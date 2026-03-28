@@ -28,8 +28,8 @@ export async function generateMetadata({
   const dict = await getDictionary(locale as Locale);
   return {
     title: {
-      default: "Yoichi Ozaki",
-      template: "%s | Yoichi Ozaki",
+      default: "Notes from Yoichi Ozaki",
+      template: "%s | Notes from Yoichi Ozaki",
     },
     description: dict.home.description,
     icons: {

@@ -3,8 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Yoichi Ozaki",
-    template: "%s | Yoichi Ozaki",
+    default: "Notes from Yoichi Ozaki",
+    template: "%s | Notes from Yoichi Ozaki",
   },
   description:
     "Yoichi Ozaki's personal blog and portfolio — technology, learnings, and daily reflections.",
