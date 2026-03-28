@@ -32,6 +32,9 @@ export async function generateMetadata({
       template: "%s | Yoichi Ozaki",
     },
     description: dict.home.description,
+    icons: {
+      icon: "/favicon.svg",
+    },
   };
 }
 

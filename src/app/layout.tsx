@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   },
   description:
     "Yoichi Ozaki's personal blog and portfolio — technology, learnings, and daily reflections.",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
