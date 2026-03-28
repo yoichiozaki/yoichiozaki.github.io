@@ -3,6 +3,35 @@ import remarkGfm from "remark-gfm";
 import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
+import type { ComponentPropsWithoutRef } from "react";
+import Mermaid from "@/components/Mermaid";
+
+function MdxPre(props: ComponentPropsWithoutRef<"pre">) {
+  const children = props.children;
+  if (
+    children &&
+    typeof children === "object" &&
+    !Array.isArray(children) &&
+    "props" in children
+  ) {
+    const child = children as React.ReactElement<
+      ComponentPropsWithoutRef<"code">
+    >;
+    if (
+      typeof child.props.className === "string" &&
+      child.props.className.includes("language-mermaid")
+    ) {
+      const code =
+        typeof child.props.children === "string"
+          ? child.props.children.trim()
+          : "";
+      return <Mermaid code={code} />;
+    }
+  }
+  return <pre {...props} />;
+}
+
+const mdxComponents = { pre: MdxPre };
 
 export async function generateStaticParams() {
   const params: { locale: string; slug: string }[] = [];
@@ -70,6 +99,7 @@ export default async function BlogPostPage({
         <MDXRemote
           source={post.content}
           options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
+          components={mdxComponents}
         />
       </div>
     </article>
