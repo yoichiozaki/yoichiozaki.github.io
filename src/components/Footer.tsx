@@ -19,6 +19,30 @@ export function Footer({ dict }: { dict: Dict }) {
           >
             GitHub
           </a>
+          <a
+            href="https://www.linkedin.com/in/ozakiyoichi/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-accent transition-colors"
+          >
+            LinkedIn
+          </a>
+          <a
+            href="https://bsky.app/profile/yoichiozaki.bsky.social"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-accent transition-colors"
+          >
+            Bluesky
+          </a>
+          <a
+            href="https://x.com/yoichiozakix"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-accent transition-colors"
+          >
+            X
+          </a>
         </div>
       </div>
     </footer>

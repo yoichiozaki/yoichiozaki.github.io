@@ -78,7 +78,7 @@ export default async function AboutPage({
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">{dict.about.contact}</h2>
-        <p className="text-muted-foreground">
+        <div className="flex flex-wrap gap-4 text-muted-foreground">
           <a
             href="https://github.com/yoichiozaki"
             target="_blank"
@@ -87,7 +87,31 @@ export default async function AboutPage({
           >
             GitHub
           </a>
-        </p>
+          <a
+            href="https://www.linkedin.com/in/ozakiyoichi/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent hover:underline"
+          >
+            LinkedIn
+          </a>
+          <a
+            href="https://bsky.app/profile/yoichiozaki.bsky.social"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent hover:underline"
+          >
+            Bluesky
+          </a>
+          <a
+            href="https://x.com/yoichiozakix"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent hover:underline"
+          >
+            X
+          </a>
+        </div>
       </section>
     </div>
   );
