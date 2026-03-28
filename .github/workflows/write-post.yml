@@ -1,0 +1,96 @@
+name: Write Blog Post
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  generate:
+    if: github.event.label.name == 'blog-post'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Parse issue body
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+
+            // Parse issue form fields
+            function getField(label) {
+              const regex = new RegExp(`### ${label}\\s*\\n\\s*([\\s\\S]*?)(?=\\n### |$)`, 'i');
+              const match = body.match(regex);
+              return match ? match[1].trim() : '';
+            }
+
+            const topic = getField('トピック / Topic') || context.payload.issue.title;
+            const details = getField('詳細・補足 / Details');
+            const language = getField('言語 / Language');
+
+            core.setOutput('topic', topic);
+            core.setOutput('details', details);
+            core.setOutput('language', language || '日英両方 / Both (ja + en)');
+
+      - name: Generate blog post
+        id: generate
+        env:
+          MODELS_TOKEN: ${{ secrets.MODELS_TOKEN }}
+          ISSUE_TOPIC: ${{ steps.parse.outputs.topic }}
+          ISSUE_DETAILS: ${{ steps.parse.outputs.details }}
+          ISSUE_LANGUAGE: ${{ steps.parse.outputs.language }}
+        run: node scripts/generate-post.mjs
+
+      - name: Create PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SLUG="${{ steps.generate.outputs.slug }}"
+          BRANCH="post/${SLUG}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          git add content/blog/
+          git commit -m "feat(blog): add post - ${{ steps.parse.outputs.topic }}"
+          git push origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --title "📝 New Post: ${{ steps.parse.outputs.topic }}" \
+            --body "Auto-generated blog post from #${{ github.event.issue.number }}
+
+          **Topic:** ${{ steps.parse.outputs.topic }}
+
+          Generated files:
+          ${{ steps.generate.outputs.files }}
+
+          ---
+          > Review the content, edit if needed, then merge to publish." \
+            --base main \
+            --head "$BRANCH")
+
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prUrl = '${{ steps.pr.outputs.pr_url }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ 記事を生成しました！\n\nPR: ${prUrl}\n\n内容を確認して、問題なければマージしてください。マージすると自動で公開されます。`
+            });
