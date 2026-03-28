@@ -1,0 +1,33 @@
+---
+title: feat: MDXコンテンツでMermaid図のレンダリングに対応する
+labels: [enhancement]
+---
+
+## 概要
+
+現在、ブログ記事（MDXコンテンツ）内に Mermaid 記法（` ```mermaid ` コードブロック）を記述しても、図としてレンダリングされずコードがそのまま表示されてしまいます。Mermaid 図をきちんとレンダリングできるようにしたい。
+
+## 現状の構成
+
+- **フレームワーク**: Next.js 16 (App Router) + 静的エクスポート (`output: "export"`)
+- **MDX描画**: `next-mdx-remote/rsc` の `MDXRemote` を使用（サーバーコンポーネント）
+- **描画箇所**: `src/app/[locale]/blog/[slug]/page.tsx`
+- **MDXカスタムコンポーネント**: `mdx-components.tsx`（デフォルトのまま）
+- **Mermaid関連パッケージ**: 未導入
+
+## 要件
+
+1. MDXコンテンツ内の ` ```mermaid ` コードブロックが図としてレンダリングされること
+2. クライアントサイドで `mermaid` ライブラリを使ってレンダリングするカスタムコンポーネントを作成する
+   - `mermaid` npm パッケージをインストール
+   - Mermaid コードブロックを検出してレンダリングするクライアントコンポーネント（例: `src/components/Mermaid.tsx`）を作成
+   - `MDXRemote` の `components` prop で `pre` または `code` 要素をオーバーライドし、言語が `mermaid` の場合にカスタムコンポーネントを使用する
+3. ダークモード対応: `ThemeProvider` のテーマに連動して Mermaid 図もダーク/ライトテーマで描画されること
+4. 静的エクスポート（`output: "export"`）との互換性を維持すること
+5. 既存のコードブロック（TypeScript等）のレンダリングに影響を与えないこと
+
+## 修正対象ファイル（想定）
+
+- `package.json` — `mermaid` パッケージの追加
+- `src/components/Mermaid.tsx`（新規）— Mermaid レンダリング用のクライアントコンポーネント
+- `src/app/[locale]/blog/[slug]/page.tsx` — `MDXRemote` の `components` prop に Mermaid コンポーネントを追加
