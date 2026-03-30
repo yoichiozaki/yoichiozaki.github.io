@@ -93,6 +93,7 @@ function greatCircleArc(
     );
   if (d < 1e-10) return [from, to];
   const pts: [number, number][] = [];
+  let prevLng = from[1];
   for (let i = 0; i <= n; i++) {
     const f = i / n;
     const a = Math.sin((1 - f) * d) / Math.sin(d);
@@ -104,10 +105,13 @@ function greatCircleArc(
       a * Math.cos(lat1) * Math.sin(lng1) +
       b * Math.cos(lat2) * Math.sin(lng2);
     const z = a * Math.sin(lat1) + b * Math.sin(lat2);
-    pts.push([
-      toD(Math.atan2(z, Math.sqrt(x * x + y * y))),
-      toD(Math.atan2(y, x)),
-    ]);
+    const lat = toD(Math.atan2(z, Math.sqrt(x * x + y * y)));
+    let lng = toD(Math.atan2(y, x));
+    // Unwrap longitude to avoid antimeridian jump
+    while (lng - prevLng > 180) lng -= 360;
+    while (lng - prevLng < -180) lng += 360;
+    prevLng = lng;
+    pts.push([lat, lng]);
   }
   return pts;
 }
@@ -171,6 +175,22 @@ function buildSegmentPaths(stops: StoryStop[]): [number, number][][] {
       ? bezierCurve(from.coordinates, to.coordinates, SEG_PTS, 0.08)
       : straightLine(from.coordinates, to.coordinates, SEG_PTS);
   });
+}
+
+/** Unwrap longitudes globally across all segments so polylines never jump 360° */
+function unwrapSegPaths(
+  segPaths: [number, number][][]
+): [number, number][][] {
+  if (segPaths.length === 0) return segPaths;
+  let prevLng = segPaths[0][0]?.[1] ?? 0;
+  return segPaths.map((seg) =>
+    seg.map(([lat, lng]) => {
+      while (lng - prevLng > 180) lng -= 360;
+      while (lng - prevLng < -180) lng += 360;
+      prevLng = lng;
+      return [lat, lng] as [number, number];
+    })
+  );
 }
 
 function fullGuidePath(
@@ -243,7 +263,7 @@ function interpolateZoomSmooth(
   //   Phase 2 (0.15→0.65): stay zoomed out while the camera pans across
   //   Phase 3 (0.65→1): zoom in to destination
   if (dist > 3000) {
-    const lowZ = Math.max(2, Math.min(fromZ, overviewZ) - 1);
+    const lowZ = Math.max(3, Math.min(fromZ, overviewZ));
     if (t < 0.15) {
       return lerp(fromZ, lowZ, easeInOutCubic(t / 0.15));
     } else if (t < 0.65) {
@@ -316,9 +336,9 @@ export function StorytellingMap({
   const [activeIndex, setActiveIndex] = useState(0);
   const [progress, setProgress] = useState(0);
 
-  // Pre-compute curved segment paths
+  // Pre-compute curved segment paths (globally unwrapped for antimeridian)
   if (segPathsRef.current.length === 0 && stops.length > 1) {
-    segPathsRef.current = buildSegmentPaths(stops);
+    segPathsRef.current = unwrapSegPaths(buildSegmentPaths(stops));
   }
 
   // Initialize Leaflet map
