@@ -1,5 +1,6 @@
 import { MDXRemote } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
+import rehypePrettyCode from "rehype-pretty-code";
 import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
@@ -7,6 +8,10 @@ import { CopyCodeBlock } from "@/components/CopyCodeBlock";
 
 const mdxComponents = {
   pre: CopyCodeBlock,
+};
+
+const rehypePrettyCodeOptions = {
+  theme: { dark: "github-dark", light: "github-light" },
 };
 
 export async function generateStaticParams() {
@@ -75,7 +80,12 @@ export default async function BlogPostPage({
         <MDXRemote
           source={post.content}
           components={mdxComponents}
-          options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
+          options={{
+            mdxOptions: {
+              remarkPlugins: [remarkGfm],
+              rehypePlugins: [[rehypePrettyCode, rehypePrettyCodeOptions]],
+            },
+          }}
         />
       </div>
     </article>
