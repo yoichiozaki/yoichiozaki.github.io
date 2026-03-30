@@ -11,6 +11,8 @@ export type StoryStop = {
   coordinates: [number, number]; // [lat, lng]
   zoom?: number;
   images?: string[];
+  /** How to draw the path TO this stop from the previous one */
+  pathType?: "flight" | "drive" | "walk";
 };
 
 type Props = {
@@ -50,7 +52,141 @@ function parseTitle(title: string) {
   return { icon, place: rest, subtitle: "" };
 }
 
-function interpolateCoords(
+// ── Geo helpers ──────────────────────────────────────────────
+
+const SEG_PTS = 48; // points per segment for smooth curves
+
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const R = 6371;
+  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
+  const dLng = ((b[1] - a[1]) * Math.PI) / 180;
+  const sl = Math.sin(dLat / 2);
+  const sn = Math.sin(dLng / 2);
+  const h =
+    sl * sl +
+    Math.cos((a[0] * Math.PI) / 180) *
+      Math.cos((b[0] * Math.PI) / 180) *
+      sn *
+      sn;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/** Great-circle arc (for flights) */
+function greatCircleArc(
+  from: [number, number],
+  to: [number, number],
+  n: number
+): [number, number][] {
+  const toR = (d: number) => (d * Math.PI) / 180;
+  const toD = (r: number) => (r * 180) / Math.PI;
+  const [lat1, lng1] = [toR(from[0]), toR(from[1])];
+  const [lat2, lng2] = [toR(to[0]), toR(to[1])];
+  const d =
+    2 *
+    Math.asin(
+      Math.sqrt(
+        Math.sin((lat1 - lat2) / 2) ** 2 +
+          Math.cos(lat1) *
+            Math.cos(lat2) *
+            Math.sin((lng1 - lng2) / 2) ** 2
+      )
+    );
+  if (d < 1e-10) return [from, to];
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const a = Math.sin((1 - f) * d) / Math.sin(d);
+    const b = Math.sin(f * d) / Math.sin(d);
+    const x =
+      a * Math.cos(lat1) * Math.cos(lng1) +
+      b * Math.cos(lat2) * Math.cos(lng2);
+    const y =
+      a * Math.cos(lat1) * Math.sin(lng1) +
+      b * Math.cos(lat2) * Math.sin(lng2);
+    const z = a * Math.sin(lat1) + b * Math.sin(lat2);
+    pts.push([
+      toD(Math.atan2(z, Math.sqrt(x * x + y * y))),
+      toD(Math.atan2(y, x)),
+    ]);
+  }
+  return pts;
+}
+
+/** Quadratic Bézier curve (for drives / buses) */
+function bezierCurve(
+  from: [number, number],
+  to: [number, number],
+  n: number,
+  curvature = 0.15
+): [number, number][] {
+  const mx = (from[0] + to[0]) / 2;
+  const my = (from[1] + to[1]) / 2;
+  const dx = to[1] - from[1];
+  const dy = to[0] - from[0];
+  const cp: [number, number] = [mx + dx * curvature, my - dy * curvature];
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    pts.push([
+      (1 - t) ** 2 * from[0] + 2 * (1 - t) * t * cp[0] + t ** 2 * to[0],
+      (1 - t) ** 2 * from[1] + 2 * (1 - t) * t * cp[1] + t ** 2 * to[1],
+    ]);
+  }
+  return pts;
+}
+
+function straightLine(
+  from: [number, number],
+  to: [number, number],
+  n: number
+): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    pts.push([lerp(from[0], to[0], t), lerp(from[1], to[1], t)]);
+  }
+  return pts;
+}
+
+// ── Pre-compute curved segment paths ─────────────────────────
+
+function buildSegmentPaths(stops: StoryStop[]): [number, number][][] {
+  return stops.slice(0, -1).map((from, i) => {
+    const to = stops[i + 1];
+    const type = to.pathType ?? "walk";
+    if (type === "flight")
+      return greatCircleArc(
+        from.coordinates,
+        to.coordinates,
+        SEG_PTS
+      );
+    if (type === "drive")
+      return bezierCurve(
+        from.coordinates,
+        to.coordinates,
+        SEG_PTS
+      );
+    const dist = haversineKm(from.coordinates, to.coordinates);
+    return dist > 3
+      ? bezierCurve(from.coordinates, to.coordinates, SEG_PTS, 0.08)
+      : straightLine(from.coordinates, to.coordinates, SEG_PTS);
+  });
+}
+
+function fullGuidePath(
+  segPaths: [number, number][][]
+): [number, number][] {
+  const pts: [number, number][] = [];
+  segPaths.forEach((seg, i) => {
+    for (let j = i === 0 ? 0 : 1; j < seg.length; j++) pts.push(seg[j]);
+  });
+  return pts;
+}
+
+// ── Interpolation on pre-computed curved paths ───────────────
+
+function interpolateCoordsOnPath(
+  segPaths: [number, number][][],
   stops: StoryStop[],
   progress: number
 ): [number, number] {
@@ -58,58 +194,94 @@ function interpolateCoords(
   if (progress <= 0) return stops[0].coordinates;
   if (progress >= 1) return stops[stops.length - 1].coordinates;
 
-  const totalSegments = stops.length - 1;
-  const rawIndex = progress * totalSegments;
-  const idx = Math.floor(rawIndex);
-  const t = easeInOutCubic(rawIndex - idx);
+  const total = stops.length - 1;
+  const raw = progress * total;
+  const idx = Math.floor(raw);
+  const t = easeInOutCubic(raw - idx);
 
-  const from = stops[idx].coordinates;
-  const to = stops[Math.min(idx + 1, stops.length - 1)].coordinates;
-  return [lerp(from[0], to[0], t), lerp(from[1], to[1], t)];
+  const seg = segPaths[idx];
+  if (!seg) return stops[stops.length - 1].coordinates;
+  const pos = t * (seg.length - 1);
+  const si = Math.floor(pos);
+  const st = pos - si;
+  if (si >= seg.length - 1) return seg[seg.length - 1];
+  return [
+    lerp(seg[si][0], seg[si + 1][0], st),
+    lerp(seg[si][1], seg[si + 1][1], st),
+  ];
 }
 
-function interpolateZoom(stops: StoryStop[], progress: number): number {
+/** Zoom-valley: zooms out for long-distance segments, stays tight for short ones */
+function interpolateZoomSmooth(
+  stops: StoryStop[],
+  progress: number
+): number {
   if (stops.length === 0) return 5;
   if (progress <= 0) return stops[0].zoom ?? 5;
   if (progress >= 1) return stops[stops.length - 1].zoom ?? 12;
 
-  const totalSegments = stops.length - 1;
-  const rawIndex = progress * totalSegments;
-  const idx = Math.floor(rawIndex);
-  const t = rawIndex - idx;
+  const total = stops.length - 1;
+  const raw = progress * total;
+  const idx = Math.floor(raw);
+  const t = raw - idx;
 
-  const fromZoom = stops[idx].zoom ?? 12;
-  const toZoom = stops[Math.min(idx + 1, stops.length - 1)].zoom ?? 12;
-  return lerp(fromZoom, toZoom, t);
+  const fromZ = stops[idx].zoom ?? 12;
+  const toZ = stops[Math.min(idx + 1, stops.length - 1)].zoom ?? 12;
+  const dist = haversineKm(
+    stops[idx].coordinates,
+    stops[Math.min(idx + 1, stops.length - 1)].coordinates
+  );
+
+  // Short distances → linear zoom
+  if (dist < 5) return lerp(fromZ, toZ, t);
+
+  // Zoom-valley: overview zoom that fits both endpoints
+  const overviewZ = Math.max(2, 17 - Math.log2(Math.max(1, dist)));
+  const midZ = Math.min(Math.min(fromZ, toZ), overviewZ);
+
+  // Quadratic Bézier zoom curve: dips to midZ around t≈0.5
+  return (1 - t) ** 2 * fromZ + 2 * (1 - t) * t * midZ + t ** 2 * toZ;
 }
 
-function getPathUpToProgress(
+function pathUpToProgress(
+  segPaths: [number, number][][],
   stops: StoryStop[],
   progress: number
 ): [number, number][] {
   if (stops.length === 0) return [];
   if (progress <= 0) return [stops[0].coordinates];
 
-  const totalSegments = stops.length - 1;
-  const rawIndex = Math.min(progress * totalSegments, totalSegments);
-  const idx = Math.floor(rawIndex);
-  const t = rawIndex - idx;
+  const total = stops.length - 1;
+  const raw = Math.min(progress * total, total);
+  const segIdx = Math.floor(raw);
+  const segT = raw - segIdx;
 
-  const points: [number, number][] = stops
-    .slice(0, idx + 1)
-    .map((s) => s.coordinates);
+  const pts: [number, number][] = [];
 
-  if (idx < totalSegments && t > 0) {
-    const from = stops[idx].coordinates;
-    const to = stops[idx + 1].coordinates;
-    const steps = 8;
-    for (let i = 1; i <= steps; i++) {
-      const segT = (t * i) / steps;
-      points.push([lerp(from[0], to[0], segT), lerp(from[1], to[1], segT)]);
+  // Completed segments
+  for (let i = 0; i < segIdx; i++) {
+    const seg = segPaths[i];
+    for (let j = i === 0 ? 0 : 1; j < seg.length; j++) pts.push(seg[j]);
+  }
+
+  // Current partial segment
+  if (segIdx < total) {
+    const seg = segPaths[segIdx];
+    const exactPos = segT * (seg.length - 1);
+    const pi = Math.floor(exactPos);
+    const pt = exactPos - pi;
+    const s = segIdx === 0 && pts.length === 0 ? 0 : 1;
+    for (let j = s; j <= pi; j++) pts.push(seg[j]);
+    if (pt > 0.001 && pi < seg.length - 1) {
+      pts.push([
+        lerp(seg[pi][0], seg[pi + 1][0], pt),
+        lerp(seg[pi][1], seg[pi + 1][1], pt),
+      ]);
     }
   }
 
-  return points;
+  if (pts.length === 0) pts.push(stops[0].coordinates);
+  return pts;
 }
 
 export function StorytellingMap({
@@ -124,8 +296,14 @@ export function StorytellingMap({
   const markerRef = useRef<L.CircleMarker | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>(0);
+  const segPathsRef = useRef<[number, number][][]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [progress, setProgress] = useState(0);
+
+  // Pre-compute curved segment paths
+  if (segPathsRef.current.length === 0 && stops.length > 1) {
+    segPathsRef.current = buildSegmentPaths(stops);
+  }
 
   // Initialize Leaflet map
   useEffect(() => {
@@ -150,9 +328,9 @@ export function StorytellingMap({
       map.setView(stops[0].coordinates, stops[0].zoom ?? 5);
     }
 
-    // Faint guide path
-    const allCoords = stops.map((s) => s.coordinates);
-    L.polyline(allCoords, {
+    // Faint guide path (curved)
+    const guide = fullGuidePath(segPathsRef.current);
+    L.polyline(guide, {
       color: pathColor,
       weight: 2,
       opacity: 0.1,
@@ -224,11 +402,12 @@ export function StorytellingMap({
           Math.min(Math.round(rawIndex), stops.length - 1)
         );
 
-        const center = interpolateCoords(stops, p);
-        const zoom = interpolateZoom(stops, p);
+        const sp = segPathsRef.current;
+        const center = interpolateCoordsOnPath(sp, stops, p);
+        const zoom = interpolateZoomSmooth(stops, p);
         map.setView(center, zoom, { animate: false });
 
-        const pathPoints = getPathUpToProgress(stops, p);
+        const pathPoints = pathUpToProgress(sp, stops, p);
         polylineRef.current?.setLatLngs(pathPoints);
         markerRef.current?.setLatLng(center);
       });

@@ -17,6 +17,7 @@ export const stopsJa: StoryStop[] = [
       "シアトルに到着してまず向かったのは、Pike Place Market。1907年から続く歴史あるマーケットで、新鮮な魚介類が飛び交う名物の魚投げパフォーマンスに圧倒された。そしてお目当てのスターバックス1号店へ。行列に並んで、ここでしか買えないオリジナルグッズをゲット。",
     coordinates: [47.6097, -122.3425],
     zoom: 15,
+    pathType: "flight",
     images: [],
   },
   {
@@ -53,6 +54,7 @@ export const stopsJa: StoryStop[] = [
       "シアトルから車で東へ約30分のRedmondにあるMicrosoft本社キャンパスへ。広大な敷地にオフィスビルが点在する様子は、まるでひとつの街のよう。ビジターセンターでMicrosoftの歴史とテクノロジーに触れ、テック企業で働くことへのモチベーションが上がった。",
     coordinates: [47.6396, -122.1286],
     zoom: 14,
+    pathType: "drive",
     images: [],
   },
   {
@@ -62,6 +64,7 @@ export const stopsJa: StoryStop[] = [
       "シアトル最後の夜は、Capitol Hill地区のクラフトビールバーへ。ローカルの人々に混ざって太平洋岸北西部ならではのIPAを堪能。シアトルのクラフトビールシーンの層の厚さに驚かされた。",
     coordinates: [47.6253, -122.3222],
     zoom: 15,
+    pathType: "drive",
     images: [],
   },
   {
@@ -71,6 +74,7 @@ export const stopsJa: StoryStop[] = [
       "シアトルからバスに乗り、約4時間かけてカナダ国境を越えバンクーバーへ。車窓から見える景色が、都市から郊外、そして雄大な自然へと変わっていく様子が印象的だった。国境でのパスポートチェックを経て、ついにカナダに入国。",
     coordinates: [49.0024, -122.756],
     zoom: 9,
+    pathType: "drive",
     images: [],
   },
   {
@@ -80,6 +84,7 @@ export const stopsJa: StoryStop[] = [
       "バンクーバーに到着して最初に向かったのは、ノースバンクーバーのLynn Canyon Park。無料で渡れる吊り橋から見下ろす渓谷は迫力満点。冬のため観光客も少なく、静寂の中で大自然を独り占めした気分。トレイルを歩きながら、巨大な針葉樹の森林浴を楽しんだ。",
     coordinates: [49.339, -123.0189],
     zoom: 14,
+    pathType: "drive",
     images: [],
   },
   {
@@ -98,6 +103,7 @@ export const stopsJa: StoryStop[] = [
       "バンクーバーのウォーターフロントに立つCanada Place。白い帆のような屋根が特徴的な建物で、クルーズ船のターミナルでもある。海沿いのプロムナードを歩きながら、対岸のノースバンクーバーの山々と港に停泊する船を眺めた。ここから見る夕焼けは格別だった。",
     coordinates: [49.2888, -123.1111],
     zoom: 15,
+    pathType: "drive",
     images: [],
   },
   {
@@ -116,6 +122,7 @@ export const stopsJa: StoryStop[] = [
       "バンクーバーから約10時間のフライトで成田に帰国。テック企業の最前線とカナダの大自然、全く異なる二つの顔を持つ太平洋岸北西部の旅は最高の体験だった。次はもっとゆっくり、夏に来たい。",
     coordinates: [35.7647, 140.3864],
     zoom: 5,
+    pathType: "flight",
     images: [],
   },
 ];
@@ -137,6 +144,7 @@ export const stopsEn: StoryStop[] = [
       "First stop in Seattle: Pike Place Market. This historic market, operating since 1907, overwhelmed me with its famous fish-throwing performances. Then on to the original Starbucks store — waited in line and grabbed exclusive merchandise you can only get here.",
     coordinates: [47.6097, -122.3425],
     zoom: 15,
+    pathType: "flight",
     images: [],
   },
   {
@@ -173,6 +181,7 @@ export const stopsEn: StoryStop[] = [
       "About 30 minutes east of Seattle lies Microsoft's headquarters campus in Redmond. Office buildings scattered across the vast grounds made it feel like its own small city. The Visitor Center showcased Microsoft's history and technology, boosting my motivation for working in tech.",
     coordinates: [47.6396, -122.1286],
     zoom: 14,
+    pathType: "drive",
     images: [],
   },
   {
@@ -182,6 +191,7 @@ export const stopsEn: StoryStop[] = [
       "Spent the last night in Seattle at a craft beer bar in the Capitol Hill district. Mingling with locals while enjoying Pacific Northwest IPAs. The depth of Seattle's craft beer scene was truly impressive.",
     coordinates: [47.6253, -122.3222],
     zoom: 15,
+    pathType: "drive",
     images: [],
   },
   {
@@ -191,6 +201,7 @@ export const stopsEn: StoryStop[] = [
       "Boarded a bus from Seattle for the roughly 4-hour journey across the Canadian border to Vancouver. Watching the scenery transform from urban to suburban to majestic wilderness through the window was mesmerizing. After passport control, finally set foot in Canada.",
     coordinates: [49.0024, -122.756],
     zoom: 9,
+    pathType: "drive",
     images: [],
   },
   {
@@ -200,6 +211,7 @@ export const stopsEn: StoryStop[] = [
       "First destination in Vancouver: Lynn Canyon Park in North Vancouver. The free suspension bridge offered thrilling views of the canyon below. With fewer tourists in winter, it felt like having the wilderness all to ourselves. Hiked the trails surrounded by towering conifers.",
     coordinates: [49.339, -123.0189],
     zoom: 14,
+    pathType: "drive",
     images: [],
   },
   {
@@ -218,6 +230,7 @@ export const stopsEn: StoryStop[] = [
       "Canada Place on Vancouver's waterfront, with its distinctive sail-like roof, also serves as a cruise ship terminal. Walking along the seaside promenade, gazing at the North Vancouver mountains and ships docked in the harbor. The sunset from here was spectacular.",
     coordinates: [49.2888, -123.1111],
     zoom: 15,
+    pathType: "drive",
     images: [],
   },
   {
@@ -236,6 +249,7 @@ export const stopsEn: StoryStop[] = [
       "A roughly 10-hour flight from Vancouver back to Narita. This journey through the cutting edge of tech and Canada's magnificent wilderness — two completely different faces of the Pacific Northwest — was an unforgettable experience. Next time, a longer stay in summer.",
     coordinates: [35.7647, 140.3864],
     zoom: 5,
+    pathType: "flight",
     images: [],
   },
 ];
