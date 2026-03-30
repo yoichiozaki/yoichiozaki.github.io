@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -20,6 +20,8 @@ type Props = {
   tileUrl?: string;
   tileAttribution?: string;
   pathColor?: string;
+  introTitle?: string;
+  introSubtitle?: string;
 };
 
 const DEFAULT_TILE =
@@ -289,6 +291,8 @@ export function StorytellingMap({
   tileUrl = DEFAULT_TILE,
   tileAttribution = DEFAULT_ATTRIBUTION,
   pathColor = "#0ea5e9",
+  introTitle,
+  introSubtitle,
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -297,8 +301,6 @@ export function StorytellingMap({
   const scrollRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>(0);
   const segPathsRef = useRef<[number, number][][]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [progress, setProgress] = useState(0);
 
   // Pre-compute curved segment paths
   if (segPathsRef.current.length === 0 && stops.length > 1) {
@@ -394,13 +396,6 @@ export function StorytellingMap({
         const scrolled = -rect.top;
         const total = scrollH - viewH;
         const p = Math.max(0, Math.min(1, scrolled / total));
-        setProgress(p);
-
-        const totalSegments = stops.length - 1;
-        const rawIndex = p * totalSegments;
-        setActiveIndex(
-          Math.min(Math.round(rawIndex), stops.length - 1)
-        );
 
         const sp = segPathsRef.current;
         const center = interpolateCoordsOnPath(sp, stops, p);
@@ -422,6 +417,9 @@ export function StorytellingMap({
     };
   }, [stops]);
 
+  const serifFont =
+    "Georgia, 'Baskerville Old Face', 'Hoefler Text', Garamond, 'Times New Roman', serif";
+
   return (
     <div
       className="storytelling-map not-prose relative"
@@ -431,15 +429,7 @@ export function StorytellingMap({
         width: "100vw",
       }}
     >
-      {/* Progress bar */}
-      <div className="fixed top-0 left-0 right-0 z-50 h-[2px]">
-        <div
-          className="h-full transition-[width] duration-100 ease-linear"
-          style={{ width: `${progress * 100}%`, backgroundColor: pathColor }}
-        />
-      </div>
-
-      {/* Single map container — sticky on mobile, absolute-positioned on desktop */}
+      {/* Map container — sticky on mobile, absolute-positioned on desktop */}
       <div
         className="sticky top-0 h-[40vh] z-10
                    lg:absolute lg:right-0 lg:top-0 lg:w-[55%] xl:w-[58%] lg:h-full lg:z-0"
@@ -448,7 +438,7 @@ export function StorytellingMap({
           <div ref={mapContainerRef} className="h-full w-full" />
           {/* Soft edge between content and map (desktop) */}
           <div
-            className="hidden lg:block absolute inset-y-0 left-0 w-16 pointer-events-none"
+            className="hidden lg:block absolute inset-y-0 left-0 w-24 pointer-events-none"
             style={{
               background:
                 "linear-gradient(to right, var(--background), transparent)",
@@ -456,29 +446,12 @@ export function StorytellingMap({
           />
           {/* Bottom fade (mobile) */}
           <div
-            className="lg:hidden absolute inset-x-0 bottom-0 h-8 pointer-events-none"
+            className="lg:hidden absolute inset-x-0 bottom-0 h-12 pointer-events-none"
             style={{
               background:
                 "linear-gradient(to top, var(--background), transparent)",
             }}
           />
-          {/* Chapter dots (desktop) */}
-          <div className="hidden lg:flex absolute right-3 top-1/2 -translate-y-1/2 flex-col gap-2">
-            {stops.map((_, i) => (
-              <div
-                key={i}
-                className="rounded-full transition-all duration-500"
-                style={{
-                  width: i === activeIndex ? 7 : 4,
-                  height: i === activeIndex ? 7 : 4,
-                  backgroundColor:
-                    i <= activeIndex ? pathColor : "rgba(148,163,184,0.4)",
-                  opacity:
-                    i === activeIndex ? 1 : i < activeIndex ? 0.5 : 0.3,
-                }}
-              />
-            ))}
-          </div>
         </div>
       </div>
 
@@ -487,100 +460,115 @@ export function StorytellingMap({
         ref={scrollRef}
         className="relative lg:z-10 lg:w-[45%] xl:w-[42%] lg:bg-[var(--background)]"
       >
+        {/* Intro section — dark cinematic header */}
+        {introTitle && (
+          <div
+            className="relative min-h-screen flex flex-col items-center justify-center text-center px-8"
+            style={{ background: "#181922" }}
+          >
+            <h2
+              className="text-4xl sm:text-5xl lg:text-[3.5rem] font-normal leading-tight text-white"
+              style={{ fontFamily: serifFont }}
+            >
+              {introTitle}
+            </h2>
+            {introSubtitle && (
+              <p
+                className="mt-5 text-xs sm:text-sm uppercase tracking-[4px] leading-relaxed"
+                style={{ color: "#9D9C95" }}
+              >
+                — {introSubtitle} —
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Story sections */}
         {stops.map((stop, i) => {
-          const { icon, place, subtitle } = parseTitle(stop.title);
-          const isActive = activeIndex === i;
-          const isPast = i < activeIndex;
+          const { place, subtitle } = parseTitle(stop.title);
 
           return (
-            <div
+            <section
               key={stop.id}
-              className="min-h-[60vh] lg:min-h-[85vh] flex items-center"
+              className="py-16 lg:py-24 min-h-[50vh] lg:min-h-[75vh]"
+              style={{ fontSize: "1.15em", lineHeight: 1.7 }}
             >
-              <div
-                className="w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out"
-                style={{
-                  opacity: isActive ? 1 : isPast ? 0.25 : 0.1,
-                }}
-              >
-                {/* Step indicator */}
-                <div className="flex items-center gap-3 mb-5">
-                  <div
-                    className="h-px transition-all duration-500"
-                    style={{
-                      width: isActive ? 32 : 16,
-                      backgroundColor: isActive
-                        ? pathColor
-                        : "var(--muted-foreground)",
-                      opacity: isActive ? 0.7 : 0.2,
-                    }}
-                  />
-                  <span
-                    className="text-[10px] font-mono uppercase tracking-[0.2em] transition-colors duration-500"
-                    style={{
-                      color: isActive
-                        ? pathColor
-                        : "var(--muted-foreground)",
-                    }}
-                  >
-                    {String(i + 1).padStart(2, "0")} /{" "}
-                    {String(stops.length).padStart(2, "0")}
-                  </span>
-                </div>
-
-                {/* Icon */}
-                {icon && (
-                  <span className="text-3xl lg:text-4xl block mb-2">
-                    {icon}
-                  </span>
-                )}
-
-                {/* Place name */}
-                <h3 className="text-2xl lg:text-[28px] font-extrabold tracking-tight leading-tight text-foreground mb-1">
-                  {place}
+              <div className="px-8 sm:px-12 lg:px-14 xl:px-16">
+                {/* Heading — Tympanus style: uppercase label + serif title */}
+                <h3 className="mb-6">
+                  {subtitle ? (
+                    <>
+                      <span
+                        className="block text-[0.7rem] font-bold uppercase tracking-[0.35em] text-neutral-400 dark:text-neutral-500"
+                      >
+                        {place}
+                      </span>
+                      <span
+                        className="block text-[1.55em] lg:text-[1.8em] font-normal mt-1"
+                        style={{
+                          fontFamily: serifFont,
+                          lineHeight: 0.95,
+                          padding: "0.15em 0 0.35em",
+                          color: "var(--color-foreground)",
+                          opacity: 0.6,
+                        }}
+                      >
+                        {subtitle}
+                      </span>
+                    </>
+                  ) : (
+                    <span
+                      className="block text-[1.55em] lg:text-[1.8em] font-normal"
+                      style={{
+                        fontFamily: serifFont,
+                        lineHeight: 0.95,
+                        padding: "0.15em 0 0.35em",
+                        color: "var(--color-foreground)",
+                        opacity: 0.6,
+                      }}
+                    >
+                      {place}
+                    </span>
+                  )}
                 </h3>
 
-                {/* Subtitle */}
-                {subtitle && (
+                {/* First paragraph — editorial intro style */}
+                {i === 0 && (
                   <p
-                    className="text-sm font-medium tracking-wide mb-4 transition-colors duration-500"
-                    style={{
-                      color: isActive
-                        ? pathColor
-                        : "var(--muted-foreground)",
-                    }}
+                    className="text-[1.1em] italic leading-relaxed mb-4"
+                    style={{ color: "var(--color-foreground)", opacity: 0.45 }}
                   >
-                    {subtitle}
+                    {stop.description}
                   </p>
                 )}
 
-                {/* Description */}
-                <p className="text-sm lg:text-[15px] leading-[1.85] text-foreground/75">
-                  {stop.description}
-                </p>
+                {/* Regular description */}
+                {i !== 0 && (
+                  <p
+                    className="text-[0.92em] leading-[1.7]"
+                    style={{ color: "var(--color-foreground)", opacity: 0.65 }}
+                  >
+                    {stop.description}
+                  </p>
+                )}
 
-                {/* Images */}
+                {/* Images with figcaption style */}
                 {stop.images && stop.images.length > 0 && (
-                  <div className="mt-5 grid gap-3">
+                  <div className="mt-8">
                     {stop.images.map((src, j) => (
-                      <div
-                        key={j}
-                        className="relative aspect-[16/10] overflow-hidden rounded-lg"
-                      >
-                        {src && (
-                          <img
-                            src={src}
-                            alt={`${place} - ${j + 1}`}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        )}
-                      </div>
+                      <figure key={j} className="my-6">
+                        <img
+                          src={src}
+                          alt={`${place} - ${j + 1}`}
+                          className="w-full"
+                          loading="lazy"
+                        />
+                      </figure>
                     ))}
                   </div>
                 )}
               </div>
-            </div>
+            </section>
           );
         })}
         <div className="h-[40vh]" />

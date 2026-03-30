@@ -20,7 +20,20 @@ const StorytellingMap = dynamic(
 
 export function SeattleVancouverMap({ locale }: { locale?: string }) {
   const stops = locale === "en" ? stopsEn : stopsJa;
-  return <StorytellingMap stops={stops} pathColor="#0ea5e9" />;
+  const introTitle =
+    locale === "en" ? "Seattle & Vancouver" : "シアトル & バンクーバー";
+  const introSubtitle =
+    locale === "en"
+      ? "A Pacific Northwest Adventure"
+      : "太平洋岸北西部の旅 — 2025";
+  return (
+    <StorytellingMap
+      stops={stops}
+      pathColor="#0ea5e9"
+      introTitle={introTitle}
+      introSubtitle={introSubtitle}
+    />
+  );
 }
 
 export { StorytellingMap as StorytellingMapLazy };
