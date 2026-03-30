@@ -5,14 +5,18 @@ import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
 import { CopyCodeBlock } from "@/components/CopyCodeBlock";
-
-const mdxComponents = {
-  pre: CopyCodeBlock,
-};
+import { SeattleVancouverMap } from "@/components/StorytellingMapLazy";
 
 const rehypePrettyCodeOptions = {
   theme: { dark: "github-dark", light: "github-light" },
 };
+
+function getMdxComponents(locale: string) {
+  return {
+    pre: CopyCodeBlock,
+    SeattleVancouverMap: () => <SeattleVancouverMap locale={locale} />,
+  };
+}
 
 export async function generateStaticParams() {
   const params: { locale: string; slug: string }[] = [];
@@ -79,7 +83,7 @@ export default async function BlogPostPage({
       <div className="prose prose-neutral dark:prose-invert max-w-none">
         <MDXRemote
           source={post.content}
-          components={mdxComponents}
+          components={getMdxComponents(locale)}
           options={{
             mdxOptions: {
               remarkPlugins: [remarkGfm],
