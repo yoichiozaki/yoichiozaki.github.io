@@ -77,6 +77,16 @@ export default async function PortfolioPage({
                   {dict.portfolio.viewDemo} →
                 </a>
               )}
+              {project.link && (
+                <a
+                  href={project.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-accent hover:underline"
+                >
+                  {project.linkLabel?.[locale as Locale] ?? project.link} →
+                </a>
+              )}
             </div>
           </div>
         ))}

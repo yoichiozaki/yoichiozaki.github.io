@@ -19,10 +19,10 @@ export async function generateMetadata({
 }
 
 const skills = {
-  Languages: ["TypeScript", "JavaScript", "Python", "Go"],
+  Languages: ["TypeScript", "JavaScript", "Python", "Go", "Nim", "C", "Rust"],
   Frontend: ["React", "Next.js", "Tailwind CSS"],
-  Backend: ["Node.js", "Express"],
-  Tools: ["Git", "Docker", "GitHub Actions"],
+  Cloud: ["Microsoft Azure", "GitHub Actions", "Docker"],
+  Tools: ["Git", "Node.js", "Linux"],
 };
 
 export default async function AboutPage({
@@ -45,8 +45,8 @@ export default async function AboutPage({
       <section className="space-y-4">
         <p className="leading-relaxed">
           {locale === "ja"
-            ? "ソフトウェアエンジニアとして、日々技術を学びながら、その知見をこのブログで共有しています。新しい技術に触れることが好きで、学んだことをアウトプットすることを大切にしています。"
-            : "As a software engineer, I learn new technologies every day and share my knowledge through this blog. I enjoy exploring new technologies and believe in the importance of sharing what I learn."}
+            ? "日本マイクロソフトでテクノロジーコンサルタントとして、お客様のクラウド導入や AI 活用を支援しています。共著で『Microsoft認定資格試験テキスト AI-900』を執筆。新しい技術に触れることが好きで、学んだことをアウトプットすることを大切にしています。"
+            : "Technology Consultant at Microsoft Japan, helping customers with cloud adoption and AI solutions. Co-authored 'Microsoft Certified Exam Textbook AI-900'. I enjoy exploring new technologies and believe in the importance of sharing what I learn."}
         </p>
       </section>
 
