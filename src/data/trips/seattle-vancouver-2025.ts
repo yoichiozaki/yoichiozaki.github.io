@@ -7,7 +7,7 @@ export const stopsJa: StoryStop[] = [
     description:
       "2月の冷たい空気の中、成田空港から太平洋を越える旅が始まった。約9時間のフライトでシアトルへ。窓の外に広がる太平洋を眺めながら、これから待ち受けるテック企業の聖地と大自然に胸を躍らせた。",
     coordinates: [35.7647, 140.3864],
-    zoom: 5,
+    zoom: 3,
     images: [],
   },
   {
@@ -121,7 +121,7 @@ export const stopsJa: StoryStop[] = [
     description:
       "バンクーバーから約10時間のフライトで成田に帰国。テック企業の最前線とカナダの大自然、全く異なる二つの顔を持つ太平洋岸北西部の旅は最高の体験だった。次はもっとゆっくり、夏に来たい。",
     coordinates: [35.7647, 140.3864],
-    zoom: 5,
+    zoom: 3,
     pathType: "flight",
     images: [],
   },
@@ -134,7 +134,7 @@ export const stopsEn: StoryStop[] = [
     description:
       "In the cold February air, the journey across the Pacific began at Narita Airport. A roughly 9-hour flight to Seattle. Watching the vast Pacific Ocean through the window, my heart raced with anticipation for the tech mecca and wilderness that awaited.",
     coordinates: [35.7647, 140.3864],
-    zoom: 5,
+    zoom: 3,
     images: [],
   },
   {
@@ -248,7 +248,7 @@ export const stopsEn: StoryStop[] = [
     description:
       "A roughly 10-hour flight from Vancouver back to Narita. This journey through the cutting edge of tech and Canada's magnificent wilderness — two completely different faces of the Pacific Northwest — was an unforgettable experience. Next time, a longer stay in summer.",
     coordinates: [35.7647, 140.3864],
-    zoom: 5,
+    zoom: 3,
     pathType: "flight",
     images: [],
   },

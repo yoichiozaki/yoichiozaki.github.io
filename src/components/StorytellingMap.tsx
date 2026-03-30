@@ -236,7 +236,23 @@ function interpolateZoomSmooth(
   if (dist < 5) return lerp(fromZ, toZ, t);
 
   // Zoom-valley: overview zoom that fits both endpoints
-  const overviewZ = Math.max(2, 17 - Math.log2(Math.max(1, dist)));
+  const overviewZ = Math.max(1, 17 - Math.log2(Math.max(1, dist)));
+
+  // Ultra-long flights (>3000km): 3-phase zoom to minimise panning at high zoom
+  //   Phase 1 (0→0.15): zoom out to overview level
+  //   Phase 2 (0.15→0.65): stay zoomed out while the camera pans across
+  //   Phase 3 (0.65→1): zoom in to destination
+  if (dist > 3000) {
+    const lowZ = Math.max(2, Math.min(fromZ, overviewZ) - 1);
+    if (t < 0.15) {
+      return lerp(fromZ, lowZ, easeInOutCubic(t / 0.15));
+    } else if (t < 0.65) {
+      return lowZ;
+    } else {
+      return lerp(lowZ, toZ, easeInOutCubic((t - 0.65) / 0.35));
+    }
+  }
+
   const midZ = Math.min(Math.min(fromZ, toZ), overviewZ);
 
   // Quadratic Bézier zoom curve: dips to midZ around t≈0.5
