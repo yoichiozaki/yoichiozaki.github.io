@@ -3,11 +3,6 @@ import remarkGfm from "remark-gfm";
 import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
-import { CodePlaygroundLazy as CodePlayground } from "@/components/CodePlaygroundLazy";
-
-const mdxComponents = {
-  CodePlayground,
-};
 
 export async function generateStaticParams() {
   const params: { locale: string; slug: string }[] = [];
@@ -74,7 +69,6 @@ export default async function BlogPostPage({
       <div className="prose prose-neutral dark:prose-invert max-w-none">
         <MDXRemote
           source={post.content}
-          components={mdxComponents}
           options={{ mdxOptions: { remarkPlugins: [remarkGfm] } }}
         />
       </div>
