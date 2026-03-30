@@ -20,7 +20,6 @@ type Props = {
   pathColor?: string;
 };
 
-// CartoDB Voyager — clean, modern map tiles
 const DEFAULT_TILE =
   "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 const DEFAULT_ATTRIBUTION =
@@ -34,7 +33,6 @@ function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-// Parse "🛫 成田空港 — 旅の始まり" → { icon, place, subtitle }
 function parseTitle(title: string) {
   const emojiMatch = title.match(
     /^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F?)\s*/u
@@ -118,13 +116,13 @@ export function StorytellingMap({
   stops,
   tileUrl = DEFAULT_TILE,
   tileAttribution = DEFAULT_ATTRIBUTION,
-  pathColor = "#2563eb",
+  pathColor = "#0ea5e9",
 }: Props) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const polylineRef = useRef<L.Polyline | null>(null);
   const markerRef = useRef<L.CircleMarker | null>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -161,7 +159,7 @@ export function StorytellingMap({
       dashArray: "4 8",
     }).addTo(map);
 
-    // Active polyline — drawn progressively
+    // Active polyline
     polylineRef.current = L.polyline([], {
       color: pathColor,
       weight: 3,
@@ -179,7 +177,7 @@ export function StorytellingMap({
       weight: 2,
     }).addTo(map);
 
-    // Stop markers (tiny dots, no tooltips — clean like Tympanus)
+    // Stop markers
     stops.forEach((stop) => {
       L.circleMarker(stop.coordinates, {
         radius: 3,
@@ -191,6 +189,7 @@ export function StorytellingMap({
     });
 
     mapRef.current = map;
+    setTimeout(() => map.invalidateSize(), 200);
 
     return () => {
       map.remove();
@@ -199,10 +198,10 @@ export function StorytellingMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Scroll-driven animation loop
+  // Scroll-driven animation
   useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
 
     const onScroll = () => {
       cancelAnimationFrame(animFrameRef.current);
@@ -210,22 +209,20 @@ export function StorytellingMap({
         const map = mapRef.current;
         if (!map) return;
 
-        const rect = wrapper.getBoundingClientRect();
-        const wrapperHeight = wrapper.scrollHeight;
-        const viewportH = window.innerHeight;
+        const rect = scrollEl.getBoundingClientRect();
+        const scrollH = scrollEl.scrollHeight;
+        const viewH = window.innerHeight;
 
         const scrolled = -rect.top;
-        const totalScrollable = wrapperHeight - viewportH;
-        const p = Math.max(0, Math.min(1, scrolled / totalScrollable));
+        const total = scrollH - viewH;
+        const p = Math.max(0, Math.min(1, scrolled / total));
         setProgress(p);
 
         const totalSegments = stops.length - 1;
         const rawIndex = p * totalSegments;
-        const newActiveIndex = Math.min(
-          Math.round(rawIndex),
-          stops.length - 1
+        setActiveIndex(
+          Math.min(Math.round(rawIndex), stops.length - 1)
         );
-        setActiveIndex(newActiveIndex);
 
         const center = interpolateCoords(stops, p);
         const zoom = interpolateZoom(stops, p);
@@ -248,7 +245,6 @@ export function StorytellingMap({
 
   return (
     <div
-      ref={wrapperRef}
       className="storytelling-map not-prose relative"
       style={{
         marginLeft: "calc(-50vw + 50%)",
@@ -264,75 +260,72 @@ export function StorytellingMap({
         />
       </div>
 
-      {/* Sticky map — fills viewport */}
-      <div className="sticky top-0 h-screen w-full z-0">
-        <div ref={mapContainerRef} className="h-full w-full" />
-
-        {/* Left gradient overlay — creates reading panel like Tympanus */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              "linear-gradient(to right, var(--background) 0%, color-mix(in srgb, var(--background) 90%, transparent) 20%, color-mix(in srgb, var(--background) 40%, transparent) 42%, transparent 62%)",
-          }}
-        />
-
-        {/* Bottom vignette */}
-        <div
-          className="absolute inset-x-0 bottom-0 h-24 pointer-events-none"
-          style={{
-            background:
-              "linear-gradient(to top, color-mix(in srgb, var(--background) 50%, transparent), transparent)",
-          }}
-        />
+      {/* Single map container — sticky on mobile, absolute-positioned on desktop */}
+      <div
+        className="sticky top-0 h-[40vh] z-10
+                   lg:absolute lg:right-0 lg:top-0 lg:w-[55%] xl:w-[58%] lg:h-full lg:z-0"
+      >
+        <div className="h-full lg:sticky lg:top-0 lg:h-screen">
+          <div ref={mapContainerRef} className="h-full w-full" />
+          {/* Soft edge between content and map (desktop) */}
+          <div
+            className="hidden lg:block absolute inset-y-0 left-0 w-16 pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(to right, var(--background), transparent)",
+            }}
+          />
+          {/* Bottom fade (mobile) */}
+          <div
+            className="lg:hidden absolute inset-x-0 bottom-0 h-8 pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(to top, var(--background), transparent)",
+            }}
+          />
+          {/* Chapter dots (desktop) */}
+          <div className="hidden lg:flex absolute right-3 top-1/2 -translate-y-1/2 flex-col gap-2">
+            {stops.map((_, i) => (
+              <div
+                key={i}
+                className="rounded-full transition-all duration-500"
+                style={{
+                  width: i === activeIndex ? 7 : 4,
+                  height: i === activeIndex ? 7 : 4,
+                  backgroundColor:
+                    i <= activeIndex ? pathColor : "rgba(148,163,184,0.4)",
+                  opacity:
+                    i === activeIndex ? 1 : i < activeIndex ? 0.5 : 0.3,
+                }}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Scrolling content layer — text directly on gradient, no cards */}
-      <div className="relative z-10" style={{ marginTop: "-100vh" }}>
-        {/* Chapter dots navigation (desktop) */}
-        <div className="fixed right-4 top-1/2 -translate-y-1/2 z-50 hidden lg:flex flex-col gap-2">
-          {stops.map((_, i) => (
-            <div
-              key={i}
-              className="rounded-full transition-all duration-500"
-              style={{
-                width: i === activeIndex ? 8 : 5,
-                height: i === activeIndex ? 8 : 5,
-                backgroundColor:
-                  i === activeIndex
-                    ? pathColor
-                    : i < activeIndex
-                      ? pathColor
-                      : "var(--muted-foreground)",
-                opacity: i === activeIndex ? 1 : i < activeIndex ? 0.5 : 0.25,
-              }}
-            />
-          ))}
-        </div>
-
+      {/* Scrolling content — full width on mobile, left column on desktop */}
+      <div
+        ref={scrollRef}
+        className="relative lg:z-10 lg:w-[45%] xl:w-[42%] lg:bg-[var(--background)]"
+      >
         {stops.map((stop, i) => {
           const { icon, place, subtitle } = parseTitle(stop.title);
           const isActive = activeIndex === i;
           const isPast = i < activeIndex;
-          const distance = Math.abs(activeIndex - i);
 
           return (
             <div
               key={stop.id}
-              className="min-h-[90vh] flex items-center"
+              className="min-h-[60vh] lg:min-h-[85vh] flex items-center"
             >
               <div
-                className="w-full max-w-md lg:max-w-lg px-6 lg:px-14 py-8 transition-all duration-700 ease-out"
+                className="w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out"
                 style={{
-                  opacity: isActive ? 1 : isPast ? 0.12 : 0.06,
-                  transform: `translateX(${isActive ? 0 : -16}px)`,
-                  filter: isActive
-                    ? "none"
-                    : `blur(${Math.min(distance * 0.8, 3)}px)`,
+                  opacity: isActive ? 1 : isPast ? 0.25 : 0.1,
                 }}
               >
-                {/* Step indicator line + number */}
-                <div className="flex items-center gap-3 mb-6">
+                {/* Step indicator */}
+                <div className="flex items-center gap-3 mb-5">
                   <div
                     className="h-px transition-all duration-500"
                     style={{
@@ -358,20 +351,20 @@ export function StorytellingMap({
 
                 {/* Icon */}
                 {icon && (
-                  <span className="text-3xl lg:text-4xl block mb-3">
+                  <span className="text-3xl lg:text-4xl block mb-2">
                     {icon}
                   </span>
                 )}
 
-                {/* Place name — large, bold, Tympanus-style */}
-                <h3 className="text-2xl lg:text-3xl font-extrabold tracking-tight leading-tight text-foreground mb-1">
+                {/* Place name */}
+                <h3 className="text-2xl lg:text-[28px] font-extrabold tracking-tight leading-tight text-foreground mb-1">
                   {place}
                 </h3>
 
                 {/* Subtitle */}
                 {subtitle && (
                   <p
-                    className="text-sm lg:text-base font-medium tracking-wide mb-5 transition-colors duration-500"
+                    className="text-sm font-medium tracking-wide mb-4 transition-colors duration-500"
                     style={{
                       color: isActive
                         ? pathColor
@@ -382,18 +375,18 @@ export function StorytellingMap({
                   </p>
                 )}
 
-                {/* Description — longer, more readable */}
-                <p className="text-sm lg:text-[15px] leading-[1.9] text-foreground/80">
+                {/* Description */}
+                <p className="text-sm lg:text-[15px] leading-[1.85] text-foreground/75">
                   {stop.description}
                 </p>
 
                 {/* Images */}
                 {stop.images && stop.images.length > 0 && (
-                  <div className="mt-6 grid gap-4">
+                  <div className="mt-5 grid gap-3">
                     {stop.images.map((src, j) => (
                       <div
                         key={j}
-                        className="relative aspect-[16/10] overflow-hidden rounded-xl"
+                        className="relative aspect-[16/10] overflow-hidden rounded-lg"
                       >
                         {src && (
                           <img
@@ -411,7 +404,7 @@ export function StorytellingMap({
             </div>
           );
         })}
-        <div className="h-[50vh]" />
+        <div className="h-[40vh]" />
       </div>
 
       <style>{`
@@ -419,11 +412,11 @@ export function StorytellingMap({
           background: var(--background, #fff) !important;
         }
         .dark .leaflet-tile-pane {
-          filter: brightness(0.55) saturate(0.7) contrast(1.1);
+          filter: brightness(0.6) saturate(0.7) contrast(1.1);
         }
         .leaflet-control-attribution {
           font-size: 9px !important;
-          background: color-mix(in srgb, var(--background) 60%, transparent) !important;
+          background: color-mix(in srgb, var(--background) 70%, transparent) !important;
           color: var(--muted-foreground) !important;
           backdrop-filter: blur(4px);
         }
