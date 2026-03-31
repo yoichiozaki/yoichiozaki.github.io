@@ -34,8 +34,8 @@ function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
 
     const update = () => {
       const rect = wrapper.getBoundingClientRect();
-      // Mobile: sync at map bottom (40vh). Desktop: header bottom (64px).
-      const syncY = window.innerWidth >= 1024 ? 64 : window.innerHeight * 0.4;
+      // Mobile: sync at map bottom (30vh). Desktop: header bottom (64px).
+      const syncY = window.innerWidth >= 1024 ? 64 : window.innerHeight * 0.3;
       // 0 when wrapper top hits syncY, 1 when wrapper bottom hits it
       const progress = (syncY - rect.top) / rect.height;
       const clamped = Math.max(0, Math.min(0.999, progress));
@@ -950,9 +950,9 @@ export function StorytellingMap({
     // ── Read scroll position (called once per rAF when dirty) ──
     const readScrollPosition = () => {
       const cards = cardRefsRef.current;
-      // Mobile: sync when card top reaches map bottom (40vh).
+      // Mobile: sync when card top reaches map bottom (30vh).
       // Desktop (lg:): map is beside cards, sync at header bottom (64px).
-      const syncY = window.innerWidth >= 1024 ? 64 : window.innerHeight * 0.4;
+      const syncY = window.innerWidth >= 1024 ? 64 : window.innerHeight * 0.3;
       const n = stops.length;
       if (n < 2) return;
 
@@ -1116,7 +1116,7 @@ export function StorytellingMap({
 
       {/* Single map container — sticky on mobile, absolute-positioned on desktop */}
       <div
-        className="sticky top-0 h-[40vh] z-10
+        className="sticky top-0 h-[30vh] z-10
                    lg:absolute lg:right-0 lg:top-0 lg:w-[55%] xl:w-[58%] lg:h-full lg:z-0"
       >
         <div className="h-full lg:sticky lg:top-0 lg:h-screen">
@@ -1191,7 +1191,7 @@ export function StorytellingMap({
                 ref={el => { cardRefsRef.current[i] = el; }}
                 className={`w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out ${
                   imgCount > 0
-                    ? "sticky top-[40vh] lg:top-16 max-h-[calc(60dvh-16px)] lg:max-h-[calc(100dvh-64px-16px)] overflow-hidden"
+                    ? "sticky top-[30vh] lg:top-16 max-h-[calc(70dvh-16px)] lg:max-h-[calc(100dvh-64px-16px)] overflow-hidden"
                     : ""
                 }`}
                 style={{
