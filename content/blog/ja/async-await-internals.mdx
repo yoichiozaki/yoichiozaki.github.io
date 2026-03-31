@@ -1,0 +1,446 @@
+---
+title: "async/awaitの裏側 — イベントループ、コルーチン、そしてランタイムの仕組み"
+date: "2026-03-31"
+description: "async/awaitキーワードの裏側でランタイムが何をしているのか。JavaScriptのイベントループ、Pythonのasyncio、Rustのポーリングベースのモデルまで、非同期処理の内部実装を解説します。"
+tags: ["非同期処理", "async/await", "イベントループ", "コルーチン", "JavaScript", "Python", "Rust"]
+---
+
+## async/awaitは何を隠しているのか
+
+現代のプログラミング言語では、`async/await` は非同期処理を書くための標準的な構文になっています。しかし、この2つのキーワードの裏側では、言語やランタイムによって大きく異なるメカニズムが動いています。
+
+```javascript
+async function fetchData() {
+  const response = await fetch("/api/data");
+  const json = await response.json();
+  return json;
+}
+```
+
+この一見シンプルなコードの裏で、ランタイムは以下のようなことを行っています：
+
+1. 関数の実行を<strong>中断（suspend）</strong>して制御をランタイムに返す
+2. I/O完了を<strong>非同期に監視</strong>する
+3. 完了したら関数の実行を<strong>再開（resume）</strong>する
+4. 複数の非同期処理を<strong>効率的にスケジューリング</strong>する
+
+この記事では、async/awaitの裏側にある3つの主要な実行モデルを解説します。
+
+<ConcurrencyTaxonomy />
+
+## 前提知識：同期・非同期・並行・並列
+
+混同されやすい用語を整理します：
+
+| 用語 | 意味 |
+|------|------|
+| <strong>同期（Synchronous）</strong> | 処理が完了するまでブロックして待つ |
+| <strong>非同期（Asynchronous）</strong> | 処理を開始したら完了を待たずに次に進み、完了時に通知を受ける |
+| <strong>並行（Concurrent）</strong> | 複数のタスクの実行期間が重なっている（シングルコアでも可能） |
+| <strong>並列（Parallel）</strong> | 複数のタスクが物理的に同時に実行されている（マルチコアが必須） |
+
+async/awaitは<strong>並行性（concurrency）</strong>を実現する仕組みであり、必ずしも並列性（parallelism）を意味しません。JavaScriptのasync/awaitはシングルスレッドで並行処理を実現しています。
+
+## JavaScript：イベントループモデル
+
+### イベントループの構造
+
+JavaScriptは<strong>シングルスレッド</strong>で動作します。1つのスレッドで複数の非同期処理を扱うために、<strong>イベントループ</strong>というメカニズムを使います。
+
+イベントループは以下の要素で構成されています：
+
+1. <strong>コールスタック</strong> — 現在実行中の関数のスタック
+2. <strong>Web API / Node API</strong> — タイマー、ネットワーク、ファイルI/Oなどの非同期操作を実行する環境
+3. <strong>マイクロタスクキュー</strong> — Promise の `.then` / `.catch` / `.finally` コールバック、`queueMicrotask()`
+4. <strong>マクロタスクキュー</strong>（タスクキュー） — `setTimeout`、`setInterval`、I/Oコールバック、UIイベント
+
+<EventLoopCycle />
+
+### イベントループの動作順序
+
+1つのイベントループのイテレーションは以下の順序で実行されます：
+
+1. コールスタック上のすべてのコードを実行する
+2. コールスタックが空になったら、<strong>マイクロタスクキューのタスクをすべて</strong>実行する（キューが空になるまで）
+3. マイクロタスクキューが空になったら、<strong>マクロタスクキューから1つだけ</strong>タスクを取り出して実行する
+4. 必要に応じてレンダリングを行う
+5. 1に戻る
+
+重要なポイントは、<strong>マイクロタスクはマクロタスクより常に優先される</strong>という点です。以下のコードで確認してみましょう：
+
+```javascript
+console.log("1");             // 同期
+
+setTimeout(() => {
+  console.log("4");           // マクロタスク
+}, 0);
+
+Promise.resolve().then(() => {
+  console.log("3");           // マイクロタスク
+});
+
+console.log("2");             // 同期
+
+// 出力順: 1, 2, 3, 4
+```
+
+<EventLoopVisualizer />
+
+### async/awaitの変換
+
+`async/await` は<strong>Promiseのシンタックスシュガー</strong>です。コンパイラ/エンジンは async 関数を内部的にPromiseチェーンに変換します：
+
+```javascript
+// async/await で書いたコード
+async function example() {
+  console.log("A");
+  const result = await fetchData();
+  console.log("B");
+  return result;
+}
+
+// エンジンが内部的に行う変換（概念的）
+function example() {
+  console.log("A");
+  return fetchData().then((result) => {
+    console.log("B");
+    return result;
+  });
+}
+```
+
+`await` 式に到達すると：
+1. `await` の右辺の式を評価する（Promise を返す）
+2. 関数の残りの部分を `.then()` コールバックとして<strong>Promise に登録</strong>する（Promise が解決されたときにマイクロタスクキューに入る）
+3. 関数の実行を中断し、<strong>制御をイベントループに返す</strong>
+
+これにより、I/O待ちの間もイベントループは他のタスクを処理し続けることができます。
+
+### V8エンジンの最適化
+
+V8（ChromeとNode.jsのJavaScriptエンジン）は、async/awaitの性能を改善するためにいくつかの最適化を行っています：
+
+- <strong>高速async/await</strong>（V8 v7.2+）: `await` に渡された値が既にPromiseの場合、追加のPromiseラッパー生成を省略し、マイクロタスクのティック数を3から1に削減します（`throwaway` Promiseの廃止と `promiseResolve` の活用）
+
+## Python：asyncioとコルーチン
+
+### Pythonのコルーチン
+
+Pythonの `async/await` はPython 3.5で導入され、<strong>コルーチン</strong>をベースにしています。コルーチンは中断・再開可能な関数で、内部的にはジェネレータの仕組みを拡張したものです。
+
+```python
+import asyncio
+
+async def fetch_data():
+    print("fetch start")
+    await asyncio.sleep(1)  # I/O操作をシミュレート
+    print("fetch done")
+    return 42
+```
+
+`async def` で定義された関数を呼び出すと、関数本体は実行されず、<strong>コルーチンオブジェクト</strong>が返されます：
+
+```python
+coro = fetch_data()   # 関数本体はまだ実行されない！
+print(type(coro))      # <class 'coroutine'>
+```
+
+コルーチンを実行するには、<strong>イベントループ</strong>（ランタイム）が必要です。
+
+<CoroutineStateMachine />
+
+### asyncioイベントループ
+
+Pythonの `asyncio` モジュールはイベントループの実装を提供します。JavaScriptと異なり、Pythonのイベントループは明示的に作成・実行する必要があります：
+
+```python
+import asyncio
+
+async def main():
+    result = await fetch_data()
+    print(result)
+
+# イベントループを作成して実行
+asyncio.run(main())
+```
+
+asyncioのイベントループは内部的に以下の仕組みで動作しています：
+
+1. <strong>セレクタベースのI/O多重化</strong>: OS のシステムコール（Linux: `epoll`、macOS: `kqueue`、Windows: `IOCP`）を使って、複数のI/Oソースを1つのスレッドで監視
+2. <strong>コルーチンスケジューラ</strong>: 実行可能なコルーチンをスケジューリング
+3. <strong>タスクキュー</strong>: `asyncio.Task` オブジェクトを管理
+
+### Pythonのコルーチンの内部実装
+
+Pythonのネイティブコルーチン（`async def`）はジェネレータとは別の型ですが、CPythonの内部実装では<strong>ジェネレータと同じサスペンド機構</strong>（`YIELD_VALUE` オペコード）を共有しています。`await` は内部的に `__await__` プロトコルを使い、制御フローを以下のように変換します：
+
+```python
+# 概念的な内部動作
+async def example():
+    result = await some_coroutine()
+    print(result)
+
+# 内部的には（簡略化）:
+# 1. some_coroutine() を呼んでコルーチンオブジェクトを取得
+# 2. .send(None) で実行を進める
+# 3. コルーチンが中断したら、イベントループに制御を返す
+# 4. I/O完了後、.send(result) で結果を渡して再開
+```
+
+CPython の実装では、コルーチンのフレーム（ローカル変数、実行位置など）は<strong>ヒープ上に保持</strong>されます。これにより、中断・再開時にスタックの巻き戻しや復元が不要になります。
+
+### asyncioの制約とGIL
+
+Pythonの `asyncio` にはいくつかの重要な制約があります：
+
+- <strong>GIL（Global Interpreter Lock）</strong>: CPythonでは、Pythonバイトコードの実行は一度に1スレッドのみ。asyncioはシングルスレッドで動作するため、GILの影響は少ない
+- <strong>CPU-bound処理には不向き</strong>: async/awaitはI/O-bound処理に最適化されており、CPU-bound処理には `multiprocessing` や `concurrent.futures.ProcessPoolExecutor` を使う
+- <strong>ライブラリの対応が必要</strong>: 同期的なライブラリ（例: `requests`）を async コードから直接呼ぶとイベントループをブロックする。非同期版（例: `aiohttp`）を使う必要がある
+
+## Rust：ゼロコストFutureとポーリング
+
+### Rustの非同期モデル
+
+Rustのasync/awaitは他の言語と大きく異なるアプローチを取っています。Rustでは：
+
+1. <strong>ランタイムは言語に組み込まれていない</strong> — サードパーティのランタイム（tokio, async-std）を選択する
+2. <strong>Futureはポーリングベース</strong> — コールバックではなく、ランタイムがFutureの完了を問い合わせる
+3. <strong>ゼロコスト抽象</strong> — async/awaitのオーバーヘッドが最小限
+
+### Future trait
+
+RustのFutureは以下のtraitで定義されます：
+
+```rust
+pub trait Future {
+    type Output;
+    
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+
+pub enum Poll<T> {
+    Ready(T),    // 完了: 結果を返す
+    Pending,     // 未完了: 後で再度ポーリングしてほしい
+}
+```
+
+JavaScriptのPromiseやPythonのコルーチンが「完了時にコールバックを呼ぶ」<strong>プッシュベース</strong>なのに対し、Rustは「ランタイムがFutureに完了したか聞く」<strong>プルベース（ポーリング）</strong>です。
+
+### async/awaitの状態機械変換
+
+Rustのコンパイラは `async fn` を<strong>状態機械</strong>（ステートマシン）に変換します：
+
+```rust
+async fn example() -> i32 {
+    let a = fetch_a().await;  // 中断点1
+    let b = fetch_b().await;  // 中断点2
+    a + b
+}
+
+// コンパイラが生成する状態機械（概念的）:
+enum ExampleFuture {
+    Start,
+    WaitingA { future_a: FetchAFuture },
+    WaitingB { a: i32, future_b: FetchBFuture },
+    Done,
+}
+
+impl Future for ExampleFuture {
+    type Output = i32;
+    
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<i32> {
+        loop {
+            match self.state {
+                Start => {
+                    self.future_a = fetch_a();
+                    self.state = WaitingA;
+                }
+                WaitingA => {
+                    match self.future_a.poll(cx) {
+                        Poll::Ready(a) => {
+                            self.a = a;
+                            self.future_b = fetch_b();
+                            self.state = WaitingB;
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                WaitingB => {
+                    match self.future_b.poll(cx) {
+                        Poll::Ready(b) => {
+                            return Poll::Ready(self.a + b);
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                Done => panic!("polled after completion"),
+            }
+        }
+    }
+}
+```
+
+この変換により：
+- <strong>ヒープ割り当てが不要</strong>: 状態機械は1つの列挙型としてスタック上に配置可能
+- <strong>動的ディスパッチが不要</strong>: コンパイル時に具体的な型が確定
+- <strong>各 `await` が1つの状態遷移</strong>に対応
+
+### Waker とランタイムの協調
+
+ポーリングベースのモデルでは、「いつFutureを再度ポーリングすべきか」をランタイムに伝える仕組みが必要です。これが<strong>Waker</strong>です：
+
+```rust
+// Context にはWakerが含まれている
+pub struct Context<'a> {
+    waker: &'a Waker,
+}
+```
+
+Futureが `Poll::Pending` を返す前に、Wakerのクローンをepollやソケットのコールバックに登録します。I/Oが完了すると、Wakerが呼ばれ、ランタイムに「この Future を再度ポーリングすべき」と通知します。
+
+```text
+1. ランタイムがFuture.poll()を呼ぶ
+2. Futureは内部でI/Oを開始し、Wakerをカーネルに登録
+3. Poll::Pending を返す
+4. ランタイムは他のFutureをポーリング
+5. I/O完了 → カーネルがWakerを起動
+6. ランタイムが該当Futureを再度poll()
+7. Poll::Ready(result) を返す
+```
+
+### tokioランタイム
+
+tokioはRustで最も広く使われている非同期ランタイムです：
+
+```rust
+#[tokio::main]
+async fn main() {
+    let result = fetch_data().await;
+    println!("{result}");
+}
+```
+
+tokioは内部的に以下を提供します：
+
+- <strong>マルチスレッドスケジューラ</strong>: work-stealing アルゴリズムでタスクをCPUコア間に分散
+- <strong>I/Oドライバ</strong>: epoll/kqueue/IOCPをラップした非同期I/O
+- <strong>タイマー</strong>: 階層型タイマーホイール
+- <strong>シングルスレッドモード</strong>: `#[tokio::main(flavor = "current_thread")]` でイベントループスタイルの動作也可能
+
+## 言語間の比較
+
+<AsyncComparison />
+
+### プッシュ vs プル
+
+| モデル | 言語 | 仕組み | メリット |
+|--------|------|--------|----------|
+| <strong>プッシュベース</strong> | JS, Python | 完了時にコールバック/継続を呼ぶ | 実装がシンプル |
+| <strong>プルベース</strong> | Rust | ランタイムがFutureをポーリング | ゼロコスト、キャンセルが自然 |
+
+Rustのプルベースモデルの特徴的な利点は<strong>キャンセル</strong>です。Futureをドロップするだけで自動的にキャンセルされます。プッシュベースのモデルでは、明示的なキャンセルトークン（CancellationToken）が必要になることが多いです。
+
+### メモリモデル
+
+| 言語 | コルーチンの状態保持 | メモリ割り当て |
+|------|---------------------|--------------|
+| JavaScript | クロージャ内（V8 ヒープ） | GC管理 |
+| Python | コルーチンフレーム（ヒープ） | GC管理 |
+| Rust | 状態機械（スタック or Box） | 手動制御可能 |
+| Go | Goroutine スタック（連続・可変長） | GC管理 + スタック成長 |
+
+### カラーの問題（Function Coloring）
+
+多くの言語では、syncとasyncの関数が明確に区別される「<strong>関数の色問題</strong>」があります：
+
+- sync関数からasync関数を直接呼べない（ブロッキングが必要）
+- async関数からsync関数は呼べるが、長時間のブロッキングは避けるべき
+
+```python
+# NG: sync から async を直接は呼べない
+def sync_function():
+    result = await async_function()  # SyntaxError!
+
+# OK: asyncio.run() でブリッジ
+def sync_function():
+    result = asyncio.run(async_function())
+```
+
+Goはgoroutineによりこの問題を回避しています。すべての関数が暗黙的に並行実行可能で、`go` キーワードで新しいgoroutineとして起動できます。
+
+## 実践的な注意点
+
+### JavaScriptでの注意
+
+```javascript
+// NG: awaitを忘れるとPromiseオブジェクトが返る
+async function bad() {
+  const data = fetch("/api");  // await がない！
+  console.log(data);            // Promise オブジェクトが出力される
+}
+
+// NG: 直列実行になってしまう
+async function sequential() {
+  const a = await fetchA();  // 1秒待ち
+  const b = await fetchB();  // さらに1秒待ち → 合計2秒
+}
+
+// OK: Promise.all で並行実行
+async function parallel() {
+  const [a, b] = await Promise.all([fetchA(), fetchB()]);  // 合計1秒
+}
+```
+
+### Pythonでの注意
+
+```python
+# NG: ブロッキングI/Oをasyncコード内で使う
+async def bad():
+    import requests
+    response = requests.get("https://example.com")  # イベントループをブロック！
+
+# OK: 非同期ライブラリを使う
+async def good():
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        response = await session.get("https://example.com")
+
+# 独立したタスクの並行実行
+async def gather_example():
+    results = await asyncio.gather(
+        fetch_a(),
+        fetch_b(),
+        fetch_c(),
+    )
+```
+
+### Rustでの注意
+
+```rust
+// NG: async fn内でブロッキング操作
+async fn bad() {
+    std::thread::sleep(Duration::from_secs(1)); // ランタイムのスレッドをブロック！
+}
+
+// OK: tokioの非同期版を使う
+async fn good() {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
+// OK: CPUバウンド処理はspawn_blockingで別スレッドに逃がす
+async fn cpu_work() {
+    let result = tokio::task::spawn_blocking(|| {
+        heavy_computation()
+    }).await.unwrap();
+}
+```
+
+## まとめ
+
+async/awaitは表面上は似た構文を提供しますが、その裏側の実装は言語によって大きく異なります：
+
+- <strong>JavaScript</strong>: シングルスレッドのイベントループ上でPromiseチェーンに変換。マイクロタスクとマクロタスクの優先順位が動作を決定する
+- <strong>Python</strong>: asyncioイベントループがコルーチン（ジェネレータ拡張）をスケジューリング。GILの制約下でI/O並行性を実現
+- <strong>Rust</strong>: ゼロコストのFuture状態機械に変換。ポーリングベースのモデルでランタイムが主導権を持ち、ヒープ割り当てなしで非同期処理を実現
+
+共通する設計原則は、<strong>I/O待ちの間にスレッドを遊ばせない</strong>ということです。async/awaitはこの原則を守りつつ、同期コードに近い読みやすさを提供する構文上の工夫なのです。

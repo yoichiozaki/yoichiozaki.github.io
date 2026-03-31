@@ -1,0 +1,347 @@
+---
+title: "How Database Indexes Work — Inside B+ Trees and LSM-Trees"
+date: "2026-03-31"
+description: "How database indexes speed up queries. The mechanics of B+ tree insertion, search, and splits, LSM-Tree write optimization strategies, and how real databases use these structures."
+tags: ["Database", "Index", "B+ Tree", "LSM-Tree", "Data Structures"]
+---
+
+## Why Indexes Matter
+
+In a database, a full table scan costs $O(n)$. Searching for a single row in a million-row table could require a million disk reads.
+
+An index solves this problem. With a proper index, lookups complete in $O(\log n)$. With a B+ tree index, thanks to its high fan-out, even a million-row table needs only about 3–4 disk accesses to find the target row.
+
+This article covers the two core data structures behind database indexing: <strong>B+ trees</strong> and <strong>LSM-Trees</strong>.
+
+<IndexTaxonomy />
+
+## B+ Tree Fundamentals
+
+### From B-Tree to B+ Tree
+
+The B-Tree was invented in 1972 by Rudolf Bayer and Edward McCreight as a self-balancing search tree. Each node holds multiple keys, making it well-suited for disk-based storage.
+
+The B+ tree is a refinement of the B-tree with two key changes:
+
+1. <strong>Data is stored only in leaf nodes</strong> — internal nodes hold only keys (routing information)
+2. <strong>Leaf nodes are linked together</strong> — enabling efficient range scans
+
+<BTreeComparison />
+
+### B+ Tree Properties
+
+A B+ tree of order $m$ has these properties:
+
+- Each internal node has at most $m$ children
+- Each internal node has at least $\lceil m/2 \rceil$ children (except the root)
+- An internal node with $k$ keys has $k+1$ children
+- Leaf nodes hold at most $m-1$ keys
+- Leaf nodes hold at least $\lceil (m-1)/2 \rceil$ keys
+- <strong>All leaves are at the same depth</strong> (perfectly balanced)
+
+### Search Algorithm
+
+Searching in a B+ tree descends from root to leaf:
+
+```text
+Search(node, key):
+  if node is leaf:
+    return binary_search(node.keys, key)
+  
+  // Internal node: pick the right child
+  i = 0
+  while i < len(node.keys) and key >= node.keys[i]:
+    i += 1
+  return Search(node.children[i], key)
+```
+
+Keys within each node are sorted, so binary search identifies the correct child in $O(\log m)$. The tree height is $O(\log_m n)$, giving an overall complexity of $O(\log_m n \cdot \log_2 m) = O(\log n)$.
+
+In practice, $m$ is typically in the hundreds (node size = disk page size = 4KB–16KB), so even a million-row table only needs a tree of height 3–4.
+
+### Insertion and Splits
+
+Insertion into a B+ tree follows these steps:
+
+1. Use the search algorithm to find the appropriate leaf node
+2. Insert the key into the leaf (maintaining sorted order)
+3. If the leaf overflows (keys > $m-1$), a <strong>split</strong> occurs:
+   - The leaf is divided into two
+   - The median key is <strong>promoted</strong> to the parent node
+   - If the parent also overflows, the split propagates upward recursively
+4. When the root splits, the tree height increases by one
+
+Step through this process in the interactive demo below:
+
+<BPlusTreeVisualizer />
+
+Here is the split pseudocode:
+
+```text
+Insert(tree, key, value):
+  leaf = find_leaf(tree.root, key)
+  insert_into_leaf(leaf, key, value)
+  
+  if leaf.num_keys > MAX_KEYS:
+    split_leaf(leaf)
+
+SplitLeaf(leaf):
+  mid = ceil(leaf.num_keys / 2)
+  new_leaf = new LeafNode()
+  
+  // Move upper half to new leaf
+  new_leaf.keys = leaf.keys[mid:]
+  leaf.keys = leaf.keys[:mid]
+  
+  // Update linked list
+  new_leaf.next = leaf.next
+  leaf.next = new_leaf
+  
+  // Promote median to parent
+  promote_key = new_leaf.keys[0]
+  insert_into_parent(leaf.parent, promote_key, new_leaf)
+```
+
+### Range Scan Efficiency
+
+The B+ tree's greatest strength is range scanning. Because leaf nodes are linked, finding the start point and then following the linked list is all it takes:
+
+```text
+RangeScan(tree, low, high):
+  leaf = find_leaf(tree.root, low)
+  results = []
+  
+  while leaf != null:
+    for key in leaf.keys:
+      if key > high:
+        return results
+      if key >= low:
+        results.append(leaf.data[key])
+    leaf = leaf.next
+  
+  return results
+```
+
+This is also highly efficient from a disk I/O perspective. Leaf nodes are often laid out contiguously on disk, enabling sequential reads.
+
+### Deletion and Merging
+
+When a deletion causes a node's key count to drop below the minimum ($\lceil (m-1)/2 \rceil$), redistribution or merging is needed:
+
+1. <strong>Redistribution</strong>: borrow a key from an adjacent sibling
+2. <strong>Merge</strong>: combine with a sibling and remove the separator key from the parent
+
+Merges can propagate upward to the root, potentially reducing the tree height by one.
+
+## Clustered vs Non-Clustered Indexes
+
+### Clustered Index
+
+In a clustered index, <strong>the actual row data is stored in the B+ tree's leaf nodes</strong>. The index order equals the physical storage order of the data.
+
+MySQL's InnoDB uses this approach. The primary key becomes the clustered index, and the entire table is organized as this B+ tree:
+
+```sql
+-- In InnoDB, the primary key becomes the clustered index
+CREATE TABLE users (
+  id INT PRIMARY KEY,      -- B+ tree key
+  name VARCHAR(100),        -- Stored in leaf nodes
+  email VARCHAR(200)        -- Stored in leaf nodes
+);
+```
+
+<strong>Secondary indexes</strong> (non-primary key indexes) store primary key values in their leaves. A secondary index lookup requires two steps:
+
+1. Search the secondary index B+ tree to get the primary key value
+2. Search the clustered index (primary key B+ tree) to get the actual row data
+
+### Non-Clustered Index
+
+PostgreSQL stores table data in a <strong>heap</strong> (unordered sequence of pages), and index leaf nodes contain row pointers (TID: tuple ID) into the heap.
+
+```text
+PostgreSQL index structure:
+  B+ tree leaf: [key → TID (block_number, offset)]
+  Heap page:    [row data stored within pages]
+```
+
+With this design, whether an <strong>Index-Only Scan</strong> (answering from the index alone) is possible significantly affects performance. When heap access is required, random I/O occurs.
+
+## Disk I/O and Page Structure
+
+### Why Node Size = Page Size
+
+B+ tree node sizes are designed to match the disk page size (typically 4KB–16KB) because:
+
+- The minimum unit of disk I/O is a page (block)
+- One I/O reads all keys in one node
+- Matching the page size eliminates wasted reads
+
+```text
+Page size = 16KB, key size = 8B, pointer size = 8B:
+  Keys per node ≈ 16384 / (8 + 8) ≈ 1000
+  → Fan-out ≈ 1000
+
+A height-3 B+ tree can index:
+  1000 × 1000 × 1000 = 1 billion rows
+  → 1 billion rows searchable in just 3 disk accesses
+```
+
+### Buffer Pool
+
+In practice, frequently accessed pages are cached in an in-memory <strong>buffer pool</strong>. The root node and upper internal nodes are almost always cached, so actual disk accesses are typically just 1–2 reads to reach the leaf.
+
+## LSM-Tree — Write-Optimized Approach
+
+### The B+ Tree Write Cost Problem
+
+B+ trees excel at reads but have write challenges:
+
+- Even a single key insertion requires updating a page at a <strong>random disk location</strong>
+- Page updates require a Read-Modify-Write cycle (one read + one write)
+- Splits require updating multiple pages
+- <strong>Write amplification</strong> is significant
+
+### LSM-Tree Design Philosophy
+
+The LSM-Tree (Log-Structured Merge-Tree), proposed by Patrick O'Neil et al. in 1996, <strong>converts all writes to sequential writes</strong>, dramatically improving write throughput.
+
+<LSMWritePath />
+
+### Write Path
+
+1. Append the write to the <strong>WAL (Write-Ahead Log)</strong> for durability
+2. Insert the key into the <strong>Memtable</strong> (an in-memory sorted structure, typically a skip list or red-black tree)
+3. When the Memtable reaches a threshold size, flush it to disk as an <strong>SSTable</strong> (Sorted String Table)
+4. SSTables are immutable (never modified) — sorted key-value pair files
+
+### Read Path
+
+Reads must search multiple levels:
+
+```text
+Read(key):
+  // 1. Search Memtable first (most recent data)
+  result = memtable.get(key)
+  if result != null: return result
+  
+  // 2. Search L0 SSTables newest-first
+  for sstable in L0_tables (newest first):
+    result = sstable.get(key)  // Bloom filter + binary search
+    if result != null: return result
+  
+  // 3. Search L1 and beyond
+  for level in [L1, L2, ...]:
+    result = level.get(key)    // Each level is sorted, so binary search
+    if result != null: return result
+  
+  return NOT_FOUND
+```
+
+Each SSTable has a <strong>Bloom filter</strong> that probabilistically determines whether a key does not exist in the file (false positive rate typically set below 1%).
+
+### Compaction
+
+As SSTables accumulate, read performance degrades, so periodic <strong>compaction</strong> is performed:
+
+```text
+Compaction(level_n, level_n1):
+  // Merge level_n SSTables with overlapping range in level_n+1
+  for sstable in level_n.tables:
+    overlapping = find_overlapping(level_n1, sstable.key_range)
+    merged = merge_sort(sstable, overlapping)
+    // Write as new SSTables to level_n+1
+    write_new_sstables(level_n1, merged)
+    // Delete old SSTables
+    delete(sstable, overlapping)
+```
+
+There are two main compaction strategies:
+
+| Strategy | Characteristics | Used by |
+|----------|----------------|---------|
+| <strong>Size-Tiered</strong> | Merges similarly-sized SSTables. Faster writes | Cassandra (default) |
+| <strong>Leveled</strong> | Fixed size ratio between levels (typically 10×). Faster reads | RocksDB, LevelDB |
+
+### Write Amplification vs Read Amplification
+
+LSM-Trees incur write amplification through compaction. With leveled compaction, a single key gets rewritten at each level (L0→L1→L2), so write amplification is $O(L \times T)$ where $L$ is the number of levels and $T$ is the size ratio. With a size ratio of 10 and 4 levels, effective write amplification can reach about 40×.
+
+B+ tree write amplification comes from partial page updates, generally page size / change size (e.g., 16KB / 100B = 160×), though buffer pool batching mitigates this.
+
+## B+ Tree vs LSM-Tree — When to Use Which
+
+<DiskIOComparison />
+
+| Aspect | B+ Tree | LSM-Tree |
+|--------|---------|----------|
+| <strong>Point read</strong> | $O(\log_m n)$, fast | Must search multiple levels, slower |
+| <strong>Range scan</strong> | Leaf linked list, extremely fast | Requires merge reads, slower |
+| <strong>Write</strong> | Random I/O, split cost | Sequential I/O, fast |
+| <strong>Space efficiency</strong> | Page fill ~50–70% | Temporary space needed during compaction |
+| <strong>Use case</strong> | OLTP, read-heavy | Logs, time series, write-heavy |
+
+### Selection Guidelines
+
+- <strong>Read-heavy with frequent range scans</strong> → B+ tree (MySQL, PostgreSQL)
+- <strong>Write-heavy with logs and event data</strong> → LSM-Tree (RocksDB, Cassandra)
+- <strong>Mixed workloads</strong> → Consider tuning or hybrid configurations
+
+## Real-World Database Adoption
+
+<DBIndexStrategies />
+
+### MySQL (InnoDB)
+
+InnoDB uses B+ tree–based clustered indexing. The primary key's B+ tree is the table itself, and secondary index leaves store primary key values.
+
+```sql
+-- Check the query plan with EXPLAIN
+EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
+-- type: ref, key: idx_email → using secondary index
+-- Extra: NULL → secondary lookup to clustered index needed
+```
+
+### PostgreSQL
+
+PostgreSQL uses a heap table + B+ tree index architecture. The HOT (Heap-Only Tuples) optimization skips index updates when indexed columns aren't modified.
+
+PostgreSQL also offers rich index types beyond B+ trees: <strong>GiST</strong> (Generalized Search Tree), <strong>GIN</strong> (Generalized Inverted Index), and <strong>BRIN</strong> (Block Range Index).
+
+### RocksDB
+
+An LSM-Tree–based storage engine developed by Meta (Facebook), forked from LevelDB and heavily optimized for production use.
+
+- <strong>Leveled Compaction</strong> by default
+- <strong>Column Families</strong> for logical data separation
+- <strong>Bloom Filters</strong> to optimize read paths
+
+It serves as the internal storage engine for CockroachDB, TiKV (TiDB), MyRocks, and many others.
+
+### SQLite
+
+SQLite internally uses two types of B-trees. <strong>Table B-trees</strong>, used for row storage, store all data in leaf nodes — a B+ tree–like structure. <strong>Index B-trees</strong>, used for indexes, hold keys in both interior and leaf nodes — closer to a traditional B-tree. `WITHOUT ROWID` tables use index B-trees, providing a structure closer to a clustered index. Its simplicity makes it ideal as an embedded database.
+
+## Advanced Topics
+
+### Write-Optimized B+ Trees (WB-Tree, Bε-Tree)
+
+The <strong>Bε-Tree</strong> (B-epsilon Tree) sits between B+ trees and LSM-Trees. Each internal node has a buffer for batching writes, improving B+ tree write performance while maintaining read performance. It was used by TokuDB (formerly available in Percona Server for MySQL, now deprecated).
+
+### Learned Index
+
+<strong>Learned Indexes</strong>, proposed by Tim Kraska et al. in 2018, replace B+ tree internal node routing with machine learning models (linear regression, neural networks). When data distribution is predictable, this can achieve faster and more memory-efficient indexing than B+ trees. However, practical adoption still faces challenges and it remains largely a research area.
+
+### ALEX (Adaptive Learned Index)
+
+ALEX improves on learned indexes by supporting dynamic inserts and deletes while adaptively updating models as data distribution changes.
+
+## Summary
+
+The core insight behind database indexing is <strong>designing data structures to match disk I/O characteristics</strong>:
+
+- <strong>B+ trees</strong> minimize random reads through high fan-out and accelerate range scans with linked leaves. Best suited for read-heavy OLTP workloads
+- <strong>LSM-Trees</strong> convert all writes to sequential I/O, maximizing write throughput. Best suited for log and time-series data ingestion
+- There are clear trade-offs between the two, and the choice depends on workload characteristics
+
+Next time you look at an `EXPLAIN` query plan, you'll be able to imagine the B+ tree determining the search path behind the scenes.

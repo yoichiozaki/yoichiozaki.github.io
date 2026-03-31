@@ -1,0 +1,347 @@
+---
+title: "データベースインデックスの仕組み — B+木とLSM-Treeの内部構造"
+date: "2026-03-31"
+description: "データベースのインデックスがどのようにクエリを高速化するのか。B+木の挿入・検索・分割のメカニズム、LSM-Treeの書込最適化戦略、そして各データベースでの採用状況を解説します。"
+tags: ["データベース", "インデックス", "B+木", "LSM-Tree", "データ構造"]
+---
+
+## なぜインデックスが必要なのか
+
+データベースにおいて、テーブルのフルスキャン（全行走査）は $O(n)$ の計算量がかかります。100万行のテーブルで1行を探すのに100万回のディスク読み取りが必要になりかねません。
+
+インデックスはこの問題を解決するデータ構造です。適切なインデックスがあれば、検索は $O(\log n)$ で完了します。B+木インデックスでは高い分岐数（fan-out）のおかげで、100万行のテーブルでもわずか3〜4回のディスクアクセスで目的の行にたどり着けます。
+
+この記事では、データベースインデックスの中核を担う2つのデータ構造、<strong>B+木</strong>と<strong>LSM-Tree</strong>の内部実装を詳しく解説します。
+
+<IndexTaxonomy />
+
+## B+木（B+ Tree）の基礎
+
+### B木からB+木へ
+
+B木（B-Tree）は1972年にRudolf BayerとEdward McCreightが発明した自己平衡探索木です。各ノードが複数のキーを持ち、ディスクベースのストレージに適した構造になっています。
+
+B+木はB木の改良版で、以下の2つの重要な変更を加えたものです：
+
+1. <strong>データはリーフノードにのみ格納される</strong> — 内部ノードはキー（ルーティング情報）のみを持つ
+2. <strong>リーフノード同士が連結リストで接続されている</strong> — 範囲検索が効率的になる
+
+<BTreeComparison />
+
+### B+木の性質
+
+次数（order）$m$ のB+木は以下の性質を持ちます：
+
+- 各内部ノードは最大 $m$ 個の子ノードを持つ
+- 各内部ノードは最低 $\lceil m/2 \rceil$ 個の子ノードを持つ（ルートを除く）
+- $k$ 個のキーを持つ内部ノードは $k+1$ 個の子ノードを持つ
+- リーフノードは最大 $m-1$ 個のキーを持つ
+- リーフノードは最低 $\lceil (m-1)/2 \rceil$ 個のキーを持つ
+- <strong>すべてのリーフは同じ深さにある</strong>（完全平衡）
+
+### 検索アルゴリズム
+
+B+木での検索はルートからリーフに向かって下降します：
+
+```text
+Search(node, key):
+  if node is leaf:
+    return binary_search(node.keys, key)
+  
+  // 内部ノード: 適切な子ノードを選ぶ
+  i = 0
+  while i < len(node.keys) and key >= node.keys[i]:
+    i += 1
+  return Search(node.children[i], key)
+```
+
+各ノードのキーはソートされているので、二分探索で $O(\log m)$ で適切な子ノードを特定できます。木の高さは $O(\log_m n)$ なので、全体の計算量は $O(\log_m n \cdot \log_2 m) = O(\log n)$ です。
+
+実際には、$m$ は通常数百程度（ノードサイズ = ディスクページサイズ = 4KB〜16KB）なので、100万行のテーブルでも木の高さは3〜4程度に収まります。
+
+### 挿入と分割
+
+B+木への挿入は以下のステップで行われます：
+
+1. 検索アルゴリズムで適切なリーフノードを特定
+2. リーフにキーを挿入（ソート順を維持）
+3. リーフが溢れた場合（キー数 > $m-1$）、<strong>分割（split）</strong>が発生：
+   - リーフを2つに分ける
+   - 中央値（median）のキーを<strong>親ノードに昇格（promote）</strong>させる
+   - 親も溢れた場合、再帰的に分割が上に伝播する
+4. ルートが分割されると、木の高さが1段増える
+
+以下のインタラクティブデモで、この過程をステップ実行で確認できます：
+
+<BPlusTreeVisualizer />
+
+分割の擬似コードを示します：
+
+```text
+Insert(tree, key, value):
+  leaf = find_leaf(tree.root, key)
+  insert_into_leaf(leaf, key, value)
+  
+  if leaf.num_keys > MAX_KEYS:
+    split_leaf(leaf)
+
+SplitLeaf(leaf):
+  mid = ceil(leaf.num_keys / 2)
+  new_leaf = new LeafNode()
+  
+  // 後半のキーを新リーフに移動
+  new_leaf.keys = leaf.keys[mid:]
+  leaf.keys = leaf.keys[:mid]
+  
+  // 連結リストを更新
+  new_leaf.next = leaf.next
+  leaf.next = new_leaf
+  
+  // 中央値を親に昇格
+  promote_key = new_leaf.keys[0]
+  insert_into_parent(leaf.parent, promote_key, new_leaf)
+```
+
+### 範囲検索の効率性
+
+B+木の最大の強みは範囲検索です。リーフノードが連結リストで繋がっているため、範囲の開始点を見つけたら、あとはリーフを順に辿るだけです：
+
+```text
+RangeScan(tree, low, high):
+  leaf = find_leaf(tree.root, low)
+  results = []
+  
+  while leaf != null:
+    for key in leaf.keys:
+      if key > high:
+        return results
+      if key >= low:
+        results.append(leaf.data[key])
+    leaf = leaf.next
+  
+  return results
+```
+
+これはディスクI/Oの観点でも非常に効率的です。リーフノードはディスク上で連続して配置されることが多く、シーケンシャルリードが活かせます。
+
+### 削除とマージ
+
+削除時には、ノードのキー数が最低保証値（$\lceil (m-1)/2 \rceil$）を下回ると、再分配（redistribution）またはマージ（merge）が必要になります：
+
+1. <strong>再分配</strong>：隣接する兄弟ノードからキーを借りる
+2. <strong>マージ</strong>：兄弟ノードと合体し、親から区切りキーを削除する
+
+マージが親に伝播すると、最悪の場合ルートまで到達し、木の高さが1段減ります。
+
+## クラスタードインデックスと非クラスタードインデックス
+
+### クラスタードインデックス
+
+クラスタードインデックスでは、<strong>テーブルの行データ自体がB+木のリーフノードに格納されます</strong>。つまり、インデックスの順序 = テーブルのデータの物理的な格納順序です。
+
+MySQLのInnoDBはこの方式を採用しています。主キー（Primary Key）がクラスタードインデックスとなり、テーブル全体がこのB+木として構成されます：
+
+```sql
+-- InnoDBでは、この主キーがクラスタードインデックスになる
+CREATE TABLE users (
+  id INT PRIMARY KEY,      -- B+木のキー
+  name VARCHAR(100),        -- リーフノードに格納されるデータ
+  email VARCHAR(200)        -- 同上
+);
+```
+
+<strong>セカンダリインデックス</strong>（主キー以外のインデックス）は、リーフに主キーの値を格納します。セカンダリインデックスでの検索は2段階になります：
+
+1. セカンダリインデックスのB+木で主キー値を取得
+2. クラスタードインデックス（主キーのB+木）で実際の行データを取得
+
+### 非クラスタードインデックス
+
+PostgreSQLでは、テーブルデータは<strong>ヒープ</strong>（順不同のページ列）に格納され、インデックスのリーフノードにはヒープ内の行ポインタ（TID: タプルID）が格納されます。
+
+```text
+PostgreSQLのインデックス構造:
+  B+木のリーフ: [key → TID (block_number, offset)]
+  ヒープページ:  [行データがページ内に格納]
+```
+
+この方式では、<strong>Index-Only Scan</strong>（インデックスのみで応答）が可能かどうかがパフォーマンスに影響します。ヒープへのアクセスが必要な場合、ランダムI/Oが発生します。
+
+## ディスクI/Oとページ構造
+
+### なぜノードサイズ = ページサイズなのか
+
+B+木のノードサイズはディスクのページサイズ（通常4KB〜16KB）に合わせて設計されます。これは：
+
+- ディスクI/Oの最小単位はページ（ブロック）単位
+- 1回のI/Oで1ノード分のキーをすべて読み込める
+- ページサイズに合わせることで無駄な読み込みがなくなる
+
+```text
+ページサイズ = 16KB, キーサイズ = 8B, ポインタサイズ = 8B の場合:
+  1ノードに格納できるキー数 ≈ 16384 / (8 + 8) ≈ 1000
+  → 分岐数（fan-out）≈ 1000
+
+高さ3のB+木が格納できるキー数:
+  1000 × 1000 × 1000 = 10億
+  → 10億行のテーブルでもわずか3回のディスクアクセスで検索可能
+```
+
+### バッファプール
+
+実際のデータベースでは、頻繁にアクセスされるページはメモリ上の<strong>バッファプール</strong>にキャッシュされます。ルートノードや上位の内部ノードはほぼ常にキャッシュされているため、実際のディスクアクセスはリーフへの1〜2回程度で済むことが多いです。
+
+## LSM-Tree — 書込最適化のアプローチ
+
+### B+木の書込コスト問題
+
+B+木は読み取りに優れますが、書込みには課題があります：
+
+- 1つのキーの挿入でもディスクの<strong>ランダムな位置</strong>にあるページを更新する必要がある
+- ページの更新はRead-Modify-Writeサイクル（1回の読取 + 1回の書込）を要する
+- 分割が発生すると複数ページの更新が必要
+- <strong>書込増幅（Write Amplification）</strong>が大きい
+
+### LSM-Treeの設計思想
+
+LSM-Tree（Log-Structured Merge-Tree）は1996年にPatrick O'Neilらが提案したデータ構造で、<strong>すべての書込みをシーケンシャル書込みに変換する</strong>ことで、書込みスループットを大幅に向上させます。
+
+<LSMWritePath />
+
+### 書込パス
+
+1. <strong>WAL（Write-Ahead Log）</strong>に書込みを追記（耐障害性のため）
+2. <strong>Memtable</strong>（メモリ上のソート済み構造、通常はスキップリストや赤黒木）にキーを挿入
+3. Memtableが一定サイズに達したら、ディスクにフラッシュして<strong>SSTable</strong>（Sorted String Table）として書き出す
+4. SSTableはイミュータブル（変更不可）で、ソート済みのキーバリューペアのファイル
+
+### 読取パス
+
+読み取りは複数のレベルを検索する必要があります：
+
+```text
+Read(key):
+  // 1. まずMemtableを検索（最新データ）
+  result = memtable.get(key)
+  if result != null: return result
+  
+  // 2. L0のSSTableを新しい順に検索
+  for sstable in L0_tables (newest first):
+    result = sstable.get(key)  // Bloom filter + binary search
+    if result != null: return result
+  
+  // 3. L1以降を順に検索
+  for level in [L1, L2, ...]:
+    result = level.get(key)    // 各レベルはソート済みなので二分探索
+    if result != null: return result
+  
+  return NOT_FOUND
+```
+
+各SSTableには<strong>ブルームフィルタ</strong>が付与されており、「このファイルにキーが存在しないこと」を確率的に高速判定できます（偽陽性率は通常1%以下に設定）。
+
+### コンパクション
+
+SSTableが増えすぎると読取性能が劣化するため、定期的に<strong>コンパクション（compaction）</strong>が実行されます：
+
+```text
+Compaction(level_n, level_n1):
+  // level_n のSSTableとlevel_n+1の重複範囲をマージ
+  for sstable in level_n.tables:
+    overlapping = find_overlapping(level_n1, sstable.key_range)
+    merged = merge_sort(sstable, overlapping)
+    // 新しいSSTableとしてlevel_n+1に書き出す
+    write_new_sstables(level_n1, merged)
+    // 古いSSTableを削除
+    delete(sstable, overlapping)
+```
+
+コンパクション戦略には主に2つのアプローチがあります：
+
+| 戦略 | 特徴 | 採用例 |
+|------|------|--------|
+| <strong>Size-Tiered</strong> | 同サイズのSSTableをまとめてマージ。書込みが速い | Cassandra (デフォルト) |
+| <strong>Leveled</strong> | 各レベルのサイズ比を固定（通常10倍）。読取りが速い | RocksDB, LevelDB |
+
+### 書込増幅と読取増幅のトレードオフ
+
+LSM-Treeはコンパクションによって書込増幅が発生します。Leveledコンパクションでは、1つのキーがL0→L1→L2と各レベルで書き直されるため、書込増幅は $O(L \times T)$（$L$: レベル数、$T$: サイズ比）です。サイズ比10、4レベルの場合、実効的な書込増幅は約40倍になり得ます。
+
+一方、B+木の書込増幅はページの部分更新がかかるため、一般にページサイズ / 変更サイズの比率（例: 16KB / 100B = 160倍）となりますが、バッファプールによるバッチ化で緩和されます。
+
+## B+木 vs LSM-Tree — いつどちらを使うか
+
+<DiskIOComparison />
+
+| 観点 | B+木 | LSM-Tree |
+|------|------|----------|
+| <strong>一点読取</strong> | $O(\log_m n)$、高速 | 複数レベルを検索、やや遅い |
+| <strong>範囲検索</strong> | リーフ連結リストで極めて高速 | マージ読取が必要、遅い |
+| <strong>書込み</strong> | ランダムI/O、分割コスト | シーケンシャルI/O、高速 |
+| <strong>スペース効率</strong> | ページ充填率50〜70%程度 | コンパクション時の一時領域が必要 |
+| <strong>ユースケース</strong> | OLTP、読取中心 | ログ、時系列、書込中心 |
+
+### 選択の指針
+
+- <strong>読取が多い・範囲検索が多い</strong> → B+木（MySQL, PostgreSQL）
+- <strong>書込みが多い・ログやイベントデータ</strong> → LSM-Tree（RocksDB, Cassandra）
+- <strong>混在ワークロード</strong> → チューニングやハイブリッド構成を検討
+
+## 実際のデータベースでの採用状況
+
+<DBIndexStrategies />
+
+### MySQL（InnoDB）
+
+InnoDBはB+木ベースのクラスタードインデックスを採用しています。主キーのB+木がテーブルそのものであり、セカンダリインデックスのリーフには主キー値が格納されます。
+
+```sql
+-- EXPLAIN で実行計画を確認
+EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
+-- type: ref, key: idx_email → セカンダリインデックスを使用
+-- Extra: NULL → クラスタードインデックスへの2次アクセスが発生
+```
+
+### PostgreSQL
+
+PostgreSQLはヒープテーブル + B+木インデックスの構成です。HOT（Heap-Only Tuples）最適化により、インデックスカラムが変更されない更新ではインデックスの更新をスキップできます。
+
+また、<strong>GiST</strong>（Generalized Search Tree）、<strong>GIN</strong>（Generalized Inverted Index）、<strong>BRIN</strong>（Block Range Index）など、B+木以外のインデックスタイプも豊富に提供しています。
+
+### RocksDB
+
+Meta（Facebook）が開発したLSM-Treeベースのストレージエンジンです。LevelDBをフォークし、本番環境向けに大幅に最適化されています。
+
+- <strong>Leveled Compaction</strong>がデフォルト
+- <strong>Column Families</strong>で論理的にデータを分離
+- <strong>Bloom Filter</strong>で読取パスを最適化
+
+CockroachDB、TiKV（TiDB）、MyRocksなど、多くのデータベースの内部ストレージエンジンとして採用されています。
+
+### SQLite
+
+SQLiteは内部的に2種類のB木を使用します。テーブル格納に使われる<strong>テーブルB木</strong>はデータをリーフノードにのみ格納するB+木的な構造です。一方、インデックスに使われる<strong>インデックスB木</strong>は内部ノードにもキーを持つ伝統的なB木に近い構造です。`WITHOUT ROWID`テーブルではインデックスB木が使われ、クラスタードインデックスに近い構造になります。組み込みデータベースとしてシンプルな設計が特徴です。
+
+## 発展的なトピック
+
+### 書込最適化B+木（WB-Tree, Bε-Tree）
+
+B+木とLSM-Treeの中間の位置づけとして、<strong>Bε-Tree</strong>（B-epsilon Tree）があります。各内部ノードにバッファを持ち、書込みをバッチ化することでB+木の書込み性能を改善しつつ、読取り性能を維持します。TokuDB（かつてPercona Server for MySQLで提供されていたが現在は非推奨）で採用されていました。
+
+### Learned Index
+
+2018年にTim Kraska らが提案した<strong>Learned Index</strong>は、B+木の内部ノードのルーティング機能を機械学習モデル（線形回帰やニューラルネットワーク）で置き換える手法です。データの分布が予測可能な場合、B+木よりも高速かつ省メモリでインデックスを実現できる可能性があります。ただし実用化にはまだ課題が多く、研究段階の技術です。
+
+### ALEX (Adaptive Learned Index)
+
+Learned Indexの実用性を高めたデータ構造で、動的な挿入・削除に対応しつつ、データ分布の変化に適応的にモデルを更新します。
+
+## まとめ
+
+データベースインデックスの核心は、<strong>ディスクI/Oの特性にデータ構造を合わせる</strong>という設計思想にあります：
+
+- <strong>B+木</strong>は高い分岐数でランダムリードを最小化し、リーフ連結リストで範囲検索を高速化する。読取中心のOLTPワークロードに適している
+- <strong>LSM-Tree</strong>はすべての書込みをシーケンシャルI/Oに変換し、書込みスループットを最大化する。ログや時系列データの蓄積に適している
+- 両者には明確なトレードオフがあり、ワークロードの特性に応じて選択する必要がある
+
+次にデータベースのクエリプランの`EXPLAIN`出力を見るとき、その裏側でB+木がどのように検索パスを決定しているか、想像できるようになっていれば幸いです。

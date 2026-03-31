@@ -1,0 +1,449 @@
+---
+title: "How Garbage Collection Works — A History of GC and Language Strategies"
+date: "2026-03-31"
+description: "A deep dive into garbage collection from the ground up. Covering reference counting, tracing GC, generational GC, and concurrent GC — tracing the evolution of GC technology and comparing strategies across major languages. Includes an interactive tri-color mark-and-sweep visualization."
+tags: ["GC", "Runtime", "Go", "Java", "Python"]
+---
+
+Memory management is an unavoidable challenge in programming. In C/C++, developers must manually call `malloc`/`free`, but most modern languages rely on a <strong>garbage collector (GC)</strong> to automatically reclaim memory.
+
+This article covers GC fundamentals — from basic concepts to algorithm evolution, write barrier mechanics, and how major languages implement their GC strategies, all with concrete examples.
+
+## Why Do We Need GC?
+
+Manual memory management leads to two classic categories of bugs.
+
+### Memory Leaks
+
+Forgetting to free unused memory causes the program's memory usage to grow without bound, eventually crashing with an OOM (Out of Memory) error.
+
+```c
+void leak_example() {
+    char *buf = malloc(1024);
+    // use buf for processing...
+    if (error) return;  // ← forgot to free(buf) before return!
+    free(buf);
+}
+```
+
+In this example, when `error` is true, `free` is never called and 1024 bytes leak. In long-running server applications, this is a fatal problem.
+
+### Dangling Pointers
+
+Prematurely freeing memory that's still in use causes Use-After-Free bugs.
+
+```c
+void dangling_example() {
+    char *a = malloc(64);
+    char *b = a;  // a and b point to the same memory
+    free(a);
+    // b still points to freed memory (dangling pointer)
+    strcpy(b, "hello");  // Undefined behavior! Crash or security vulnerability
+}
+```
+
+GC fundamentally solves both problems. Developers no longer need to specify when to free memory, dramatically improving program safety and productivity.
+
+GC was invented by John McCarthy in 1959 for Lisp. It's a technology with over 67 years of history, during which many algorithms have been developed and refined.
+
+## Fundamental GC Strategies
+
+GC algorithms fall into two major families: <strong>reference counting</strong> and <strong>tracing</strong>.
+
+<GCTaxonomy />
+
+⮳ Generational, incremental, and concurrent are orthogonal optimization strategies that can combine with any tracing algorithm. For example, Java’s young generation uses copying GC, not mark & sweep. The diagram above is a simplified overview of common combinations.
+
+## Reference Counting
+
+Each object maintains a counter tracking how many references point to it. The counter is incremented when a new reference is created and decremented when a reference is removed. When the counter reaches zero, the object is immediately freed.
+
+### Reference Counting in Action
+
+```python
+a = Object()   # Object ref_count = 1 (a references it)
+b = a           # Object ref_count = 2 (a and b reference it)
+a = None        # Object ref_count = 1 (only b references it)
+b = None        # Object ref_count = 0 → immediately freed!
+```
+
+With reference counting, object lifetimes are tracked in real-time and memory is reclaimed the instant it becomes unused.
+
+### Advantages
+
+- <strong>Simple implementation</strong>: Just increment/decrement counters — easy to understand and implement
+- <strong>Immediate reclamation</strong>: Garbage is collected the moment it's created. Latency is predictable
+- <strong>No Stop-The-World</strong>: No need to pause the entire application
+- <strong>Minimal memory footprint</strong>: Objects are freed immediately, keeping peak memory usage low
+
+### Disadvantages
+
+- <strong>Cannot collect circular references</strong>: The biggest weakness. When A→B→A forms a cycle, `ref_count` never reaches zero even when no external references remain
+
+<CircularRefDiagram />
+
+As shown above, when A and B reference each other, their `ref_count` stays at 1 even after all external references are gone — a permanent leak.
+
+- <strong>Counter update overhead</strong>: Every pointer assignment requires a counter update. In multithreaded environments, this requires atomic operations (`atomic_increment`/`atomic_decrement`), causing cache line contention
+- <strong>Cascading frees</strong>: When the root of a large data structure reaches zero, a chain reaction of frees can cause a temporary latency spike
+
+## Tracing GC
+
+Starting from a <strong>root set</strong> (stack variables, global variables, registers, etc.), the collector traverses the object graph and marks reachable objects as "alive." Unreachable objects are collected as garbage.
+
+### What Is the Root Set?
+
+In tracing GC, "roots" are pointers directly accessible by the program. Specifically:
+
+- <strong>Local variables on stack frames</strong>: Each goroutine/thread's stack
+- <strong>Global variables</strong>: Package/module-level variables
+- <strong>CPU registers</strong>: Pointers held by the current thread
+
+Only objects reachable from the root set are considered "alive" — everything else is garbage. Even circular references are correctly collected as long as the cycle is unreachable from roots, which is the key advantage over reference counting.
+
+## Tri-color Mark & Sweep
+
+The most fundamental and widely used tracing GC algorithm. Proposed by Dijkstra et al. in their 1978 paper *"On-the-Fly Garbage Collection: An Exercise in Cooperation"*.
+
+### The Three Colors
+
+| Color | Meaning | State |
+|---|---|---|
+| <strong>White</strong> | Not yet discovered by GC | Candidate (might be garbage) |
+| <strong>Gray</strong> | Discovered, but references not fully scanned | Awaiting scan |
+| <strong>Black</strong> | Fully scanned (self and all references) | Definitely reachable (alive) |
+
+### The Tri-color Invariant
+
+Algorithm correctness depends on this invariant:
+
+> <strong>A black object never directly references a white object</strong>
+
+Why is this invariant critical? Black objects are never scanned again by the GC. If a black object directly references a white object, that white object loses its chance to be scanned — it would be freed even though it's still alive. As long as gray objects exist between black and white, every reachable object will eventually be scanned.
+
+### Algorithm Flow
+
+1. <strong>Initialize</strong>: Color all objects white
+2. <strong>Root discovery</strong>: Color objects pointed to by GC roots gray, push them onto the gray stack (worklist)
+3. <strong>Scan</strong>: Pop an object from the gray stack:
+   - Color its white referents gray and push them onto the gray stack
+   - Color the object itself black
+4. <strong>Repeat</strong>: Repeat step 3 until the gray stack is empty (mark complete)
+5. <strong>Sweep</strong>: Walk the heap and free all objects that remain white
+
+Step through this process with the interactive demo below. Watch how each object's color changes and how the gray stack evolves:
+
+<GCVisualizer />
+
+### Challenges of Mark & Sweep
+
+Basic Mark & Sweep has several challenges:
+
+- <strong>Fragmentation</strong>: Freed objects leave gaps between surviving objects, fragmenting memory. Large object allocations may fail to find contiguous space
+- <strong>Stop-The-World</strong>: All application threads must pause during mark and sweep
+- <strong>Full heap traversal</strong>: Sweeping requires walking the entire heap, with cost proportional to heap size
+
+Various variants were developed to address these challenges.
+
+## Evolution of Tracing GC
+
+### Mark-Compact
+
+Mark & Sweep causes <strong>memory fragmentation</strong> when objects are freed. Mark-Compact eliminates fragmentation by sliding surviving objects to one end of the heap.
+
+<FragmentationDiagram />
+
+As shown above, compaction fills the gaps left after sweep, creating a contiguous free region at the end of the heap.
+
+<strong>Compaction algorithms</strong> come in several varieties:
+
+- <strong>Sliding compaction</strong>: Slides objects in address order, preserving their relative ordering
+- <strong>Lisp 2 algorithm</strong>: Three passes over the heap — compute new addresses, update pointers, then move objects
+- <strong>Threaded compaction</strong>: Converts references into linked lists to store temporary information. No extra memory needed but complex
+
+<strong>Cost</strong>: Moving objects and updating references is expensive, but allocation becomes fast with bump-pointer allocation. Bump-pointer is essentially `alloc(size) = ptr; ptr += size` — a single instruction, significantly faster than free-list allocation (linear search for fitting blocks).
+
+### Copying GC (Semispace)
+
+Splits the heap into two spaces: <strong>From space</strong> and <strong>To space</strong>. Objects are allocated in From space. During GC, surviving objects are copied to To space, then From and To are swapped and the old From is freed entirely.
+
+<strong>Cheney's algorithm</strong> (1970) is the canonical implementation, using BFS (breadth-first search) to copy objects:
+
+```text
+scan = free = start of To space
+Copy objects referenced by GC roots to To space, advance free
+while scan < free:
+    For each field of the object at scan:
+        If referent is in From space → copy to To space, advance free
+        Set forwarding pointer at old location
+    Advance scan to next object
+```
+
+- <strong>Advantages</strong>: Free compaction (copies are always packed), bump-pointer allocation, no heap sweep needed
+- <strong>Disadvantages</strong>: Only half the heap is usable (50% memory efficiency), copying is expensive for large objects
+
+### Generational GC
+
+An optimization based on the <strong>Weak Generational Hypothesis</strong>:
+
+> <strong>Most objects die young (become unreachable shortly after allocation)</strong>
+
+This is backed by real-world observations. In typical applications, 80–95% of newly allocated objects become unreachable before the first GC cycle.
+
+<GenerationalHeapDiagram />
+
+- <strong>Young generation</strong>: A small area for new allocations. GC runs frequently (Minor GC) but is very fast (a few milliseconds) since most objects are already dead. New objects are allocated in Eden, and survivors are copied to Survivor spaces
+- <strong>Old generation</strong>: Objects that survive multiple Minor GCs are <strong>promoted</strong> here. GC is less frequent but heavier (Major GC / Full GC, tens to hundreds of milliseconds)
+
+Generational GC requires a <strong>remembered set</strong> to track references from Old to Young generation. This avoids scanning the entire Old generation during Minor GC. The <strong>card table</strong> approach is common: divide Old generation memory into ~512-byte cards and mark only cards containing Young pointers as "dirty" for scanning.
+
+### Incremental / Concurrent GC
+
+To reduce Stop-The-World (STW) time, GC work runs alongside application execution.
+
+<ConcurrencyTimeline />
+
+- <strong>Stop-The-World GC</strong>: Application completely paused during mark + sweep. Simplest implementation but long pause times (proportional to heap size)
+- <strong>Incremental GC</strong>: Splits marking into small steps, interleaved with application execution. Each step's pause is short, but total GC time is longer (write barrier overhead)
+- <strong>Concurrent GC</strong>: Runs marking on separate threads in parallel. Application pauses only at mark start and remark (final synchronization), which are extremely short
+
+In concurrent GC, the application (mutator) and GC (collector) run simultaneously, so reference relationships can change during marking. <strong>Write barriers</strong> handle this.
+
+## Write Barriers
+
+The mechanism for maintaining the tri-color invariant in concurrent/incremental GC. When the application (mutator) modifies a pointer, code is inserted to "notify" the GC.
+
+### Why Write Barriers Are Necessary
+
+Consider this scenario:
+
+```text
+1. GC has scanned object A and colored it black
+2. Application executes A.field = C (C is white)
+3. Application executes B.field = nil (removes B→C reference; B is gray/white)
+4. GC scans B, but C is no longer referenced by B
+5. C remains white → freed as garbage → alive object freed!
+```
+
+This is the <strong>lost object problem</strong>. It occurs when a black→white reference is created (condition ①) and simultaneously all other paths to that white object are severed (condition ②).
+
+### Major Write Barrier Types
+
+<strong>① Dijkstra Barrier (Insertion Barrier)</strong>
+
+When a pointer is written to reference a new object, the referent is shaded gray.
+
+```text
+// Barrier inserted when executing A.field = C
+writeBarrier(A, field, C):
+    shade(C)      // shade C gray first (prevent black→white reference)
+    A.field = C   // then perform the store
+```
+
+The shade must happen <strong>before</strong> the store. If the order were reversed, a window would exist where black object A references white object C — a concurrent GC could see this and incorrectly free C.
+
+Every newly referenced object becomes gray, ensuring it will be scanned. However, this conservatively shades many objects gray, increasing floating garbage (objects that are actually garbage but won't be collected this cycle).
+
+<strong>② Yuasa Barrier (Deletion Barrier / Snapshot-at-the-beginning)</strong>
+
+Shades the object <strong>losing</strong> a reference gray. This captures the idea of preserving a "snapshot" of the object graph at GC start time.
+
+```text
+// Barrier inserted before A.field changes from old to new
+writeBarrier(A, field, new):
+    old = A.field
+    if old is white:
+        shade(old)  // shade old gray
+    A.field = new
+```
+
+This guarantees all objects reachable at GC start will be marked.
+
+<strong>③ Hybrid Barrier (Go 1.8+)</strong>
+
+Go combines Dijkstra and Yuasa barriers into a <strong>hybrid write barrier</strong>.
+
+```text
+writeBarrier(slot, new):
+    shade(*slot)  // deletion barrier: shade the overwritten old value gray
+    shade(new)    // insertion barrier: shade the new value gray
+    *slot = new
+```
+
+The key benefit of the hybrid approach is that <strong>stack rescanning becomes unnecessary</strong>. In Go 1.5–1.7 with only the Dijkstra barrier, all goroutine stacks needed to be rescanned at the end of marking — this was the main contributor to STW time. With the hybrid barrier, Go's STW is typically under 100μs.
+
+## Memory Allocation Strategies
+
+Closely related to GC is the memory allocation strategy. The choice of GC algorithm heavily influences allocation design.
+
+### Free List
+
+Manages freed memory blocks as a linked list. Allocation searches for a block of suitable size.
+
+- <strong>First-fit</strong>: Use the first sufficiently large block found
+- <strong>Best-fit</strong>: Use the closest-sized block (less fragmentation)
+- <strong>Segregated-fit</strong>: Maintain separate lists for each size class (used by Go, tcmalloc)
+
+### Bump Pointer
+
+Used with compacted heaps or copying GC. A pointer marks the start of free memory, and allocation simply advances it.
+
+```text
+alloc(size):
+    result = freePtr
+    freePtr += size
+    return result
+```
+
+Extremely fast (effectively one instruction) but requires contiguous free space.
+
+### TLAB (Thread-Local Allocation Buffer)
+
+Pre-allocates a portion of the heap to each thread to avoid allocation contention in multithreaded environments. Within a thread, allocation uses lock-free bump-pointer. Used by Java's HotSpot JVM and Go's runtime.
+
+## GC Strategies by Language
+
+Let's examine how major programming languages implement their GC in detail.
+
+### Go — Concurrent Tri-color Mark & Sweep
+
+Go prioritizes <strong>simplicity and low latency</strong> above all else.
+
+| Aspect | Details |
+|---|---|
+| Algorithm | Concurrent tri-color mark & sweep |
+| Generational | No |
+| Compaction | No |
+| STW | Mark start/end only (typically < 100μs) |
+| Write barrier | Hybrid (Dijkstra + Yuasa) |
+| Tuning | `GOGC` / `GOMEMLIMIT` |
+
+<strong>Why doesn't Go use generational GC?</strong> Go aggressively stack-allocates. The compiler's escape analysis places objects that don't escape the function on the stack rather than the heap. This means most short-lived objects never even reach the heap. The generational hypothesis ("many heap objects are short-lived") is weakened, making the benefit of generational GC too small to justify the write barrier cost.
+
+<strong>GC Pacer</strong>: Go's GC uses a "pacer" to decide when to start the next GC cycle. `GOGC=100` (default) means "start the next GC when the heap has grown by 100% relative to the live heap after the last GC." Go 1.19 added `GOMEMLIMIT`, which sets a soft memory limit to prevent OOM in memory-constrained environments.
+
+GC source code lives in [`runtime/mgc.go`](https://github.com/golang/go/blob/master/src/runtime/mgc.go).
+
+### Java (HotSpot) — Generational + Multiple Collectors
+
+Java has the <strong>most mature GC ecosystem</strong>, with multiple collectors for different use cases.
+
+| Collector | Characteristics | STW | Use Case |
+|---|---|---|---|
+| <strong>Serial GC</strong> | Single-threaded | Long | Small apps, client |
+| <strong>Parallel GC</strong> | Multi-threaded mark | Medium | Throughput-oriented batch |
+| <strong>G1 GC</strong> | Region-based, predictable pauses | Short (target-configurable) | General purpose (JDK 9+ default) |
+| <strong>ZGC</strong> | Colored pointers, TB-scale heaps | < 1ms | Low-latency requirements |
+| <strong>Shenandoah</strong> | Concurrent compaction | < 10ms | Low-latency (RedHat) |
+
+<strong>How G1 GC works</strong>: The heap is divided into equal-sized <strong>regions</strong> (typically 1–32MB). Young/Old distinctions are assigned dynamically at the region level. G1 prioritizes collecting regions with the most garbage (Garbage-First), maximizing reclamation within a given pause time budget. Configure with `-XX:MaxGCPauseMillis=200`.
+
+<strong>ZGC's Colored Pointers</strong>: ZGC embeds GC metadata (mark state, relocation state) in unused bits of object pointers. This eliminates the need to write mark information to object headers, enabling concurrent marking and relocation using only load barriers. This technique is what allows ZGC to maintain sub-1ms STW even with TB-scale heaps.
+
+### Python (CPython) — Reference Counting + Generational Tracing
+
+Python uses a <strong>hybrid approach</strong>.
+
+<PythonHybridDiagram />
+
+- <strong>Reference Counting (Primary)</strong>: The main memory reclamation mechanism. When an object's `ob_refcnt` reaches 0, `tp_dealloc` is called immediately to free it
+- <strong>Generational Tracing GC (Auxiliary)</strong>: Runs generational tracing GC in the background to detect and collect circular references that reference counting cannot handle
+
+<strong>Three-generation threshold system</strong>:
+
+| Generation | Threshold (default) | Meaning |
+|---|---|---|
+| Generation 0 | 700 | Run Gen 0 collection when allocations − deallocations reaches 700 |
+| Generation 1 | 10 | Run Gen 1 collection every 10 Gen 0 collections |
+| Generation 2 | 10 | Run Gen 2 collection every 10 Gen 1 collections |
+
+Objects are promoted from Gen N to Gen N+1 after surviving just 1 collection. In other words, the thresholds control how frequently each generation is collected, not how many collections an object must survive. Check with `gc.get_threshold()`, adjust with `gc.set_threshold()`.
+
+CPython's GIL (Global Interpreter Lock) means reference count updates don't need atomic operations. However, Python 3.13+'s free-threaded mode (`--disable-gil`) switches to <strong>biased reference counting</strong> — the owning thread uses regular increment/decrement while other threads use atomic operations, achieving thread-safe reference counting without the GIL.
+
+### JavaScript (V8) — Generational + Concurrent Marking
+
+V8 (Chrome, Node.js, Deno) uses generational GC.
+
+| Area | Name | Algorithm |
+|---|---|---|
+| Young gen | Nursery (Scavenger) | Semispace copying GC |
+| Old gen | Major GC | Concurrent mark & sweep/compact |
+
+<strong>How Scavenger works</strong>: Young generation is split into two semispaces. New objects are allocated in "From" space. During Minor GC (Scavenge), surviving objects are copied to "To" space. Objects surviving twice are promoted to Old generation.
+
+<strong>Orinoco</strong>: V8's GC optimization project name. It processes marking concurrently with the main thread, dramatically reducing STW time. Specific techniques:
+
+- <strong>Concurrent Marking</strong>: Worker threads traverse the object graph in parallel with the main thread
+- <strong>Parallel Scavenging</strong>: Multiple worker threads perform Young generation GC in parallel
+- <strong>Incremental Marking</strong>: Makes small marking progress during idle time or between tasks
+- <strong>Lazy Sweeping</strong>: Defers sweep processing to allocation time
+
+### .NET (CLR) — Generational + Segment-Based
+
+.NET's GC is optimized for server workloads.
+
+| Aspect | Details |
+|---|---|
+| Algorithm | Generational mark & compact |
+| Generations | 3 (Gen 0, 1, 2) + LOH (Large Object Heap) |
+| Mode | Workstation GC / Server GC |
+| Concurrent | Background GC (concurrent Gen 2 collection) |
+
+<strong>Large Object Heap (LOH)</strong>: Objects 85,000 bytes or larger are allocated directly in the LOH. The LOH is not compacted by default, though .NET 4.5.1+ allows explicit compaction via `GCSettings.LargeObjectHeapCompactionMode`.
+
+<strong>Pinning</strong>: Prevents GC from moving objects during native interop. Achieved with `fixed` statements or `GCHandle.Alloc(obj, GCHandleType.Pinned)`, but overuse causes fragmentation.
+
+### Rust — No GC (Ownership System)
+
+Rust doesn't rely on GC. Its <strong>ownership + borrowing + lifetime</strong> system enforces memory safety at compile time.
+
+```text
+Ownership system → Memory deallocation timing decided at compile time
+                 → Zero runtime overhead
+                 → Zero GC pause time
+```
+
+The <strong>RAII (Resource Acquisition Is Initialization)</strong> pattern ensures the `Drop` trait is called automatically when a variable goes out of scope. This code is inserted at compile time, so runtime cost is zero.
+
+For circular references, `Rc<T>` / `Arc<T>` + `Weak<T>` provide reference counting. `Weak<T>` doesn't count toward `Rc`'s reference count, allowing cycles to be broken.
+
+### Swift — ARC (Automatic Reference Counting)
+
+Swift uses <strong>ARC</strong>, which inserts reference counting operations at compile time.
+
+- No runtime tracing GC needed
+- <strong>Predictable performance</strong>: All retain/release calls are inserted at compile time, making runtime overhead predictable
+- Circular references must be explicitly resolved by developers using `weak` (becomes Optional) / `unowned` (non-Optional, when lifecycle is guaranteed)
+
+Swift's compiler includes <strong>ARC optimizations</strong> that eliminate redundant retain/release pairs (including Copy-on-Write optimization).
+
+## GC Technology Timeline
+
+<GCTimelineDiagram />
+
+## Summary
+
+| Language | GC Type | Generational | Concurrent | STW | Allocation |
+|---|---|---|---|---|---|
+| <strong>Go</strong> | Tri-color M&S | No | Yes | < 100μs | Segregated-fit |
+| <strong>Java</strong> | Selectable (G1/ZGC/Shenandoah) | Yes | Yes | < 1ms+ | TLAB + bump pointer |
+| <strong>Python</strong> | Ref counting + tracing | Yes (3 gen) | No | Yes | pymalloc arena |
+| <strong>JavaScript (V8)</strong> | Copying + M&S/Compact | Yes | Yes | Short | Semispace + free list |
+| <strong>.NET</strong> | Generational M&C | Yes (3 gen+LOH) | Yes | Short | Bump pointer |
+| <strong>Rust</strong> | None (ownership) | — | — | None | System allocator |
+| <strong>Swift</strong> | ARC | — | — | None | ARC + malloc |
+
+GC is not a mere convenience feature — it's one of the most critical architecture decisions in programming language runtime design. The simplicity of reference counting, the completeness of tracing GC, the efficiency of generational hypothesis, the low latency of concurrent execution — each technique represents a specific set of trade-offs. The depth and fascination of this field lies in how each language team draws on decades of research to choose the optimal balance.
+
+## References
+
+- [The Garbage Collection Handbook](https://gchandbook.org/) — Richard Jones, Antony Hosking, Eliot Moss
+- [Go Blog: Getting to Go — The Journey of Go's Garbage Collector](https://go.dev/blog/ismmkeynote)
+- [Go Blog: A Guide to the Go Garbage Collector](https://tip.golang.org/doc/gc-guide)
+- [V8 Blog: Trash talk — The Orinoco garbage collector](https://v8.dev/blog/trash-talk)
+- [ZGC — Oracle Documentation](https://docs.oracle.com/en/java/javase/21/gctuning/z-garbage-collector.html)
+- [Python GC — CPython Developer Guide](https://devguide.python.org/internals/garbage-collector/)
+- [.NET GC — Microsoft Documentation](https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/)
+- Dijkstra et al., "On-the-Fly Garbage Collection: An Exercise in Cooperation," 1978
+- R. Jones, A. Hosking, E. Moss, "The Garbage Collection Handbook: The Art of Automatic Memory Management," 2011

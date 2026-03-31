@@ -1,0 +1,447 @@
+---
+title: "ガベージコレクションの仕組み — GC技術の系譜と言語ごとの戦略"
+date: "2026-03-31"
+description: "ガベージコレクション（GC）の仕組みをゼロから解説。参照カウントからトレースGC、世代別GC、並行GCまで、技術の系譜を辿りながら主要プログラミング言語の GC 戦略を比較します。三色マーク&スイープのインタラクティブな可視化付き。"
+tags: ["GC", "Runtime", "Go", "Java", "Python"]
+---
+
+プログラミングにおいてメモリ管理は避けて通れない問題です。C/C++ では開発者が手動で `malloc`/`free` を呼ぶ必要がありますが、多くの現代的な言語は<strong>ガベージコレクタ（GC）</strong>がメモリの回収を自動で行ってくれます。
+
+この記事では、GC の基本概念からアルゴリズムの系譜、書き込みバリアの仕組み、そして主要言語がどのような GC 戦略を採用しているかを、具体例を交えて解説します。
+
+## なぜ GC が必要なのか
+
+手動メモリ管理には 2 つの典型的なバグがあります。
+
+### メモリリーク
+
+使わなくなったメモリを解放し忘れると、プログラムのメモリ使用量が際限なく増加し、最終的には OOM（Out of Memory）でクラッシュします。
+
+```c
+void leak_example() {
+    char *buf = malloc(1024);
+    // buf を使って処理...
+    if (error) return;  // ← free(buf) を忘れてリターン！
+    free(buf);
+}
+```
+
+この例では、`error` が真の場合に `free` が呼ばれず、1024 バイトのメモリがリークします。長時間稼働するサーバーアプリケーションでは致命的な問題になります。
+
+### ダングリングポインタ
+
+まだ使用中のメモリを誤って解放してしまうと、解放済みメモリへのアクセス（Use-After-Free）が発生します。
+
+```c
+void dangling_example() {
+    char *a = malloc(64);
+    char *b = a;  // a と b が同じメモリを指す
+    free(a);
+    // b はまだ解放済みメモリを指している（ダングリングポインタ）
+    strcpy(b, "hello");  // 未定義動作！クラッシュやセキュリティ脆弱性の原因
+}
+```
+
+GC はこれらの問題を根本的に解決します。開発者がメモリの解放タイミングを明示する必要がなくなり、プログラムの安全性と生産性が大幅に向上します。
+
+GC は 1959 年に John McCarthy が Lisp のために考案しました。67 年以上の歴史を持つ技術であり、その間に多くのアルゴリズムが生まれ、洗練されてきました。
+
+## GC の基本戦略
+
+GC のアルゴリズムは大きく<strong>参照カウント方式</strong>と<strong>トレース方式</strong>の 2 つの系統に分けられます。
+
+<GCTaxonomy />
+
+⮳ 世代別・インクリメンタル・並行 GC は直交する最適化戦略であり、M&S 以外のアルゴリズムとも組み合わせ可能です。例えば Java の Young 世代はコピー GC を使います。上図は代表的な組み合わせを簡略化したものです。
+
+## 参照カウント方式（Reference Counting）「自分を何箇所から参照されているか」をカウンタとして持ちます。参照が増えるとカウントをインクリメントし、参照が外れるとデクリメントします。カウンタが 0 になった時点で、そのオブジェクトは即座に解放されます。
+
+### 参照カウントの動作例
+
+```python
+a = Object()   # Object の ref_count = 1（a が参照）
+b = a           # Object の ref_count = 2（a, b が参照）
+a = None        # Object の ref_count = 1（b のみ参照）
+b = None        # Object の ref_count = 0 → 即座に解放！
+```
+
+このように、参照カウント方式ではオブジェクトの寿命がリアルタイムに追跡され、不要になった瞬間にメモリが回収されます。
+
+### 長所
+
+- <strong>実装がシンプル</strong>: カウンタの増減だけで管理でき、理解しやすい
+- <strong>即時回収</strong>: ゴミは発生した瞬間に回収される。レイテンシが予測しやすい
+- <strong>Stop-The-World がない</strong>: アプリケーション全体を停止させる必要がない
+- <strong>メモリ使用量が最小限</strong>: 不要になったオブジェクトがすぐに解放されるため、メモリのピーク使用量が抑えられる
+
+### 短所
+
+- <strong>循環参照を回収できない</strong>: 最大の弱点。A→B→A のような循環参照があると、外部からの参照がなくなっても `ref_count` が 0 にならない
+
+<CircularRefDiagram />
+
+上図のように A と B が互いを参照していると、外部からの参照がなくなっても `ref_count` は 1 のまま残り、永久にリークします。
+
+- <strong>カウンタ更新のオーバーヘッド</strong>: ポインタの代入のたびにカウンタの更新が必要。特にマルチスレッド環境ではアトミック操作（`atomic_increment`/`atomic_decrement`）が必要で、キャッシュラインの競合が発生する
+- <strong>カスケード解放</strong>: 大きなデータ構造のルートの参照カウントが 0 になると、連鎖的に多数のオブジェクトの解放が走り、一時的なレイテンシスパイクになり得る
+
+## トレース方式（Tracing GC）
+
+<strong>ルートの集合</strong>（スタック上の変数、グローバル変数、レジスタなど）からオブジェクトグラフを辿り、到達可能（reachable）なオブジェクトを「生きている」とマークします。到達不可能（unreachable）なオブジェクトはガベージとして回収されます。
+
+### ルートセットとは
+
+トレース GC における「ルート」とは、プログラムから直接アクセス可能なポインタのことです。具体的には以下が含まれます：
+
+- <strong>スタックフレーム上のローカル変数</strong>: 各 goroutine / スレッドのスタック
+- <strong>グローバル変数</strong>: パッケージ / モジュールレベルの変数
+- <strong>CPU レジスタ</strong>: 現在のスレッドが保持しているポインタ
+
+ルートセットから辿れるオブジェクトだけが「生きている」と判断され、辿れないものはすべてガベージです。循環参照があっても、ルートから辿れなければ正しく回収されるのが、参照カウント方式に対する大きな利点です。
+
+## 三色マーク & スイープ（Tri-color Mark & Sweep）
+
+最も基本的かつ広く使われているトレース GC アルゴリズムです。Dijkstra らが 1978 年の論文 *"On-the-Fly Garbage Collection: An Exercise in Cooperation"* で提唱しました。
+
+### 三色の意味
+
+| 色 | 意味 | 状態 |
+|---|---|---|
+| <strong>白</strong> | まだ GC に発見されていない | 候補（ガベージかもしれない） |
+| <strong>灰色</strong> | 発見されたが、参照先のスキャンがまだ完了していない | スキャン待ち |
+| <strong>黒</strong> | 自身も参照先もすべてスキャン済み | 確実に到達可能（生存） |
+
+### 三色不変条件（Tri-color Invariant）
+
+アルゴリズムの正しさは以下の不変条件に依存します：
+
+> <strong>黒色オブジェクトが白色オブジェクトを直接参照することはない</strong>
+
+なぜこの条件が重要なのでしょうか？黒色のオブジェクトはもう GC がスキャンしません。もし黒から白を直接参照していると、その白オブジェクトはスキャンの機会を失い、「生きている」のに「ゴミ」として回収されてしまうからです。灰色オブジェクトが間にある限り、必ずスキャンの機会が訪れます。
+
+### アルゴリズムの流れ
+
+1. <strong>初期化</strong>: すべてのオブジェクトを白色にする
+2. <strong>ルート発見</strong>: GC ルートがポイントするオブジェクトを灰色にし、灰色スタック（ワークリスト）に追加
+3. <strong>スキャン</strong>: 灰色スタックからオブジェクトを一つ取り出し：
+   - それが参照するオブジェクトのうち白色のものを灰色にし、灰色スタックに追加
+   - 自身を黒色にする
+4. <strong>繰り返し</strong>: 灰色スタックが空になるまで 3 を繰り返す（マーク完了）
+5. <strong>スイープ</strong>: ヒープを走査し、白色のまま残ったオブジェクトのメモリを解放する
+
+以下のインタラクティブデモで、このプロセスをステップごとに確認できます。各オブジェクトの色が変わる様子と、灰色スタックの変化に注目してください：
+
+<GCVisualizer />
+
+### Mark & Sweep の課題
+
+基本的な Mark & Sweep には以下の課題があります：
+
+- <strong>フラグメンテーション</strong>: 解放されたオブジェクトの間に隙間ができ、メモリが断片化する。大きなオブジェクトの割り当て時に連続領域が確保できないことがある
+- <strong>Stop-The-World</strong>: マークとスイープの間、すべてのアプリケーションスレッドが停止する
+- <strong>ヒープ全体の走査</strong>: スイープ時にヒープ全体を走査する必要があり、ヒープサイズに比例してコストが増大する
+
+これらの課題を解決するために、さまざまなバリエーションが生まれました。
+
+## トレース GC の発展
+
+### マーク & コンパクト（Mark-Compact）
+
+Mark & Sweep はオブジェクトを解放すると<strong>メモリの断片化（fragmentation）</strong>が起こります。Mark-Compact は生存オブジェクトをヒープの一端に詰め直すことで断片化を解消します。
+
+<FragmentationDiagram />
+
+上の図が示すように、スイープ後に生じた隙間をコンパクション（圧縮）で詰めることで、ヒープ末尾に連続した空き領域が作られます。
+
+<strong>コンパクションのアルゴリズム</strong>にはいくつかの種類があります：
+
+- <strong>Sliding compaction</strong>: オブジェクトをアドレス順にスライドさせる。オブジェクト同士の相対的な順序が保たれる
+- <strong>Lisp 2 algorithm</strong>: ヒープを 3 回走査する。1回目で新アドレスを計算、2回目でポインタを更新、3回目でオブジェクトを移動
+- <strong>Threaded compaction</strong>: 参照をリンクリストに変換して一時情報を保存する。追加メモリ不要だが複雑
+
+<strong>コスト</strong>: オブジェクトの移動＋参照の書き換えが必要で重い処理ですが、割り当てはバンプポインタ（単純なポインタ移動）で高速になります。バンプポインタ割り当ては `alloc(size) = ptr; ptr += size` の一命令で済むため、フリーリスト方式（空きブロックを線形探索）に比べて大幅に高速です。
+
+### コピー GC（Copying / Semispace）
+
+ヒープを 2 つの領域（<strong>From 空間</strong> / <strong>To 空間</strong>）に分割します。オブジェクトの割り当ては From 空間で行い、GC 時に生存オブジェクトを To 空間にコピーします。コピー後、From と To を交換し、古い From を一括で解放します。
+
+<strong>Cheney のアルゴリズム</strong>（1970年）が代表的な実装で、BFS（幅優先探索）でオブジェクトをコピーします：
+
+```text
+scan = free = To空間の先頭
+GCルートから参照されるオブジェクトをTo空間にコピー, freeを進める
+while scan < free:
+    scanが指すオブジェクトの各フィールドについて:
+        参照先がFrom空間にあれば → To空間にコピー, freeを進める
+        参照先にforwarding pointerを設定
+    scanを次のオブジェクトに進める
+```
+
+- <strong>長所</strong>: コンパクションが無料で付いてくる（コピー先は常に詰めて配置）、バンプポインタで高速割り当て、ヒープ全体のスイープが不要
+- <strong>短所</strong>: ヒープの半分しか使えない（メモリ効率が 50%）、オブジェクトのコピーは大きなオブジェクトに対してコストが高い
+
+### 世代別 GC（Generational GC）
+
+<strong>弱い世代仮説（Weak Generational Hypothesis）</strong>に基づく最適化です：
+
+> <strong>ほとんどのオブジェクトは生成直後に不要になる（若くして死ぬ）</strong>
+
+実際の観測結果に基づいています。典型的なアプリケーションでは、新規割り当てされたオブジェクトの 80〜95% が最初の GC までに不要になります。
+
+<GenerationalHeapDiagram />
+
+- <strong>Young 世代（新世代）</strong>: 新規オブジェクトを割り当てる小さな領域。頻繁に GC（Minor GC）が走りますが、ほとんどのオブジェクトが死んでいるため非常に高速（数ミリ秒）。Eden 領域で新規割り当てを行い、Minor GC で生存したオブジェクトは Survivor 空間にコピーされます
+- <strong>Old 世代（旧世代）</strong>: 何度も Minor GC を生き延びたオブジェクトが<strong>昇格（promotion）</strong>する領域。GC の頻度は低いが、処理は重い（Major GC / Full GC で数十〜数百ミリ秒）
+
+世代別 GC の実現には<strong>リメンバードセット（Remembered Set）</strong>が必要です。Old 世代から Young 世代への参照を追跡する仕組みです。Minor GC 時に Old 世代全体をスキャンせずに済むようにするためのもので、<strong>カードテーブル</strong>方式が一般的です。Old 世代のメモリを 512 バイト程度のカード単位に分割し、Young 世代への参照を含むカードだけを「ダーティ」とマークしてスキャン対象にします。
+
+### インクリメンタル GC / 並行 GC
+
+Stop-The-World（STW）の時間を短縮するため、GC 処理をアプリケーションの実行と並行して行います。
+
+<ConcurrencyTimeline />
+
+- <strong>Stop-The-World GC</strong>: マーク＋スイープの間、アプリケーションを完全に停止。実装は最もシンプルだが、停止時間が長い（ヒープサイズに比例）
+- <strong>インクリメンタル GC</strong>: マーク処理を小さなステップに分割し、アプリケーションの実行と交互に進めます。各ステップの停止は短いが、合計の GC 時間は長くなる（書き込みバリアのオーバーヘッド）
+- <strong>並行 GC（Concurrent GC）</strong>: マーク処理を別スレッドで並行実行。アプリケーションの停止は最初（マーク開始）と最後（再マーク）のみで極めて短い
+
+並行 GC では、アプリケーション（ミューテータ）と GC（コレクタ）が同時に動くため、マーク中にオブジェクトの参照関係が変わる可能性があります。これに対処するのが<strong>書き込みバリア（Write Barrier）</strong>です。
+
+## 書き込みバリア（Write Barrier）
+
+並行 / インクリメンタル GC において三色不変条件を維持するための仕組みです。アプリケーション（ミューテータ）がポインタを書き換える際に、GC に対して「通知」するコードが挿入されます。
+
+### なぜ書き込みバリアが必要か
+
+以下のシナリオを考えてください：
+
+```text
+1. GC がオブジェクト A を黒色にスキャン済み
+2. アプリケーションが A.field = C（白色）を実行
+3. アプリケーションが B.field = nil（B→C の参照を削除。B は灰色/白色）
+4. GC は B をスキャンするが、もう C への参照がない
+5. C は白色のまま → ガベージとして解放される → 生きているのに解放！
+```
+
+これは<strong>ロストオブジェクト問題</strong>と呼ばれます。黒→白の参照が作られ（条件①）、同時にその白オブジェクトへの他の経路が切断された（条件②）場合に発生します。
+
+### 主要な書き込みバリア
+
+<strong>① Dijkstra バリア（挿入バリア）</strong>
+
+ポインタが新しいオブジェクトを参照する際に、参照先を灰色にマークします。
+
+```text
+// A.field = C を実行する際に挿入されるバリア
+writeBarrier(A, field, C):
+    shade(C)      // まず C を灰色にする（黒→白の参照を防ぐ）
+    A.field = C   // その後にストアを実行
+```
+
+ストアの<strong>前に</strong> shade を実行するのがポイントです。もし順序が逆だと、ストアと shade の間に「黒オブジェクト A が白オブジェクト C を参照している」状態が生まれ、並行して動く GC がその瞬間に C をガベージと判断してしまう可能性があります。
+
+新しい参照が追加されるたびに、参照先が灰色になるので確実にスキャンされます。ただし、保守的に多くのオブジェクトを灰色にするため、浮遊ガベージ（本当はゴミだが今回は回収されない）が増える傾向があります。
+
+<strong>② Yuasa バリア（削除バリア / snapshot-at-the-beginning）</strong>
+
+参照が<strong>外される</strong>オブジェクトを灰色にマークします。GC 開始時点のオブジェクトグラフの「スナップショット」を保存する考え方です。
+
+```text
+// A.field が old → new に変わる前に挿入されるバリア
+writeBarrier(A, field, new):
+    old = A.field
+    if old is white:
+        shade(old)  // old を灰色にする
+    A.field = new
+```
+
+GC 開始時に到達可能だったオブジェクトはすべてマークされることを保証できます。
+
+<strong>③ ハイブリッドバリア（Go 1.8+）</strong>
+
+Go は Dijkstra バリアと Yuasa バリアを組み合わせた<strong>ハイブリッド書き込みバリア</strong>を採用しています。
+
+```text
+writeBarrier(slot, new):
+    shade(*slot)  // 削除バリア: 上書きされる古い値を灰色にする
+    shade(new)    // 挿入バリア: 新しい値を灰色にする
+    *slot = new
+```
+
+このハイブリッド方式の最大の利点は、<strong>スタックの再スキャンが不要</strong>になることです。Go 1.5〜1.7 の Dijkstra バリアのみの実装では、マーク終了時にすべての goroutine のスタックを再スキャンする必要があり、これが STW 時間の主要因でした。ハイブリッドバリアにより、Go の STW は通常 100μs 以下にまで短縮されました。
+
+## メモリアロケーション戦略
+
+GC と密接に関連するのがメモリの割り当て方式です。GC アルゴリズムの選択は、割り当て戦略にも大きく影響します。
+
+### フリーリスト（Free List）
+
+解放されたメモリブロックをリンクリストで管理します。割り当て時に適切なサイズのブロックを探します。
+
+- <strong>First-fit</strong>: 最初に見つかった十分なサイズのブロックを使う
+- <strong>Best-fit</strong>: 最もサイズが近いブロックを使う（断片化が少ない）
+- <strong>Segregated-fit</strong>: サイズクラスごとに別のリストを持つ（Go, tcmalloc が採用）
+
+### バンプポインタ（Bump Pointer）
+
+コンパクション済みのヒープや Copying GC で使われる方式。空きメモリの先頭にポインタを置き、割り当てのたびにポインタを進めるだけです。
+
+```text
+alloc(size):
+    result = freePtr
+    freePtr += size
+    return result
+```
+
+極めて高速（実質1命令）ですが、連続した空き領域が必要です。
+
+### TLAB（Thread-Local Allocation Buffer）
+
+マルチスレッド環境での割り当て競合を避けるため、各スレッドにヒープの一部を事前に割り当てます。スレッド内での割り当てはロックフリーのバンプポインタで行えます。Java の HotSpot JVM や Go のランタイムが採用しています。
+
+## 言語ごとの GC 戦略
+
+主要なプログラミング言語がどのような GC を採用しているかを詳しく見ていきましょう。
+
+### Go — 並行三色マーク & スイープ
+
+Go は<strong>シンプルさとレイテンシの低さ</strong>を最優先にした設計です。
+
+| 項目 | 内容 |
+|---|---|
+| アルゴリズム | 並行三色マーク & スイープ |
+| 世代別 | なし（非世代別） |
+| コンパクション | なし |
+| STW | マーク開始・終了時のみ（通常 < 100μs） |
+| 書き込みバリア | ハイブリッド（Dijkstra + Yuasa） |
+| チューニング | `GOGC` / `GOMEMLIMIT` |
+
+<strong>なぜ Go は世代別 GC ではないのか？</strong>Go はスタック割り当てを積極的に行います。コンパイラのエスケープ解析（escape analysis）により、関数外に参照が漏れないオブジェクトはスタックに割り当てられます。つまり、短命なオブジェクトの多くはそもそもヒープに到達しません。世代別 GC の前提（「多くのヒープオブジェクトが短命」）が弱くなるため、世代別の恩恵が小さく、書き込みバリアのコストに見合わないのです。
+
+<strong>GC ペーサー</strong>: Go の GC は次の GC サイクルをいつ開始するか「ペーサー」が制御しています。`GOGC=100`（デフォルト）は、「前回の GC 後のライブヒープサイズに対して、ヒープが 100% 成長したら次の GC を開始する」という意味です。Go 1.19 では `GOMEMLIMIT` が追加され、メモリ上限をソフトリミットとして設定できるようになりました。
+
+GC のソースコードは [`runtime/mgc.go`](https://github.com/golang/go/blob/master/src/runtime/mgc.go) にあります。
+
+### Java (HotSpot) — 世代別 + 多彩なコレクタ
+
+Java は<strong>最も GC 研究が進んだエコシステム</strong>を持ち、用途に応じて複数のコレクタを選択できます。
+
+| コレクタ | 特徴 | STW | ユースケース |
+|---|---|---|---|
+| <strong>Serial GC</strong> | シングルスレッド | 長い | 小規模アプリ、クライアント |
+| <strong>Parallel GC</strong> | マルチスレッドマーク | 中程度 | スループット重視のバッチ処理 |
+| <strong>G1 GC</strong> | リージョンベース、予測可能な停止 | 短い（目標指定可） | 汎用（JDK 9+ デフォルト） |
+| <strong>ZGC</strong> | 着色ポインタ、TB級ヒープ | < 1ms | 低レイテンシ要求 |
+| <strong>Shenandoah</strong> | 並行コンパクション | < 10ms | 低レイテンシ（RedHat系） |
+
+<strong>G1 GC の仕組み</strong>: ヒープを均等な<strong>リージョン</strong>（通常 1〜32MB）に分割します。Young/Old の区別はリージョン単位で動的に割り当てられます。G1 は「ガベージの多いリージョン」を優先的に回収（Garbage-First）することで、限られた停止時間内で最大の効果を得ます。`-XX:MaxGCPauseMillis=200` のように停止時間の目標を設定できます。
+
+<strong>ZGC の着色ポインタ（Colored Pointers）</strong>: ZGC はオブジェクトポインタの未使用ビットに GC のメタデータ（マーク状態、リロケーション状態）を埋め込みます。これにより、オブジェクトヘッダにマーク情報を書き込む必要がなく、ロードバリアだけで並行マークとリロケーションを実現しています。TB 級のヒープでも STW が 1ms 以下を維持できるのはこの技術のおかげです。
+
+### Python (CPython) — 参照カウント + 世代別トレース GC
+
+Python は<strong>ハイブリッド方式</strong>を採用しています。
+
+<PythonHybridDiagram />
+
+- <strong>参照カウント（Primary）</strong>: メインのメモリ回収方式。オブジェクトの `ob_refcnt` が 0 になると即座に `tp_dealloc` が呼ばれて解放される
+- <strong>世代別トレース GC（Auxiliary）</strong>: 参照カウントでは回収できない循環参照を検出・回収するために、世代別のトレース GC をバックグラウンドで実行
+
+<strong>3 世代の閾値システム</strong>:
+
+| 世代 | 閾値（デフォルト） | 意味 |
+|---|---|---|
+| Generation 0 | 700 | 割り当て数 − 解放数 が 700 に達したら Gen 0 コレクションを実行 |
+| Generation 1 | 10 | Gen 0 コレクションが 10 回走るたびに Gen 1 コレクションも実行 |
+| Generation 2 | 10 | Gen 1 コレクションが 10 回走るたびに Gen 2 コレクションも実行 |
+
+オブジェクトは Gen N のコレクションを 1 回生存するだけで Gen N+1 に昇格します。つまり閾値はオブジェクトの生存回数ではなく、各世代のコレクション頻度を制御するパラメータです。`gc.get_threshold()` で確認、`gc.set_threshold()` で調整可能です。
+
+CPython の GIL（Global Interpreter Lock）の存在により、参照カウントの更新はアトミック操作が不要です。ただし、Python 3.13+ の free-threaded モード（`--disable-gil`）では<strong>バイアス参照カウント（biased reference counting）</strong>方式に変更されています。これはオーナースレッドは通常のインクリメント/デクリメントを行い、他のスレッドはアトミック操作でカウンタを更新する方式で、GIL なしでもスレッドセーフな参照カウントを実現します。
+
+### JavaScript (V8) — 世代別 + 並行マーク
+
+V8 エンジン（Chrome, Node.js, Deno）は世代別 GC を採用しています。
+
+| 領域 | 名称 | アルゴリズム |
+|---|---|---|
+| Young 世代 | Nursery (Scavenger) | Semispace コピー GC |
+| Old 世代 | Major GC | 並行マーク & スイープ/コンパクト |
+
+<strong>Scavenger の仕組み</strong>: Young 世代は 2 つの semispace に分けられます。新規オブジェクトは「From」空間に割り当てられ、Minor GC（Scavenge）時に生存オブジェクトが「To」空間にコピーされます。2 回生存したオブジェクトは Old 世代に昇格します。
+
+<strong>Orinoco</strong>: V8 の GC 最適化プロジェクトの名前です。メインスレッドと並行してマーク処理を行い、STW 時間を大幅に短縮しています。具体的な最適化手法：
+
+- <strong>Concurrent Marking</strong>: ワーカースレッドがメインスレッドと並行してオブジェクトグラフを走査
+- <strong>Parallel Scavenging</strong>: 複数のワーカースレッドが Young 世代の GC を並列実行
+- <strong>Incremental Marking</strong>: マーク処理を細切れに進め、アイドル時間やタスク間の短い隙間で実行
+- <strong>Lazy Sweeping</strong>: スイープ処理をオブジェクトの割り当て時に遅延実行
+
+### .NET (CLR) — 世代別 + セグメントベース
+
+.NET の GC はサーバーワークロードに最適化された設計です。
+
+| 項目 | 内容 |
+|---|---|
+| アルゴリズム | 世代別マーク & コンパクト |
+| 世代数 | 3（Gen 0, 1, 2）+ LOH (Large Object Heap) |
+| モード | Workstation GC / Server GC |
+| 並行 | Background GC（Gen 2 の並行コレクション） |
+
+<strong>Large Object Heap (LOH)</strong>: 85,000 バイト以上のオブジェクトは LOH に直接割り当てられます。LOH はコンパクションされないのがデフォルトで、.NET 4.5.1+ では `GCSettings.LargeObjectHeapCompactionMode` で明示的にコンパクションを要求できます。
+
+<strong>ピン留め（Pinning）</strong>: ネイティブコードとの相互運用時に、GC がオブジェクトを移動することを防ぎます。`fixed` ステートメントや `GCHandle.Alloc(obj, GCHandleType.Pinned)` で実現しますが、多用するとフラグメンテーションの原因になります。
+
+### Rust — GC なし（所有権システム）
+
+Rust は GC に頼らず、<strong>所有権（ownership）+ 借用（borrowing）+ ライフタイム</strong>のコンパイル時チェックでメモリ安全を保証します。
+
+```text
+所有権システム → コンパイル時にメモリ解放のタイミングが決定
+             → ランタイムオーバーヘッドゼロ
+             → GC 停止時間もゼロ
+```
+
+<strong>RAII（Resource Acquisition Is Initialization）</strong>パターンにより、変数がスコープを抜けると自動的に `Drop` トレイトが呼ばれてリソースが解放されます。これはコンパイル時に挿入されるコードなので、ランタイムコストはゼロです。
+
+循環参照が必要な場合は `Rc<T>` / `Arc<T>` + `Weak<T>` を使い、参照カウントで管理します。`Weak<T>` は所有権を持たない参照で、`Rc` の参照カウントに含まれないため、循環を断ち切れます。
+
+### Swift — ARC（Automatic Reference Counting）
+
+Swift はコンパイル時に参照カウントの増減コードを自動挿入する <strong>ARC</strong> を採用しています。
+
+- ランタイムでのトレース GC は不要
+- <strong>予測可能なパフォーマンス</strong>: コンパイル時にすべての retain/release が挿入されるため、実行時のオーバーヘッドが予測しやすい
+- 循環参照は `weak`（Optional になる）/ `unowned`（非 Optional、ライフサイクルが保証される場合）参照で開発者が明示的に解決する必要がある
+
+Swift のコンパイラは<strong>ARC 最適化</strong>として、不要な retain/release のペアを除去するパス（Copy-on-Write 最適化を含む）を持っています。
+
+## GC 技術の年表
+
+<GCTimelineDiagram />
+
+## まとめ
+
+| 言語 | GC 方式 | 世代別 | 並行 | STW | 割り当て方式 |
+|---|---|---|---|---|---|
+| <strong>Go</strong> | 三色 M&S | No | Yes | < 100μs | Segregated-fit |
+| <strong>Java</strong> | 選択可（G1/ZGC/Shenandoah） | Yes | Yes | < 1ms〜 | TLAB + バンプポインタ |
+| <strong>Python</strong> | 参照カウント + トレース | Yes (3世代) | No | あり | pymalloc arena |
+| <strong>JavaScript (V8)</strong> | コピー + M&S/Compact | Yes | Yes | 短い | Semispace + Free list |
+| <strong>.NET</strong> | 世代別 M&C | Yes (3世代+LOH) | Yes | 短い | バンプポインタ |
+| <strong>Rust</strong> | なし（所有権） | — | — | なし | システムアロケータ |
+| <strong>Swift</strong> | ARC | — | — | なし | ARC + malloc |
+
+GC は「あれば便利」の機能ではなく、プログラミング言語のランタイム設計における最重要アーキテクチャ決定の一つです。参照カウントのシンプルさ、トレース GC の正確さ、世代別仮説による効率化、並行実行による低レイテンシ化 — それぞれの技術が特定のトレードオフの上に成り立っています。各言語のチームが数十年の研究成果を踏まえて最適なトレードオフを選んでいるところに、この分野の深さと面白さがあります。
+
+## 参考文献
+
+- [The Garbage Collection Handbook](https://gchandbook.org/) — Richard Jones, Antony Hosking, Eliot Moss
+- [Go Blog: Getting to Go — The Journey of Go's Garbage Collector](https://go.dev/blog/ismmkeynote)
+- [Go Blog: A Guide to the Go Garbage Collector](https://tip.golang.org/doc/gc-guide)
+- [V8 Blog: Trash talk — The Orinoco garbage collector](https://v8.dev/blog/trash-talk)
+- [ZGC — Oracle Documentation](https://docs.oracle.com/en/java/javase/21/gctuning/z-garbage-collector.html)
+- [Python GC — CPython Developer Guide](https://devguide.python.org/internals/garbage-collector/)
+- [.NET GC — Microsoft Documentation](https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/)
+- Dijkstra et al., "On-the-Fly Garbage Collection: An Exercise in Cooperation," 1978
+- R. Jones, A. Hosking, E. Moss, "The Garbage Collection Handbook: The Art of Automatic Memory Management," 2011

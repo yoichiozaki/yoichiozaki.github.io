@@ -11,19 +11,21 @@ Personal blog & portfolio site for Yoichi Ozaki (尾崎 耀一), hosted on GitHu
 - **Tailwind CSS v4** + `@tailwindcss/typography`
 - **MDX** via `next-mdx-remote/rsc` v6 (React Server Components)
 - **rehype-pretty-code** (Shiki) — Dual-theme syntax highlighting (github-light / github-dark)
+- **Mermaid** — Client-side diagram rendering (dark/light theme aware via ThemeProvider)
 - **next-intl** — i18n (ja / en, default: ja)
 - **GitHub Pages** — Deploy via GitHub Actions
 
 ## Architecture
 
 ```
-src/app/[locale]/       → Locale-scoped pages (App Router)
-src/components/         → Shared React components
-src/lib/blog.ts         → Blog post loader (reads content/blog/{locale}/*.mdx)
-src/i18n/               → Locale config & dictionary loader
-src/data/projects.ts    → Portfolio project data
-content/blog/{locale}/  → MDX blog posts (ja/, en/)
-messages/{locale}.json  → UI translation strings
+src/app/[locale]/             → Locale-scoped pages (App Router)
+src/components/               → Shared React components
+src/components/interactive/   → Interactive article components (client-side)
+src/lib/blog.ts               → Blog post loader (reads content/blog/{locale}/*.mdx)
+src/i18n/                     → Locale config & dictionary loader
+src/data/projects.ts          → Portfolio project data
+content/blog/{locale}/        → MDX blog posts (ja/, en/)
+messages/{locale}.json        → UI translation strings
 ```
 
 - Path alias: `@/` → `./src/`
@@ -34,7 +36,7 @@ messages/{locale}.json  → UI translation strings
 
 ```sh
 npm run dev    # Local dev server
-npm run build  # Static export to out/
+npm run build  # next build → out/
 npm run lint   # ESLint
 ```
 
@@ -58,7 +60,11 @@ tags: ["Tag1", "Tag2"]
 
 - Every post needs both `ja/` and `en/` versions with the same slug
 - MDX custom components are wired through `src/app/[locale]/blog/[slug]/page.tsx`
-- Code blocks in MDX get automatic syntax highlighting and a copy button via `CopyCodeBlock`
+- Code blocks in MDX get automatic syntax highlighting and a copy button via `CodeBlock` (wraps `CopyCodeBlock`)
+- Mermaid code blocks (` ```mermaid `) are rendered client-side as SVG diagrams (theme-aware, no build step needed)
+- **Code blocks must always have a language tag** (e.g., `go`, `text`) — untagged blocks cause MDX to interpret `{}` as JSX
+- Interactive components from `src/components/interactive/` can be used as MDX tags (e.g., `<GoRoutineVisualizer />`)
+- When quoting external source code, always link to the upstream repository
 
 ### Styling
 
@@ -94,3 +100,24 @@ tags: ["Tag1", "Tag2"]
 - **Lazy wrapper**: `src/components/StorytellingMapLazy.tsx` — Per-trip wrapper components (SSR-safe)
 - **Trip data**: `src/data/trips/{slug}.ts` — Bilingual stop data (stopsJa/stopsEn)
 - **Images**: `public/images/trips/{slug}/` — WebP photos named `{stop-id}-{n}.webp`
+
+### Interactive Articles
+
+- **Instruction**: `.github/instructions/interactive-articles.instructions.md` — Full guide for creating step-based interactive visualizations in MDX
+- **Container**: `src/components/interactive/InteractiveDemo.tsx` — Styled wrapper that breaks out of prose
+- **Hook**: `src/components/interactive/useStepPlayer.ts` — Reusable play/pause/step/reset animation logic
+- **Controls**: `src/components/interactive/StepPlayerControls.tsx` — Playback UI (progress bar, buttons, step dots)
+- **Example**: `src/components/interactive/GoRoutineVisualizer.tsx` — Go scheduler G/M/P demo (14 steps)
+- New components are registered in `src/app/[locale]/blog/[slug]/page.tsx` via `getMdxComponents()`
+
+### Content Reviewer
+
+- **Skill**: `.github/skills/content-reviewer/SKILL.md` — Systematic technical accuracy review workflow for blog articles
+- **Agent**: `.github/agents/content-reviewer.agent.md` — Automated reviewer that checks algorithms, pseudocode, language-specific claims, diagrams, and bilingual consistency
+
+### Mermaid Diagrams
+
+- **CodeBlock**: `src/components/CodeBlock.tsx` — `pre` override that detects `data-language="mermaid"` and delegates to Mermaid component; otherwise renders CopyCodeBlock
+- **Mermaid**: `src/components/Mermaid.tsx` — Client component that dynamically imports mermaid, renders SVG with dark/light theme support via `useTheme()`, `securityLevel: "strict"`
+- **Dark mode**: Mermaid re-renders automatically when theme toggles (via `useTheme()` + `useEffect` dependency)
+- **Usage in MDX**: Simply use a ` ```mermaid ` fenced code block — no imports or custom components needed

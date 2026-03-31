@@ -1,0 +1,446 @@
+---
+title: "Inside async/await — Event Loops, Coroutines, and Runtime Mechanics"
+date: "2026-03-31"
+description: "What happens behind the async/await keywords. From JavaScript's event loop to Python's asyncio to Rust's polling-based Future model, a deep dive into the internals of asynchronous execution."
+tags: ["Async", "async/await", "Event Loop", "Coroutine", "JavaScript", "Python", "Rust"]
+---
+
+## What async/await Hides
+
+In modern programming languages, `async/await` has become the standard syntax for writing asynchronous code. But behind these two keywords, vastly different mechanisms run depending on the language and runtime.
+
+```javascript
+async function fetchData() {
+  const response = await fetch("/api/data");
+  const json = await response.json();
+  return json;
+}
+```
+
+Behind this seemingly simple code, the runtime is doing the following:
+
+1. <strong>Suspending</strong> the function's execution and returning control to the runtime
+2. <strong>Asynchronously monitoring</strong> I/O completion
+3. <strong>Resuming</strong> the function when complete
+4. <strong>Efficiently scheduling</strong> multiple async operations
+
+This article covers the three major execution models behind async/await.
+
+<ConcurrencyTaxonomy />
+
+## Prerequisites: Sync, Async, Concurrent, Parallel
+
+These commonly confused terms deserve clarification:
+
+| Term | Meaning |
+|------|---------|
+| <strong>Synchronous</strong> | Blocks and waits until the operation completes |
+| <strong>Asynchronous</strong> | Starts the operation and moves on; gets notified upon completion |
+| <strong>Concurrent</strong> | Multiple tasks have overlapping execution periods (possible on a single core) |
+| <strong>Parallel</strong> | Multiple tasks physically execute simultaneously (requires multiple cores) |
+
+async/await achieves <strong>concurrency</strong>, not necessarily parallelism. JavaScript's async/await achieves concurrent processing on a single thread.
+
+## JavaScript: The Event Loop Model
+
+### Event Loop Structure
+
+JavaScript runs on a <strong>single thread</strong>. To handle multiple asynchronous operations on one thread, it uses the <strong>event loop</strong> mechanism.
+
+The event loop consists of:
+
+1. <strong>Call Stack</strong> — Stack of currently executing functions
+2. <strong>Web APIs / Node APIs</strong> — Environment for async operations (timers, network, file I/O)
+3. <strong>Microtask Queue</strong> — Promise `.then` / `.catch` / `.finally` callbacks, `queueMicrotask()`
+4. <strong>Macrotask Queue</strong> (Task Queue) — `setTimeout`, `setInterval`, I/O callbacks, UI events
+
+<EventLoopCycle />
+
+### Event Loop Execution Order
+
+One iteration of the event loop follows this order:
+
+1. Execute all code on the call stack
+2. Once the stack is empty, execute <strong>all tasks in the microtask queue</strong> (until the queue is empty)
+3. Once the microtask queue is empty, dequeue and execute <strong>one task from the macrotask queue</strong>
+4. Perform rendering if needed
+5. Return to step 1
+
+The critical point is that <strong>microtasks always take priority over macrotasks</strong>. Let's verify with this code:
+
+```javascript
+console.log("1");             // synchronous
+
+setTimeout(() => {
+  console.log("4");           // macrotask
+}, 0);
+
+Promise.resolve().then(() => {
+  console.log("3");           // microtask
+});
+
+console.log("2");             // synchronous
+
+// Output order: 1, 2, 3, 4
+```
+
+<EventLoopVisualizer />
+
+### async/await Transformation
+
+`async/await` is <strong>syntactic sugar over Promises</strong>. The compiler/engine internally transforms async functions into Promise chains:
+
+```javascript
+// Code written with async/await
+async function example() {
+  console.log("A");
+  const result = await fetchData();
+  console.log("B");
+  return result;
+}
+
+// Conceptual internal transformation
+function example() {
+  console.log("A");
+  return fetchData().then((result) => {
+    console.log("B");
+    return result;
+  });
+}
+```
+
+When an `await` expression is reached:
+1. Evaluate the right-hand side expression (returns a Promise)
+2. Register the rest of the function as a `.then()` callback <strong>on the Promise</strong> (it enters the microtask queue when the Promise resolves)
+3. Suspend execution and <strong>return control to the event loop</strong>
+
+This allows the event loop to continue processing other tasks while waiting for I/O.
+
+### V8 Engine Optimizations
+
+V8 (the JavaScript engine in Chrome and Node.js) includes several optimizations for async/await:
+
+- <strong>Faster async/await</strong> (V8 v7.2+): When the value passed to `await` is already a Promise, V8 skips creating an extra wrapper Promise and eliminates the `throwaway` Promise, reducing microtask ticks from 3 to 1 (via `promiseResolve` optimization)
+
+## Python: asyncio and Coroutines
+
+### Python Coroutines
+
+Python's `async/await` was introduced in Python 3.5 and is based on <strong>coroutines</strong>. Coroutines are functions that can be suspended and resumed, internally extending the generator mechanism.
+
+```python
+import asyncio
+
+async def fetch_data():
+    print("fetch start")
+    await asyncio.sleep(1)  # Simulates I/O operation
+    print("fetch done")
+    return 42
+```
+
+Calling a function defined with `async def` doesn't execute the body — it returns a <strong>coroutine object</strong>:
+
+```python
+coro = fetch_data()   # Function body has NOT run yet!
+print(type(coro))      # <class 'coroutine'>
+```
+
+An <strong>event loop</strong> (runtime) is needed to actually execute the coroutine.
+
+<CoroutineStateMachine />
+
+### asyncio Event Loop
+
+Python's `asyncio` module provides an event loop implementation. Unlike JavaScript, Python's event loop must be explicitly created and run:
+
+```python
+import asyncio
+
+async def main():
+    result = await fetch_data()
+    print(result)
+
+# Create and run the event loop
+asyncio.run(main())
+```
+
+The asyncio event loop internally works through:
+
+1. <strong>Selector-based I/O multiplexing</strong>: Uses OS system calls (Linux: `epoll`, macOS: `kqueue`, Windows: `IOCP`) to monitor multiple I/O sources on a single thread
+2. <strong>Coroutine scheduler</strong>: Schedules runnable coroutines
+3. <strong>Task queue</strong>: Manages `asyncio.Task` objects
+
+### Internal Implementation of Python Coroutines
+
+Python's native coroutines (`async def`) are a distinct type from generators, but in CPython's implementation they <strong>share the same suspension machinery</strong> (`YIELD_VALUE` opcode) as generators. `await` internally uses the `__await__` protocol, transforming control flow as follows:
+
+```python
+# Conceptual internal behavior
+async def example():
+    result = await some_coroutine()
+    print(result)
+
+# Internally (simplified):
+# 1. Call some_coroutine() to get a coroutine object
+# 2. Advance execution with .send(None)
+# 3. When the coroutine suspends, return control to the event loop
+# 4. After I/O completion, pass the result with .send(result) to resume
+```
+
+In CPython's implementation, the coroutine frame (local variables, execution position, etc.) is <strong>kept on the heap</strong>. This eliminates the need for stack unwinding or restoration when suspending and resuming.
+
+### asyncio Constraints and the GIL
+
+Python's `asyncio` has several important constraints:
+
+- <strong>GIL (Global Interpreter Lock)</strong>: In CPython, only one thread executes Python bytecode at a time. Since asyncio runs on a single thread, the GIL's impact is minimal
+- <strong>Not suited for CPU-bound work</strong>: async/await is optimized for I/O-bound operations. For CPU-bound work, use `multiprocessing` or `concurrent.futures.ProcessPoolExecutor`
+- <strong>Library support required</strong>: Calling synchronous libraries (e.g., `requests`) from async code blocks the event loop. Use async alternatives (e.g., `aiohttp`) instead
+
+## Rust: Zero-Cost Futures and Polling
+
+### Rust's Async Model
+
+Rust's async/await takes a fundamentally different approach from other languages:
+
+1. <strong>The runtime is not built into the language</strong> — You choose a third-party runtime (tokio, async-std)
+2. <strong>Futures are poll-based</strong> — Instead of callbacks, the runtime asks Futures if they're done
+3. <strong>Zero-cost abstraction</strong> — async/await overhead is minimal
+
+### The Future Trait
+
+Rust's Future is defined by this trait:
+
+```rust
+pub trait Future {
+    type Output;
+    
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+
+pub enum Poll<T> {
+    Ready(T),    // Complete: return the result
+    Pending,     // Not yet complete: poll me again later
+}
+```
+
+While JavaScript's Promises and Python's coroutines are <strong>push-based</strong> ("call the callback when done"), Rust is <strong>pull-based (polling)</strong> ("the runtime asks the Future if it's done").
+
+### State Machine Transformation
+
+Rust's compiler transforms `async fn` into a <strong>state machine</strong>:
+
+```rust
+async fn example() -> i32 {
+    let a = fetch_a().await;  // Suspension point 1
+    let b = fetch_b().await;  // Suspension point 2
+    a + b
+}
+
+// State machine generated by the compiler (conceptual):
+enum ExampleFuture {
+    Start,
+    WaitingA { future_a: FetchAFuture },
+    WaitingB { a: i32, future_b: FetchBFuture },
+    Done,
+}
+
+impl Future for ExampleFuture {
+    type Output = i32;
+    
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<i32> {
+        loop {
+            match self.state {
+                Start => {
+                    self.future_a = fetch_a();
+                    self.state = WaitingA;
+                }
+                WaitingA => {
+                    match self.future_a.poll(cx) {
+                        Poll::Ready(a) => {
+                            self.a = a;
+                            self.future_b = fetch_b();
+                            self.state = WaitingB;
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                WaitingB => {
+                    match self.future_b.poll(cx) {
+                        Poll::Ready(b) => {
+                            return Poll::Ready(self.a + b);
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
+                Done => panic!("polled after completion"),
+            }
+        }
+    }
+}
+```
+
+This transformation provides:
+- <strong>No heap allocation needed</strong>: The state machine can be placed on the stack as a single enum
+- <strong>No dynamic dispatch</strong>: Concrete types are determined at compile time
+- <strong>Each `await` corresponds to one state transition</strong>
+
+### Waker and Runtime Cooperation
+
+In the poll-based model, there must be a mechanism to tell the runtime "when to poll the Future again." This is the <strong>Waker</strong>:
+
+```rust
+// Context contains a Waker
+pub struct Context<'a> {
+    waker: &'a Waker,
+}
+```
+
+Before a Future returns `Poll::Pending`, it registers a clone of the Waker with epoll or a socket callback. When I/O completes, the Waker fires, notifying the runtime that "this Future should be polled again."
+
+```text
+1. Runtime calls Future.poll()
+2. Future initiates I/O internally, registers Waker with the kernel
+3. Returns Poll::Pending
+4. Runtime polls other Futures
+5. I/O completes -> kernel wakes the Waker
+6. Runtime polls that Future again
+7. Returns Poll::Ready(result)
+```
+
+### The tokio Runtime
+
+tokio is Rust's most widely used async runtime:
+
+```rust
+#[tokio::main]
+async fn main() {
+    let result = fetch_data().await;
+    println!("{result}");
+}
+```
+
+tokio internally provides:
+
+- <strong>Multi-threaded scheduler</strong>: Work-stealing algorithm distributes tasks across CPU cores
+- <strong>I/O driver</strong>: Async I/O wrapping epoll/kqueue/IOCP
+- <strong>Timer</strong>: Hierarchical timer wheel
+- <strong>Single-threaded mode</strong>: `#[tokio::main(flavor = "current_thread")]` for event-loop style operation
+
+## Cross-Language Comparison
+
+<AsyncComparison />
+
+### Push vs Pull
+
+| Model | Languages | Mechanism | Advantage |
+|-------|-----------|-----------|-----------|
+| <strong>Push-based</strong> | JS, Python | Calls callback/continuation on completion | Simpler implementation |
+| <strong>Pull-based</strong> | Rust | Runtime polls Futures | Zero-cost, natural cancellation |
+
+A distinguishing advantage of Rust's pull-based model is <strong>cancellation</strong>. Dropping a Future automatically cancels it. Push-based models often require explicit cancellation tokens (CancellationToken).
+
+### Memory Model
+
+| Language | Coroutine State Storage | Memory Allocation |
+|----------|------------------------|-------------------|
+| JavaScript | Inside closures (V8 heap) | GC-managed |
+| Python | Coroutine frame (heap) | GC-managed |
+| Rust | State machine (stack or Box) | Manually controllable |
+| Go | Goroutine stack (contiguous, growable) | GC-managed + stack growth |
+
+### The Function Coloring Problem
+
+Many languages have a "<strong>function coloring problem</strong>" where sync and async functions are clearly distinguished:
+
+- You can't directly call an async function from a sync function (blocking is needed)
+- You can call sync functions from async ones, but long blocking should be avoided
+
+```python
+# NG: Can't directly call async from sync
+def sync_function():
+    result = await async_function()  # SyntaxError!
+
+# OK: Bridge with asyncio.run()
+def sync_function():
+    result = asyncio.run(async_function())
+```
+
+Go avoids this problem with goroutines. All functions are implicitly capable of concurrent execution, and the `go` keyword launches a new goroutine.
+
+## Practical Pitfalls
+
+### JavaScript Pitfalls
+
+```javascript
+// NG: Forgetting await returns a Promise object
+async function bad() {
+  const data = fetch("/api");  // Missing await!
+  console.log(data);            // Prints Promise object
+}
+
+// NG: Sequential when it could be parallel
+async function sequential() {
+  const a = await fetchA();  // Wait 1 second
+  const b = await fetchB();  // Wait 1 more second → 2 seconds total
+}
+
+// OK: Use Promise.all for parallel execution
+async function parallel() {
+  const [a, b] = await Promise.all([fetchA(), fetchB()]);  // 1 second total
+}
+```
+
+### Python Pitfalls
+
+```python
+# NG: Blocking I/O inside async code
+async def bad():
+    import requests
+    response = requests.get("https://example.com")  # Blocks the event loop!
+
+# OK: Use async libraries
+async def good():
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        response = await session.get("https://example.com")
+
+# Running independent tasks concurrently
+async def gather_example():
+    results = await asyncio.gather(
+        fetch_a(),
+        fetch_b(),
+        fetch_c(),
+    )
+```
+
+### Rust Pitfalls
+
+```rust
+// NG: Blocking operation inside async fn
+async fn bad() {
+    std::thread::sleep(Duration::from_secs(1)); // Blocks the runtime thread!
+}
+
+// OK: Use tokio's async version
+async fn good() {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+}
+
+// OK: Use spawn_blocking for CPU-bound work
+async fn cpu_work() {
+    let result = tokio::task::spawn_blocking(|| {
+        heavy_computation()
+    }).await.unwrap();
+}
+```
+
+## Summary
+
+async/await provides similar surface syntax, but the underlying implementations differ dramatically across languages:
+
+- <strong>JavaScript</strong>: Transforms to Promise chains on a single-threaded event loop. Microtask vs macrotask priority determines behavior
+- <strong>Python</strong>: asyncio event loop schedules coroutines (extended generators). Achieves I/O concurrency under GIL constraints
+- <strong>Rust</strong>: Compiles to zero-cost Future state machines. Poll-based model where the runtime drives execution, achieving async without heap allocation
+
+The common design principle is <strong>never letting threads sit idle during I/O waits</strong>. async/await is the syntactic innovation that achieves this while maintaining the readability of synchronous code.
