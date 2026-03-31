@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -167,12 +167,8 @@ function tileUrl(template: string, z: number, x: number, y: number): string {
 /**
  * Pre-fetch tiles along the entire scroll path into the browser HTTP cache.
  *
- * Collects tile URLs in priority order:
- *   1. Each stop's exact coordinates & zoom (destination tiles first)
- *   2. Intermediate keyframe samples along the path
- *
- * All URLs are loaded in small batches to avoid saturating the browser's
- * connection limit (which would starve Leaflet's own tile loading).
+ * Uses requestIdleCallback (with setTimeout fallback) to avoid competing
+ * with the main-thread animation loop and initial render.
  */
 function precacheTiles(
   template: string,
@@ -181,7 +177,6 @@ function precacheTiles(
   numKeyframes = 30,
   gridRadius = 3,
   batchSize = 6,
-  batchDelayMs = 200
 ): (() => void) {
   const queued = new Set<string>();
   const urls: string[] = [];
@@ -222,27 +217,36 @@ function precacheTiles(
     }
   }
 
-  // Load tiles in small batches to avoid congestion
   let cancelled = false;
   let idx = 0;
+  const rIC = typeof requestIdleCallback === "function"
+    ? requestIdleCallback
+    : (cb: () => void) => setTimeout(cb, 200);
+  const cIC = typeof cancelIdleCallback === "function"
+    ? cancelIdleCallback
+    : clearTimeout;
+  let handle: number | ReturnType<typeof setTimeout> = 0;
 
-  function loadBatch() {
+  function loadBatch(deadline?: IdleDeadline) {
     if (cancelled || idx >= urls.length) return;
-    const end = Math.min(idx + batchSize, urls.length);
-    for (let i = idx; i < end; i++) {
+    // Load tiles while we have idle time (or up to batchSize)
+    let count = 0;
+    while (idx < urls.length && count < batchSize) {
+      if (deadline && deadline.timeRemaining() < 2) break;
       const img = new Image();
-      img.src = urls[i];
+      img.src = urls[idx++];
+      count++;
     }
-    idx = end;
-    setTimeout(loadBatch, batchDelayMs);
+    if (idx < urls.length) handle = rIC(loadBatch);
   }
 
-  // Start after a short delay so it doesn't compete with initial render
-  const startTimer = setTimeout(loadBatch, 500);
+  // Start after initial render settles
+  const startTimer = setTimeout(() => { handle = rIC(loadBatch); }, 500);
 
   return () => {
     cancelled = true;
     clearTimeout(startTimer);
+    cIC(handle as number);
   };
 }
 
@@ -618,48 +622,77 @@ function remapProgressForMap(
   return (segIdx + mapT) / segments;
 }
 
-function pathUpToProgress(
+// ── Precomputed cumulative path for O(1) slicing ────────────
+
+/** Flat cumulative array of all segment points + per-segment start indices */
+type CumulativePath = {
+  points: [number, number][];
+  /** segStarts[i] = index into `points` where segment i begins */
+  segStarts: number[];
+};
+
+function buildCumulativePath(segPaths: [number, number][][]): CumulativePath {
+  const points: [number, number][] = [];
+  const segStarts: number[] = [];
+  for (let i = 0; i < segPaths.length; i++) {
+    segStarts.push(points.length);
+    const seg = segPaths[i];
+    for (let j = i === 0 ? 0 : 1; j < seg.length; j++) points.push(seg[j]);
+  }
+  return { points, segStarts };
+}
+
+/**
+ * Return the index into `cumPath.points` up to which the polyline should
+ * be drawn, plus an interpolated fractional tip point.
+ * Avoids per-frame array allocation — callers can use cumPath.points.slice(0, endIndex).
+ */
+function pathEndIndex(
+  cumPath: CumulativePath,
   segPaths: [number, number][][],
   stops: StoryStop[],
   progress: number
-): [number, number][] {
-  if (stops.length === 0) return [];
-  if (progress <= 0) return [stops[0].coordinates];
+): { endIndex: number; tip: [number, number] | null } {
+  if (stops.length === 0) return { endIndex: 0, tip: null };
+  if (progress <= 0) return { endIndex: 0, tip: stops[0].coordinates };
+  if (progress >= 1) return { endIndex: cumPath.points.length, tip: null };
 
   const total = stops.length - 1;
   const raw = Math.min(progress * total, total);
   const segIdx = Math.floor(raw);
-  // Apply the same easing as interpolateCoordsOnPath so the polyline tip
-  // stays in sync with the camera position (prevents off-screen clipping
-  // during long-distance segments like the Pacific crossing).
   const segT = easeInOutCubic(raw - segIdx);
 
-  const pts: [number, number][] = [];
+  // Base: all completed segments
+  let endIndex = segIdx < segPaths.length
+    ? cumPath.segStarts[segIdx] + (segIdx === 0 ? 0 : 0)
+    : cumPath.points.length;
 
-  // Completed segments
-  for (let i = 0; i < segIdx; i++) {
-    const seg = segPaths[i];
-    for (let j = i === 0 ? 0 : 1; j < seg.length; j++) pts.push(seg[j]);
-  }
-
-  // Current partial segment
-  if (segIdx < total) {
+  // For segment boundaries: segStarts[segIdx] is where this segment's
+  // first NEW point lives. All earlier points are already before it.
+  if (segIdx < total && segIdx < segPaths.length) {
     const seg = segPaths[segIdx];
+    const segStart = cumPath.segStarts[segIdx];
+    // Points contributed by this segment = seg.length - (segIdx===0?0:1)
+    const offset = segIdx === 0 ? 0 : 1;
     const exactPos = segT * (seg.length - 1);
     const pi = Math.floor(exactPos);
     const pt = exactPos - pi;
-    const s = segIdx === 0 && pts.length === 0 ? 0 : 1;
-    for (let j = s; j <= pi; j++) pts.push(seg[j]);
+    endIndex = segStart + Math.max(0, pi - offset) + 1;
+
     if (pt > 0.001 && pi < seg.length - 1) {
-      pts.push([
-        lerp(seg[pi][0], seg[pi + 1][0], pt),
-        lerp(seg[pi][1], seg[pi + 1][1], pt),
-      ]);
+      return {
+        endIndex,
+        tip: [
+          lerp(seg[pi][0], seg[pi + 1][0], pt),
+          lerp(seg[pi][1], seg[pi + 1][1], pt),
+        ],
+      };
     }
+  } else {
+    endIndex = cumPath.points.length;
   }
 
-  if (pts.length === 0) pts.push(stops[0].coordinates);
-  return pts;
+  return { endIndex, tip: null };
 }
 
 export function StorytellingMap({
@@ -675,6 +708,7 @@ export function StorytellingMap({
   const scrollRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>(0);
   const segPathsRef = useRef<[number, number][][]>([]);
+  const cumPathRef = useRef<CumulativePath | null>(null);
   const targetPRef = useRef(0);
   const currentPRef = useRef(0);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -684,11 +718,19 @@ export function StorytellingMap({
   const loadTilesAtTargetRef = useRef<((p: number) => void) | null>(null);
   const dotRefsRef = useRef<(HTMLDivElement | null)[]>([]);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
-
+  // Scroll-dirty flag: set true on scroll, consumed in rAF tick
+  const scrollDirtyRef = useRef(true);
+  // Previous frame values for skipping redundant updates
+  const prevCenterRef = useRef<[number, number]>([0, 0]);
+  const prevZoomRef = useRef(0);
+  const prevEndIdxRef = useRef(-1);
+  // Active stop index state for lazy image loading
+  const [visibleRange, setVisibleRange] = useState<[number, number]>([0, Math.min(2, stops.length - 1)]);
 
   // Pre-compute curved segment paths (globally unwrapped for antimeridian)
   if (segPathsRef.current.length === 0 && stops.length > 1) {
     segPathsRef.current = unwrapSegPaths(buildSegmentPaths(stops));
+    cumPathRef.current = buildCumulativePath(segPathsRef.current);
   }
 
   // Initialize Leaflet map
@@ -881,31 +923,37 @@ export function StorytellingMap({
     const LERP_FACTOR = 0.12;
     let running = true;
 
-    const onScroll = () => {
+    // Lightweight scroll listener: just flag dirty — no DOM reads here.
+    // All getBoundingClientRect calls happen once per rAF tick instead.
+    const onScroll = () => { scrollDirtyRef.current = true; };
+
+    // ── Read scroll position (called once per rAF when dirty) ──
+    const readScrollPosition = () => {
       const cards = cardRefsRef.current;
-      // Sync point: card top reaches just below the sticky header (64px)
       const syncY = 64;
       const n = stops.length;
       if (n < 2) return;
 
-      // Use card top edges as reference points.
-      // When a card's top reaches syncY, the map should be at that stop.
-      let bestIdx = 0;
+      // Narrow scan: only check cards near the current active index (±2)
+      // instead of all N cards. Falls back to full scan on first call.
+      const scanLo = Math.max(0, activeIndexRef.current - 2);
+      const scanHi = Math.min(n - 1, activeIndexRef.current + 2);
+
+      let bestIdx = scanLo;
       let bestDist = Infinity;
       const tops: number[] = [];
-      for (let i = 0; i < n; i++) {
+      for (let i = scanLo; i <= scanHi; i++) {
         const el = cards[i];
         if (!el) { tops.push(0); continue; }
-        const r = el.getBoundingClientRect();
-        const top = r.top;
+        const top = el.getBoundingClientRect().top;
         tops.push(top);
         const d = Math.abs(top - syncY);
         if (d < bestDist) { bestDist = d; bestIdx = i; }
       }
 
-      // Determine the two neighbours to interpolate between
       let lo: number, hi: number;
-      if (tops[bestIdx] <= syncY) {
+      const localIdx = bestIdx - scanLo;
+      if (tops[localIdx] <= syncY) {
         lo = bestIdx;
         hi = Math.min(bestIdx + 1, n - 1);
       } else {
@@ -917,28 +965,32 @@ export function StorytellingMap({
       if (lo === hi) {
         p = lo / (n - 1);
       } else {
-        const loY = tops[lo];
-        const hiY = tops[hi];
+        const loLocal = lo - scanLo;
+        const hiLocal = hi - scanLo;
+        const loY = loLocal >= 0 && loLocal < tops.length ? tops[loLocal] : 0;
+        const hiY = hiLocal >= 0 && hiLocal < tops.length ? tops[hiLocal] : 0;
         const t = hiY === loY ? 0 : (syncY - loY) / (hiY - loY);
-        const clampedT = Math.max(0, Math.min(1, t));
-        p = (lo + clampedT) / (n - 1);
+        p = (lo + Math.max(0, Math.min(1, t))) / (n - 1);
       }
 
       targetPRef.current = Math.max(0, Math.min(1, p));
 
-      // Trigger tile loading at the TARGET position (not lerped).
-      // This ensures tiles are loaded for where the user is scrolling TO.
-      // Use remapped progress so tiles match the map's actual position.
       loadTilesAtTargetRef.current?.(remapProgressForMap(targetPRef.current, stops));
     };
 
     const tick = () => {
       if (!running) return;
+
+      // Read scroll position only when dirty (avoids unnecessary layout)
+      if (scrollDirtyRef.current) {
+        scrollDirtyRef.current = false;
+        readScrollPosition();
+      }
+
       const map = mapRef.current;
       if (map) {
         const prev = currentPRef.current;
         const target = targetPRef.current;
-        // Lerp toward target; snap when very close
         const diff = target - prev;
         const p = Math.abs(diff) < 0.0005 ? target : prev + diff * LERP_FACTOR;
         currentPRef.current = p;
@@ -946,14 +998,17 @@ export function StorytellingMap({
           progressBarRef.current.style.width = `${target * 100}%`;
         }
 
-        // Active card is based on RAW scroll position (target), not the
-        // lerped value — because the DOM cards scroll instantly with the
-        // page, so highlighting must match what the user actually sees.
+        // Active card highlighting (based on raw target, not lerped)
         const totalSegments = stops.length - 1;
         const rawTargetIndex = target * totalSegments;
         const newIndex = Math.min(Math.round(rawTargetIndex), stops.length - 1);
         if (newIndex !== activeIndexRef.current) {
           activeIndexRef.current = newIndex;
+          // Update visible range for lazy image loading (current ± 1)
+          const lo = Math.max(0, newIndex - 1);
+          const hi = Math.min(stops.length - 1, newIndex + 1);
+          setVisibleRange([lo, hi]);
+
           for (let i = 0; i < stops.length; i++) {
             const card = cardRefsRef.current[i];
             if (card) {
@@ -972,33 +1027,44 @@ export function StorytellingMap({
         }
 
         // Map camera, path, and marker use the lerped value — remapped
-        // so the map dwells at stops with multiple images.
         const sp = segPathsRef.current;
+        const cumPath = cumPathRef.current;
         const mapP = remapProgressForMap(p, stops);
         const center = interpolateCoordsOnPath(sp, stops, mapP);
         const rawZoom = interpolateZoomSmooth(stops, mapP);
-        // Snap zoom to nearest integer when close — this ensures tiles
-        // display at native resolution (scale=1) instead of fractional
-        // CSS scaling which causes blur.
         const nearestInt = Math.round(rawZoom);
         const zoom = Math.abs(rawZoom - nearestInt) < 0.15 ? nearestInt : rawZoom;
 
-        // setView updates map state + overlay positioning every frame.
-        // The tile layer's overridden methods ensure tiles are NOT
-        // destroyed — only CSS transforms update visually.
-        map.setView(center, zoom, { animate: false });
+        // Skip setView when camera hasn't moved meaningfully
+        const dLat = Math.abs(center[0] - prevCenterRef.current[0]);
+        const dLng = Math.abs(center[1] - prevCenterRef.current[1]);
+        const dZoom = Math.abs(zoom - prevZoomRef.current);
+        if (dLat > 0.00001 || dLng > 0.00001 || dZoom > 0.001) {
+          map.setView(center, zoom, { animate: false });
+          prevCenterRef.current = center;
+          prevZoomRef.current = zoom;
+        }
 
-        const pathPoints = pathUpToProgress(sp, stops, mapP);
-        polylineRef.current?.setLatLngs(pathPoints);
-        // Place marker exactly at the polyline tip so they stay in sync
-        const tip = pathPoints[pathPoints.length - 1];
-        markerRef.current?.setLatLng(tip);
+        // Update polyline — use precomputed cumulative path
+        if (cumPath) {
+          const { endIndex, tip } = pathEndIndex(cumPath, sp, stops, mapP);
+          // Only rebuild polyline when endpoint changes
+          if (endIndex !== prevEndIdxRef.current || tip) {
+            prevEndIdxRef.current = endIndex;
+            const pts = cumPath.points.slice(0, endIndex);
+            if (tip) pts.push(tip);
+            polylineRef.current?.setLatLngs(pts);
+            const markerPos = tip ?? pts[pts.length - 1] ?? stops[0].coordinates;
+            markerRef.current?.setLatLng(markerPos);
+          }
+        }
       }
       animFrameRef.current = requestAnimationFrame(tick);
     };
 
     window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
+    // Initial read
+    readScrollPosition();
     animFrameRef.current = requestAnimationFrame(tick);
 
     return () => {
@@ -1084,13 +1150,20 @@ export function StorytellingMap({
           const minH = imgCount > 1
             ? `calc(80vh + ${extraVh}vh)`
             : undefined;
+          // Lazy image loading: only mount slideshow for stops near active
+          const showImages = i >= visibleRange[0] && i <= visibleRange[1];
 
           return (
             <div
               key={stop.id}
               data-stop-wrapper
               className="min-h-[80vh] lg:min-h-screen"
-              style={minH ? { minHeight: minH } : undefined}
+              style={{
+                ...(minH ? { minHeight: minH } : {}),
+                // Let browser skip layout/paint for far-away stops
+                contentVisibility: Math.abs(i - activeIndexRef.current) > 3 ? 'auto' : 'visible',
+                containIntrinsicSize: 'auto 80vh',
+              } as React.CSSProperties}
             >
               <div
                 ref={el => { cardRefsRef.current[i] = el; }}
@@ -1162,9 +1235,13 @@ export function StorytellingMap({
                 </p>
                 </div>
 
-                {/* Images */}
-                {stop.images && stop.images.length > 0 && (
+                {/* Images — lazy mounted for stops near active */}
+                {stop.images && stop.images.length > 0 && showImages && (
                   <ImageSlideshow images={stop.images} alt={place} />
+                )}
+                {/* Placeholder to maintain layout when images are unmounted */}
+                {stop.images && stop.images.length > 0 && !showImages && (
+                  <div className="mt-5 min-h-0 flex-1" />
                 )}
               </div>
             </div>
