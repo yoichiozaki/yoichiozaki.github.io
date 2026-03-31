@@ -1191,7 +1191,7 @@ export function StorytellingMap({
                 ref={el => { cardRefsRef.current[i] = el; }}
                 className={`w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out ${
                   imgCount > 0
-                    ? "sticky top-[30vh] lg:top-16 max-h-[calc(70dvh-16px)] lg:max-h-[calc(100dvh-64px-16px)] overflow-y-auto"
+                    ? "sticky top-12 bottom-4 lg:top-16 lg:bottom-auto lg:max-h-[calc(100dvh-64px-16px)]"
                     : ""
                 }`}
                 style={{
