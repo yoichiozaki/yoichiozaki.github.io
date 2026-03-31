@@ -7,8 +7,8 @@ export const stopsJa: StoryStop[] = [
     description:
       "2月の冷たい空気の中、成田空港から太平洋を越える旅が始まった。約9時間のフライトでシアトルへ。窓の外に広がる太平洋を眺めながら、これから待ち受けるテック企業の聖地と大自然に胸を躍らせた。",
     coordinates: [35.7647, 140.3864],
-    zoom: 3,
-    images: [],
+    zoom: 5,
+    images: ["/images/trips/seattle-vancouver-2025/narita-1.webp"],
   },
   {
     id: "pike-place",
@@ -18,7 +18,13 @@ export const stopsJa: StoryStop[] = [
     coordinates: [47.6097, -122.3425],
     zoom: 15,
     pathType: "flight",
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/pike-place-1.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-2.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-3.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-4.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-5.webp",
+    ],
   },
   {
     id: "space-needle",
@@ -27,7 +33,10 @@ export const stopsJa: StoryStop[] = [
       "シアトルのシンボル、Space Needle。地上184メートルの展望デッキからは、ダウンタウンのスカイライン、ピュージェット湾、そして晴れた日にはレーニア山まで見渡せる360度の絶景が広がっていた。2月の澄んだ空気のおかげで視界は抜群だった。",
     coordinates: [47.6205, -122.3493],
     zoom: 15,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/space-needle-1.webp",
+      "/images/trips/seattle-vancouver-2025/space-needle-2.webp",
+    ],
   },
   {
     id: "uw",
@@ -36,7 +45,10 @@ export const stopsJa: StoryStop[] = [
       "ゴシック様式の美しい建物が並ぶワシントン大学のキャンパスを散策。特に有名な図書館 Suzzallo Library の荘厳な内装に息をのんだ。まるでハリー・ポッターの世界に迷い込んだような感覚。",
     coordinates: [47.6553, -122.3035],
     zoom: 15,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/uw-1.webp",
+      "/images/trips/seattle-vancouver-2025/uw-2.webp",
+    ],
   },
   {
     id: "amazon-hq",
@@ -45,7 +57,10 @@ export const stopsJa: StoryStop[] = [
       "Amazon本社のあるSouth Lake Union地区へ。巨大なガラスのドーム「The Spheres」が目を引く。4万本の植物が植えられた温室のようなオフィスは、テック企業のスケールの大きさを実感させてくれた。周辺のDay 1ビルやAmazon Goの無人コンビニも体験。",
     coordinates: [47.6157, -122.3389],
     zoom: 15,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/amazon-hq-1.webp",
+      "/images/trips/seattle-vancouver-2025/amazon-hq-2.webp",
+    ],
   },
   {
     id: "microsoft",
@@ -55,7 +70,7 @@ export const stopsJa: StoryStop[] = [
     coordinates: [47.6396, -122.1286],
     zoom: 14,
     pathType: "drive",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/microsoft-1.webp"],
   },
   {
     id: "seattle-bar",
@@ -65,7 +80,11 @@ export const stopsJa: StoryStop[] = [
     coordinates: [47.6253, -122.3222],
     zoom: 15,
     pathType: "drive",
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/seattle-bar-1.webp",
+      "/images/trips/seattle-vancouver-2025/seattle-bar-2.webp",
+      "/images/trips/seattle-vancouver-2025/seattle-bar-3.webp",
+    ],
   },
   {
     id: "border-crossing",
@@ -75,7 +94,7 @@ export const stopsJa: StoryStop[] = [
     coordinates: [49.0024, -122.756],
     zoom: 9,
     pathType: "drive",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/border-crossing-1.webp"],
   },
   {
     id: "lynn-canyon",
@@ -85,16 +104,19 @@ export const stopsJa: StoryStop[] = [
     coordinates: [49.339, -123.0189],
     zoom: 14,
     pathType: "drive",
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/lynn-canyon-1.webp",
+      "/images/trips/seattle-vancouver-2025/lynn-canyon-2.webp",
+    ],
   },
   {
-    id: "capilano",
-    title: "🌉 Capilano Suspension Bridge",
+    id: "lions-gate",
+    title: "🌉 Lions Gate Bridge",
     description:
-      "Lynn Canyonの後は、近くにあるCapilano Suspension Bridgeへ。全長137m、高さ70mの吊り橋は、渡るたびに揺れてスリル満点。橋の先にはCliff WalkやTreetops Adventureなど、さまざまなアクティビティも。冬季のイルミネーションも美しく、幻想的な雰囲気を味わえた。",
-    coordinates: [49.3429, -123.1149],
+      "Lynn Canyonの後は、バンクーバーのシンボル的存在であるライオンズ・ゲート・ブリッジへ。全長1,823mの吊り橋は、バラード・インレットとバンクーバー・ダウンタウンを結ぶ。橋の上からはバンクーバーのスカイラインと山々のパノラマが広がり、絶景だった。",
+    coordinates: [49.31740493348699, -123.14023029015001],
     zoom: 14,
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/lions-gate-1.webp"],
   },
   {
     id: "canada-place",
@@ -104,7 +126,7 @@ export const stopsJa: StoryStop[] = [
     coordinates: [49.2888, -123.1111],
     zoom: 15,
     pathType: "drive",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/canada-place-1.webp"],
   },
   {
     id: "gastown",
@@ -113,7 +135,10 @@ export const stopsJa: StoryStop[] = [
       "バンクーバー発祥の地、Gastown。レンガ造りの歴史的な街並みが美しい。名物の蒸気時計（Steam Clock）は15分ごとに蒸気で音を奏でる。夜のGastownはライトアップされて雰囲気抜群。おしゃれなレストランやバーも多く、バンクーバー最後の夜を楽しんだ。",
     coordinates: [49.2844, -123.1088],
     zoom: 16,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/gastown-1.webp",
+      "/images/trips/seattle-vancouver-2025/gastown-2.webp",
+    ],
   },
   {
     id: "narita-return",
@@ -121,9 +146,9 @@ export const stopsJa: StoryStop[] = [
     description:
       "バンクーバーから約10時間のフライトで成田に帰国。テック企業の最前線とカナダの大自然、全く異なる二つの顔を持つ太平洋岸北西部の旅は最高の体験だった。次はもっとゆっくり、夏に来たい。",
     coordinates: [35.7647, 140.3864],
-    zoom: 3,
+    zoom: 5,
     pathType: "flight",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/narita-return-1.webp"],
   },
 ];
 
@@ -134,8 +159,8 @@ export const stopsEn: StoryStop[] = [
     description:
       "In the cold February air, the journey across the Pacific began at Narita Airport. A roughly 9-hour flight to Seattle. Watching the vast Pacific Ocean through the window, my heart raced with anticipation for the tech mecca and wilderness that awaited.",
     coordinates: [35.7647, 140.3864],
-    zoom: 3,
-    images: [],
+    zoom: 5,
+    images: ["/images/trips/seattle-vancouver-2025/narita-1.webp"],
   },
   {
     id: "pike-place",
@@ -145,7 +170,13 @@ export const stopsEn: StoryStop[] = [
     coordinates: [47.6097, -122.3425],
     zoom: 15,
     pathType: "flight",
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/pike-place-1.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-2.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-3.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-4.webp",
+      "/images/trips/seattle-vancouver-2025/pike-place-5.webp",
+    ],
   },
   {
     id: "space-needle",
@@ -154,7 +185,10 @@ export const stopsEn: StoryStop[] = [
       "Seattle's iconic Space Needle. The observation deck at 184 meters offered a 360-degree panorama of the downtown skyline, Puget Sound, and on clear days, Mount Rainier. The crisp February air made for exceptional visibility.",
     coordinates: [47.6205, -122.3493],
     zoom: 15,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/space-needle-1.webp",
+      "/images/trips/seattle-vancouver-2025/space-needle-2.webp",
+    ],
   },
   {
     id: "uw",
@@ -163,7 +197,10 @@ export const stopsEn: StoryStop[] = [
       "Strolled through the beautiful Gothic architecture of the University of Washington campus. The majestic interior of Suzzallo Library was absolutely breathtaking — like stepping into the world of Harry Potter.",
     coordinates: [47.6553, -122.3035],
     zoom: 15,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/uw-1.webp",
+      "/images/trips/seattle-vancouver-2025/uw-2.webp",
+    ],
   },
   {
     id: "amazon-hq",
@@ -172,7 +209,10 @@ export const stopsEn: StoryStop[] = [
       "Headed to the South Lake Union district, home of Amazon HQ. The massive glass domes of 'The Spheres' were stunning — a greenhouse-like office housing 40,000 plants that truly showcases the scale of tech companies. Also experienced the Day 1 building and an Amazon Go cashierless store.",
     coordinates: [47.6157, -122.3389],
     zoom: 15,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/amazon-hq-1.webp",
+      "/images/trips/seattle-vancouver-2025/amazon-hq-2.webp",
+    ],
   },
   {
     id: "microsoft",
@@ -182,7 +222,7 @@ export const stopsEn: StoryStop[] = [
     coordinates: [47.6396, -122.1286],
     zoom: 14,
     pathType: "drive",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/microsoft-1.webp"],
   },
   {
     id: "seattle-bar",
@@ -192,7 +232,11 @@ export const stopsEn: StoryStop[] = [
     coordinates: [47.6253, -122.3222],
     zoom: 15,
     pathType: "drive",
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/seattle-bar-1.webp",
+      "/images/trips/seattle-vancouver-2025/seattle-bar-2.webp",
+      "/images/trips/seattle-vancouver-2025/seattle-bar-3.webp",
+    ],
   },
   {
     id: "border-crossing",
@@ -202,7 +246,7 @@ export const stopsEn: StoryStop[] = [
     coordinates: [49.0024, -122.756],
     zoom: 9,
     pathType: "drive",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/border-crossing-1.webp"],
   },
   {
     id: "lynn-canyon",
@@ -212,16 +256,19 @@ export const stopsEn: StoryStop[] = [
     coordinates: [49.339, -123.0189],
     zoom: 14,
     pathType: "drive",
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/lynn-canyon-1.webp",
+      "/images/trips/seattle-vancouver-2025/lynn-canyon-2.webp",
+    ],
   },
   {
-    id: "capilano",
-    title: "🌉 Capilano Suspension Bridge",
+    id: "lions-gate",
+    title: "🌉 Lions Gate Bridge",
     description:
-      "After Lynn Canyon, headed to the nearby Capilano Suspension Bridge. At 137m long and 70m high, the swaying bridge was an adrenaline rush. Beyond the bridge, activities like Cliff Walk and Treetops Adventure awaited. The winter illumination was enchanting.",
-    coordinates: [49.3429, -123.1149],
+      "After Lynn Canyon, headed to Lions Gate Bridge—an iconic symbol of Vancouver. The 1,823m suspension bridge connects the North Shore to downtown Vancouver. From the bridge, a stunning panorama of Vancouver's skyline and surrounding mountains unfolded.",
+    coordinates: [49.31740493348699, -123.14023029015001],
     zoom: 14,
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/lions-gate-1.webp"],
   },
   {
     id: "canada-place",
@@ -231,7 +278,7 @@ export const stopsEn: StoryStop[] = [
     coordinates: [49.2888, -123.1111],
     zoom: 15,
     pathType: "drive",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/canada-place-1.webp"],
   },
   {
     id: "gastown",
@@ -240,7 +287,10 @@ export const stopsEn: StoryStop[] = [
       "Gastown, the birthplace of Vancouver. Beautiful historic brick buildings line the streets. The famous Steam Clock plays sounds powered by steam every 15 minutes. Gastown lit up at night was incredibly atmospheric. Enjoyed the last Vancouver evening at trendy restaurants and bars.",
     coordinates: [49.2844, -123.1088],
     zoom: 16,
-    images: [],
+    images: [
+      "/images/trips/seattle-vancouver-2025/gastown-1.webp",
+      "/images/trips/seattle-vancouver-2025/gastown-2.webp",
+    ],
   },
   {
     id: "narita-return",
@@ -248,8 +298,8 @@ export const stopsEn: StoryStop[] = [
     description:
       "A roughly 10-hour flight from Vancouver back to Narita. This journey through the cutting edge of tech and Canada's magnificent wilderness — two completely different faces of the Pacific Northwest — was an unforgettable experience. Next time, a longer stay in summer.",
     coordinates: [35.7647, 140.3864],
-    zoom: 3,
+    zoom: 5,
     pathType: "flight",
-    images: [],
+    images: ["/images/trips/seattle-vancouver-2025/narita-return-1.webp"],
   },
 ];
