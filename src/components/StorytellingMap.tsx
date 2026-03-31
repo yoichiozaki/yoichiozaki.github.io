@@ -34,8 +34,8 @@ function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
 
     const update = () => {
       const rect = wrapper.getBoundingClientRect();
-      // Sync with header bottom (64px) — same reference as the map sync
-      const syncY = 64;
+      // Mobile: sync at map bottom (40vh). Desktop: header bottom (64px).
+      const syncY = window.innerWidth >= 1024 ? 64 : window.innerHeight * 0.4;
       // 0 when wrapper top hits syncY, 1 when wrapper bottom hits it
       const progress = (syncY - rect.top) / rect.height;
       const clamped = Math.max(0, Math.min(0.999, progress));
@@ -930,7 +930,9 @@ export function StorytellingMap({
     // ── Read scroll position (called once per rAF when dirty) ──
     const readScrollPosition = () => {
       const cards = cardRefsRef.current;
-      const syncY = 64;
+      // Mobile: sync when card top reaches map bottom (40vh).
+      // Desktop (lg:): map is beside cards, sync at header bottom (64px).
+      const syncY = window.innerWidth >= 1024 ? 64 : window.innerHeight * 0.4;
       const n = stops.length;
       if (n < 2) return;
 
