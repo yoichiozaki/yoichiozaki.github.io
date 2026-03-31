@@ -71,12 +71,12 @@ function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
 
   if (images.length === 1) {
     return (
-      <div className="mt-5 overflow-hidden">
-        <div className="relative overflow-hidden rounded-lg">
+      <div className="mt-3 min-h-0 flex-1">
+        <div className="relative overflow-hidden rounded-lg h-full">
           <img
             src={images[0]}
             alt={`${alt} - 1`}
-            className="w-full h-auto"
+            className="w-full h-full object-cover"
             loading="lazy"
           />
         </div>
@@ -85,15 +85,15 @@ function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
   }
 
   return (
-    <div ref={containerRef} className="mt-5 overflow-hidden">
-      <div className="relative overflow-hidden rounded-lg">
+    <div ref={containerRef} className="mt-3 min-h-0 flex-1">
+      <div className="relative overflow-hidden rounded-lg h-full">
         {images.map((src, i) => (
           <img
             key={i}
             ref={(el) => { imgRefsRef.current[i] = el; }}
             src={src}
             alt={`${alt} - ${i + 1}`}
-            className={`w-full h-auto transition-opacity duration-700 ease-in-out ${
+            className={`w-full h-full object-cover transition-opacity duration-700 ease-in-out ${
               i === 0 ? "relative" : "absolute top-0 left-0"
             }`}
             style={{ opacity: i === 0 ? 1 : 0 }}
@@ -1191,7 +1191,7 @@ export function StorytellingMap({
                 ref={el => { cardRefsRef.current[i] = el; }}
                 className={`w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out ${
                   imgCount > 0
-                    ? "sticky top-[30vh] lg:top-16 max-h-[calc(70dvh-16px)] lg:max-h-[calc(100dvh-64px-16px)] overflow-hidden"
+                    ? "sticky top-[30vh] lg:top-16 max-h-[calc(70dvh-16px)] lg:max-h-[calc(100dvh-64px-16px)] flex flex-col"
                     : ""
                 }`}
                 style={{
@@ -1199,7 +1199,7 @@ export function StorytellingMap({
                 }}
               >
                 {/* Text content */}
-                <div>
+                <div className={imgCount > 0 ? "shrink-0" : ""}>
                   {/* Step indicator */}
                   <div className="flex items-center gap-3 mb-5">
                   <div
@@ -1263,7 +1263,7 @@ export function StorytellingMap({
                 )}
                 {/* Placeholder to maintain layout when images are unmounted */}
                 {stop.images && stop.images.length > 0 && !showImages && (
-                  <div className="mt-5" />
+                  <div className="mt-3 min-h-0 flex-1" />
                 )}
               </div>
             </div>
