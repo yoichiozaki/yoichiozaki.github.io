@@ -83,3 +83,14 @@ tags: ["Tag1", "Tag2"]
 - **Next.js 16 breaking changes**: Read `node_modules/next/dist/docs/` before using unfamiliar APIs. `params` is now a Promise in page/layout components.
 - **Static export only**: No `getServerSideProps`, no API routes, no middleware, no `revalidate`. Only `generateStaticParams` for dynamic routes.
 - **Tailwind CSS v4**: Uses `@import "tailwindcss"` and `@plugin` syntax, NOT the v3 `@tailwind` directives or `tailwind.config.js`.
+
+## Custom Skills & Agents
+
+### Storytelling Map
+
+- **Skill**: `.github/skills/storytelling-map/SKILL.md` — Step-by-step workflow for creating scroll-driven map travel articles
+- **Agent**: `.github/agents/storytelling-map-producer.agent.md` — Interactive guide that walks through the full creation process
+- **Component**: `src/components/StorytellingMap.tsx` — Leaflet-based scroll-driven map with image slideshow
+- **Lazy wrapper**: `src/components/StorytellingMapLazy.tsx` — Per-trip wrapper components (SSR-safe)
+- **Trip data**: `src/data/trips/{slug}.ts` — Bilingual stop data (stopsJa/stopsEn)
+- **Images**: `public/images/trips/{slug}/` — WebP photos named `{stop-id}-{n}.webp`
