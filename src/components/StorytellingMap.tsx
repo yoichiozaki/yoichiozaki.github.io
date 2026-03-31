@@ -608,9 +608,10 @@ function remapProgressForMap(
 
   const imgCount = stops[segIdx].images?.length ?? 0;
   // Dwell fraction: stops with multiple images hold the map in place
-  // while all images cycle + one extra slot for the last image to linger.
-  // e.g. 5 images → dwell for 5/6 of the segment, move in last 1/6
-  const dwellFraction = imgCount > 1 ? imgCount / (imgCount + 1) : 0;
+  // while all images cycle, plus an extra "linger" slot after the last
+  // image finishes so the marker stays at the stop a bit longer.
+  // e.g. 5 images → (5+1)/(5+2) ≈ 0.86 of the segment = dwell, last 0.14 = move
+  const dwellFraction = imgCount > 1 ? (imgCount + 1) / (imgCount + 2) : 0;
 
   let mapT: number;
   if (segT <= dwellFraction) {
