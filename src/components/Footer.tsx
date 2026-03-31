@@ -43,6 +43,14 @@ export function Footer({ dict }: { dict: Dict }) {
           >
             X
           </a>
+          <a
+            href="https://www.instagram.com/yoichiozaki.ig/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-accent transition-colors"
+          >
+            Instagram
+          </a>
         </div>
       </div>
     </footer>
