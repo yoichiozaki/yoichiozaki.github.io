@@ -697,7 +697,7 @@ function pathEndIndex(
     const exactPos = segT * (seg.length - 1);
     const pi = Math.floor(exactPos);
     const pt = exactPos - pi;
-    endIndex = segStart + Math.max(0, pi - offset) + 1;
+    endIndex = segStart + Math.max(0, pi + 1 - offset);
 
     if (pt > 0.001 && pi < seg.length - 1) {
       return {
