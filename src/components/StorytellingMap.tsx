@@ -76,7 +76,7 @@ function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
           <img
             src={images[0]}
             alt={`${alt} - 1`}
-            className="w-full h-auto"
+            className="w-full h-full object-contain"
             loading="lazy"
           />
         </div>
@@ -93,7 +93,7 @@ function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
             ref={(el) => { imgRefsRef.current[i] = el; }}
             src={src}
             alt={`${alt} - ${i + 1}`}
-            className={`w-full h-auto transition-opacity duration-700 ease-in-out ${
+            className={`w-full h-full object-contain transition-opacity duration-700 ease-in-out ${
               i === 0 ? "relative" : "absolute top-0 left-0"
             }`}
             style={{ opacity: i === 0 ? 1 : 0 }}
