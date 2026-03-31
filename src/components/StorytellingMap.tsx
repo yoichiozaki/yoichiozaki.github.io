@@ -584,11 +584,16 @@ function interpolateZoomSmooth(
 }
 
 /**
- * Remap raw scroll progress so the map "dwells" at stops with multiple images.
+ * Remap raw scroll progress so the map "dwells" at each stop.
  *
  * Within each segment i→i+1, instead of moving linearly:
- *   - First portion (proportional to image count at stop i) → map stays at stop i
+ *   - First portion → map stays at stop i (dwell zone)
  *   - Remaining portion → map transitions from stop i to stop i+1
+ *
+ * Dwell time scales with:
+ *   - Number of images (multi-image stops get proportionally longer dwell)
+ *   - Distance to next stop (long-distance segments get extra pre-transition dwell)
+ *   - A minimum base dwell so even 0/1-image stops pause briefly
  *
  * Card highlighting and progress bar use raw progress (unchanged).
  * Only map camera, path, marker, and tile loading use the remapped value.
@@ -607,11 +612,25 @@ function remapProgressForMap(
   const segT = raw - segIdx;
 
   const imgCount = stops[segIdx].images?.length ?? 0;
-  // Dwell fraction: stops with multiple images hold the map in place
-  // while all images cycle, plus an extra "linger" slot after the last
-  // image finishes so the marker stays at the stop a bit longer.
-  // e.g. 5 images → (5+1)/(5+2) ≈ 0.86 of the segment = dwell, last 0.14 = move
-  const dwellFraction = imgCount > 1 ? (imgCount + 1) / (imgCount + 2) : 0;
+
+  // Base dwell for multi-image stops: image cycling + 1 linger slot
+  let dwellFraction: number;
+  if (imgCount > 1) {
+    dwellFraction = (imgCount + 1) / (imgCount + 2);
+  } else {
+    // Minimum base dwell for all stops (even 0/1 image)
+    dwellFraction = 0.15;
+  }
+
+  // Boost dwell before long-distance segments so the map lingers longer
+  // at the departure point before a big geographic jump.
+  const nextStop = stops[Math.min(segIdx + 1, n - 1)];
+  const dist = haversineKm(stops[segIdx].coordinates, nextStop.coordinates);
+  if (dist > 500) {
+    // Long distance: add extra dwell (up to 0.15 more), capped at 0.92
+    const boost = Math.min(0.15, dist / 20000);
+    dwellFraction = Math.min(0.92, dwellFraction + boost);
+  }
 
   let mapT: number;
   if (segT <= dwellFraction) {
@@ -1172,7 +1191,7 @@ export function StorytellingMap({
                 ref={el => { cardRefsRef.current[i] = el; }}
                 className={`w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out ${
                   imgCount > 0
-                    ? "sticky top-16 max-h-[calc(100dvh-64px-16px)] flex flex-col"
+                    ? "sticky top-[40vh] lg:top-16 max-h-[calc(60dvh-16px)] lg:max-h-[calc(100dvh-64px-16px)] flex flex-col"
                     : ""
                 }`}
                 style={{
