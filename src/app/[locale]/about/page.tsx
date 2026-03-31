@@ -1,5 +1,6 @@
 import { type Locale, locales } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
+import { SocialLinks } from "@/components/SocialLinks";
 
 export async function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
@@ -78,40 +79,7 @@ export default async function AboutPage({
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">{dict.about.contact}</h2>
-        <div className="flex flex-wrap gap-4 text-muted-foreground">
-          <a
-            href="https://github.com/yoichiozaki"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent hover:underline"
-          >
-            GitHub
-          </a>
-          <a
-            href="https://www.linkedin.com/in/ozakiyoichi/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent hover:underline"
-          >
-            LinkedIn
-          </a>
-          <a
-            href="https://bsky.app/profile/yoichiozaki.bsky.social"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent hover:underline"
-          >
-            Bluesky
-          </a>
-          <a
-            href="https://x.com/yoichiozakix"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent hover:underline"
-          >
-            X
-          </a>
-        </div>
+        <SocialLinks className="flex flex-wrap gap-4" />
       </section>
     </div>
   );
