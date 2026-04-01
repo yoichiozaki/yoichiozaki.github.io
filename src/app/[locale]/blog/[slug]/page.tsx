@@ -28,6 +28,10 @@ import {
   EventLoopCycle,
   CoroutineStateMachine,
   AsyncComparison,
+  TypeSystemTaxonomy,
+  StructuralVsNominal,
+  TypeInferenceVisualizer,
+  TypeSystemComparison,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -59,6 +63,10 @@ function getMdxComponents(locale: string) {
     EventLoopCycle: () => <EventLoopCycle locale={locale} />,
     CoroutineStateMachine: () => <CoroutineStateMachine locale={locale} />,
     AsyncComparison: () => <AsyncComparison locale={locale} />,
+    TypeSystemTaxonomy: () => <TypeSystemTaxonomy locale={locale} />,
+    StructuralVsNominal: () => <StructuralVsNominal locale={locale} />,
+    TypeInferenceVisualizer: () => <TypeInferenceVisualizer locale={locale} />,
+    TypeSystemComparison: () => <TypeSystemComparison locale={locale} />,
   };
 }
 

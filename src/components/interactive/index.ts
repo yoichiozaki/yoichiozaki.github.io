@@ -27,3 +27,9 @@ export {
   CoroutineStateMachine,
   AsyncComparison,
 } from "./AsyncDiagrams";
+export {
+  TypeSystemTaxonomy,
+  StructuralVsNominal,
+  TypeInferenceVisualizer,
+  TypeSystemComparison,
+} from "./TypeSystemDiagrams";
