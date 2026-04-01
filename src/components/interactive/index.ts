@@ -43,4 +43,5 @@ export {
   TwoPhaseCommitDiagram,
   ConsensusComparisonTable,
   FLPDiagram,
+  RaftStateTransition,
 } from "./ConsensusDiagrams";

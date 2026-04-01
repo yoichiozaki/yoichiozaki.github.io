@@ -1,6 +1,9 @@
 import { MDXRemote } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypePrettyCode from "rehype-pretty-code";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
@@ -39,6 +42,7 @@ import {
   TwoPhaseCommitDiagram,
   ConsensusComparisonTable,
   FLPDiagram,
+  RaftStateTransition,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -81,6 +85,7 @@ function getMdxComponents(locale: string) {
     TwoPhaseCommitDiagram: () => <TwoPhaseCommitDiagram locale={locale} />,
     ConsensusComparisonTable: () => <ConsensusComparisonTable locale={locale} />,
     FLPDiagram: () => <FLPDiagram locale={locale} />,
+    RaftStateTransition: () => <RaftStateTransition locale={locale} />,
   };
 }
 
@@ -152,8 +157,8 @@ export default async function BlogPostPage({
           components={getMdxComponents(locale)}
           options={{
             mdxOptions: {
-              remarkPlugins: [remarkGfm],
-              rehypePlugins: [[rehypePrettyCode, rehypePrettyCodeOptions]],
+              remarkPlugins: [remarkGfm, remarkMath],
+              rehypePlugins: [rehypeKatex, [rehypePrettyCode, rehypePrettyCodeOptions]],
             },
           }}
         />
