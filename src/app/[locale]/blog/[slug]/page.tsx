@@ -32,6 +32,13 @@ import {
   StructuralVsNominal,
   TypeInferenceVisualizer,
   TypeSystemComparison,
+  PaxosSimulator,
+  RaftSimulator,
+  PBFTSimulator,
+  ConsensusTimeline,
+  TwoPhaseCommitDiagram,
+  ConsensusComparisonTable,
+  FLPDiagram,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -67,6 +74,13 @@ function getMdxComponents(locale: string) {
     StructuralVsNominal: () => <StructuralVsNominal locale={locale} />,
     TypeInferenceVisualizer: () => <TypeInferenceVisualizer locale={locale} />,
     TypeSystemComparison: () => <TypeSystemComparison locale={locale} />,
+    PaxosSimulator: () => <PaxosSimulator locale={locale} />,
+    RaftSimulator: () => <RaftSimulator locale={locale} />,
+    PBFTSimulator: () => <PBFTSimulator locale={locale} />,
+    ConsensusTimeline: () => <ConsensusTimeline locale={locale} />,
+    TwoPhaseCommitDiagram: () => <TwoPhaseCommitDiagram locale={locale} />,
+    ConsensusComparisonTable: () => <ConsensusComparisonTable locale={locale} />,
+    FLPDiagram: () => <FLPDiagram locale={locale} />,
   };
 }
 

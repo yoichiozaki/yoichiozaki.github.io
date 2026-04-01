@@ -1,0 +1,238 @@
+---
+title: "合意アルゴリズムの系譜 — 2PC からビザンチン耐性まで、分散合意の進化を図解で追う"
+date: "2025-05-15"
+description: "2PC, Paxos, Raft, PBFT の仕組みをインタラクティブシミュレーターで可視化しながら、分散合意アルゴリズムの進化と理論的背景を解説します。"
+tags: ["Distributed Systems", "Consensus", "Paxos", "Raft", "PBFT"]
+---
+
+分散システムを設計するとき、**「複数のノードがひとつの値に合意する」** という問題は避けて通れない。データベースのレプリケーション、マイクロサービス間のトランザクション、ブロックチェーンの台帳管理——すべての根底にあるのが **合意（Consensus）問題** だ。
+
+この記事では、合意アルゴリズムの歴史を辿りながら、2PC → Paxos → Raft → PBFT への進化をインタラクティブなシミュレーターで体感できるようにした。各アルゴリズムの「なぜこうなっているのか」を理解するのが目標だ。
+
+## 合意アルゴリズムの系譜
+
+まず、主要な合意アルゴリズムの登場時期を俯瞰しよう。
+
+<ConsensusTimeline />
+
+1978 年の 2PC から始まり、1982 年のビザンチン将軍問題の定式化を経て、Paxos、PBFT、Raft と発展してきた。左側の「クラッシュ障害耐性」と右側の「ビザンチン障害耐性」という2つの流れがあることに注目してほしい。
+
+## 障害モデル — クラッシュ障害 vs ビザンチン障害
+
+合意アルゴリズムを理解する前に、**障害モデル** を整理しておこう。
+
+- **クラッシュ障害（Crash Fault）**: ノードが突然停止し、以降応答しなくなる。復旧後は正しく動作する。嘘はつかない。
+- **ビザンチン障害（Byzantine Fault）**: ノードが任意の不正な動作をする。嘘のメッセージを送る、メッセージを改ざんする、無視する——なんでもあり。
+
+クラッシュ障害はビザンチン障害の特殊ケースだ。ビザンチン障害に耐えるアルゴリズムはクラッシュ障害にも当然耐えるが、必要なノード数が多くなり、メッセージ量も増える。
+
+| 障害モデル | 必要ノード数 | ノードの振る舞い |
+|:---|:---|:---|
+| クラッシュ障害 | 2f + 1（f 台の障害に耐える） | 停止するだけ、嘘はつかない |
+| ビザンチン障害 | 3f + 1（f 台の障害に耐える） | 任意の不正動作が可能 |
+
+## FLP 不可能性定理 — 完璧な合意は存在しない
+
+1985 年、Fischer, Lynch, Paterson は衝撃的な結果を証明した。
+
+<FLPDiagram />
+
+> **FLP 不可能性定理**: 非同期モデルにおいて、1台でもクラッシュする可能性があるなら、安全性（Safety）・活性（Liveness）・障害耐性（Fault Tolerance）の3つを同時に保証する決定性アルゴリズムは存在しない。
+
+これは「合意アルゴリズムは作れない」という意味ではない。実用的なアルゴリズムは以下の方法で FLP を回避している。
+
+1. **ランダム化**: Proposer の選出にランダム性を導入する（確率的に活性を保証）
+2. **部分同期モデル**: 最終的にはメッセージが届くと仮定する（GST: Global Stabilization Time）
+3. **障害検知器**: タイムアウトによる不完全な障害検知を利用する
+
+Paxos、Raft は **安全性を常に保証**し、活性は「十分な時間が経てば」保証するという戦略をとっている。
+
+## 2PC — 最もシンプルな合意
+
+**Two-Phase Commit（2PC）** は分散トランザクションの基本プロトコルだ。Coordinator が全参加者に Prepare → Commit の2フェーズで合意を取る。
+
+<TwoPhaseCommitDiagram />
+
+### 2PC の問題点
+
+2PC はシンプルだが致命的な弱点がある。
+
+1. **ブロッキング**: Coordinator がクラッシュすると、Vote Yes を返した参加者は Commit/Abort の指示を永遠に待ち続ける。タイムアウトで勝手に Abort すると、他の参加者と不整合になる可能性がある。
+2. **障害耐性ゼロ**: Coordinator の1台クラッシュで全体が停止する。「f=0」の障害耐性しかない。
+3. **Single Point of Failure**: Coordinator に全権限が集中している。
+
+これらの問題を解決するために、**Paxos** が生まれた。
+
+## Paxos — 「合意」の理論的基盤
+
+Leslie Lamport が 1989 年に提案した **Paxos** は、クラッシュ障害に耐えるアルゴリズムの理論的基盤となった。Google の Chubby ロックサービスや Spanner で使われている。
+
+### Paxos の3つの役割
+
+- **Proposer**: 値を提案する。提案には一意の **proposal number** が付く。
+- **Acceptor**: 提案を受理するか判断する。過半数が同じ値を受理すれば合意成立。
+- **Learner**: 合意結果を知る（ここでは省略）。
+
+### Single-Decree Paxos のプロトコル
+
+Paxos は **2フェーズ** で動作する（2PC と似ているが、過半数で判断する点が根本的に異なる）。
+
+**Phase 1 — Prepare/Promise:**
+1. Proposer が proposal number `n` を選び、全 Acceptor に `Prepare(n)` を送信
+2. Acceptor は `n` が今まで見た最大なら `Promise(n, 過去に受理した値)` を返す
+
+**Phase 2 — Accept/Accepted:**
+3. Proposer は過半数の Promise を受信後、`Accept(n, v)` を送信
+   - Promise に過去の受理値があれば、最大の proposal number に対応する値を選ぶ
+   - なければ自分の値を提案
+4. Acceptor は `n` より大きい Promise をしていなければ `Accepted(n, v)` を返す
+
+シミュレーターで各フェーズを確認してみよう。
+
+<PaxosSimulator />
+
+### なぜ Paxos は安全なのか
+
+Paxos の安全性の核心は **proposal number による順序付け** にある。
+
+- Acceptor は「より大きな proposal number を見たら、小さい number の Accept は拒否する」
+- Proposer は「Promise に含まれる過去の受理値を尊重する」
+
+この2つの制約により、一度過半数が受理した値は、それ以降のどんな proposal でも上書きされないことが保証される。これが **Paxos の安全性定理** だ。
+
+### Paxos の課題
+
+Paxos は正しいが、実装は難しい。
+
+1. **理解困難**: Lamport 自身の論文 ["The Part-Time Parliament"](https://lamport.azurewebsites.net/pubs/lamport-paxos.pdf) は古代ギリシャの議会に喩えた独特の文体で、多くの研究者が理解に苦労した。後に ["Paxos Made Simple"](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf) で書き直された。
+2. **Multi-Paxos への拡張が自明でない**: Single-Decree Paxos は1つの値を決めるだけ。実用的なログ複製（Multi-Paxos）に拡張する方法は論文に明記されておらず、各実装が独自の最適化を行った。
+3. **活性の問題（Livelock）**: 2つの Proposer が交互により大きな proposal number で競合すると、永遠に合意できない（シミュレーターの「Proposer 競合」シナリオ参照）。
+
+## Raft — 理解しやすさのための再設計
+
+Diego Ongaro と John Ousterhout が 2014 年に発表した [**Raft**](https://raft.github.io/raft.pdf) は、「Paxos と同等の安全性を持ちながら、はるかに理解しやすい」ことを設計目標にした合意アルゴリズムだ。
+
+### Raft の設計哲学
+
+Raft は Paxos の問題を2つのアプローチで解決した。
+
+1. **問題の分解**: 合意問題を **Leader 選出**、**ログ複製**、**安全性** の3つに明確に分離。
+2. **Strong Leader**: 全ての書き込みは Leader を経由し、Leader → Follower への一方向のログ複製を行う。
+
+### Raft の状態遷移
+
+各ノードは **Follower**, **Candidate**, **Leader** の3状態を持つ。
+
+```text
+           timeout            勝利
+Follower ──────→ Candidate ──────→ Leader
+    ↑                |                |
+    |                | 敗北            | 高い term を発見
+    |                ↓                |
+    └────────────────┘────────────────┘
+```
+
+### Leader 選出
+
+1. 全ノードが Follower として起動
+2. **election timeout** が切れたノードが Candidate に遷移し、`term` をインクリメント
+3. 自分自身に投票し、他のノードに `RequestVote` RPC を送信
+4. **過半数** の票を得たら Leader に就任
+5. Leader は定期的に **heartbeat**（空の `AppendEntries`）を送信して election timeout をリセット
+
+**Election Restriction**: 投票するノードは、候補者のログが自分のログ以上に新しい場合にのみ投票する。これにより、コミット済みのエントリを持たないノードは Leader になれない。
+
+### ログ複製
+
+1. Leader がクライアントからの書き込みをログに追記
+2. `AppendEntries` RPC で全 Follower にログエントリを送信
+3. 過半数が応答 → コミット（State Machine に適用）
+
+**Leader Completeness Property**: コミットされたエントリは、以降の全ての Leader のログに必ず含まれる。これが Raft の安全性の核心だ。
+
+<RaftSimulator />
+
+### Raft vs Paxos
+
+| 観点 | Paxos | Raft |
+|:---|:---|:---|
+| Leader の扱い | Leader は最適化 | Leader は必須 |
+| ログの流れ | 任意の Proposer → Acceptor | Leader → Follower（一方向） |
+| 理解のしやすさ | 難解 | 設計目標として重視 |
+| 安全性の証明 | 同等 | 同等 |
+| 採用例 | Chubby, Spanner | etcd, CockroachDB, TiKV |
+
+## PBFT — ビザンチン障害への耐性
+
+ここまでの Paxos と Raft は **クラッシュ障害** のみを扱う。ノードが「嘘をつく」可能性がある環境では、より強力なプロトコルが必要だ。
+
+1999 年、Miguel Castro と Barbara Liskov が提案した [**PBFT（Practical Byzantine Fault Tolerance）**](https://pmg.csail.mit.edu/papers/osdi99.pdf) は、ビザンチン障害に耐える実用的なアルゴリズムとして画期的だった。
+
+### PBFT のプロトコル
+
+PBFT は **3フェーズ** で動作する。
+
+1. **Pre-prepare**: Primary（リーダーに相当）がリクエストにシーケンス番号を割り当て、全 Replica に送信
+2. **Prepare**: 各ノードが他の全ノードに Prepare メッセージを送信（**全対全通信**）
+3. **Commit**: Prepare が $2f+1$ 個集まったノードが、他の全ノードに Commit メッセージを送信
+
+Prepare・Commit フェーズで $2f+1$ のメッセージを集める必要があるため、$f$ 台のビザンチンノードがいても、正しいノードが過半数を占める。
+
+### なぜ 3f+1 が必要なのか
+
+$n$ 台中 $f$ 台がビザンチンのとき、正直なノードは $n - f$ 台。$2f+1$ のメッセージを集めるには、正直なノードだけでも閾値を超える必要がある。
+
+$$n - f \geq 2f + 1 \implies n \geq 3f + 1$$
+
+4ノードなら $f=1$、7ノードなら $f=2$ のビザンチン障害に耐えられる。
+
+<PBFTSimulator />
+
+### PBFT の課題
+
+- **$O(n^2)$ のメッセージ量**: 全対全通信により、ノード数が増えるとメッセージ量が急増
+- **スケーラビリティ**: 実用的には数十ノード程度が限界
+- **View Change の複雑さ**: Primary が不正な場合の切り替えプロトコルが複雑
+
+## アルゴリズム比較
+
+<ConsensusComparisonTable />
+
+## 実世界での採用
+
+各アルゴリズムがどこで使われているかを見ると、理論と実践の関係がよくわかる。
+
+### Paxos 系
+- **Google Chubby**: 分散ロックサービス。Multi-Paxos を使用。
+- **Google Spanner**: グローバル分散データベース。Paxos でレプリケーション。
+- **Apache ZooKeeper**: Zab プロトコル（Paxos の変種）を使用。
+
+### Raft 系
+- **etcd**: Kubernetes のバックエンドストア。Raft で一貫性を保証。
+- **CockroachDB**: 分散 SQL データベース。各 Range が Raft グループ。
+- **TiKV**: 分散 KV ストア（TiDB のストレージ層）。Raft を使用。
+- **Consul**: サービスメッシュのコントロールプレーン。Raft で合意。
+
+### PBFT 系
+- **Hyperledger Fabric**: 企業向けブロックチェーン。初期バージョンは PBFT を使用、v1.4.1 以降は Raft、v3.0 以降は SmartBFT（BFT-SMART ベース）を採用。
+- **Tendermint**: ブロックチェーン合意エンジン。PBFT の変種。
+
+## まとめ
+
+合意アルゴリズムの進化を振り返ると、いくつかの重要なパターンが見えてくる。
+
+1. **障害モデルの拡張**: クラッシュ障害 → ビザンチン障害へ。耐えるべき障害が強くなるほど、必要なノード数とメッセージ量が増える。
+2. **理解のしやすさの重要性**: Paxos の難解さが Raft を生んだ。正しさだけでなく、理解・実装の容易さも重要な設計指標。
+3. **理論と実践のギャップ**: FLP 不可能性定理は「完璧は無理」と告げるが、実用システムはタイムアウトやランダム化で十分に機能している。
+4. **トレードオフの選択**: 安全性（Safety）は常に保証し、活性（Liveness）は「十分な時間が経てば」保証する——これが現代の合意アルゴリズムの共通戦略。
+
+分散システムにおける合意は、一見単純な問題に見えて、40年以上の研究の蓄積がある深い分野だ。この記事のシミュレーターを通じて、各アルゴリズムの「なぜ」が少しでも伝わったなら幸いだ。
+
+## 参考文献
+
+- Lamport, L. ["The Part-Time Parliament"](https://lamport.azurewebsites.net/pubs/lamport-paxos.pdf). ACM TOCS, 1998.
+- Lamport, L. ["Paxos Made Simple"](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf). 2001.
+- Ongaro, D. and Ousterhout, J. ["In Search of an Understandable Consensus Algorithm"](https://raft.github.io/raft.pdf). USENIX ATC, 2014.
+- Castro, M. and Liskov, B. ["Practical Byzantine Fault Tolerance"](https://pmg.csail.mit.edu/papers/osdi99.pdf). OSDI, 1999.
+- Fischer, M., Lynch, N., and Paterson, M. "Impossibility of Distributed Consensus with One Faulty Process". JACM, 1985.
+- Lamport, L., Shostak, R., and Pease, M. "The Byzantine Generals Problem". ACM TOPLAS, 1982.

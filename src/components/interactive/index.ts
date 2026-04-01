@@ -33,3 +33,14 @@ export {
   TypeInferenceVisualizer,
   TypeSystemComparison,
 } from "./TypeSystemDiagrams";
+export {
+  PaxosSimulator,
+  RaftSimulator,
+  PBFTSimulator,
+} from "./ConsensusSimulators";
+export {
+  ConsensusTimeline,
+  TwoPhaseCommitDiagram,
+  ConsensusComparisonTable,
+  FLPDiagram,
+} from "./ConsensusDiagrams";
