@@ -72,3 +72,10 @@ export {
   RoPEDiagram,
 } from "./TransformerDetailDiagrams";
 export { TransformerBlockVisualizer } from "./TransformerBlockVisualizer";
+export { ParadigmTimeline } from "./ParadigmTimeline";
+export { ParadigmTaxonomy } from "./ParadigmTaxonomy";
+export { ImperativeVsDeclarative } from "./ImperativeVsDeclarative";
+export { LambdaCalculusVisualizer } from "./LambdaCalculusVisualizer";
+export { OOPVisualizer } from "./OOPVisualizer";
+export { ParadigmComparison } from "./ParadigmComparison";
+export { TestRunnerVisualizer } from "./TestRunnerVisualizer";

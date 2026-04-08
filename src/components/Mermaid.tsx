@@ -3,6 +3,14 @@
 import { useEffect, useRef, useState, useId } from "react";
 import { useTheme } from "@/components/ThemeProvider";
 
+// Serialize mermaid operations to avoid concurrent initialize/render conflicts
+let renderQueue: Promise<void> = Promise.resolve();
+
+function enqueueRender(fn: () => Promise<void>): Promise<void> {
+  renderQueue = renderQueue.then(fn, fn);
+  return renderQueue;
+}
+
 export function Mermaid({ chart }: { chart: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
@@ -13,7 +21,7 @@ export function Mermaid({ chart }: { chart: string }) {
   useEffect(() => {
     let cancelled = false;
 
-    async function render() {
+    enqueueRender(async () => {
       try {
         const mermaid = (await import("mermaid")).default;
         mermaid.initialize({
@@ -72,9 +80,11 @@ export function Mermaid({ chart }: { chart: string }) {
             },
           }),
         });
+        // Normalize line endings to avoid parser issues
+        const normalizedChart = chart.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
         const { svg: rendered } = await mermaid.render(
           `mermaid-${uniqueId}`,
-          chart,
+          normalizedChart,
         );
         if (!cancelled) {
           // Strip any background paint mermaid bakes into the SVG
@@ -94,9 +104,8 @@ export function Mermaid({ chart }: { chart: string }) {
           setSvg("");
         }
       }
-    }
+    });
 
-    render();
     return () => {
       cancelled = true;
     };

@@ -70,6 +70,11 @@ For each diagram or visualization component:
 2. Verify **timeline ordering** — are events in the correct sequence?
 3. Check **labels and annotations** — do they match the text description?
 4. Identify **oversimplifications** — flag where a diagram might mislead
+5. **Validate Mermaid rendering** — for each ` ```mermaid ` block, run it through `npx @mermaid-js/mermaid-cli@latest` or equivalent validation to confirm it parses without errors. Common Mermaid pitfalls:
+   - `opt` is a reserved keyword in sequenceDiagram (used for optional blocks) — do NOT use it as a participant ID
+   - Other reserved sequenceDiagram keywords to avoid as IDs: `loop`, `alt`, `else`, `end`, `par`, `critical`, `break`, `rect`, `note`
+   - Angle brackets `<T>` in message text or labels are interpreted as HTML — remove or escape them
+   - `style` fill colors with low contrast (e.g., `#e2e8f0`, `#bbf7d0`) are unreadable in dark mode — use medium-tone fills with explicit `color:` for text
 
 Key rule: If a taxonomy shows X as a child of Y, confirm X is truly a subtype/variant of Y, not an orthogonal concept.
 

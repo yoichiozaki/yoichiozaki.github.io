@@ -8,6 +8,8 @@ import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
 import { CodeBlock } from "@/components/CodeBlock";
+import { Mermaid } from "@/components/Mermaid";
+import { remarkMermaid } from "@/lib/remark-mermaid";
 import { SeattleVancouverMap } from "@/components/StorytellingMapLazy";
 import {
   InteractiveDemo,
@@ -64,6 +66,13 @@ import {
   SwiGLUDiagram,
   RoPEDiagram,
   TransformerBlockVisualizer,
+  ParadigmTimeline,
+  ParadigmTaxonomy,
+  ImperativeVsDeclarative,
+  LambdaCalculusVisualizer,
+  OOPVisualizer,
+  ParadigmComparison,
+  TestRunnerVisualizer,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -73,6 +82,7 @@ const rehypePrettyCodeOptions = {
 function getMdxComponents(locale: string) {
   return {
     pre: CodeBlock,
+    Mermaid,
     SeattleVancouverMap: () => <SeattleVancouverMap locale={locale} />,
     InteractiveDemo,
     GoRoutineVisualizer: () => <GoRoutineVisualizer locale={locale} />,
@@ -128,6 +138,13 @@ function getMdxComponents(locale: string) {
     SwiGLUDiagram: () => <SwiGLUDiagram locale={locale} />,
     RoPEDiagram: () => <RoPEDiagram locale={locale} />,
     TransformerBlockVisualizer: () => <TransformerBlockVisualizer locale={locale} />,
+    ParadigmTimeline: () => <ParadigmTimeline locale={locale} />,
+    ParadigmTaxonomy: () => <ParadigmTaxonomy locale={locale} />,
+    ImperativeVsDeclarative: () => <ImperativeVsDeclarative locale={locale} />,
+    LambdaCalculusVisualizer: () => <LambdaCalculusVisualizer locale={locale} />,
+    OOPVisualizer: () => <OOPVisualizer locale={locale} />,
+    ParadigmComparison: () => <ParadigmComparison locale={locale} />,
+    TestRunnerVisualizer: () => <TestRunnerVisualizer locale={locale} />,
   };
 }
 
@@ -199,7 +216,7 @@ export default async function BlogPostPage({
           components={getMdxComponents(locale)}
           options={{
             mdxOptions: {
-              remarkPlugins: [remarkGfm, remarkMath],
+              remarkPlugins: [remarkMermaid, remarkGfm, remarkMath],
               rehypePlugins: [rehypeKatex, [rehypePrettyCode, rehypePrettyCodeOptions]],
             },
           }}

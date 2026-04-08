@@ -1,0 +1,1125 @@
+---
+title: "テストフレームワークの裏側 — ゼロから理解するテストランナーの設計と実装"
+date: "2026-04-04"
+description: "pytest や unittest などのテストフレームワークが裏で何をしているのか？テストランナーをゼロから Python で実装しながら、ディスカバリ・収集・ライフサイクル・アサーション・レポートの仕組みを超詳細に解説します。"
+tags: ["Testing", "Python", "Software Engineering", "Architecture", "Interactive"]
+---
+
+`pytest` を実行したとき、裏で何が起きているのか考えたことはありますか？
+
+テストフレームワーク（pytest, unittest, Jest, Go の testing パッケージなど）は、数百行のテストコードを受け取り、**自動的にテストを発見し、整理し、実行し、結果を報告する**という複雑な仕事をこなしています。この記事では、テストフレームワークをゼロから Python で実装しながら、その設計思想と内部構造を徹底的に解き明かします。
+
+## テストフレームワークの全体像
+
+まず、テストフレームワークが処理する全体のパイプラインを見てみましょう。
+
+```mermaid
+graph LR
+    A[テストファイル] --> B[ディスカバリ]
+    B --> C[テスト収集]
+    C --> D[ライフサイクル<br/>フック実行]
+    D --> E[テスト実行]
+    E --> F[アサーション<br/>エンジン]
+    F --> G[結果集計]
+    G --> H[レポーター]
+```
+
+以下のインタラクティブデモで、テストランナーが各フェーズで何をしているかをステップ実行してみましょう。
+
+<TestRunnerVisualizer />
+
+それでは、各フェーズを実際にコードで実装しながら詳しく見ていきます。
+
+---
+
+## Phase 1: テストディスカバリ — ファイルを見つける
+
+テストフレームワークが最初に行うことは、**どのファイルがテストなのかを見つける**ことです。
+
+### 規約ベースのディスカバリ
+
+ほとんどのフレームワークは**ファイル名の規約**でテストファイルを識別します。
+
+```text
+pytest:
+  test_*.py
+  *_test.py
+
+unittest:
+  test*.py（discover のデフォルト）
+
+Jest / Vitest:
+  **/*.test.{ts,js}
+  **/*.spec.{ts,js}
+
+Go:
+  *_test.go
+```
+
+これを実装してみましょう。`pathlib.Path.rglob()` を使えば、ディレクトリを再帰的にたどりながらパターンにマッチするファイルを一括で取得できます。
+
+```python
+# mini_test/discovery.py
+from pathlib import Path
+from fnmatch import fnmatch
+
+DEFAULT_PATTERNS = ["test_*.py", "*_test.py"]
+DEFAULT_IGNORE = ["__pycache__", ".venv", "venv", ".git"]
+
+
+def discover_test_files(
+    root_dir: str = ".",
+    patterns: list[str] | None = None,
+    ignore: list[str] | None = None,
+) -> list[Path]:
+    """glob パターンでテストファイルを再帰探索する"""
+    patterns = patterns or DEFAULT_PATTERNS
+    ignore = ignore or DEFAULT_IGNORE
+    root = Path(root_dir)
+
+    files: list[Path] = []
+    for path in root.rglob("*.py"):
+        # 無視すべきディレクトリをスキップ
+        if any(part in ignore for part in path.parts):
+            continue
+        # ファイル名がいずれかのパターンにマッチするか
+        if any(fnmatch(path.name, pat) for pat in patterns):
+            files.append(path)
+
+    return sorted(files)
+```
+
+返り値を `sorted()` しているのは、テストの実行順序を**決定的**（deterministic）にするためです。ファイルシステムの返す順序は OS やファイルシステムによって異なるため、ソートを入れることで環境に依存しない安定した実行順序が保証されます。また、`__pycache__` や `.venv` を無視リストに入れているのは、これらの中にある `.py` ファイルを誤って「テスト」として拾ってしまうことを防ぐためです。
+
+### なぜ glob なのか？
+
+glob パターンの利点は**宣言的**であることです。テストファイルの配置ルールをユーザーが設定ファイルで定義でき、フレームワーク側はそのパターンに従ってファイルシステムをスキャンするだけです。
+
+```ini
+# pyproject.toml の testpaths 設定がまさにこれ
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+```
+
+---
+
+## Phase 2: テスト収集 — 関数とクラスからテストケースを集める
+
+テストファイルが見つかったら、次はその中のテストケースを**収集**します。ここが pytest の設計で最も興味深い部分です。
+
+### pytest の収集戦略：関数名の規約
+
+pytest は `describe`/`it` のような DSL を使いません。**関数名の規約**（`test_` で始まる関数）だけでテストを識別します。これは Python の `inspect` モジュールと組み合わさることで、非常に強力なディスカバリを実現します。
+
+以下の実装では、`importlib.util` を使ってテストファイルを**動的にモジュールとしてインポート**しています。`spec_from_file_location()` でファイルパスからモジュール仕様を作り、`module_from_spec()` でモジュールオブジェクトを生成し、`exec_module()` で実際にコードを実行するという 3 ステップです。この仕組みにより、`sys.path` を汚さずに任意の `.py` ファイルをインポートできます。
+
+```python
+# mini_test/collector.py
+import importlib.util
+import inspect
+from dataclasses import dataclass, field
+from typing import Callable
+from pathlib import Path
+
+
+@dataclass
+class TestCase:
+    name: str
+    fn: Callable[[], None]
+    module_name: str
+
+
+@dataclass
+class TestSuite:
+    name: str
+    tests: list[TestCase] = field(default_factory=list)
+    setup_module: Callable[[], None] | None = None
+    teardown_module: Callable[[], None] | None = None
+    setup_function: Callable[[], None] | None = None
+    teardown_function: Callable[[], None] | None = None
+
+
+def collect_from_file(path: Path) -> TestSuite:
+    """テストファイルを読み込み、test_ 関数を収集する"""
+    # ファイルをモジュールとして動的にインポート
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load {path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # ← モジュールのトップレベルが実行される
+
+    suite = TestSuite(name=path.stem)
+
+    # ライフサイクルフックの収集
+    suite.setup_module = getattr(module, "setup_module", None)
+    suite.teardown_module = getattr(module, "teardown_module", None)
+    suite.setup_function = getattr(module, "setup_function", None)
+    suite.teardown_function = getattr(module, "teardown_function", None)
+
+    # test_ で始まる関数を収集
+    for name, obj in inspect.getmembers(module, inspect.isfunction):
+        if name.startswith("test_"):
+            suite.tests.append(
+                TestCase(name=name, fn=obj, module_name=path.stem)
+            )
+
+    return suite
+```
+
+### 収集フェーズの鍵: モジュールのインポート
+
+ここで重要なのは、**`exec_module()` でモジュールのトップレベルコードが実行される**という点です。テスト関数自体はこの時点では実行されず、`inspect.getmembers()` で名前ベースで収集されるだけです。
+
+```python
+# test_math.py — このファイルが exec_module() される
+
+import math
+
+print("この行は収集フェーズで実行される")  # モジュールレベル
+
+def test_addition():
+    # ← この関数は収集されるだけ。実行は後
+    assert 1 + 1 == 2
+
+def test_sqrt():
+    # ← これも収集されるだけ
+    assert math.sqrt(4) == 2.0
+
+def helper_function():
+    # ← test_ で始まらないので収集されない
+    pass
+```
+
+この「**モジュールのインポートで収集、テスト関数は遅延実行**」というパターンが、pytest 系フレームワークの根幹をなす設計です。これにより：
+
+1. テストの**登録**と**実行**を分離できる
+2. 実行前にテストの総数を把握できる（プログレスバーの表示）
+3. テストの**フィルタリング**（`-k` オプション）や**並べ替え**を実行前に行える
+4. ライフサイクルフック（setup/teardown）を正しいタイミングで差し込める
+
+### ライフサイクルフックの登録
+
+pytest / unittest の規約では、特定の名前の関数がライフサイクルフックとして認識されます。ライフサイクルフックを `setup_module`/`teardown_module`（モジュール単位）と `setup_function`/`teardown_function`（テスト関数単位）に分離する設計には重要な理由があります。データベース接続のように**生成コストが高いリソース**はモジュール単位で一度だけ作成・破棄し、テーブルのクリアのように**テスト間の独立性**に関わる処理はテスト関数単位で毎回実行する、という使い分けが可能になります。
+
+```python
+# test_database.py — ライフサイクルフックの例
+
+db = None
+
+def setup_module():
+    """モジュール内の全テストの前に1回だけ実行"""
+    global db
+    db = create_test_database()
+
+def teardown_module():
+    """モジュール内の全テストの後に1回だけ実行"""
+    db.drop()
+
+def setup_function():
+    """各テスト関数の前に毎回実行"""
+    db.clear_tables()
+
+def teardown_function():
+    """各テスト関数の後に毎回実行"""
+    db.rollback()
+
+def test_insert():
+    db.insert({"key": "value"})
+    assert db.get("key") == "value"
+
+def test_delete():
+    db.insert({"key": "value"})
+    db.delete("key")
+    assert db.get("key") is None
+```
+
+---
+
+## Phase 3: テスト実行エンジン — 正しい順序で走らせる
+
+収集が終わったら、テストを実行します。テストランナーの仕事は、**ライフサイクルフックを正しい順序で挟みながら、各テストを安全に実行する**ことです。
+
+### 実行順序
+
+テストランナーがスイートを実行する際の順序を視覚化すると以下のようになります。`setup_module` → （各テストの `setup_function` → テスト本体 → `teardown_function`）× n → `teardown_module` という入れ子構造が見えてきます。
+
+```text
+Suite "test_math" の実行フロー:
+  ┌─ setup_module()         ← モジュール全体で1回
+  │
+  │  ┌─ setup_function()    ← テストごとに1回
+  │  │  test_addition() 実行
+  │  └─ teardown_function()
+  │
+  │  ┌─ setup_function()
+  │  │  test_sqrt() 実行
+  │  └─ teardown_function()
+  │
+  └─ teardown_module()      ← モジュール全体で1回
+```
+
+### ランナーの実装
+
+実装にあたって注目すべきポイントは **`time.perf_counter()`** の使用です。`time.time()` はシステムクロックに基づくため NTP の同期や手動の時刻変更の影響を受けますが、`perf_counter()` はモノトニッククロック（単調増加時計）を使うため、**経過時間の計測に最適**です。
+
+```python
+# mini_test/runner.py
+import time
+from dataclasses import dataclass
+
+
+@dataclass
+class TestResult:
+    name: str
+    suite_name: str
+    status: str  # "passed" or "failed"
+    duration: float
+    error: Exception | None = None
+
+
+def run_suite(suite: TestSuite) -> list[TestResult]:
+    results: list[TestResult] = []
+
+    # setup_module — モジュール全体の初期化
+    if suite.setup_module:
+        suite.setup_module()
+
+    for test_case in suite.tests:
+        # setup_function — 各テスト前の初期化
+        if suite.setup_function:
+            suite.setup_function()
+
+        start = time.perf_counter()
+        try:
+            # テスト本体の実行
+            test_case.fn()
+            results.append(TestResult(
+                name=test_case.name,
+                suite_name=suite.name,
+                status="passed",
+                duration=time.perf_counter() - start,
+            ))
+        except Exception as exc:
+            results.append(TestResult(
+                name=test_case.name,
+                suite_name=suite.name,
+                status="failed",
+                duration=time.perf_counter() - start,
+                error=exc,
+            ))
+
+        # teardown_function — 各テスト後のクリーンアップ
+        if suite.teardown_function:
+            suite.teardown_function()
+
+    # teardown_module — モジュール全体のクリーンアップ
+    if suite.teardown_module:
+        suite.teardown_module()
+
+    return results
+```
+
+### try-except によるテスト隔離
+
+テストランナーの最も重要な設計原則の一つは、**あるテストの失敗が他のテストに影響しない**ことです。
+
+```python
+# 各テストは独立した try-except で囲まれる
+try:
+    test_case.fn()
+    # → テストが例外を投げなければ PASS
+except Exception as exc:
+    # → テストが例外を投げたら FAIL（他のテストには影響しない）
+```
+
+これは「アサーションは単に例外を投げる」という設計と組み合わさります。`assert 1 == 2` は内部で `raise AssertionError` を実行しているだけです。テストが PASS するのは「何も投げなかった」とき、FAIL するのは「何かが投げられた」ときです。
+
+この `try-except` モデルのもう一つの利点は、**予期しないエラー（`TypeError`、`KeyError` など）もキャッチする**ことです。アサーション失敗だけでなく、テスト中に発生したあらゆる例外を安全に捕捉し、残りのテストを続行できます。この堅牢性こそがテストランナーに求められる基本的な性質です。
+
+---
+
+## Phase 4: アサーションエンジン — assert の内側
+
+テストフレームワークの中で最もユーザーに近い部分がアサーションエンジンです。
+
+### Python の assert 文
+
+Python のテストでは、組み込みの `assert` 文がそのまま使えます。これは `AssertionError` を `raise` するだけのシンタックスシュガーです。
+
+```python
+# assert 文の本質
+assert 1 + 1 == 2
+# ↓ 以下と等価
+if not (1 + 1 == 2):
+    raise AssertionError
+```
+
+しかし、素の `assert` ではエラーメッセージが貧弱です。たとえば `assert result == "Hello, world!"` が失敗したとき、素の Python では `AssertionError` とだけ表示され、`result` に実際に何が入っていたのかわかりません。これではデバッグに時間がかかります。pytest はこの問題を **assert のリライティング** で解決しています。
+
+### pytest の assert リライティング
+
+pytest は `assert` の AST（抽象構文木）を**インポート時に書き換えて**、失敗時に詳細な情報を表示します。これが pytest の最も革新的な機能の一つです。
+
+```python
+# ユーザーが書くコード
+def test_greeting():
+    result = greet("world")
+    assert result == "Hello, world!"
+
+# pytest が内部で書き換えたコード（概念）
+def test_greeting():
+    result = greet("world")
+    _left = result
+    _right = "Hello, world!"
+    if not (_left == _right):
+        raise AssertionError(
+            f"assert {_left!r} == {_right!r}\n"
+            f"  where {_left!r} = greet('world')"
+        )
+```
+
+この仕組みを簡易的に実装してみましょう：
+
+```python
+# mini_test/assertion_rewrite.py
+import ast
+import textwrap
+
+
+class AssertRewriter(ast.NodeTransformer):
+    """assert 文を詳細なエラーメッセージ付きに変換する"""
+
+    def visit_Assert(self, node: ast.Assert) -> ast.AST:
+        # assert a == b の場合のみリライト
+        if isinstance(node.test, ast.Compare):
+            return self._rewrite_compare(node)
+        return node
+
+    def _rewrite_compare(self, node: ast.Assert) -> list[ast.stmt]:
+        compare = node.test
+        if not isinstance(compare, ast.Compare) or len(compare.ops) != 1:
+            return [node]
+
+        # 左辺と右辺を一時変数に保存
+        stmts: list[ast.stmt] = []
+
+        # __mt_left = <left expr>
+        stmts.append(ast.Assign(
+            targets=[ast.Name(id="__mt_left", ctx=ast.Store())],
+            value=compare.left,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        ))
+
+        # __mt_right = <right expr>
+        stmts.append(ast.Assign(
+            targets=[ast.Name(id="__mt_right", ctx=ast.Store())],
+            value=compare.comparators[0],
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        ))
+
+        # if not (__mt_left <op> __mt_right): raise AssertionError(...)
+        op_symbols = {
+            "Eq": "==", "NotEq": "!=", "Lt": "<", "LtE": "<=",
+            "Gt": ">", "GtE": ">=", "Is": "is", "IsNot": "is not",
+            "In": "in", "NotIn": "not in",
+        }
+        op_name = type(compare.ops[0]).__name__
+        op_symbol = op_symbols.get(op_name, op_name)
+        raise_node = ast.Raise(
+            exc=ast.Call(
+                func=ast.Name(id="AssertionError", ctx=ast.Load()),
+                args=[ast.JoinedStr(values=[
+                    ast.Constant(value="assert "),
+                    ast.FormattedValue(
+                        value=ast.Name(id="__mt_left", ctx=ast.Load()),
+                        conversion=ord("r"),
+                    ),
+                    ast.Constant(value=f" {op_symbol} "),
+                    ast.FormattedValue(
+                        value=ast.Name(id="__mt_right", ctx=ast.Load()),
+                        conversion=ord("r"),
+                    ),
+                ])],
+                keywords=[],
+            ),
+        )
+        stmts.append(ast.If(
+            test=ast.UnaryOp(
+                op=ast.Not(),
+                operand=ast.Compare(
+                    left=ast.Name(id="__mt_left", ctx=ast.Load()),
+                    ops=compare.ops,
+                    comparators=[ast.Name(id="__mt_right", ctx=ast.Load())],
+                ),
+            ),
+            body=[raise_node],
+            orelse=[],
+        ))
+
+        # 全ノードに行番号を付与
+        for stmt in stmts:
+            ast.fix_missing_locations(stmt)
+        return stmts
+```
+
+### カスタム assert 関数の実装
+
+pytest の assert リライトは AST 変換という高度な技術を使っていますが、もっとシンプルに**カスタム assert 関数**を実装する方法もあります。
+
+AST リライトの利点は「ユーザーが素の `assert` を書くだけで詳細なメッセージが得られる」ことですが、実装が複雑でデバッグも難しくなります。一方、カスタム assert 関数は `assert_equal(a, b)` のような呼び出しが必要になりますが、実装が透明で理解しやすいというトレードオフがあります：
+
+```python
+# mini_test/assertions.py
+from typing import Any
+
+
+class AssertionError(Exception):
+    def __init__(self, message: str, actual: Any = None, expected: Any = None):
+        super().__init__(message)
+        self.actual = actual
+        self.expected = expected
+
+
+def assert_equal(actual: Any, expected: Any) -> None:
+    """== による等値比較"""
+    if actual != expected:
+        raise AssertionError(
+            f"Expected {expected!r}, got {actual!r}",
+            actual=actual,
+            expected=expected,
+        )
+
+
+def assert_is(actual: Any, expected: Any) -> None:
+    """is による同一性比較"""
+    if actual is not expected:
+        raise AssertionError(
+            f"Expected {expected!r} (id={id(expected)}), "
+            f"got {actual!r} (id={id(actual)})",
+            actual=actual,
+            expected=expected,
+        )
+
+
+def assert_true(value: Any) -> None:
+    if not value:
+        raise AssertionError(f"Expected truthy, got {value!r}")
+
+
+def assert_raises(exc_type: type, fn: Any, *args: Any, **kwargs: Any) -> None:
+    """関数が特定の例外を投げることを検証"""
+    try:
+        fn(*args, **kwargs)
+    except exc_type:
+        return  # 期待通りの例外 → PASS
+    except Exception as e:
+        raise AssertionError(
+            f"Expected {exc_type.__name__}, got {type(e).__name__}: {e}"
+        )
+    raise AssertionError(
+        f"Expected {exc_type.__name__} to be raised, but nothing was raised"
+    )
+
+
+def assert_in(item: Any, container: Any) -> None:
+    if item not in container:
+        raise AssertionError(
+            f"Expected {item!r} to be in {container!r}"
+        )
+
+
+def assert_length(obj: Any, length: int) -> None:
+    actual = len(obj)
+    if actual != length:
+        raise AssertionError(
+            f"Expected length {length}, got {actual}"
+        )
+```
+
+### == vs is — 何が違うのか
+
+この二つの比較の違いは、テストを書く人がよく混乱するポイントです。実用的なガイドラインとしては、**値の一致を検証したいなら `==`、シングルトンオブジェクト（`None` など）や同一オブジェクトへの参照を検証したいなら `is`** を使いましょう。
+
+```python
+# == → 値の等値比較（__eq__ メソッド）
+assert [1, 2] == [1, 2]     # ✅ 値が同じなら OK
+assert {"a": 1} == {"a": 1} # ✅ 構造が同じなら OK
+
+# is → オブジェクトの同一性比較（id が同じか）
+a = [1, 2]
+b = [1, 2]
+assert a is a  # ✅ 同じオブジェクト
+assert a is b  # ❌ 値は同じだが異なるオブジェクト
+
+# 注意: 小さい整数は CPython がキャッシュする
+assert 1 is 1        # ✅ CPython の実装詳細（-5〜256はキャッシュ）
+assert 1000 is 1000  # ⚠️ CPython ではたまたま True になることもある
+```
+
+### not 修飾子のパターン
+
+```text
+assert 1 == 2       → 1 == 2 が False → AssertionError
+assert not 1 == 2   → not (1 == 2) が True → PASS
+assert not 1 == 1   → not (1 == 1) が False → AssertionError
+```
+
+---
+
+## Phase 5: モック・パッチ — 関数の振る舞いを差し替える
+
+テストフレームワークのもう一つの重要な機能は、**関数の振る舞いを差し替えたり、呼び出しを記録する**仕組みです。
+
+なぜモックが必要なのでしょうか？テストでは、外部 API 呼び出し、データベース接続、ファイルシステム操作などの**外部依存**が問題になります。これらの外部依存をそのままテストに含めると、テストが遅くなり、不安定になり、環境依存になってしまいます。モックを使えば、これらの依存を「偽物」に差し替え、テスト対象のロジックだけに集中できます。
+
+### スパイの実装
+
+**スパイ**は元の関数をラップし、呼び出し情報を記録します。
+
+```python
+# mini_test/spy.py
+from typing import Any, Callable
+from dataclasses import dataclass, field
+
+_UNSET = object()  # 「未設定」を表すセンチネル
+
+
+@dataclass
+class CallRecord:
+    args: tuple
+    kwargs: dict
+    return_value: Any = None
+    exception: Exception | None = None
+
+
+class Spy:
+    """関数をラップして呼び出しを記録するスパイ"""
+
+    def __init__(self, original: Callable | None = None):
+        self._original = original
+        self._mock_return: Any = _UNSET
+        self._mock_impl: Callable | None = None
+        self.calls: list[CallRecord] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        record = CallRecord(args=args, kwargs=kwargs)
+        self.calls.append(record)
+
+        # モックの戻り値が設定されている場合
+        if self._mock_return is not _UNSET:
+            record.return_value = self._mock_return
+            return self._mock_return
+
+        # 差し替えた実装がある場合
+        impl = self._mock_impl or self._original
+        if impl:
+            try:
+                result = impl(*args, **kwargs)
+                record.return_value = result
+                return result
+            except Exception as exc:
+                record.exception = exc
+                raise
+
+        return None
+
+    @property
+    def call_count(self) -> int:
+        return len(self.calls)
+
+    def mock_return_value(self, value: Any) -> "Spy":
+        self._mock_return = value
+        return self
+
+    def mock_implementation(self, fn: Callable) -> "Spy":
+        self._mock_impl = fn
+        self._mock_return = _UNSET
+        return self
+
+    def reset(self) -> None:
+        self._mock_impl = None
+        self._mock_return = _UNSET
+        self.calls.clear()
+```
+
+### スパイを使ったテスト
+
+```python
+def test_spy_records_calls():
+    add = Spy(lambda a, b: a + b)
+
+    add(1, 2)
+    add(3, 4)
+
+    assert add.call_count == 2
+    assert add.calls[0].args == (1, 2)
+    assert add.calls[0].return_value == 3
+
+def test_spy_mock_return():
+    fetch_user = Spy()
+    fetch_user.mock_return_value({"name": "Alice"})
+
+    user = fetch_user()
+    assert user["name"] == "Alice"
+```
+
+### オブジェクトのメソッドをパッチする
+
+Python では `unittest.mock.patch` が有名ですが、その仕組みは**属性の差し替え**です。以下の `Patch` クラスは Python のコンテキストマネージャ（`with` 文）を使っています。`__enter__` で属性を差し替え、`__exit__` で元に戻すことで、**復元忘れを構造的に防ぐ**設計です。これはテストの独立性を保つ上で極めて重要です。
+
+```python
+# mini_test/patch.py
+from typing import Any
+
+
+class Patch:
+    """オブジェクトの属性を一時的に差し替えるコンテキストマネージャ"""
+
+    def __init__(self, obj: Any, attr: str, replacement: Any = None):
+        self.obj = obj
+        self.attr = attr
+        self.replacement = replacement or Spy()
+        self._original: Any = None
+
+    def __enter__(self) -> Any:
+        # 元の属性を保存して差し替え
+        self._original = getattr(self.obj, self.attr)
+        setattr(self.obj, self.attr, self.replacement)
+        return self.replacement
+
+    def __exit__(self, *exc_info: Any) -> None:
+        # 元の属性を復元
+        setattr(self.obj, self.attr, self._original)
+```
+
+```python
+# 使用例
+import os
+
+def test_patch_environ():
+    with Patch(os, "getcwd", Spy(lambda: "/fake/path")) as mock_cwd:
+        result = os.getcwd()
+        assert result == "/fake/path"
+        assert mock_cwd.call_count == 1
+
+    # with ブロックを抜けると自動的に復元
+    assert os.getcwd() != "/fake/path"
+```
+
+---
+
+## Phase 6: レポーター — 結果を人間に伝える
+
+テストの実行結果を**人間が読みやすい形式で出力する**のがレポーターです。
+
+### レポーターインターフェース
+
+レポーターを抽象クラス（インターフェース）として定義するのは、**ストラテジーパターン**の典型的な適用です。同じテスト実行結果を、コンソール出力、JSON ファイル、JUnit XML、HTML など、様々な形式で出力できるようになります。ランナー側はレポーターの具体的な実装を知らず、インターフェースだけに依存します。
+
+```python
+# mini_test/reporter.py
+from abc import ABC, abstractmethod
+
+
+class Reporter(ABC):
+    @abstractmethod
+    def on_suite_start(self, suite: TestSuite) -> None: ...
+
+    @abstractmethod
+    def on_test_result(self, result: TestResult) -> None: ...
+
+    @abstractmethod
+    def on_suite_end(self, suite: TestSuite, results: list[TestResult]) -> None: ...
+
+    @abstractmethod
+    def on_run_end(self, all_results: list[TestResult]) -> None: ...
+```
+
+### コンソールレポーターの実装
+
+コンソールレポーターでは ANSI エスケープコード（`\033[32m` が緑、`\033[31m` が赤、`\033[0m` がリセット）を使ってテスト結果を色分けします。成功は緑の `✓`、失敗は赤の `✗` という視覚的なフィードバックにより、大量のテスト結果も瞬時に把握できます。
+
+```python
+# mini_test/console_reporter.py
+import time
+
+
+class ConsoleReporter(Reporter):
+    def __init__(self):
+        self._start_time = 0.0
+
+    def on_suite_start(self, suite: TestSuite) -> None:
+        print(f"\n  {suite.name}")
+        self._start_time = time.perf_counter()
+
+    def on_test_result(self, result: TestResult) -> None:
+        icon = "✓" if result.status == "passed" else "✗"
+        color = "\033[32m" if result.status == "passed" else "\033[31m"
+        reset = "\033[0m"
+        duration = f"{result.duration * 1000:.1f}"
+
+        print(f"    {color}{icon}{reset} {result.name} ({duration}ms)")
+
+        if result.error:
+            print(f"      {result.error}")
+
+    def on_suite_end(self, suite: TestSuite, results: list[TestResult]) -> None:
+        pass  # スイート単位のサマリは省略
+
+    def on_run_end(self, all_results: list[TestResult]) -> None:
+        passed = sum(1 for r in all_results if r.status == "passed")
+        failed = sum(1 for r in all_results if r.status == "failed")
+        total = len(all_results)
+        duration = (time.perf_counter() - self._start_time) * 1000
+
+        print("\n" + "─" * 40)
+        if failed > 0:
+            print(f"\033[31m  Tests: {passed} passed, {failed} failed, {total} total\033[0m")
+        else:
+            print(f"\033[32m  Tests: {passed} passed, {total} total\033[0m")
+        print(f"  Time:  {duration:.0f}ms")
+```
+
+### レポーターを組み込んだランナー
+
+```python
+# mini_test/runner.py（レポーター統合版）
+
+def run(suites: list[TestSuite], reporter: Reporter) -> list[TestResult]:
+    all_results: list[TestResult] = []
+
+    for suite in suites:
+        reporter.on_suite_start(suite)
+        results = run_suite(suite)
+
+        for result in results:
+            reporter.on_test_result(result)
+
+        reporter.on_suite_end(suite, results)
+        all_results.extend(results)
+
+    reporter.on_run_end(all_results)
+    return all_results
+```
+
+---
+
+## Phase 7: すべてを統合する — CLI エントリーポイント
+
+最後に、すべてのフェーズを統合した CLI エントリーポイントを作ります。ここで特に重要なのが **終了コード**の設計です。`sys.exit(1 if failed else 0)` により、CI サーバー（GitHub Actions, Jenkins, CircleCI など）は終了コードだけでテストの成否を判定できます。これは Unix の「終了コード 0 = 成功、非 0 = 失敗」という規約に従っており、あらゆるテストフレームワークがこの規約を守っています。
+
+```python
+# mini_test/cli.py
+import sys
+from mini_test.discovery import discover_test_files
+from mini_test.collector import collect_from_file
+from mini_test.runner import run
+from mini_test.console_reporter import ConsoleReporter
+
+
+def main() -> None:
+    # Phase 1: ディスカバリ
+    files = discover_test_files()
+    print(f"Found {len(files)} test file(s)\n")
+
+    # Phase 2: 収集
+    suites = [collect_from_file(f) for f in files]
+
+    # Phase 3–6: 実行 + レポート
+    reporter = ConsoleReporter()
+    results = run(suites, reporter)
+
+    # 終了コード
+    failed = any(r.status == "failed" for r in results)
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### 実行結果
+
+```text
+$ python -m mini_test
+
+Found 2 test file(s)
+
+  test_math
+    ✓ test_addition (0.3ms)
+    ✓ test_division_by_zero (0.1ms)
+
+  test_string
+    ✓ test_trim (0.2ms)
+    ✗ test_upper (0.4ms)
+      AssertionError: Expected 'HELLO', got 'Hello'
+
+────────────────────────────────────────
+  Tests: 3 passed, 1 failed, 4 total
+  Time:  12ms
+```
+
+---
+
+## 実際のフレームワークとの比較
+
+ここまでで、テストフレームワークのコア機能を一通り実装しました。実際のフレームワークは、このコアの上にさらに高度な機能を積み重ねています。テストの並列化による実行時間の短縮、スナップショットによる回帰検知、コードカバレッジによるテストの漏れ発見、ウォッチモードによる開発体験の向上など、それぞれが個別の設計課題を持っています。
+
+### テスト並列化
+
+pytest-xdist は `execnet` を使ってワーカープロセスを生成・管理し、テストファイルを並列実行します。
+
+```text
+並列実行のアーキテクチャ:
+  メインプロセス（コーディネーター）
+    │
+    ├── Worker 1 (subprocess): test_math.py
+    ├── Worker 2 (subprocess): test_string.py
+    ├── Worker 3 (subprocess): test_api.py
+    └── Worker 4 (subprocess): test_ui.py
+
+  各ワーカーは独立したプロセスで、
+  グローバル状態の干渉がない。
+  結果はプロセス間通信でメインプロセスに集約される。
+```
+
+```python
+# 並列実行の概念的な実装
+from multiprocessing import Pool
+from pathlib import Path
+
+def run_file(path: str) -> list[TestResult]:
+    suite = collect_from_file(Path(path))
+    return run_suite(suite)
+
+def run_in_parallel(files: list[Path], num_workers: int = 4) -> list[TestResult]:
+    with Pool(num_workers) as pool:
+        nested = pool.map(run_file, [str(f) for f in files])
+    return [r for results in nested for r in results]  # flatten
+```
+
+### スナップショットテスト
+
+スナップショットテストは、出力を**ファイルに保存し、次回実行時に比較する**仕組みです（pytest では syrupy プラグイン等）。UI コンポーネントや API レスポンスのように、出力が複雑で「正しい値」を手で書くのが大変なケースで特に有効です。初回実行で「基準スナップショット」を保存し、それ以降は差分だけを検出することで、意図しない回帰を効率的に見つけられます。
+
+```python
+# 概念的な実装
+import json
+from pathlib import Path
+from typing import Any
+
+def assert_matches_snapshot(actual: Any, snapshot_path: Path) -> None:
+    serialized = json.dumps(actual, indent=2, sort_keys=True, default=str)
+
+    if snapshot_path.exists():
+        stored = snapshot_path.read_text()
+        if serialized != stored:
+            raise AssertionError(
+                f"Snapshot mismatch. Run with --update to update.\n"
+                f"  Expected: {stored[:100]}...\n"
+                f"  Got:      {serialized[:100]}..."
+            )
+    else:
+        # 初回実行時: スナップショットを保存
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_path.write_text(serialized)
+```
+
+### コードカバレッジ
+
+Python のカバレッジ計測は、**`sys.settrace` によるトレースフック**または **`sys.monitoring`（Python 3.12+）** で実現されます。
+
+```text
+coverage.py の仕組み:
+  1. sys.settrace() でトレースフックを設定
+  2. Python インタプリタが各行の実行時にフックを呼ぶ
+  3. フックが実行された行番号を set に記録
+  4. テスト終了後、ソースファイルの全行数と照合してカバレッジを計算
+
+Python 3.12+ の sys.monitoring:
+  1. sys.monitoring はよりオーバーヘッドの少ない新しい API
+  2. LINE イベントを監視して行の実行を記録
+  3. coverage.py 7.x がこの新 API に対応
+```
+
+### ウォッチモード
+
+ファイルの変更を検知して自動で再実行するウォッチモードは、`watchdog` ライブラリ等を使ったファイルシステム監視で実現されます（pytest-watch）。
+
+```python
+# 概念的な実装
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class TestRerunHandler(FileSystemEventHandler):
+    def on_modified(self, event):
+        if event.src_path.endswith(".py"):
+            print(f"\nFile changed: {event.src_path}")
+            run_tests()
+
+def watch_mode(root_dir: str) -> None:
+    print("Watching for changes...")
+    observer = Observer()
+    observer.schedule(TestRerunHandler(), root_dir, recursive=True)
+    observer.start()
+    observer.join()
+```
+
+---
+
+## フレームワーク間の設計比較
+
+### pytest vs unittest
+
+```text
+pytest:
+  - ディスカバリ: ファイル名 + 関数名の規約（test_ プレフィックス）
+  - アサーション: 組み込み assert のリライティング（AST 変換）
+  - フィクスチャ: デコレータ + 引数名による依存性注入
+  - プラグイン: pluggy ベースのプラグインシステム
+  - 並列化: pytest-xdist（execnet）
+
+unittest:
+  - ディスカバリ: TestCase サブクラスの test* メソッド
+  - アサーション: assertEqual, assertTrue 等のメソッド群
+  - フィクスチャ: setUp / tearDown メソッド
+  - プラグイン: TestRunner のカスタマイズ
+  - 並列化: 標準では未サポート
+
+最大の違い:
+  pytest は「assert 文をそのまま使える」仕組みを
+  AST リライトで実現した。これにより
+  unittest の self.assertEqual(a, b) のような
+  冗長なメソッド呼び出しが不要になった。
+```
+
+### Go の testing パッケージ
+
+Go は言語標準にテスト機構を組み込んでいる稀有な例です。
+
+```go
+// Go: テストは関数シグネチャの規約で識別される
+func TestAdd(t *testing.T) {
+    result := Add(1, 1)
+    if result != 2 {
+        t.Errorf("Add(1, 1) = %d, want 2", result)
+    }
+}
+
+// サブテスト — describe/it に近い階層化
+func TestMath(t *testing.T) {
+    t.Run("addition", func(t *testing.T) {
+        if Add(1, 1) != 2 {
+            t.Fatal("1+1 should be 2")
+        }
+    })
+    t.Run("division by zero", func(t *testing.T) {
+        defer func() {
+            if r := recover(); r == nil {
+                t.Fatal("expected panic")
+            }
+        }()
+        Divide(1, 0)
+    })
+}
+```
+
+```text
+Go testing の特徴:
+  - テストディスカバリ: go test がコンパイル時に Test* 関数を収集
+  - アサーション: 標準ライブラリにはない（if + t.Error が基本）
+  - 並列化: t.Parallel() で明示的にオプトイン
+  - ベンチマーク: Benchmark* 関数で統合
+  - ファジング: Fuzz* 関数で統合（Go 1.18+）
+```
+
+### Jest / Vitest
+
+JavaScript / TypeScript エコシステムの主要なテストフレームワークです。
+
+```text
+Jest:
+  - ディスカバリ: *.test.js / *.spec.js のファイル名パターン
+  - 収集: describe/it のコールバック登録パターン
+  - アサーション: expect().toBe() の Fluent API
+  - モック: jest.mock() による自動モジュールモック
+  - 並列化: child_process（fork）がデフォルト
+
+Vitest:
+  - Jest 互換の API だが、Vite のエコシステムを活用
+  - ESM ネイティブ対応
+  - tinypool（worker_threads ベース）で並列化
+```
+
+### pytest のフィクスチャ — 依存性注入の傑作
+
+pytest のフィクスチャシステムは、テストフレームワーク設計の中でも特に優れた仕組みです。テスト関数の**引数名**がそのままフィクスチャの名前とマッチングされ、自動的に依存性が注入されます。これは、Web フレームワークの DI コンテナに似たアイデアですが、テストに特化した形で実現されています。`yield` を使ったフィクスチャでは、`yield` より前がセットアップ、後がテアダウンになるため、リソースの生成と破棄を一箇所にまとめられます。
+
+```python
+# pytest: フィクスチャは依存性注入
+import pytest
+
+@pytest.fixture
+def database():
+    """テスト用DBの作成と破棄"""
+    db = create_test_db()
+    yield db        # ← テストに db を注入
+    db.cleanup()    # ← テスト後のクリーンアップ
+
+@pytest.fixture
+def user(database):
+    """database フィクスチャに依存するフィクスチャ"""
+    return database.create_user(name="Alice")
+
+def test_insert(database):
+    # 引数名 "database" がフィクスチャ名と一致 → 自動注入
+    database.insert({"key": "value"})
+    assert database.get("key") == "value"
+
+def test_user_name(user):
+    # user フィクスチャが自動注入 → 内部で database も自動解決
+    assert user.name == "Alice"
+
+# パラメトリックテスト
+@pytest.mark.parametrize("input_val,expected", [
+    (1, 1),
+    (2, 4),
+    (3, 9),
+])
+def test_square(input_val, expected):
+    assert input_val ** 2 == expected
+```
+
+```text
+pytest のフィクスチャ解決:
+  1. テスト関数の引数名を inspect.signature で取得
+  2. 引数名とフィクスチャ名のマッチング
+  3. 依存グラフの構築（フィクスチャが他のフィクスチャに依存可能）
+  4. トポロジカルソートで実行順序を決定
+  5. スコープ（function / class / module / session）に応じたキャッシュ
+```
+
+---
+
+## まとめ
+
+テストフレームワークは、一見シンプルに見えて、その内部は精巧な設計の集合体です。
+
+| フェーズ | 仕組み | 設計パターン |
+|---------|--------|-------------|
+| ディスカバリ | glob パターンでファイル探索 | 規約による設定 |
+| 収集 | モジュールインポート + inspect | リフレクション |
+| ライフサイクル | setup/teardown フック | フック/コールバック |
+| 実行 | try-except でテスト隔離 | 防御的プログラミング |
+| アサーション | assert が例外を raise | AST リライティング |
+| モック | 関数ラップ + 呼び出し記録 | プロキシパターン |
+| レポート | Reporter 抽象クラス | ストラテジーパターン |
+| 並列化 | execnet（プロセス並列） | メッセージパッシング |
+
+テストを書くときに「裏で何が起きているか」を理解していると、テストの設計判断がより的確になります。次にテストが赤くなったとき、`assert` 文が `raise AssertionError` し、ランナーの `try-except` がキャッチしている様子を思い浮かべてみてください。
