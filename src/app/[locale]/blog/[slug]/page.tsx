@@ -73,6 +73,15 @@ import {
   OOPVisualizer,
   ParadigmComparison,
   TestRunnerVisualizer,
+  GraphTraversalVisualizer,
+  DijkstraVisualizer,
+  GraphRepresentationDiagram,
+  TraversalComparisonTable,
+  TraversalApplicationsDiagram,
+  GraphComplexityTable,
+  RandomWalk1DVisualizer,
+  RandomWalkGraphVisualizer,
+  PageRankVisualizer,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -145,6 +154,15 @@ function getMdxComponents(locale: string) {
     OOPVisualizer: () => <OOPVisualizer locale={locale} />,
     ParadigmComparison: () => <ParadigmComparison locale={locale} />,
     TestRunnerVisualizer: () => <TestRunnerVisualizer locale={locale} />,
+    GraphTraversalVisualizer: () => <GraphTraversalVisualizer locale={locale} />,
+    DijkstraVisualizer: () => <DijkstraVisualizer locale={locale} />,
+    GraphRepresentationDiagram: () => <GraphRepresentationDiagram locale={locale} />,
+    TraversalComparisonTable: () => <TraversalComparisonTable locale={locale} />,
+    TraversalApplicationsDiagram: () => <TraversalApplicationsDiagram locale={locale} />,
+    GraphComplexityTable: () => <GraphComplexityTable locale={locale} />,
+    RandomWalk1DVisualizer: () => <RandomWalk1DVisualizer locale={locale} />,
+    RandomWalkGraphVisualizer: () => <RandomWalkGraphVisualizer locale={locale} />,
+    PageRankVisualizer: () => <PageRankVisualizer locale={locale} />,
   };
 }
 

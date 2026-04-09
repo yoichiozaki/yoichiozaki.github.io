@@ -79,3 +79,14 @@ export { LambdaCalculusVisualizer } from "./LambdaCalculusVisualizer";
 export { OOPVisualizer } from "./OOPVisualizer";
 export { ParadigmComparison } from "./ParadigmComparison";
 export { TestRunnerVisualizer } from "./TestRunnerVisualizer";
+export { GraphTraversalVisualizer } from "./GraphTraversalVisualizer";
+export { DijkstraVisualizer } from "./DijkstraVisualizer";
+export {
+  GraphRepresentationDiagram,
+  TraversalComparisonTable,
+  TraversalApplicationsDiagram,
+  GraphComplexityTable,
+} from "./GraphDiagrams";
+export { RandomWalk1DVisualizer } from "./RandomWalk1DVisualizer";
+export { RandomWalkGraphVisualizer } from "./RandomWalkGraphVisualizer";
+export { PageRankVisualizer } from "./PageRankVisualizer";
