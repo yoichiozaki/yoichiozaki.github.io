@@ -82,6 +82,11 @@ import {
   RandomWalk1DVisualizer,
   RandomWalkGraphVisualizer,
   PageRankVisualizer,
+  MapReduceVisualizer,
+  MapReduceArchitecture,
+  FaultToleranceDiagram,
+  MapReduceComparison,
+  MapReduceTimeline,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -163,6 +168,11 @@ function getMdxComponents(locale: string) {
     RandomWalk1DVisualizer: () => <RandomWalk1DVisualizer locale={locale} />,
     RandomWalkGraphVisualizer: () => <RandomWalkGraphVisualizer locale={locale} />,
     PageRankVisualizer: () => <PageRankVisualizer locale={locale} />,
+    MapReduceVisualizer: () => <MapReduceVisualizer locale={locale} />,
+    MapReduceArchitecture: () => <MapReduceArchitecture locale={locale} />,
+    FaultToleranceDiagram: () => <FaultToleranceDiagram locale={locale} />,
+    MapReduceComparison: () => <MapReduceComparison locale={locale} />,
+    MapReduceTimeline: () => <MapReduceTimeline locale={locale} />,
   };
 }
 

@@ -90,3 +90,10 @@ export {
 export { RandomWalk1DVisualizer } from "./RandomWalk1DVisualizer";
 export { RandomWalkGraphVisualizer } from "./RandomWalkGraphVisualizer";
 export { PageRankVisualizer } from "./PageRankVisualizer";
+export { MapReduceVisualizer } from "./MapReduceVisualizer";
+export {
+  MapReduceArchitecture,
+  FaultToleranceDiagram,
+  MapReduceComparison,
+  MapReduceTimeline,
+} from "./MapReduceDiagrams";
