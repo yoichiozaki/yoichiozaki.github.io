@@ -1,0 +1,1168 @@
+---
+title: "バイトコードVMの仕組み — インタプリタからJITコンパイラまで"
+date: "2026-04-12"
+description: "PythonやJavaのようなバイトコードVM（仮想マシン）の内部構造を徹底解説。ソースコードからバイトコードへのコンパイル、スタックマシンとレジスタマシンの違い、インタプリタの実装パターン、そしてJITコンパイラによる最適化まで、VMの全体像を丁寧に紐解きます。"
+tags: ["VM", "Python", "Java", "JIT", "Runtime"]
+---
+
+プログラミング言語の実行方式を「コンパイル言語」と「インタプリタ言語」に二分する説明をよく見かけます。しかし、現代の主要言語（Python、Java、C#、JavaScript、Ruby、Lua など）の多くは、その中間に位置する<strong>バイトコードVM（仮想マシン）</strong>方式を採用しています。
+
+この記事では、バイトコード VM の全体像を徹底的に解説します。ソースコードがどのようにバイトコードへ変換されるのか、VM がどのようにバイトコードを実行するのか、そしてJITコンパイラがどのように実行時の最適化を行うのかまで、一歩ずつ丁寧に掘り下げていきます。
+
+## 実行方式の分類 — コンパイル・インタプリタ・VM
+
+まず、プログラムの実行方式を整理しましょう。
+
+### ネイティブコンパイル
+
+C、C++、Rust、Go などの言語は、ソースコードを直接<strong>機械語（ネイティブコード）</strong>にコンパイルします。生成された実行ファイルはCPUが直接実行するため、実行速度は最も高速です。
+
+```text
+ソースコード (.c) → コンパイラ → 機械語 (.exe) → CPU が直接実行
+```
+
+利点は高いパフォーマンスですが、コンパイルしたプラットフォーム専用のバイナリが生成されるため、異なるOS・アーキテクチャでは再コンパイルが必要です。
+
+### 純粋インタプリタ
+
+初期の BASIC や Shell スクリプトのように、ソースコードを<strong>1行ずつ読み取りながら逐次実行</strong>する方式です。
+
+```text
+ソースコード → インタプリタがソースを1行ずつ解析・実行
+```
+
+プラットフォームに依存せず手軽に実行できますが、実行のたびにソースコードの解析（パース）が走るため、実行速度は最も遅くなります。
+
+### バイトコードVM方式
+
+Python、Java、C# などが採用する方式です。ソースコードをまず中間表現（<strong>バイトコード</strong>）にコンパイルし、そのバイトコードを<strong>仮想マシン（VM）</strong>が実行します。
+
+```text
+ソースコード → コンパイラ → バイトコード → VM が実行
+```
+
+この方式には以下の利点があります：
+
+- <strong>ポータビリティ</strong>: バイトコードはプラットフォームに依存しない。VM さえあればどこでも動く（Java の "Write once, run anywhere"）
+- <strong>純粋インタプリタより高速</strong>: ソースコードの解析は一度だけ。バイトコードはコンパクトで効率的なフォーマット
+- <strong>最適化の余地</strong>: JIT コンパイラを導入すれば、実行時にネイティブコード並みの速度を実現できる
+
+## コンパイルパイプライン — ソースコードからバイトコードへ
+
+バイトコードを生成するまでの流れを、Python を例に見ていきましょう。
+
+### 字句解析（Lexing / Tokenization）
+
+ソースコードの文字列をトークン（字句）の列に変換します。
+
+```python
+# ソースコード
+x = 1 + 2 * 3
+```
+
+```text
+トークン列:
+  NAME("x") → EQUAL("=") → NUMBER("1") → PLUS("+") 
+  → NUMBER("2") → STAR("*") → NUMBER("3") → NEWLINE
+```
+
+字句解析器（レキサー）は、空白やコメントをスキップしつつ、ソースコードを意味のある最小単位に分割します。
+
+### 構文解析（Parsing）
+
+トークン列を<strong>抽象構文木（AST: Abstract Syntax Tree）</strong>に変換します。AST はプログラムの構造を木構造で表現したものです。
+
+```text
+       Assign
+       /    \
+    Name   BinOp(+)
+     "x"   /      \
+        Num(1)   BinOp(*)
+                 /      \
+              Num(2)   Num(3)
+```
+
+構文解析器（パーサー）は、言語の文法規則に従ってトークン列を解析し、演算子の優先順位（`*` は `+` より先に計算）などを正しく反映した木構造を構築します。
+
+### 意味解析（Semantic Analysis）
+
+AST に対してさらなるチェックと情報の付加を行います。例えば：
+
+- 変数のスコープ解決（ローカル変数か、グローバル変数か、クロージャのキャプチャか）
+- 型チェック（静的型付け言語の場合）
+- 定数畳み込みなどの簡単な最適化
+
+Python の場合はシンボルテーブルの構築がこの段階で行われ、各変数がどのスコープに属するかが決定されます。
+
+### バイトコード生成（Code Generation）
+
+AST（またはその中間表現）を走査して、バイトコード命令列を生成します。
+
+```python
+# Python で実際のバイトコードを確認する
+import dis
+
+def example():
+    x = 1 + 2 * 3
+
+dis.dis(example)
+```
+
+```text
+  2           RESUME                   0
+
+  3           LOAD_CONST               1 (7)
+              STORE_FAST               0 (x)
+              RETURN_CONST             0 (None)
+```
+
+注目すべき点がいくつかあります：
+
+1. <strong>定数畳み込み</strong>: `1 + 2 * 3` は `7` に事前計算されています。CPython のコンパイラが AST の段階で定数式を評価しているためです
+2. <strong>LOAD_CONST / STORE_FAST</strong>: バイトコードはスタックマシンモデルに基づいています（後述）
+3. <strong>RETURN_CONST</strong>: Python の関数は明示的な `return` がなくても `None` を返します
+
+もう少し複雑な例を見てみましょう。
+
+```python
+def loop_example():
+    total = 0
+    for i in range(10):
+        total += i
+    return total
+
+dis.dis(loop_example)
+```
+
+```text
+  2           RESUME                   0
+
+  3           LOAD_CONST               1 (0)
+              STORE_FAST               0 (total)
+
+  4           LOAD_GLOBAL              1 (range)
+              LOAD_CONST               2 (10)
+              CALL                     1
+              GET_ITER
+        >>    FOR_ITER                 7 (to 36)
+              STORE_FAST               1 (i)
+
+  5           LOAD_FAST                0 (total)
+              LOAD_FAST                1 (i)
+              BINARY_OP               13 (+=)
+              STORE_FAST               0 (total)
+              JUMP_BACKWARD            9 (to 18)
+
+        >>    END_FOR
+              POP_TOP
+
+  6           LOAD_FAST                0 (total)
+              RETURN_VALUE
+```
+
+`for` ループが `GET_ITER` → `FOR_ITER` → `JUMP_BACKWARD` というバイトコードパターンに変換されていることがわかります。これが VM が実際に実行する命令列です。
+
+以下のインタラクティブデモで、バイトコードが実際にどのように実行されるかを 1 命令ずつステップ実行できます。命令ポインタ（IP）、オペランドスタック、ローカル変数の変化を観察してみてください。
+
+<BytecodeExecutionVisualizer />
+
+## バイトコードの構造
+
+バイトコードは基本的に<strong>命令（オペコード）</strong>と<strong>オペランド</strong>のペアが並んだバイト列です。
+
+### オペコードとオペランド
+
+```text
+バイトコード命令:
+  [opcode] [operand]
+  1バイト   0〜数バイト
+
+例（CPython 3.12+、基本命令幅は1ワード = 2バイト、一部はインラインキャッシュ付き）:
+  LOAD_CONST    1     → 定数テーブルのインデックス1の値をスタックにプッシュ
+  STORE_FAST    0     → スタックトップの値をローカル変数スロット0に格納
+  BINARY_OP     0     → スタックから2つの値をポップし、加算してプッシュ
+```
+
+CPython 3.6 以降ではすべての命令が<strong>ワードコード</strong>（2バイト = オペコード1バイト + オペランド1バイト）形式です。さらに CPython 3.12 以降は一部の命令が4バイトに拡張されています。オペランドが 255 を超える場合は `EXTENDED_ARG` 命令を前に置いてオペランドを拡張します。
+
+### コードオブジェクト
+
+Python では、コンパイルされたバイトコードは<strong>コードオブジェクト（`code` object）</strong>として格納されます。
+
+```python
+def add(a, b):
+    return a + b
+
+code = add.__code__
+print(code.co_code)        # 生のバイト列
+print(code.co_consts)      # 定数テーブル: (None,)
+print(code.co_varnames)    # ローカル変数名: ('a', 'b')
+print(code.co_stacksize)   # 必要なスタックの深さ: 2
+print(code.co_nlocals)     # ローカル変数の数: 2
+```
+
+コードオブジェクトには命令列だけでなく、定数テーブル、変数名テーブル、スタックサイズ情報など、VM が実行に必要なすべてのメタデータが含まれています。
+
+### `.pyc` ファイル — バイトコードのキャッシュ
+
+Python はモジュールをインポートする際、コンパイル済みのバイトコードを `.pyc` ファイルとしてキャッシュします。
+
+```text
+__pycache__/
+  module.cpython-312.pyc
+```
+
+`.pyc` ファイルのフォーマット：
+
+| オフセット | サイズ | 内容 |
+|---|---|---|
+| 0 | 4バイト | マジックナンバー（Python バージョンを識別） |
+| 4 | 4バイト | ビットフィールド（無効化モードのフラグ） |
+| 8 | 8バイト | ソースファイルのタイムスタンプ or ハッシュ |
+| 16 | 以降 | マーシャルされたコードオブジェクト |
+
+次回の `import` 時に `.pyc` が最新であれば、ソースコードの再コンパイルをスキップしてバイトコードを直接ロードします。これにより起動時間が短縮されます。
+
+## スタックマシンとレジスタマシン
+
+VM のアーキテクチャには大きく分けて<strong>スタックマシン</strong>と<strong>レジスタマシン</strong>の2種類があります。
+
+### スタックマシン
+
+CPython、JVM、CLR が採用するモデルです。演算はすべて<strong>オペランドスタック</strong>を通じて行われます。
+
+```text
+式: a + b * c のバイトコード（スタックマシン）
+
+命令             スタック状態（左がボトム）
+────────────────────────────────────────
+LOAD a           [a]
+LOAD b           [a, b]
+LOAD c           [a, b, c]
+MUL              [a, (b*c)]
+ADD              [(a+b*c)]
+```
+
+<strong>長所</strong>:
+- 命令がコンパクト（オペランドにレジスタ番号を指定する必要がない）
+- コード生成が容易（AST の後置走査で直接生成できる）
+- 命令セットがシンプルで VM の実装が簡単
+
+<strong>短所</strong>:
+- 同じ計算を行うのに命令数が多くなる（LOAD/STORE が頻出）
+- スタックの読み書きがメモリアクセスになりオーバーヘッドが生じる
+
+### レジスタマシン
+
+Lua（5.0以降）、Dalvik VM（Android）、一部の JS エンジンが採用するモデルです。仮想レジスタの配列を使って演算を行います。
+
+```text
+式: a + b * c のバイトコード（レジスタマシン）
+
+命令                      レジスタ状態
+────────────────────────────────────────
+MUL  R1, R_b, R_c         R1 = b * c
+ADD  R0, R_a, R1           R0 = a + b * c
+```
+
+<strong>長所</strong>:
+- 命令数が少ない（1命令で複数のオペランドを指定できる）
+- データの移動が少なく、インタプリタのディスパッチオーバーヘッドが減る
+
+<strong>短所</strong>:
+- 命令が大きい（レジスタ番号分のビットがオペランドに必要）
+- コード生成が複雑（レジスタ割り当てが必要）
+
+### 実際のVMの選択
+
+| VM | アーキテクチャ | 言語 |
+|---|---|---|
+| CPython | スタックマシン | Python |
+| JVM | スタックマシン | Java, Kotlin, Scala, Clojure |
+| CLR | スタックマシン | C#, F#, VB.NET |
+| Lua VM | レジスタマシン | Lua |
+| Dalvik | レジスタマシン | Java（Android、Android 5.0 以降は ART に移行） |
+| BEAM | レジスタマシン（ハイブリッド） | Erlang, Elixir |
+
+研究では、レジスタマシンはスタックマシンに比べて命令ディスパッチ回数を 47% 削減できるという報告があります（Yunhe Shi et al., "Virtual Machine Showdown: Stack Versus Registers", VEE 2005 / ACM TACO 2008）。ただし、バイトコードのサイズはレジスタマシンの方が約 26% 大きくなります。
+
+以下のデモで、同じ式 `a + b × c` をスタックマシンとレジスタマシンで同時に実行し、命令数の違いを体感できます。
+
+<StackVsRegisterComparison />
+
+## インタプリタの実装パターン
+
+バイトコードを実行するインタプリタ（VM のコア部分）には、いくつかの実装パターンがあります。
+
+### Switch-based Interpreter（スイッチディスパッチ）
+
+最もシンプルな実装です。巨大な `switch` 文で各オペコードを処理します。
+
+```c
+// 簡略化した VM ループ（C 言語）
+void eval(uint8_t *bytecode, Value *stack) {
+    uint8_t *ip = bytecode;   // Instruction Pointer
+    Value *sp = stack;         // Stack Pointer
+
+    for (;;) {
+        uint8_t opcode = *ip++;
+        switch (opcode) {
+            case OP_LOAD_CONST: {
+                uint8_t idx = *ip++;
+                *sp++ = constants[idx];
+                break;
+            }
+            case OP_ADD: {
+                Value b = *--sp;
+                Value a = *--sp;
+                *sp++ = value_add(a, b);
+                break;
+            }
+            case OP_STORE_FAST: {
+                uint8_t slot = *ip++;
+                locals[slot] = *--sp;
+                break;
+            }
+            case OP_RETURN: {
+                return;
+            }
+            // ... 数百のオペコード
+        }
+    }
+}
+```
+
+<strong>長所</strong>: 実装が単純で理解しやすい。CPython の歴史的な中核実装。
+
+<strong>短所</strong>: CPU の分岐予測が効きにくい。すべてのオペコードが同じ `switch` の分岐点を共有するため、分岐予測器は「次にどのオペコードが来るか」を予測できず、パイプラインストールが頻発します。
+
+### Direct Threaded Interpreter（ダイレクトスレッディング）
+
+GCC 拡張の<strong>計算済み goto（computed goto）</strong>を使って、各オペコードのハンドラアドレスを直接ジャンプする方式です。
+
+```c
+void eval_threaded(uint8_t *bytecode, Value *stack) {
+    // 各ハンドラのアドレステーブル
+    static void *dispatch_table[] = {
+        [OP_LOAD_CONST] = &&op_load_const,
+        [OP_ADD]        = &&op_add,
+        [OP_STORE_FAST] = &&op_store_fast,
+        [OP_RETURN]     = &&op_return,
+        // ...
+    };
+
+    uint8_t *ip = bytecode;
+    Value *sp = stack;
+
+    #define DISPATCH() goto *dispatch_table[*ip++]
+
+    DISPATCH();  // 最初の命令へジャンプ
+
+op_load_const: {
+        uint8_t idx = *ip++;
+        *sp++ = constants[idx];
+        DISPATCH();
+    }
+op_add: {
+        Value b = *--sp;
+        Value a = *--sp;
+        *sp++ = value_add(a, b);
+        DISPATCH();
+    }
+op_store_fast: {
+        uint8_t slot = *ip++;
+        locals[slot] = *--sp;
+        DISPATCH();
+    }
+op_return:
+        return;
+}
+```
+
+<strong>長所</strong>: 各ハンドラの末尾が異なる間接ジャンプになるため、CPU の分岐予測がハンドラごとに独立したエントリを持てる。switch-based に比べて<strong>15〜25%</strong>の高速化が報告されています。
+
+<strong>短所</strong>: GCC/Clang の拡張に依存（標準 C ではない）。MSVC ではサポートされていません。
+
+CPython 3.x はコンパイル時に computed goto が使えるかを検出し、使える場合はダイレクトスレッディングを採用します。
+
+### Token Threaded / Subroutine Threaded
+
+ダイレクトスレッディング以外にも、いくつかのスレッディング方式があります。
+
+- <strong>Token Threaded</strong>: バイトコード列をオペコードのインデックスのまま保持し、ディスパッチ時にテーブルを参照する。ダイレクトスレッディングよりもバイトコードがコンパクト
+- <strong>Subroutine Threaded</strong>: 各オペコードのハンドラを関数として実装し、バイトコード列を関数ポインタの配列に変換する。`call`/`ret` の命令が使われるため、CPU のリターンスタックバッファ（RSB）による分岐予測が効く
+
+### Specializing Adaptive Interpreter（特殊化適応型インタプリタ）
+
+CPython 3.11 で導入された画期的な最適化です。バイトコード命令を実行時のデータ型パターンに基づいて<strong>特殊化（specialize）</strong>します。
+
+```text
+通常の命令:       BINARY_OP  ADD
+                     ↓ 実行時に「整数 + 整数」パターンが検出される
+特殊化された命令: BINARY_OP_ADD_INT
+```
+
+仕組み：
+
+1. 各命令に<strong>適応カウンタ</strong>が付与される
+2. 命令が一定回数実行されると、VM が最近のオペランドの型パターンを分析する
+3. パターンが安定していれば、汎用命令をより効率的な<strong>特殊化命令</strong>に書き換える
+4. 予期しない型が来た場合は<strong>脱最適化（deoptimize）</strong>して汎用命令に戻す
+
+主な特殊化命令（CPython 3.12+）：
+
+| 汎用命令 | 特殊化命令 | 条件 |
+|---|---|---|
+| `LOAD_ATTR` | `LOAD_ATTR_INSTANCE_VALUE` | インスタンス属性の辞書アクセス |
+| `LOAD_ATTR` | `LOAD_ATTR_SLOT` | `__slots__` を使うクラス |
+| `LOAD_ATTR` | `LOAD_ATTR_MODULE` | モジュール属性 |
+| `BINARY_OP` | `BINARY_OP_ADD_INT` | 両オペランドが `int` |
+| `BINARY_OP` | `BINARY_OP_ADD_FLOAT` | 両オペランドが `float` |
+| `BINARY_OP` | `BINARY_OP_ADD_UNICODE` | 両オペランドが `str` |
+| `COMPARE_OP` | `COMPARE_OP_INT` | 整数同士の比較 |
+| `CALL` | `CALL_PY_EXACT_ARGS` | Python 関数への呼び出し（引数数一致） |
+| `FOR_ITER` | `FOR_ITER_LIST` | リストのイテレーション |
+| `UNPACK_SEQUENCE` | `UNPACK_SEQUENCE_TWO_TUPLE` | 2要素タプルのアンパック |
+
+この最適化により、CPython 3.11 は 3.10 に比べて平均<strong>25%</strong>の高速化を達成しました。JIT なしでインタプリタのみでここまでの改善を実現したのは画期的です。
+
+## フレームとコールスタック
+
+VM が関数呼び出しを管理するための仕組みを見ていきましょう。
+
+### フレームオブジェクト
+
+関数が呼び出されるたびに、VM は<strong>フレーム（スタックフレーム / 実行フレーム）</strong>を作成します。
+
+```text
+┌─────────────────────────────────┐
+│         フレーム (frame)         │
+├─────────────────────────────────┤
+│  コードオブジェクト (code)       │  → バイトコード命令列
+│  命令ポインタ (IP)              │  → 現在実行中の位置
+│  ローカル変数配列 (locals)      │  → [a, b, result, ...]
+│  オペランドスタック (stack)     │  → 演算用の一時的なスタック
+│  前のフレームへのリンク         │  → 呼び出し元のフレーム
+│  例外ハンドラのスタック         │  → try/except の情報
+│  ビルトイン名前空間への参照     │  → builtins
+│  グローバル名前空間への参照     │  → globals
+└─────────────────────────────────┘
+```
+
+### コールスタックの成長
+
+```python
+def outer():
+    x = 10
+    return inner(x)
+
+def inner(n):
+    return n * 2
+```
+
+```text
+実行時のコールスタック:
+
+inner(10) のフレーム  ← 現在実行中
+  code: inner.__code__
+  locals: [n=10]
+  stack: []
+──────────────────
+outer() のフレーム
+  code: outer.__code__
+  locals: [x=10]
+  stack: []
+──────────────────
+<module> のフレーム
+  code: <module>.__code__
+  locals: []
+  stack: []
+```
+
+`inner` が `return` すると、そのフレームが破棄され、制御が `outer` のフレームに戻ります。
+
+CPython では `sys.getrecursionlimit()` でフレームスタックの最大深さが制限されています（デフォルト 1000）。これはスタックオーバーフローによるセグメンテーションフォルトを防ぐための安全弁です。
+
+### フレームの最適化
+
+フレームの生成と破棄はオーバーヘッドになるため、各 VM は様々な最適化を行っています。
+
+- <strong>CPython 3.11+</strong>: インライン化されたフレーム（`_PyInterpreterFrame`）。ヒープ割り当てを避け、C のスタック上に直接フレームを配置
+- <strong>JVM</strong>: フレームはネイティブスタック上に配置。JIT コンパイラがインライン展開により関数呼び出しを完全に除去することもある
+- <strong>V8</strong>: JIT コンパイラがインライン展開によりフレームを統合し、脱最適化メタデータを含むスタックフレームレイアウトを最適化
+
+## オブジェクトの表現とタグ付き値
+
+VM は動的型付け言語の値をどのように内部表現するのでしょうか。これは VM のパフォーマンスに直結する重要なトピックです。
+
+### ボックス化（Boxing）
+
+CPython では、すべての値は<strong>PyObject</strong>構造体へのポインタとして表現されます。整数 `42` であっても、ヒープに割り当てられたオブジェクトです。
+
+```c
+// CPython の PyObject 構造体（簡略化）
+typedef struct {
+    Py_ssize_t ob_refcnt;    // 参照カウント
+    PyTypeObject *ob_type;   // 型へのポインタ
+} PyObject;
+
+// Python の整数は任意精度（多倍長）なので可変長の digit 配列を持つ
+typedef struct {
+    PyObject_VAR_HEAD            // ob_refcnt + ob_type + ob_size
+    digit ob_digit[1];           // 任意精度の桁配列（30ビット/digit）
+} PyLongObject;
+// ※CPython 3.12+ では小さな整数に対して "compact" 表現を導入し、
+//   ob_size のビットフィールドに値を格納して ob_digit を省略可能にした
+```
+
+Python の `int` は任意精度整数であり、どんなに大きな値でも表現できます。小さな整数 `42` であっても、参照カウント（8バイト）+ 型ポインタ（8バイト）+ サイズ（8バイト）+ digit 配列 + メモリアロケータのオーバーヘッド = <strong>少なくとも 28 バイト</strong>が必要です。C 言語の `int` なら 4 バイトで済むことを考えると、非常に贅沢なメモリ使用です。
+
+### NaN Boxing
+
+一部のVMでは、IEEE 754 の NaN（Not a Number）の内部表現を活用して、64ビットのダブル型の中に<strong>型タグと値を同時に格納</strong>する技法を使います。
+
+```text
+IEEE 754 double (64 bits):
+  符号(1) | 指数(11) | 仮数(52)
+
+NaN のビットパターン:
+  x | 11111111111 | 1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                     ↑ quiet NaN ビット
+
+値の格納:
+  ・浮動小数点数: そのまま IEEE 754 のビットパターンとして格納
+  ・整数、ポインタ、真偽値: NaN の仮数部にタグビット + 値を格納
+```
+
+```text
+NaN Boxing のレイアウト例:
+  [0][11111111111][1][TTT][PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP]
+                       ↑ タグ(3ビット)  ↑ ペイロード(48ビット)
+
+タグ:
+  000 = ポインタ (オブジェクト)
+  001 = 32ビット整数
+  010 = 真偽値
+  011 = nil/null
+  ...
+```
+
+<strong>LuaJIT</strong>、<strong>JavaScriptCore（Safari）</strong>、<strong>SpiderMonkey（Firefox）</strong>がこの方式を使用しています。SpiderMonkey では NaN Boxing がプライマリの値表現として全面的に採用されています。値がスタック上の 64 ビットワードに収まるため、ヒープ割り当てやポインタの間接参照が不要になり、大幅なパフォーマンス向上が得られます。
+
+### タグ付きポインタ（Tagged Pointer）
+
+64ビットアーキテクチャでは、アラインメントにより<strong>ポインタの下位数ビットが常に0</strong>になります。この空きビットを型タグとして利用する手法です。
+
+```text
+通常のポインタ（8バイトアラインメント）:
+  PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP000
+                                                                ↑ 常に 0（下位3ビット）
+
+タグ付きポインタ:
+  PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP|TTT|
+  ↑ ポインタ部分（上位61ビット）                                ↑ タグ（下位3ビット）
+```
+
+V8（Google の JavaScript エンジン）では Smi (Small Integer) と HeapObject を区別するためにタグ付きポインタを使用します：
+
+- 最下位ビットが `0` → Smi（31ビット整数を上位31ビットに格納）
+- 最下位ビットが `1` → HeapObject へのポインタ（タグビットをマスクして参照）
+
+Ruby の CRuby（MRI）でも同様の手法が使われており、Fixnum（小さな整数）はヒープ割り当てなしに表現されます。
+
+## JIT コンパイラ — 実行時のネイティブコード生成
+
+ここからが本記事の核心です。JIT（Just-In-Time）コンパイラは、プログラムの<strong>実行中に</strong>バイトコードをネイティブコード（機械語）にコンパイルし、以降はネイティブコードを直接実行することで大幅な高速化を実現します。
+
+### なぜ JIT が必要なのか
+
+インタプリタでバイトコードを実行する場合、1 つのバイトコード命令を処理するために数十〜数百のネイティブ命令が実行されます。
+
+```text
+バイトコード: BINARY_OP_ADD_INT
+
+インタプリタが実際に行う処理（概略）:
+  1. オペコードをフェッチ（メモリ読み取り）
+  2. ディスパッチテーブルからハンドラのアドレスを取得
+  3. ハンドラにジャンプ
+  4. スタックからオペランドB をポップ
+  5. スタックからオペランドA をポップ
+  6. A の型チェック（int か？）
+  7. B の型チェック（int か？）
+  8. オーバーフローチェック
+  9. 加算を実行
+  10. 結果をスタックにプッシュ
+  11. 次のオペコードに進む
+
+JIT がネイティブコードに変換した場合:
+  add rax, rbx    ← たった1命令（もしくは数命令）
+```
+
+整数の加算を例に取ると、インタプリタでは<strong>数十倍のオーバーヘッド</strong>が生じています。JIT はこのオーバーヘッドを除去します。
+
+### JIT コンパイルの基本フロー
+
+```text
+  ソースコード
+      ↓
+  バイトコードにコンパイル
+      ↓
+  インタプリタで実行開始
+      ↓
+  プロファイリング（型情報、実行頻度の収集）
+      ↓
+  ホットスポットの検出（頻繁に実行されるコード）
+      ↓
+  JIT コンパイル（バイトコード → IR → 最適化 → ネイティブコード）
+      ↓
+  ネイティブコードで実行（次回以降はインタプリタをバイパス）
+      ↓
+  仮定が崩れたら脱最適化（ネイティブコード → インタプリタに戻る）
+```
+
+### メソッドJIT vs トレーシングJIT
+
+JIT コンパイラには大きく分けて 2 つのアプローチがあります。
+
+#### メソッドJIT（Method-based JIT）
+
+関数（メソッド）単位でコンパイルする方式です。JVM（HotSpot C2）、V8、.NET の RyuJIT がこの方式を採用しています。
+
+```text
+関数 calculate() が1000回呼ばれた
+  → 「ホットメソッド」と判定
+  → 関数全体をネイティブコードにコンパイル
+  → 次回以降はネイティブコードを実行
+```
+
+<strong>長所</strong>: コンパイル単位が明確で最適化しやすい。インライン展開との相性が良い。
+<strong>短所</strong>: 大きな関数をコンパイルすると時間がかかる。関数内の一部しかホットでなくてもまとめてコンパイルされる。
+
+#### トレーシングJIT（Trace-based JIT）
+
+実行パスを<strong>トレース（追跡）</strong>し、実際に実行されたバイトコード列をコンパイルする方式です。LuaJIT、かつての Mozilla TraceMonkey がこの方式を採用していました。
+
+```text
+ループの実行パスを記録:
+  LOAD x → LOAD y → ADD → COMPARE → BRANCH(true) → STORE → JUMP_BACK
+
+この「トレース」をネイティブコードにコンパイル:
+  ・分岐は常に true と仮定（ガード命令で検証）
+  ・型は記録時の型を仮定（ガード命令で検証）
+  ・ガードが失敗したらインタプリタに戻る
+```
+
+<strong>長所</strong>: ループの最適化に非常に強い。実際の実行パスのみをコンパイルするため、デッドコードが含まれない。関数境界を超えたインライン化が自然に行われる。
+<strong>短所</strong>: 複雑な分岐パターンに弱い（ガードの失敗による脱最適化が頻発する）。トレースの記録にオーバーヘッドがある。
+
+### 型特殊化（Type Specialization）
+
+動的型付け言語の JIT において最も重要な最適化が<strong>型特殊化</strong>です。
+
+```python
+def add(a, b):
+    return a + b
+```
+
+この関数は `int`、`float`、`str`、`list` など任意の型の引数を受け取れますが、プロファイリングにより「この関数は常に `int` で呼ばれている」という情報が得られれば、JIT は以下のような特殊化を行えます：
+
+```text
+汎用版（インタプリタ）:
+  1. a の型を取得
+  2. b の型を取得
+  3. 型に応じた __add__ メソッドを検索
+  4. __add__ を呼び出し
+  5. 結果をボックス化して返す
+
+特殊化版（JIT、int 想定）:
+  ; ガード: a が int であることを確認
+  test [rdi + type_offset], INT_TAG
+  jne deoptimize
+  ; ガード: b が int であることを確認
+  test [rsi + type_offset], INT_TAG
+  jne deoptimize
+  ; 直接加算
+  mov rax, [rdi + value_offset]
+  add rax, [rsi + value_offset]
+  ; オーバーフローチェック
+  jo  deoptimize
+  ret
+```
+
+型チェックのオーバーヘッドは<strong>ガード命令</strong>で最小化されます。ガードが成功すれば最適化されたパスを走り、失敗すれば<strong>脱最適化（deoptimization）</strong>してインタプリタに戻ります。
+
+### インライン展開（Inlining）
+
+JIT コンパイラの最も強力な最適化の一つです。関数呼び出しを、呼び出し先の関数本体に置き換えます。
+
+```python
+def square(x):
+    return x * x
+
+def sum_of_squares(a, b):
+    return square(a) + square(b)
+```
+
+JIT コンパイラはこれを以下のように変換します：
+
+```text
+sum_of_squares のネイティブコード（インライン展開後）:
+  ; square(a) をインライン化
+  mov rax, [rdi]      ; a の値
+  imul rax, rax       ; a * a
+  mov rcx, rax        ; 結果を保存
+
+  ; square(b) をインライン化
+  mov rax, [rsi]      ; b の値
+  imul rax, rax       ; b * b
+
+  ; 加算
+  add rax, rcx        ; a*a + b*b
+  ret
+```
+
+インライン展開のメリット：
+- 関数呼び出し/リターンのオーバーヘッドが除去される
+- インライン化後のコードに対してさらなる最適化（定数伝播、デッドコード除去など）が適用できる
+- 呼び出し先のコンテキスト（型情報）を引き継いだ最適化が可能
+
+### 脱最適化（Deoptimization）
+
+JIT が前提としていた「仮定」が実行中に崩れた場合、ネイティブコードの実行を中断してインタプリタに戻る必要があります。これが<strong>脱最適化</strong>です。
+
+```python
+def process(x):
+    return x + 1
+
+# 最初の1万回は int で呼ばれる → JIT が int 版を生成
+for i in range(10000):
+    process(i)
+
+# 突然 float で呼ばれる → ガードが失敗、脱最適化が発生
+process(3.14)
+```
+
+脱最適化のプロセス：
+
+1. ガード命令が失敗を検出
+2. その時点のマシンレジスタの状態をキャプチャ
+3. インタプリタのフレーム（スタック、ローカル変数、命令ポインタ）を再構築
+4. インタプリタに制御を戻す
+5. プロファイル情報を更新し、再コンパイルのトリガーを設定
+
+脱最適化は非常にコストが高い操作ですが、十分に稀であれば JIT 全体としてのパフォーマンスは向上します。問題は、脱最適化が頻繁に起こると、コンパイル→脱最適化→再コンパイルの繰り返しでかえって遅くなる場合があることです。
+
+### On-Stack Replacement (OSR)
+
+通常、JIT コンパイルは関数の<strong>次回呼び出し時</strong>から有効になります。しかし、長時間実行されるループの場合、関数を再度呼び出すまで待てないことがあります。
+
+<strong>OSR</strong>は、<strong>現在実行中のインタプリタフレームを</strong>JIT コンパイルされたネイティブコードの途中に「載せ替える」技術です。
+
+```text
+実行中のループ:
+  for i in range(1000000):  ← ループのイテレーション中に...
+      ...                    
+                             ★ JIT コンパイルが完了！
+                             ★ OSR: インタプリタからネイティブコードに切り替え
+                             ★ ループの残りはネイティブコードで実行
+```
+
+OSR のために必要な処理：
+1. インタプリタのフレーム状態（ローカル変数、スタック、ループカウンタ）をキャプチャ
+2. ネイティブコードのフレームレイアウトにマッピング
+3. ネイティブコードのループ本体の適切な位置にジャンプ
+
+JVM の HotSpot、V8、SpiderMonkey が OSR をサポートしています。
+
+## 多段階 JIT コンパイル
+
+JIT コンパイルには<strong>コンパイル時間</strong>と<strong>最適化レベル</strong>のトレードオフがあります。低い最適化レベルで素早くコンパイルするか、高い最適化レベルで時間をかけるかのジレンマです。
+
+多くの実用的な JIT はこの問題を<strong>多段階コンパイル（Tiered Compilation）</strong>で解決します。
+
+以下のインタラクティブデモで、関数がインタプリタからベースライン JIT、最適化 JIT へと昇格していく過程と、脱最適化・再コンパイルのサイクルを体験できます。
+
+<JITTieringVisualizer />
+
+### JVM HotSpot の多段階コンパイル
+
+JVM の HotSpot は 5 つのティアを持ちますが、メソッドが必ず全ティアを順番に通過するわけではありません。最も一般的なパスは <strong>Tier 0 → Tier 3 → Tier 4</strong>（インタプリタ → C1 完全プロファイリング → C2）です：
+
+```text
+Tier 0: インタプリタ（プロファイリング情報を収集）
+  ↓ メソッドの呼び出し回数がしきい値を超える（通常ここが最初のコンパイル）
+Tier 3: C1、完全なプロファイリング付き
+  ↓ 十分なプロファイル情報が蓄積
+Tier 4: C2（サーバーコンパイラ）、積極的最適化
+
+特殊なケースで使用されるティア:
+Tier 1: C1、プロファイリングなし（トリビアルなメソッド向け）
+Tier 2: C1、限定的プロファイリング付き（C2 キューが満杯の場合のフォールバック）
+```
+
+| ティア | コンパイラ | コンパイル速度 | 最適化レベル | プロファイリング |
+|---|---|---|---|---|
+| 0 | なし（インタプリタ） | - | なし | あり |
+| 1 | C1 | 高速 | 基本的 | なし |
+| 2 | C1 | 高速 | 基本的 | 限定的 |
+| 3 | C1 | 高速 | 基本的 | 完全 |
+| 4 | C2 | 低速 | 積極的 | - |
+
+<strong>C1（クライアントコンパイラ）</strong>は短い起動時間が重要なアプリケーション向けに、素早く基本的な最適化を行います。<strong>C2（サーバーコンパイラ）</strong>は長時間稼働するサーバー向けに、時間をかけて積極的な最適化を行います。
+
+C2 が行う主な最適化：
+- ループアンローリング
+- エスケープ解析（escape analysis）による割り当ての除去
+- ロック省略（lock elision）
+- 範囲チェック除去（bounds check elimination）
+- デッドコード除去
+- ベクトル化（SIMD 命令の利用）
+
+### V8 の多段階コンパイル
+
+Google の V8 JavaScript エンジンも多段階コンパイルを採用しています。
+
+```text
+Ignition（インタプリタ）
+  ↓ 関数がホットになる
+Sparkplug（ベースラインコンパイラ、V8 v9.1+）
+  ↓ さらなるプロファイリング
+Maglev（中間層コンパイラ、Chrome 117+ / V8 v11.7+）
+  ↓ 十分なプロファイル情報
+TurboFan（最適化コンパイラ）
+```
+
+- <strong>Ignition</strong>: レジスタベースのバイトコードインタプリタ。全コードをまずここで実行
+- <strong>Sparkplug</strong>: バイトコードから直接ネイティブコードを生成する非最適化コンパイラ。コンパイルが極めて高速（AST を経由しない）
+- <strong>Maglev</strong>（Chrome 117+ / V8 v11.7+）: SSA ベースの中間表現を使い、型フィードバックに基づく最適化を行う中間層コンパイラ
+- <strong>TurboFan</strong>: Sea of Nodes IR を使った本格的な最適化コンパイラ。インライン展開、ループ最適化、エスケープ解析などを実施
+
+### GraalVM の Graal JIT
+
+Oracle が開発する GraalVM は、<strong>Java 自身で実装された JIT コンパイラ</strong>（Graal）を搭載しています。
+
+特筆すべき点：
+- <strong>Partial Escape Analysis</strong>: オブジェクトが特定のパスでのみエスケープする場合、そのパスだけ割り当てを行い、他のパスではスカラー値として保持する
+- <strong>多言語対応（Truffle フレームワーク）</strong>: Truffle の API（`@Specialization`、`@NodeChild` など）を使って AST インタプリタを記述すると、Graal JIT が自動的に最適化を適用する。Python、Ruby、JavaScript、R、LLVM bitcode など多数の言語をサポート
+- <strong>ネイティブイメージ</strong>: AOT（Ahead-Of-Time）コンパイルにより、ミリ秒単位の起動時間で実行可能なスタンドアロンバイナリを生成
+
+## 主要 VM の比較
+
+現代の主要なバイトコード VM を比較してみましょう。
+
+### CPython（Python）
+
+```text
+特徴:
+  ・スタックベースのバイトコード VM
+  ・GIL（Global Interpreter Lock）によりマルチスレッドが制限される
+  ・参照カウント + 循環参照検出 GC
+  ・CPython 3.11: Specializing Adaptive Interpreter
+  ・CPython 3.13: 実験的 JIT（copy-and-patch JIT）
+  ・CPython 3.13: free-threaded モード（GIL 無効化、実験的）
+```
+
+CPython 3.13 で導入された<strong>copy-and-patch JIT</strong>は、事前に用意されたネイティブコードのテンプレート（ステンシル）をコピーして、オペランドをパッチするだけの極めて軽量な JIT です。コンパイル時間を最小限に抑えつつ、インタプリタのディスパッチオーバーヘッドを除去します。
+
+重要な点として、copy-and-patch JIT はバイトコードを直接コンパイルするのではなく、まず<strong>Tier 2 オプティマイザ</strong>がバイトコードを<strong>マイクロオペレーション（μop）</strong>の中間表現に変換し、その μop 列に対して JIT が適用されます。
+
+```text
+Copy-and-patch のフロー:
+  1. ビルド時に各 μop のネイティブコードテンプレート（ステンシル）を生成
+  2. 実行時に Tier 2 オプティマイザがバイトコードを μop 列に変換
+  3. ホットな μop 列のテンプレートをメモリにコピー
+  4. オペランド（定数値、変数スロット番号）をパッチ
+  5. テンプレートを連結してネイティブコード列を完成
+  6. 連結されたテンプレート列を直接実行
+```
+
+### JVM（Java, Kotlin）
+
+```text
+特徴:
+  ・スタックベースのバイトコード VM
+  ・多段階 JIT（C1 + C2, または Graal）
+  ・高度な GC（G1, ZGC, Shenandoah など）
+  ・バイトコード検証（verifier）によるセキュリティ保証
+  ・クラスローダによる動的クラスロード
+```
+
+JVM のバイトコード検証器は、バイトコード実行前に以下を検証します：
+- スタックのオーバーフロー/アンダーフローがないこと
+- ローカル変数のアクセスが範囲内であること
+- 型の整合性が保たれていること
+- `finally` ブロックが正しく接続されていること
+
+これにより、不正なバイトコードの実行を防ぎ、VM のメモリ安全性を保証します。
+
+### CLR（C#, F#）
+
+```text
+特徴:
+  ・スタックベースの CIL（Common Intermediate Language）
+  ・RyuJIT（JIT コンパイラ）
+  ・値型（struct）のサポート — ボックス化を回避
+  ・Span<T> / stackalloc によるゼロアロケーション
+  ・NativeAOT による事前コンパイルもサポート
+  ・多世代 GC（世代別マーク&スイープ）
+```
+
+CLR の特筆すべき点は<strong>値型のサポート</strong>です。`struct` はスタック上に直接配置されるため、ヒープ割り当てと GC 圧力を大幅に削減できます。
+
+```csharp
+// 値型 — スタック上に配置
+struct Point { public int X, Y; }
+
+// 参照型 — ヒープに割り当て
+class PointClass { public int X, Y; }
+
+void Example() {
+    Point p = new(1, 2);       // スタック上。GC 不要
+    PointClass pc = new(1, 2); // ヒープ割り当て。GC 対象
+}
+```
+
+### LuaJIT
+
+```text
+特徴:
+  ・レジスタベースのバイトコード VM
+  ・トレーシング JIT
+  ・NaN Boxing による値表現
+  ・極めて高速（動的型付け言語で最速クラス）
+  ・FFI（Foreign Function Interface）が高速
+```
+
+LuaJIT は Mike Pall が開発した、<strong>現存する最高速のトレーシング JIT</strong>の一つです。コードサイズが非常にコンパクト（約 10 万行の C/アセンブリ）でありながら、多くのベンチマークで C に迫る性能を叩き出します。
+
+LuaJIT のトレーシング JIT の仕組み：
+
+1. <strong>ホットループ検出</strong>: ループのバックエッジが一定回数実行されると「ホット」と判定
+2. <strong>トレース記録</strong>: ホットループの実行パスを「トレース」として記録。関数呼び出しも展開して記録
+3. <strong>SSA 変換</strong>: トレースを SSA（Static Single Assignment）形式の IR に変換
+4. <strong>最適化</strong>: 定数畳み込み、代数的簡約、CSE（共通部分式除去）、DCE（デッドコード除去）、ループ不変コード移動、レジスタ割り当て
+5. <strong>コード生成</strong>: 最適化された IR から直接ネイティブコードを生成（x86, x64, ARM, MIPS, PPC 対応）
+
+### V8（JavaScript）
+
+```text
+特徴:
+  ・バイトコード（Ignition）+ 多段階 JIT
+  ・Hidden Class（隠しクラス）によるオブジェクトの効率的表現
+  ・Inline Cache（IC）によるプロパティアクセスの高速化
+  ・世代別 GC（Scavenger + Mark-Compact）
+  ・タグ付きポインタ
+```
+
+V8 の<strong>Hidden Class（Map）</strong>は、動的型のオブジェクトに対して C++ のクラスのような固定レイアウトを推論する仕組みです。
+
+```javascript
+// この2つのオブジェクトは同じ Hidden Class を共有する
+let a = { x: 1, y: 2 };
+let b = { x: 3, y: 4 };
+
+// 以下は新しい Hidden Class への遷移を引き起こす
+a.z = 5;
+```
+
+同じプロパティを同じ順序で追加したオブジェクトは同じ Hidden Class を共有し、JIT コンパイラはこの Hidden Class を基にプロパティアクセスを最適化します。
+
+## 具体例で見る：Python バイトコードの実行トレース
+
+最後に、Python のバイトコードがどのように実行されるかを、具体的なステップで追いかけてみましょう。
+
+```python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+```
+
+```python
+import dis
+dis.dis(fibonacci)
+```
+
+```text
+  2           RESUME                   0
+
+  3           LOAD_FAST                0 (n)
+              LOAD_CONST               1 (1)
+              COMPARE_OP              26 (<=)
+              POP_JUMP_IF_FALSE        1 (to 14)
+
+  4           LOAD_FAST                0 (n)
+              RETURN_VALUE
+
+  5     >>    LOAD_GLOBAL              1 (fibonacci)
+              LOAD_FAST                0 (n)
+              LOAD_CONST               1 (1)
+              BINARY_OP               10 (-)
+              CALL                     1
+              LOAD_GLOBAL              1 (fibonacci)
+              LOAD_FAST                0 (n)
+              LOAD_CONST               2 (2)
+              BINARY_OP               10 (-)
+              CALL                     1
+              BINARY_OP                0 (+)
+              RETURN_VALUE
+```
+
+`fibonacci(3)` を呼び出した場合を、スタックの変化と合わせてトレースします。
+
+```text
+fibonacci(3) の実行トレース:
+
+命令                    スタック           備考
+─────────────────────────────────────────────────────
+RESUME                  []                 フレーム初期化
+LOAD_FAST 0 (n)         [3]                n=3 をプッシュ
+LOAD_CONST 1 (1)        [3, 1]             定数 1 をプッシュ
+COMPARE_OP <= (26)      [False]            3 <= 1 → False
+POP_JUMP_IF_FALSE       []                 False なのでジャンプ
+LOAD_GLOBAL 1           [NULL, fibonacci]  NULL + 関数オブジェクトをプッシュ
+LOAD_FAST 0 (n)         [NULL, fibonacci, 3]  n=3
+LOAD_CONST 1 (1)        [NULL, fibonacci, 3, 1]  定数 1
+BINARY_OP - (10)        [NULL, fibonacci, 2]  3 - 1 = 2
+CALL 1                  [→ fibonacci(2) を呼び出し]
+                        ... 再帰呼び出し ...
+                        [result_1]          fibonacci(2) の結果 = 1
+LOAD_GLOBAL 1           [1, NULL, fibonacci]
+LOAD_FAST 0 (n)         [1, NULL, fibonacci, 3]
+LOAD_CONST 2 (2)        [1, NULL, fibonacci, 3, 2]
+BINARY_OP - (10)        [1, NULL, fibonacci, 1]  3 - 2 = 1
+CALL 1                  [→ fibonacci(1) を呼び出し]
+                        ... 再帰呼び出し ...
+                        [1, result_2]       fibonacci(1) の結果 = 1
+BINARY_OP + (0)         [2]                1 + 1 = 2
+RETURN_VALUE            → 2 を返す
+```
+
+## インラインキャッシュ — 動的ディスパッチの高速化
+
+動的型付け言語ではプロパティアクセスやメソッド呼び出しのたびに、オブジェクトの型を確認してプロパティの位置を検索する必要があります。<strong>インラインキャッシュ（Inline Cache / IC）</strong>は、この検索結果をキャッシュして再利用する仕組みです。
+
+### IC の状態遷移
+
+```text
+Uninitialized（未初期化）
+  ↓ 最初のアクセス
+Monomorphic（単形）
+  → 1つの型のみが観測された。キャッシュヒット率が最も高い
+  ↓ 異なる型が観測される
+Polymorphic（多形）
+  → 2〜4つの型が観測された。複数のキャッシュエントリを線形探索
+  ↓ さらに異なる型が観測される
+Megamorphic（超多形）
+  → 多数の型が観測された。キャッシュを諦め、汎用パスにフォールバック
+```
+
+### 具体例
+
+```javascript
+function getX(obj) {
+    return obj.x;  // ← この箇所に IC が設定される
+}
+
+// 常に同じ形状のオブジェクトで呼ぶ → Monomorphic（最速）
+getX({ x: 1, y: 2 });
+getX({ x: 3, y: 4 });
+
+// 異なる形状のオブジェクトが混在 → Polymorphic → Megamorphic
+getX({ x: 1 });
+getX({ x: 1, y: 2, z: 3 });
+getX({ a: 0, x: 1 });
+```
+
+Monomorphic な IC はプロパティアクセスを<strong>1回の比較 + 1回のメモリ読み取り</strong>まで高速化できます。JIT コンパイラは Monomorphic な IC の情報を使って、型ガード付きの直接フィールドアクセスコードを生成します。
+
+## プロファイリングの仕組み
+
+JIT コンパイラが「どのコードをコンパイルすべきか」「どの型で特殊化すべきか」を判断するには、プロファイリングデータの収集が不可欠です。
+
+### プロファイリング手法の比較
+
+| VM | プロファイリング手法 | 仕組み |
+|---|---|---|
+| JVM HotSpot | 呼び出しカウンタ + バックエッジカウンタ | メソッド呼び出し回数とループのバックエッジ回数をカウント。時間経過で減衰（decay）させ、最近のホットスポットを優先 |
+| V8 | 割り込みバジェット（Interrupt Budget） | バイトコード命令ごとにバジェットをデクリメント。バジェットが 0 になるとコンパイルをトリガー |
+| CPython 3.11+ | 命令ごとの適応カウンタ | 各バイトコード命令にカウンタを設置。しきい値到達で特殊化を試行 |
+
+HotSpot のカウンタ減衰は重要な設計判断です。プログラムの起動時に多く実行されたが定常状態では実行されないコードが、いつまでも「ホット」と見なされるのを防ぎます。
+
+## GC とJIT の連携 — セーフポイント
+
+JIT コンパイルされたネイティブコードは、ガベージコレクタと協調して動作する必要があります。GC がヒープを走査・移動するには、すべてのスレッドが<strong>安全な状態（セーフポイント）</strong>で停止していなければなりません。
+
+### セーフポイントの配置
+
+JIT コンパイラはネイティブコード内に<strong>セーフポイントポーリング</strong>を挿入します。
+
+```text
+JIT 生成コード（概略）:
+  ...
+  add rax, rbx          ; 計算
+  test [safepoint_page], eax  ; ★ セーフポイントポーリング
+  ...                    ; safepoint_page が不可読にされると
+                         ; ページフォルトが発生 → GC に制御を渡す
+```
+
+JVM HotSpot では、セーフポイントは以下の場所に配置されます：
+- メソッドの `return` 直前
+- ループのバックエッジ（ループの末尾から先頭へのジャンプ）
+- JNI / ネイティブメソッド呼び出しの遷移点
+
+カウントループ（反復回数が既知の `int` ループ）ではバックエッジのセーフポイントが省略される場合があり、GC の停止時間（Time-To-Safepoint）が予想外に長くなる原因になることがあります。JDK 17 以降では<strong>ループストリップマイニング</strong>がデフォルトで有効になり、カウントループをチャンクに分割してチャンク間にセーフポイントを挿入することで、この問題を緩和しています。
+
+## JIT のセキュリティ — W^X 問題
+
+JIT コンパイルには本質的なセキュリティ上の課題があります。ネイティブコードを実行時に生成するには、メモリ領域が<strong>書き込み可能（W）かつ実行可能（X）</strong>でなければなりません。これは W^X（Write XOR Execute）というセキュリティポリシーに違反します。
+
+### W^X 問題への対処
+
+| 手法 | 説明 | 採用例 |
+|---|---|---|
+| W/X トグル | コード生成時は W、完了後に X に切り替え | 多くの JIT |
+| ダブルマッピング | 同一物理ページを W（書き込み用）と X（実行用）の 2 つの仮想アドレスにマッピング | OpenJDK, V8 |
+| JIT 禁止 | JIT を使用せず、AOT またはインタプリタのみ | iOS アプリ（Safari以外） |
+
+iOS では、Apple がサードパーティアプリに対して JIT を禁止しており、Safari および WKWebView（Chrome、Firefox などのサードパーティブラウザを含む）は JIT が有効ですが、JavaScriptCore を直接組み込むアプリは JIT が使えず、インタプリタ（LLInt）のみで動作します。これが iOS 上の JavaScript パフォーマンスに影響を与える場合があります。
+
+## まとめ
+
+バイトコード VM は、ポータビリティと実行効率を両立させる巧妙なアーキテクチャです。
+
+```text
+ソースコード
+  ↓ 字句解析 → 構文解析 → 意味解析 → バイトコード生成
+バイトコード（ポータブルな中間表現）
+  ↓ VM が実行
+インタプリタ（全コードをまず実行）
+  ↓ プロファイリング
+JIT コンパイラ（ホットスポットをネイティブコードに変換）
+  ↓ 型特殊化 → インライン展開 → 各種最適化
+ネイティブコード（CPU が直接実行）
+```
+
+各 VM は異なるトレードオフを選択しています：
+
+- <strong>CPython</strong>: シンプルさとエコシステムの安定性を重視。JIT は最近ようやく導入
+- <strong>JVM</strong>: 長期稼働サーバーに最適化された重厚な JIT パイプライン
+- <strong>V8</strong>: 短いスクリプトの起動時間とサーバーサイドの最適化を両立する多段階コンパイル
+- <strong>LuaJIT</strong>: コンパクトなコードベースから驚異的な性能を引き出すトレーシング JIT
+
+理想的な VM（＝ゼロオーバーヘッド、無限に速い）に到達する日は来ないかもしれませんが、インタプリタの改良、JIT コンパイラの進化、そしてハードウェアとの協調により、その差は着実に縮まっています。2020 年代に入ってからの CPython の急速な高速化（3.11 の Specializing Adaptive Interpreter、3.13 の copy-and-patch JIT）は、バイトコード VM の技術がまだ進化の途上にあることを示しています。また、WebAssembly（WASM）の台頭により、バイトコード VM の設計思想がブラウザの枠を超えてサーバサイドやエッジコンピューティングにも広がりつつあります。
+
+## 参考文献
+
+- Aho, Lam, Sethi, Ullman. *Compilers: Principles, Techniques, and Tools (2nd Edition)*, 2006
+- Smith & Nair. *Virtual Machines: Versatile Platforms for Systems and Processes*, 2005
+- Yunhe Shi, David Gregg, Andrew Beatty, M. Anton Ertl. "Virtual Machine Showdown: Stack Versus Registers", *ACM Transactions on Architecture and Code Optimization*, 2008
+- CPython Developer's Guide. [https://devguide.python.org/internals/](https://devguide.python.org/internals/)
+- Mark Shannon. "Faster CPython" (PEP 659 — Specializing Adaptive Interpreter)
+- Mike Pall. "LuaJIT 2.0 intellectual property disclosure and research opportunities", 2009
+- "Life of a V8 JavaScript object", V8 Blog. [https://v8.dev/blog](https://v8.dev/blog)
+- Würthinger et al. "One VM to Rule Them All" (Truffle/Graal), *ACM DL*, 2013
+- Bryce Adelstein Lelbach. "A Deep Introduction to JIT Compilers: JITs are not very Just-in-Time", CppCon 2021
+- Hölzle, Chambers, Ungar. "Optimizing Dynamically-Typed Object-Oriented Languages With Polymorphic Inline Caches", *ECOOP*, 1991
+- Agesen. "Design and Implementation of PEP, a Java Just-In-Time Translator", *Sun Microsystems*, 1997

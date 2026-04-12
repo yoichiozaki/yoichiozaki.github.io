@@ -87,6 +87,9 @@ import {
   FaultToleranceDiagram,
   MapReduceComparison,
   MapReduceTimeline,
+  BytecodeExecutionVisualizer,
+  StackVsRegisterComparison,
+  JITTieringVisualizer,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -173,6 +176,9 @@ function getMdxComponents(locale: string) {
     FaultToleranceDiagram: () => <FaultToleranceDiagram locale={locale} />,
     MapReduceComparison: () => <MapReduceComparison locale={locale} />,
     MapReduceTimeline: () => <MapReduceTimeline locale={locale} />,
+    BytecodeExecutionVisualizer: () => <BytecodeExecutionVisualizer locale={locale} />,
+    StackVsRegisterComparison: () => <StackVsRegisterComparison locale={locale} />,
+    JITTieringVisualizer: () => <JITTieringVisualizer locale={locale} />,
   };
 }
 

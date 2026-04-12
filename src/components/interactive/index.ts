@@ -97,3 +97,6 @@ export {
   MapReduceComparison,
   MapReduceTimeline,
 } from "./MapReduceDiagrams";
+export { BytecodeExecutionVisualizer } from "./BytecodeExecutionVisualizer";
+export { StackVsRegisterComparison } from "./StackVsRegisterComparison";
+export { JITTieringVisualizer } from "./JITTieringVisualizer";

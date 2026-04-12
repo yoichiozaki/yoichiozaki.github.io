@@ -1,0 +1,1168 @@
+---
+title: "Inside Bytecode VMs — From Interpreters to JIT Compilers"
+date: "2026-04-12"
+description: "A deep dive into bytecode virtual machines like Python's CPython and JVM. We trace the entire journey from source code to bytecode compilation, explore stack machines vs register machines, interpreter implementation patterns, and finally JIT compiler optimizations that bring dynamic languages close to native speed."
+tags: ["VM", "Python", "Java", "JIT", "Runtime"]
+---
+
+You've probably seen programming languages classified as either "compiled" or "interpreted." But most major languages today — Python, Java, C#, JavaScript, Ruby, Lua — actually sit somewhere in between, using a <strong>bytecode VM (virtual machine)</strong> architecture.
+
+In this article, we'll take an exhaustive look at how bytecode VMs work. We'll trace the journey from source code to bytecode, explore how VMs execute bytecode, and dive deep into JIT compilers that optimize execution at runtime.
+
+## Execution Models — Compiled, Interpreted, and VM-Based
+
+Let's start by classifying how programs are executed.
+
+### Native Compilation
+
+Languages like C, C++, Rust, and Go compile source code directly into <strong>machine code (native code)</strong>. The resulting binary is executed directly by the CPU, yielding the highest possible performance.
+
+```text
+Source code (.c) → Compiler → Machine code (.exe) → CPU executes directly
+```
+
+The upside is top-tier performance, but the binary is platform-specific — you need to recompile for each OS and architecture.
+
+### Pure Interpretation
+
+Early BASIC and shell scripts work by <strong>reading and executing source code line by line</strong>.
+
+```text
+Source code → Interpreter reads and executes one line at a time
+```
+
+This is platform-independent and convenient, but parsing source code on every execution makes it the slowest approach.
+
+### Bytecode VM
+
+This is the model used by Python, Java, C#, and many others. Source code is first compiled to an intermediate representation (<strong>bytecode</strong>), which is then executed by a <strong>virtual machine (VM)</strong>.
+
+```text
+Source code → Compiler → Bytecode → VM executes
+```
+
+This approach offers several advantages:
+
+- <strong>Portability</strong>: Bytecode is platform-independent. It runs anywhere the VM exists (Java's "Write once, run anywhere")
+- <strong>Faster than pure interpretation</strong>: Source code is parsed only once. Bytecode is a compact, efficient format
+- <strong>Room for optimization</strong>: A JIT compiler can achieve near-native speed at runtime
+
+## The Compilation Pipeline — From Source Code to Bytecode
+
+Let's trace the bytecode generation process, using Python as our example.
+
+### Lexical Analysis (Lexing / Tokenization)
+
+The source code string is converted into a sequence of tokens (lexemes).
+
+```python
+# Source code
+x = 1 + 2 * 3
+```
+
+```text
+Token sequence:
+  NAME("x") → EQUAL("=") → NUMBER("1") → PLUS("+") 
+  → NUMBER("2") → STAR("*") → NUMBER("3") → NEWLINE
+```
+
+The lexer skips whitespace and comments while splitting the source into the smallest meaningful units.
+
+### Parsing
+
+The token sequence is transformed into an <strong>Abstract Syntax Tree (AST)</strong> — a tree structure representing the program's structure.
+
+```text
+       Assign
+       /    \
+    Name   BinOp(+)
+     "x"   /      \
+        Num(1)   BinOp(*)
+                 /      \
+              Num(2)   Num(3)
+```
+
+The parser follows the language's grammar rules, correctly reflecting operator precedence (`*` before `+`) in the tree structure.
+
+### Semantic Analysis
+
+Additional checks and information are attached to the AST:
+
+- Variable scope resolution (local, global, or closure capture)
+- Type checking (for statically typed languages)
+- Simple optimizations like constant folding
+
+In Python, symbol table construction happens at this stage, determining which scope each variable belongs to.
+
+### Code Generation
+
+The AST (or its intermediate representation) is traversed to generate bytecode instructions.
+
+```python
+# Examining actual bytecode in Python
+import dis
+
+def example():
+    x = 1 + 2 * 3
+
+dis.dis(example)
+```
+
+```text
+  2           RESUME                   0
+
+  3           LOAD_CONST               1 (7)
+              STORE_FAST               0 (x)
+              RETURN_CONST             0 (None)
+```
+
+Several things are worth noting:
+
+1. <strong>Constant folding</strong>: `1 + 2 * 3` has been precomputed to `7`. CPython's compiler evaluates constant expressions at the AST stage
+2. <strong>LOAD_CONST / STORE_FAST</strong>: The bytecode is based on a stack machine model (more on this later)
+3. <strong>RETURN_CONST</strong>: Python functions implicitly return `None` when there's no explicit `return`
+
+Let's look at a slightly more complex example:
+
+```python
+def loop_example():
+    total = 0
+    for i in range(10):
+        total += i
+    return total
+
+dis.dis(loop_example)
+```
+
+```text
+  2           RESUME                   0
+
+  3           LOAD_CONST               1 (0)
+              STORE_FAST               0 (total)
+
+  4           LOAD_GLOBAL              1 (range)
+              LOAD_CONST               2 (10)
+              CALL                     1
+              GET_ITER
+        >>    FOR_ITER                 7 (to 36)
+              STORE_FAST               1 (i)
+
+  5           LOAD_FAST                0 (total)
+              LOAD_FAST                1 (i)
+              BINARY_OP               13 (+=)
+              STORE_FAST               0 (total)
+              JUMP_BACKWARD            9 (to 18)
+
+        >>    END_FOR
+              POP_TOP
+
+  6           LOAD_FAST                0 (total)
+              RETURN_VALUE
+```
+
+The `for` loop is translated into a `GET_ITER` → `FOR_ITER` → `JUMP_BACKWARD` bytecode pattern. This is the actual instruction sequence the VM executes.
+
+The interactive demo below lets you step through bytecode execution one instruction at a time. Observe how the instruction pointer (IP), operand stack, and local variables change at each step.
+
+<BytecodeExecutionVisualizer />
+
+## Bytecode Structure
+
+Bytecode is essentially a byte sequence of <strong>instruction (opcode)</strong> and <strong>operand</strong> pairs.
+
+### Opcodes and Operands
+
+```text
+Bytecode instruction:
+  [opcode] [operand]
+  1 byte   0 to several bytes
+
+Example (CPython 3.12+, base instruction = 1 word = 2 bytes; some have inline cache entries):
+  LOAD_CONST    1     → Push value at index 1 of constant table onto stack
+  STORE_FAST    0     → Store stack top into local variable slot 0
+  BINARY_OP     0     → Pop 2 values from stack, add, push result
+```
+
+Since CPython 3.6, all instructions use a <strong>word code</strong> format (2 bytes = 1 byte opcode + 1 byte operand). CPython 3.12 and later extended some instructions to 4 bytes. When an operand exceeds 255, an `EXTENDED_ARG` instruction is prepended to extend the operand.
+
+### Code Objects
+
+In Python, compiled bytecode is stored as a <strong>code object</strong>.
+
+```python
+def add(a, b):
+    return a + b
+
+code = add.__code__
+print(code.co_code)        # Raw byte sequence
+print(code.co_consts)      # Constant table: (None,)
+print(code.co_varnames)    # Local variable names: ('a', 'b')
+print(code.co_stacksize)   # Required stack depth: 2
+print(code.co_nlocals)     # Number of local variables: 2
+```
+
+Code objects contain not just the instruction sequence but all metadata the VM needs: constant tables, variable name tables, stack size information, and more.
+
+### `.pyc` Files — Bytecode Caching
+
+Python caches compiled bytecode as `.pyc` files when importing modules.
+
+```text
+__pycache__/
+  module.cpython-312.pyc
+```
+
+`.pyc` file format:
+
+| Offset | Size | Content |
+|---|---|---|
+| 0 | 4 bytes | Magic number (identifies Python version) |
+| 4 | 4 bytes | Bit field (invalidation mode flags) |
+| 8 | 8 bytes | Source file timestamp or hash |
+| 16 | onward | Marshalled code object |
+
+On subsequent imports, if the `.pyc` is up to date, Python skips recompilation and loads the bytecode directly, reducing startup time.
+
+## Stack Machines vs Register Machines
+
+VM architectures fall into two major categories: <strong>stack machines</strong> and <strong>register machines</strong>.
+
+### Stack Machines
+
+This is the model used by CPython, JVM, and CLR. All operations go through an <strong>operand stack</strong>.
+
+```text
+Expression: a + b * c bytecode (stack machine)
+
+Instruction       Stack state (left = bottom)
+────────────────────────────────────────
+LOAD a           [a]
+LOAD b           [a, b]
+LOAD c           [a, b, c]
+MUL              [a, (b*c)]
+ADD              [(a+b*c)]
+```
+
+<strong>Pros</strong>:
+- Compact instructions (no need to specify register numbers in operands)
+- Easy code generation (direct post-order AST traversal)
+- Simple instruction set makes VM implementation straightforward
+
+<strong>Cons</strong>:
+- More instructions needed for the same computation (frequent LOAD/STORE)
+- Stack reads/writes become memory accesses with associated overhead
+
+### Register Machines
+
+This model is used by Lua (5.0+), Dalvik VM (Android), and some JS engines. Operations use an array of virtual registers.
+
+```text
+Expression: a + b * c bytecode (register machine)
+
+Instruction                Register state
+────────────────────────────────────────
+MUL  R1, R_b, R_c         R1 = b * c
+ADD  R0, R_a, R1           R0 = a + b * c
+```
+
+<strong>Pros</strong>:
+- Fewer instructions (one instruction can specify multiple operands)
+- Less data movement, reducing interpreter dispatch overhead
+
+<strong>Cons</strong>:
+- Larger instructions (register numbers require extra bits in operands)
+- More complex code generation (register allocation needed)
+
+### Real-World VM Choices
+
+| VM | Architecture | Language |
+|---|---|---|
+| CPython | Stack machine | Python |
+| JVM | Stack machine | Java, Kotlin, Scala, Clojure |
+| CLR | Stack machine | C#, F#, VB.NET |
+| Lua VM | Register machine | Lua |
+| Dalvik | Register machine | Java (Android, replaced by ART in Android 5.0) |
+| BEAM | Register machine (hybrid) | Erlang, Elixir |
+
+Research has shown that register machines can reduce instruction dispatch count by 47% compared to stack machines (Yunhe Shi et al., "Virtual Machine Showdown: Stack Versus Registers", VEE 2005 / ACM TACO 2008). However, bytecode size is roughly 26% larger for register machines.
+
+The demo below executes the same expression `a + b × c` on a stack machine and register machine simultaneously, so you can feel the difference in instruction count.
+
+<StackVsRegisterComparison />
+
+## Interpreter Implementation Patterns
+
+The interpreter — the core of the VM that executes bytecode — can be implemented using several patterns.
+
+### Switch-based Interpreter
+
+The simplest implementation. A giant `switch` statement handles each opcode.
+
+```c
+// Simplified VM loop (C language)
+void eval(uint8_t *bytecode, Value *stack) {
+    uint8_t *ip = bytecode;   // Instruction Pointer
+    Value *sp = stack;         // Stack Pointer
+
+    for (;;) {
+        uint8_t opcode = *ip++;
+        switch (opcode) {
+            case OP_LOAD_CONST: {
+                uint8_t idx = *ip++;
+                *sp++ = constants[idx];
+                break;
+            }
+            case OP_ADD: {
+                Value b = *--sp;
+                Value a = *--sp;
+                *sp++ = value_add(a, b);
+                break;
+            }
+            case OP_STORE_FAST: {
+                uint8_t slot = *ip++;
+                locals[slot] = *--sp;
+                break;
+            }
+            case OP_RETURN: {
+                return;
+            }
+            // ... hundreds of opcodes
+        }
+    }
+}
+```
+
+<strong>Pros</strong>: Simple to implement and understand. The historical core of CPython.
+
+<strong>Cons</strong>: Poor CPU branch prediction. All opcodes share the same `switch` branch point, so the branch predictor can't predict "which opcode comes next," causing frequent pipeline stalls.
+
+### Direct Threaded Interpreter
+
+Uses GCC's <strong>computed goto</strong> extension to jump directly to each opcode handler's address.
+
+```c
+void eval_threaded(uint8_t *bytecode, Value *stack) {
+    // Address table for each handler
+    static void *dispatch_table[] = {
+        [OP_LOAD_CONST] = &&op_load_const,
+        [OP_ADD]        = &&op_add,
+        [OP_STORE_FAST] = &&op_store_fast,
+        [OP_RETURN]     = &&op_return,
+        // ...
+    };
+
+    uint8_t *ip = bytecode;
+    Value *sp = stack;
+
+    #define DISPATCH() goto *dispatch_table[*ip++]
+
+    DISPATCH();  // Jump to first instruction
+
+op_load_const: {
+        uint8_t idx = *ip++;
+        *sp++ = constants[idx];
+        DISPATCH();
+    }
+op_add: {
+        Value b = *--sp;
+        Value a = *--sp;
+        *sp++ = value_add(a, b);
+        DISPATCH();
+    }
+op_store_fast: {
+        uint8_t slot = *ip++;
+        locals[slot] = *--sp;
+        DISPATCH();
+    }
+op_return:
+        return;
+}
+```
+
+<strong>Pros</strong>: Since each handler ends with a different indirect jump, the CPU branch predictor can maintain independent entries per handler. Reported <strong>15-25%</strong> speedup over switch-based implementations.
+
+<strong>Cons</strong>: Depends on GCC/Clang extensions (not standard C). Not supported by MSVC.
+
+CPython 3.x detects at compile time whether computed goto is available and uses direct threading when it is.
+
+### Token Threaded / Subroutine Threaded
+
+Beyond direct threading, there are other threading approaches:
+
+- <strong>Token Threaded</strong>: Keeps bytecode as opcode indices and looks up the dispatch table at dispatch time. Produces more compact bytecode than direct threading
+- <strong>Subroutine Threaded</strong>: Implements each opcode handler as a function and converts the bytecode sequence into an array of function pointers. Uses `call`/`ret` instructions, which benefit from the CPU's Return Stack Buffer (RSB) for branch prediction
+
+### Specializing Adaptive Interpreter
+
+A groundbreaking optimization introduced in CPython 3.11. It <strong>specializes</strong> bytecode instructions based on runtime data type patterns.
+
+```text
+Generic instruction:     BINARY_OP  ADD
+                           ↓ Runtime detects "int + int" pattern
+Specialized instruction: BINARY_OP_ADD_INT
+```
+
+How it works:
+
+1. Each instruction gets an <strong>adaptive counter</strong>
+2. After an instruction executes a certain number of times, the VM analyzes recent operand type patterns
+3. If the pattern is stable, the generic instruction is rewritten to a more efficient <strong>specialized instruction</strong>
+4. If an unexpected type appears, <strong>deoptimization</strong> reverts to the generic instruction
+
+Key specialized instructions (CPython 3.12+):
+
+| Generic Instruction | Specialized Instruction | Condition |
+|---|---|---|
+| `LOAD_ATTR` | `LOAD_ATTR_INSTANCE_VALUE` | Instance attribute dict access |
+| `LOAD_ATTR` | `LOAD_ATTR_SLOT` | Class using `__slots__` |
+| `LOAD_ATTR` | `LOAD_ATTR_MODULE` | Module attribute |
+| `BINARY_OP` | `BINARY_OP_ADD_INT` | Both operands are `int` |
+| `BINARY_OP` | `BINARY_OP_ADD_FLOAT` | Both operands are `float` |
+| `BINARY_OP` | `BINARY_OP_ADD_UNICODE` | Both operands are `str` |
+| `COMPARE_OP` | `COMPARE_OP_INT` | Integer comparison |
+| `CALL` | `CALL_PY_EXACT_ARGS` | Python function call (exact arg count) |
+| `FOR_ITER` | `FOR_ITER_LIST` | List iteration |
+| `UNPACK_SEQUENCE` | `UNPACK_SEQUENCE_TWO_TUPLE` | 2-element tuple unpack |
+
+This optimization made CPython 3.11 on average <strong>25%</strong> faster than 3.10. Achieving this level of improvement through interpreter-only techniques — without JIT — was remarkable.
+
+## Frames and the Call Stack
+
+Let's examine how VMs manage function calls.
+
+### Frame Objects
+
+Each time a function is called, the VM creates a <strong>frame (stack frame / execution frame)</strong>.
+
+```text
+┌─────────────────────────────────┐
+│           Frame                 │
+├─────────────────────────────────┤
+│  Code object (code)             │  → Bytecode instructions
+│  Instruction pointer (IP)       │  → Current execution position
+│  Local variable array (locals)  │  → [a, b, result, ...]
+│  Operand stack                  │  → Temporary stack for operations
+│  Link to previous frame         │  → Caller's frame
+│  Exception handler stack        │  → try/except info
+│  Builtins namespace reference   │  → builtins
+│  Global namespace reference     │  → globals
+└─────────────────────────────────┘
+```
+
+### Call Stack Growth
+
+```python
+def outer():
+    x = 10
+    return inner(x)
+
+def inner(n):
+    return n * 2
+```
+
+```text
+Runtime call stack:
+
+inner(10) frame  ← Currently executing
+  code: inner.__code__
+  locals: [n=10]
+  stack: []
+──────────────────
+outer() frame
+  code: outer.__code__
+  locals: [x=10]
+  stack: []
+──────────────────
+<module> frame
+  code: <module>.__code__
+  locals: []
+  stack: []
+```
+
+When `inner` executes `return`, its frame is discarded and control returns to `outer`'s frame.
+
+CPython limits the frame stack depth via `sys.getrecursionlimit()` (default 1000). This is a safety valve to prevent segmentation faults from stack overflow.
+
+### Frame Optimizations
+
+Frame creation and destruction are overhead, so VMs apply various optimizations:
+
+- <strong>CPython 3.11+</strong>: Inlined frames (`_PyInterpreterFrame`). Avoids heap allocation by placing frames directly on the C stack
+- <strong>JVM</strong>: Frames are placed on the native stack. The JIT compiler may completely eliminate function calls through inlining
+- <strong>V8</strong>: The JIT compiler merges frames via inlining and optimizes stack frame layout for deoptimization metadata
+
+## Object Representation and Tagged Values
+
+How does a VM internally represent values in a dynamically typed language? This directly affects VM performance.
+
+### Boxing
+
+In CPython, every value is represented as a pointer to a <strong>PyObject</strong> struct. Even the integer `42` is a heap-allocated object.
+
+```c
+// CPython's PyObject struct (simplified)
+typedef struct {
+    Py_ssize_t ob_refcnt;    // Reference count
+    PyTypeObject *ob_type;   // Pointer to type
+} PyObject;
+
+// Python integers are arbitrary precision, so they use a variable-length digit array
+typedef struct {
+    PyObject_VAR_HEAD            // ob_refcnt + ob_type + ob_size
+    digit ob_digit[1];           // Arbitrary-precision digit array (30 bits/digit)
+} PyLongObject;
+// Note: CPython 3.12+ introduced a "compact" representation for small ints,
+//   storing the value in ob_size bit fields and omitting ob_digit
+```
+
+Python's `int` is an arbitrary-precision integer that can represent values of any size. Even a small integer like `42` requires: reference count (8 bytes) + type pointer (8 bytes) + size (8 bytes) + digit array + memory allocator overhead = <strong>at least 28 bytes</strong>. Compare this to C's `int` at just 4 bytes — quite a luxurious use of memory.
+
+### NaN Boxing
+
+Some VMs exploit the IEEE 754 NaN (Not a Number) bit pattern to <strong>store both a type tag and value within a 64-bit double</strong>.
+
+```text
+IEEE 754 double (64 bits):
+  sign(1) | exponent(11) | mantissa(52)
+
+NaN bit pattern:
+  x | 11111111111 | 1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                     ↑ quiet NaN bit
+
+Value storage:
+  - Floating point: stored directly as IEEE 754 bit pattern
+  - Integers, pointers, booleans: stored in NaN mantissa with tag bits + value
+```
+
+```text
+NaN Boxing layout example:
+  [0][11111111111][1][TTT][PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP]
+                       ↑ tag (3 bits)  ↑ payload (48 bits)
+
+Tags:
+  000 = pointer (object)
+  001 = 32-bit integer
+  010 = boolean
+  011 = nil/null
+  ...
+```
+
+<strong>LuaJIT</strong>, <strong>JavaScriptCore (Safari)</strong>, and <strong>SpiderMonkey (Firefox)</strong> use this technique. In SpiderMonkey, NaN boxing is the primary value representation used throughout the engine. Since values fit in a 64-bit word on the stack, heap allocation and pointer indirection are eliminated, yielding significant performance gains.
+
+### Tagged Pointers
+
+On 64-bit architectures, alignment ensures that <strong>the lower few bits of pointers are always zero</strong>. These spare bits can be used as type tags.
+
+```text
+Normal pointer (8-byte alignment):
+  PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP000
+                                                                ↑ always 0 (lower 3 bits)
+
+Tagged pointer:
+  PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP|TTT|
+  ↑ pointer portion (upper 61 bits)                             ↑ tag (lower 3 bits)
+```
+
+V8 (Google's JavaScript engine) uses tagged pointers to distinguish Smi (Small Integer) from HeapObject:
+
+- Least significant bit is `0` → Smi (31-bit integer stored in upper 31 bits)
+- Least significant bit is `1` → HeapObject pointer (mask off tag bit to dereference)
+
+CRuby (MRI) uses a similar technique, representing Fixnum (small integers) without heap allocation.
+
+## JIT Compilers — Runtime Native Code Generation
+
+This is the heart of the article. A JIT (Just-In-Time) compiler compiles bytecode to native machine code <strong>during program execution</strong>, dramatically speeding up subsequent execution by running native code directly.
+
+### Why JIT Is Needed
+
+When interpreting bytecode, dozens to hundreds of native instructions execute for each bytecode instruction.
+
+```text
+Bytecode: BINARY_OP_ADD_INT
+
+What the interpreter actually does (outline):
+  1. Fetch opcode (memory read)
+  2. Get handler address from dispatch table
+  3. Jump to handler
+  4. Pop operand B from stack
+  5. Pop operand A from stack
+  6. Type check A (is it int?)
+  7. Type check B (is it int?)
+  8. Overflow check
+  9. Perform addition
+  10. Push result onto stack
+  11. Advance to next opcode
+
+When JIT compiles to native code:
+  add rax, rbx    ← Just 1 instruction (or a few)
+```
+
+For integer addition, the interpreter incurs <strong>tens of times more overhead</strong>. JIT eliminates this overhead.
+
+### JIT Compilation Flow
+
+```text
+  Source code
+      ↓
+  Compile to bytecode
+      ↓
+  Start executing in interpreter
+      ↓
+  Profiling (collect type info, execution frequency)
+      ↓
+  Hot spot detection (frequently executed code)
+      ↓
+  JIT compile (bytecode → IR → optimization → native code)
+      ↓
+  Execute native code (bypass interpreter on subsequent runs)
+      ↓
+  If assumptions break, deoptimize (native code → back to interpreter)
+```
+
+### Method JIT vs Tracing JIT
+
+JIT compilers fall into two major approaches.
+
+#### Method JIT
+
+Compiles at the function (method) level. JVM (HotSpot C2), V8, and .NET's RyuJIT use this approach.
+
+```text
+Function calculate() was called 1000 times
+  → Identified as "hot method"
+  → Compile entire function to native code
+  → Execute native code on subsequent calls
+```
+
+<strong>Pros</strong>: Clear compilation units make optimization straightforward. Pairs well with inlining.
+<strong>Cons</strong>: Compiling large functions takes time. Even if only part of a function is hot, the entire function is compiled.
+
+#### Tracing JIT
+
+<strong>Traces (records)</strong> execution paths and compiles the actual executed bytecode sequence. LuaJIT and the former Mozilla TraceMonkey used this approach.
+
+```text
+Record loop execution path:
+  LOAD x → LOAD y → ADD → COMPARE → BRANCH(true) → STORE → JUMP_BACK
+
+Compile this "trace" to native code:
+  - Assume branch is always true (verified by guard instructions)
+  - Assume types match recorded types (verified by guard instructions)
+  - Fall back to interpreter if a guard fails
+```
+
+<strong>Pros</strong>: Extremely effective for loop optimization. Only the actually executed path is compiled, eliminating dead code. Cross-function inlining happens naturally.
+<strong>Cons</strong>: Weak against complex branching patterns (frequent deoptimization from guard failures). Trace recording has overhead.
+
+### Type Specialization
+
+The most important JIT optimization for dynamically typed languages is <strong>type specialization</strong>.
+
+```python
+def add(a, b):
+    return a + b
+```
+
+This function can accept `int`, `float`, `str`, `list`, or any other type. But if profiling reveals "this function is always called with `int`," the JIT can specialize:
+
+```text
+Generic version (interpreter):
+  1. Get type of a
+  2. Get type of b
+  3. Look up __add__ method for the type
+  4. Call __add__
+  5. Box result and return
+
+Specialized version (JIT, assuming int):
+  ; Guard: verify a is int
+  test [rdi + type_offset], INT_TAG
+  jne deoptimize
+  ; Guard: verify b is int
+  test [rsi + type_offset], INT_TAG
+  jne deoptimize
+  ; Direct addition
+  mov rax, [rdi + value_offset]
+  add rax, [rsi + value_offset]
+  ; Overflow check
+  jo  deoptimize
+  ret
+```
+
+Type checking overhead is minimized through <strong>guard instructions</strong>. If the guard succeeds, the optimized path runs; if it fails, <strong>deoptimization</strong> returns to the interpreter.
+
+### Inlining
+
+One of the most powerful JIT compiler optimizations. It replaces function calls with the called function's body.
+
+```python
+def square(x):
+    return x * x
+
+def sum_of_squares(a, b):
+    return square(a) + square(b)
+```
+
+The JIT compiler transforms this into:
+
+```text
+sum_of_squares native code (after inlining):
+  ; Inline square(a)
+  mov rax, [rdi]      ; value of a
+  imul rax, rax       ; a * a
+  mov rcx, rax        ; save result
+
+  ; Inline square(b)
+  mov rax, [rsi]      ; value of b
+  imul rax, rax       ; b * b
+
+  ; Addition
+  add rax, rcx        ; a*a + b*b
+  ret
+```
+
+Benefits of inlining:
+- Function call/return overhead is eliminated
+- Further optimizations (constant propagation, dead code elimination) can be applied to the inlined code
+- Optimizations can use the caller's context (type information)
+
+### Deoptimization
+
+When assumptions made by the JIT are violated during execution, native code execution must be suspended and control returned to the interpreter. This is <strong>deoptimization</strong>.
+
+```python
+def process(x):
+    return x + 1
+
+# First 10,000 calls with int → JIT generates int version
+for i in range(10000):
+    process(i)
+
+# Suddenly called with float → guard fails, deoptimization occurs
+process(3.14)
+```
+
+The deoptimization process:
+
+1. Guard instruction detects failure
+2. Capture current machine register state
+3. Reconstruct interpreter frame (stack, local variables, instruction pointer)
+4. Return control to interpreter
+5. Update profile information and set recompilation trigger
+
+Deoptimization is very expensive, but if it's rare enough, overall JIT performance still improves. The problem is when deoptimization happens frequently — the compile → deoptimize → recompile cycle can make things slower.
+
+### On-Stack Replacement (OSR)
+
+Normally, JIT compilation takes effect on a function's <strong>next invocation</strong>. But for long-running loops, you can't wait until the function is called again.
+
+<strong>OSR</strong> is a technique that <strong>replaces the currently executing interpreter frame</strong> with JIT-compiled native code mid-execution.
+
+```text
+Running loop:
+  for i in range(1000000):  ← During loop iteration...
+      ...                    
+                             ★ JIT compilation complete!
+                             ★ OSR: Switch from interpreter to native code
+                             ★ Remaining loop iterations run in native code
+```
+
+What OSR requires:
+1. Capture interpreter frame state (local variables, stack, loop counter)
+2. Map to native code frame layout
+3. Jump to the appropriate position in the native code loop body
+
+JVM's HotSpot, V8, and SpiderMonkey all support OSR.
+
+## Multi-Tier JIT Compilation
+
+JIT compilation involves a tradeoff between <strong>compilation time</strong> and <strong>optimization level</strong>. Compile quickly with low optimization, or spend time for high optimization — it's a dilemma.
+
+Most practical JITs solve this with <strong>tiered compilation</strong>.
+
+The interactive demo below shows how functions progress from interpreter to baseline JIT to optimizing JIT as they execute. You can also experience deoptimization and recompilation.
+
+<JITTieringVisualizer />
+
+### JVM HotSpot's Tiered Compilation
+
+JVM's HotSpot has 5 tiers, but methods don't necessarily pass through all of them sequentially. The most common path is <strong>Tier 0 → Tier 3 → Tier 4</strong> (interpreter → C1 with full profiling → C2):
+
+```text
+Tier 0: Interpreter (collects profiling data)
+  ↓ Method call count exceeds threshold (this is typically the first compilation)
+Tier 3: C1, full profiling
+  ↓ Sufficient profile data accumulated
+Tier 4: C2 (Server compiler), aggressive optimization
+
+Tiers used in special cases:
+Tier 1: C1, no profiling (for trivial methods)
+Tier 2: C1, limited profiling (fallback when C2 queue is full)
+```
+
+| Tier | Compiler | Compile Speed | Optimization Level | Profiling |
+|---|---|---|---|---|
+| 0 | None (interpreter) | - | None | Yes |
+| 1 | C1 | Fast | Basic | No |
+| 2 | C1 | Fast | Basic | Limited |
+| 3 | C1 | Fast | Basic | Full |
+| 4 | C2 | Slow | Aggressive | - |
+
+<strong>C1 (Client compiler)</strong> performs quick, basic optimizations for applications where short startup time matters. <strong>C2 (Server compiler)</strong> spends more time on aggressive optimizations for long-running server applications.
+
+Key C2 optimizations:
+- Loop unrolling
+- Escape analysis for allocation elimination
+- Lock elision
+- Bounds check elimination
+- Dead code elimination
+- Vectorization (SIMD instructions)
+
+### V8's Tiered Compilation
+
+Google's V8 JavaScript engine also uses tiered compilation.
+
+```text
+Ignition (interpreter)
+  ↓ Function becomes hot
+Sparkplug (baseline compiler, V8 v9.1+)
+  ↓ Further profiling
+Maglev (mid-tier compiler, Chrome 117+ / V8 v11.7+)
+  ↓ Sufficient profile data
+TurboFan (optimizing compiler)
+```
+
+- <strong>Ignition</strong>: Register-based bytecode interpreter. All code starts here
+- <strong>Sparkplug</strong>: Non-optimizing compiler that generates native code directly from bytecode. Extremely fast compilation (bypasses AST)
+- <strong>Maglev</strong> (Chrome 117+ / V8 v11.7+): Mid-tier compiler using SSA-based intermediate representation with type-feedback-based optimization
+- <strong>TurboFan</strong>: Full optimizing compiler using Sea of Nodes IR. Performs inlining, loop optimization, escape analysis, and more
+
+### GraalVM's Graal JIT
+
+Oracle's GraalVM ships with a JIT compiler (<strong>Graal</strong>) that is <strong>implemented in Java itself</strong>.
+
+Notable features:
+- <strong>Partial Escape Analysis</strong>: When an object escapes only on certain paths, allocation happens only on those paths — on other paths, it's kept as scalar values
+- <strong>Polyglot support (Truffle framework)</strong>: Write an AST interpreter using Truffle's API (`@Specialization`, `@NodeChild`, etc.), and Graal JIT automatically applies optimization. Supports Python, Ruby, JavaScript, R, LLVM bitcode, and more
+- <strong>Native Image</strong>: AOT (Ahead-Of-Time) compilation produces standalone binaries with near-instant startup time (on the order of milliseconds)
+
+## Major VM Comparison
+
+Let's compare today's major bytecode VMs.
+
+### CPython (Python)
+
+```text
+Features:
+  - Stack-based bytecode VM
+  - GIL (Global Interpreter Lock) limits multi-threading
+  - Reference counting + cycle detection GC
+  - CPython 3.11: Specializing Adaptive Interpreter
+  - CPython 3.13: Experimental JIT (copy-and-patch JIT)
+  - CPython 3.13: Free-threaded mode (GIL disabled, experimental)
+```
+
+CPython 3.13's <strong>copy-and-patch JIT</strong> is an ultra-lightweight JIT that copies pre-prepared native code templates (stencils) and patches operands. It minimizes compilation time while eliminating interpreter dispatch overhead.
+
+Importantly, the copy-and-patch JIT does not compile bytecodes directly. Instead, the <strong>Tier 2 optimizer</strong> first converts bytecodes to a <strong>micro-operation (μop)</strong> intermediate representation, and the JIT is applied to that μop sequence.
+
+```text
+Copy-and-patch flow:
+  1. At build time, generate native code templates (stencils) for each μop
+  2. At runtime, the Tier 2 optimizer converts bytecodes to μop sequences
+  3. Copy templates for hot μop sequences into memory
+  4. Patch operands (constant values, variable slot numbers)
+  5. Concatenate templates to form complete native code sequence
+  6. Execute the concatenated template sequence directly
+```
+
+### JVM (Java, Kotlin)
+
+```text
+Features:
+  - Stack-based bytecode VM
+  - Tiered JIT (C1 + C2, or Graal)
+  - Advanced GC (G1, ZGC, Shenandoah)
+  - Bytecode verification for security guarantees
+  - Dynamic class loading via ClassLoaders
+```
+
+The JVM bytecode verifier checks before execution:
+- No stack overflow/underflow
+- Local variable access is within bounds
+- Type consistency is maintained
+- `finally` blocks are properly connected
+
+This prevents execution of malformed bytecode and guarantees VM memory safety.
+
+### CLR (C#, F#)
+
+```text
+Features:
+  - Stack-based CIL (Common Intermediate Language)
+  - RyuJIT (JIT compiler)
+  - Value types (struct) — avoids boxing
+  - Span<T> / stackalloc for zero-allocation
+  - NativeAOT for ahead-of-time compilation
+  - Generational mark-and-sweep GC
+```
+
+CLR's standout feature is <strong>value type support</strong>. `struct` values are placed directly on the stack, significantly reducing heap allocation and GC pressure.
+
+```csharp
+// Value type — placed on stack
+struct Point { public int X, Y; }
+
+// Reference type — heap allocated
+class PointClass { public int X, Y; }
+
+void Example() {
+    Point p = new(1, 2);       // On the stack. No GC needed
+    PointClass pc = new(1, 2); // Heap allocated. GC managed
+}
+```
+
+### LuaJIT
+
+```text
+Features:
+  - Register-based bytecode VM
+  - Tracing JIT
+  - NaN Boxing for value representation
+  - Extremely fast (among the fastest dynamic language VMs)
+  - Fast FFI (Foreign Function Interface)
+```
+
+LuaJIT, developed by Mike Pall, is one of the <strong>fastest tracing JITs in existence</strong>. Despite its compact codebase (~100K lines of C/assembly), it achieves near-C performance on many benchmarks.
+
+How LuaJIT's tracing JIT works:
+
+1. <strong>Hot loop detection</strong>: A loop's back-edge execution count exceeding a threshold marks it as "hot"
+2. <strong>Trace recording</strong>: Records the hot loop's execution path as a "trace." Function calls are unfolded into the trace
+3. <strong>SSA conversion</strong>: Converts the trace to SSA (Static Single Assignment) form IR
+4. <strong>Optimization</strong>: Constant folding, algebraic simplification, CSE (Common Subexpression Elimination), DCE (Dead Code Elimination), loop-invariant code motion, register allocation
+5. <strong>Code generation</strong>: Generates native code directly from optimized IR (supports x86, x64, ARM, MIPS, PPC)
+
+### V8 (JavaScript)
+
+```text
+Features:
+  - Bytecode (Ignition) + tiered JIT
+  - Hidden Classes for efficient object representation
+  - Inline Caches (IC) for fast property access
+  - Generational GC (Scavenger + Mark-Compact)
+  - Tagged pointers
+```
+
+V8's <strong>Hidden Class (Map)</strong> system infers fixed layouts — similar to C++ classes — for dynamically typed objects.
+
+```javascript
+// These two objects share the same Hidden Class
+let a = { x: 1, y: 2 };
+let b = { x: 3, y: 4 };
+
+// This triggers a transition to a new Hidden Class
+a.z = 5;
+```
+
+Objects with properties added in the same order share the same Hidden Class, allowing the JIT compiler to optimize property access based on it.
+
+## Concrete Example: Python Bytecode Execution Trace
+
+Finally, let's trace exactly how Python bytecode is executed, step by step.
+
+```python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+```
+
+```python
+import dis
+dis.dis(fibonacci)
+```
+
+```text
+  2           RESUME                   0
+
+  3           LOAD_FAST                0 (n)
+              LOAD_CONST               1 (1)
+              COMPARE_OP              26 (<=)
+              POP_JUMP_IF_FALSE        1 (to 14)
+
+  4           LOAD_FAST                0 (n)
+              RETURN_VALUE
+
+  5     >>    LOAD_GLOBAL              1 (fibonacci)
+              LOAD_FAST                0 (n)
+              LOAD_CONST               1 (1)
+              BINARY_OP               10 (-)
+              CALL                     1
+              LOAD_GLOBAL              1 (fibonacci)
+              LOAD_FAST                0 (n)
+              LOAD_CONST               2 (2)
+              BINARY_OP               10 (-)
+              CALL                     1
+              BINARY_OP                0 (+)
+              RETURN_VALUE
+```
+
+Let's trace the execution of `fibonacci(3)`, showing the stack changes:
+
+```text
+fibonacci(3) execution trace:
+
+Instruction             Stack              Notes
+─────────────────────────────────────────────────────
+RESUME                  []                 Frame initialization
+LOAD_FAST 0 (n)         [3]                Push n=3
+LOAD_CONST 1 (1)        [3, 1]             Push constant 1
+COMPARE_OP <= (26)      [False]            3 <= 1 → False
+POP_JUMP_IF_FALSE       []                 False, so jump
+LOAD_GLOBAL 1           [NULL, fibonacci]  Push NULL + function object
+LOAD_FAST 0 (n)         [NULL, fibonacci, 3]  n=3
+LOAD_CONST 1 (1)        [NULL, fibonacci, 3, 1]  Constant 1
+BINARY_OP - (10)        [NULL, fibonacci, 2]  3 - 1 = 2
+CALL 1                  [→ calls fibonacci(2)]
+                        ... recursive call ...
+                        [result_1]          fibonacci(2) result = 1
+LOAD_GLOBAL 1           [1, NULL, fibonacci]
+LOAD_FAST 0 (n)         [1, NULL, fibonacci, 3]
+LOAD_CONST 2 (2)        [1, NULL, fibonacci, 3, 2]
+BINARY_OP - (10)        [1, NULL, fibonacci, 1]  3 - 2 = 1
+CALL 1                  [→ calls fibonacci(1)]
+                        ... recursive call ...
+                        [1, result_2]       fibonacci(1) result = 1
+BINARY_OP + (0)         [2]                1 + 1 = 2
+RETURN_VALUE            → returns 2
+```
+
+## Inline Caching — Speeding Up Dynamic Dispatch
+
+In dynamically typed languages, every property access or method call requires checking the object's type and looking up the property's location. <strong>Inline Caching (IC)</strong> caches these lookup results for reuse.
+
+### IC State Transitions
+
+```text
+Uninitialized
+  ↓ First access
+Monomorphic
+  → Only one type observed. Highest cache hit rate
+  ↓ Different type observed
+Polymorphic
+  → 2-4 types observed. Linear search through multiple cache entries
+  ↓ More types observed
+Megamorphic
+  → Too many types observed. Cache abandoned, falls back to generic path
+```
+
+### Concrete Example
+
+```javascript
+function getX(obj) {
+    return obj.x;  // ← IC is set up at this call site
+}
+
+// Always called with same-shape objects → Monomorphic (fastest)
+getX({ x: 1, y: 2 });
+getX({ x: 3, y: 4 });
+
+// Mixed object shapes → Polymorphic → Megamorphic
+getX({ x: 1 });
+getX({ x: 1, y: 2, z: 3 });
+getX({ a: 0, x: 1 });
+```
+
+A monomorphic IC can speed up property access to <strong>one comparison + one memory read</strong>. JIT compilers use monomorphic IC information to generate direct field access code with type guards.
+
+## Profiling Mechanics
+
+For a JIT compiler to decide "which code to compile" and "which types to specialize for," profiling data collection is essential.
+
+### Profiling Approaches Compared
+
+| VM | Profiling Method | Mechanism |
+|---|---|---|
+| JVM HotSpot | Invocation counter + backedge counter | Counts method invocations and loop backedge executions. Decays over time to prioritize recent hot spots |
+| V8 | Interrupt Budget | Decrements a budget per bytecode instruction. Triggers compilation when budget reaches 0 |
+| CPython 3.11+ | Per-instruction adaptive counter | Attaches a counter to each bytecode instruction. Specialization is attempted when threshold is reached |
+
+HotSpot's counter decay is an important design decision. It prevents code that ran frequently during startup — but rarely during steady state — from being considered "hot" indefinitely.
+
+## GC–JIT Coordination — Safepoints
+
+JIT-compiled native code must cooperate with the garbage collector. For the GC to scan and relocate heap objects, all threads must stop at a <strong>safe state (safepoint)</strong>.
+
+### Safepoint Placement
+
+JIT compilers insert <strong>safepoint polls</strong> into generated native code.
+
+```text
+JIT-generated code (outline):
+  ...
+  add rax, rbx          ; computation
+  test [safepoint_page], eax  ; ★ safepoint poll
+  ...                    ; when safepoint_page is made unreadable,
+                         ; a page fault occurs → control transfers to GC
+```
+
+In JVM HotSpot, safepoints are placed at:
+- Just before method `return`
+- Loop backedges (jumps from end to start of loop)
+- JNI / native method call transitions
+
+For counted loops (loops with an `int` counter and a known bound), backedge safepoints may be omitted, which can cause unexpectedly long GC pauses (Time-To-Safepoint issues). Since JDK 17, <strong>loop strip mining</strong> is enabled by default, breaking counted loops into chunks with safepoint polls between them to mitigate this problem.
+
+## JIT Security — The W^X Problem
+
+JIT compilation poses an inherent security challenge. Generating native code at runtime requires memory to be both <strong>writable (W) and executable (X)</strong>, violating the W^X (Write XOR Execute) security policy.
+
+### Addressing the W^X Problem
+
+| Approach | Description | Used By |
+|---|---|---|
+| W/X toggle | Memory is W during code generation, then switched to X | Most JITs |
+| Double mapping | Map the same physical page as W (for writing) and X (for execution) at two virtual addresses | OpenJDK, V8 |
+| JIT prohibition | No JIT — use only AOT or interpreter | iOS apps (except Safari) |
+
+On iOS, Apple prohibits JIT for third-party apps. Safari and WKWebView (including third-party browsers like Chrome and Firefox) have JIT enabled, but apps that embed JavaScriptCore directly run with only the interpreter (LLInt) and no JIT tiers. This can impact JavaScript performance on iOS.
+
+## Conclusion
+
+Bytecode VMs are an elegant architecture that balances portability with execution efficiency.
+
+```text
+Source Code
+  ↓ Lexing → Parsing → Semantic Analysis → Code Generation
+Bytecode (portable intermediate representation)
+  ↓ VM executes
+Interpreter (executes all code first)
+  ↓ Profiling
+JIT Compiler (converts hot spots to native code)
+  ↓ Type specialization → Inlining → Various optimizations
+Native Code (CPU executes directly)
+```
+
+Each VM makes different tradeoffs:
+
+- <strong>CPython</strong>: Prioritizes simplicity and ecosystem stability. JIT only recently introduced
+- <strong>JVM</strong>: A heavyweight JIT pipeline optimized for long-running servers
+- <strong>V8</strong>: Multi-tier compilation balancing short script startup with server-side optimization
+- <strong>LuaJIT</strong>: A tracing JIT that extracts remarkable performance from a compact codebase
+
+We may never reach the ideal VM — zero overhead, infinitely fast — but through interpreter improvements, JIT compiler evolution, and hardware co-design, the gap keeps narrowing. CPython's rapid acceleration in the 2020s (3.11's Specializing Adaptive Interpreter, 3.13's copy-and-patch JIT) demonstrates that bytecode VM technology is still very much evolving. Meanwhile, WebAssembly (WASM) is bringing bytecode VM design principles beyond the browser into server-side and edge computing.
+
+## References
+
+- Aho, Lam, Sethi, Ullman. *Compilers: Principles, Techniques, and Tools (2nd Edition)*, 2006
+- Smith & Nair. *Virtual Machines: Versatile Platforms for Systems and Processes*, 2005
+- Yunhe Shi, David Gregg, Andrew Beatty, M. Anton Ertl. "Virtual Machine Showdown: Stack Versus Registers", *ACM Transactions on Architecture and Code Optimization*, 2008
+- CPython Developer's Guide. [https://devguide.python.org/internals/](https://devguide.python.org/internals/)
+- Mark Shannon. "Faster CPython" (PEP 659 — Specializing Adaptive Interpreter)
+- Mike Pall. "LuaJIT 2.0 intellectual property disclosure and research opportunities", 2009
+- "Life of a V8 JavaScript object", V8 Blog. [https://v8.dev/blog](https://v8.dev/blog)
+- Würthinger et al. "One VM to Rule Them All" (Truffle/Graal), *ACM DL*, 2013
+- Bryce Adelstein Lelbach. "A Deep Introduction to JIT Compilers: JITs are not very Just-in-Time", CppCon 2021
+- Hölzle, Chambers, Ungar. "Optimizing Dynamically-Typed Object-Oriented Languages With Polymorphic Inline Caches", *ECOOP*, 1991
+- Agesen. "Design and Implementation of PEP, a Java Just-In-Time Translator", *Sun Microsystems*, 1997
