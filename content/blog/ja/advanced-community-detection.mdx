@@ -1,0 +1,475 @@
+---
+title: "Community Detection 続編 — 高次構造・動的ネットワーク・多重ネットワークの最前線"
+date: "2026-04-13"
+description: "従来の辺密度ベースを超えた Community Detection の最前線。モチーフ・高次構造に基づく検出、動的ネットワークにおけるコミュニティの追跡、多重ネットワークの統合的解析を、歴史的経緯とともに超詳細に解説します。"
+tags: ["Graph Theory", "Community Detection", "Network Science", "Higher-Order", "Dynamic Networks"]
+---
+
+## はじめに — 前編の振り返りと続編の動機
+
+[前編](/ja/blog/community-detection)では、Community Detection の基本的な歴史、Modularity Q の定式化、Louvain / Leiden / Infomap / SBM といった標準的なアルゴリズム、そして Resolution Limit や検出限界といった本質的な困難を解説しました。
+
+しかし、前編で扱った手法には共通する暗黙の仮定がありました:
+
+1. **ペアワイズな辺のみを考慮する** — ノード $i$ と $j$ の間に辺があるかないか、という 2 体関係だけでコミュニティを定義
+2. **静的（単一スナップショット）のグラフ** — ネットワークは時間とともに変化しないと仮定
+3. **単一種類の関係** — ノード間の関係は 1 種類のみ
+
+現実のネットワークはこれらの仮定をことごとく破ります。SNS では「友人の友人が友人」という三角形の閉包（triadic closure）が重要であり、ノード間の関係は時間とともに変化し、同じ人物間にも「友人関係」「仕事関係」「趣味の繋がり」など複数種類の関係が存在します。
+
+この続編では、こうした現実の複雑さに対応するために発展してきた 3 つの研究方向を掘り下げます:
+
+- **高次構造 (Higher-Order) に基づくコミュニティ検出** — モチーフ、ハイパーグラフ、単体複体
+- **動的ネットワークにおけるコミュニティ検出** — 時間発展するグラフへの対応
+- **多重 (Multiplex) ネットワークにおけるコミュニティ検出** — 複数レイヤーの統合
+
+<AdvancedCDTimeline />
+
+## 第 I 部: 高次構造 (Higher-Order) に基づくコミュニティ検出
+
+### なぜ「辺」だけでは不十分なのか
+
+前編で紹介した Modularity ベースの手法を含む多くのアルゴリズムは、コミュニティを「辺が密な部分グラフ」として定義します。しかし、この定義には見落としがあります。
+
+以下の 2 つのグラフを考えてみましょう:
+
+- **グラフ A**: 6 ノード、9 辺。全ての辺が三角形の一部を構成（三角形が 3 つ）
+- **グラフ B**: 6 ノード、9 辺。三角形は 0 個。完全二部グラフ $K_{3,3}$ の構造
+
+<EdgeVsTriangleDiagram />
+
+両者は同じ辺密度を持ちますが、構造的には全く異なります。グラフ A には強い局所的凝集（triadic closure）があり、社会ネットワークでは「友人の友人は友人」という現象の反映です。グラフ B にはそれがありません。
+
+辺密度だけに基づく手法では、この区別がつきません。これこそが **高次構造 (higher-order structure)** を考慮する動機です。
+
+### クリーク・パーコレーション法 (CPM) — 高次構造利用の先駆
+
+高次構造を活用した最初の影響力ある手法が、Palla, Derényi, Farkas, Vicsek (2005) による **クリーク・パーコレーション法 (Clique Percolation Method, CPM)** です。CPM のアイデアは明快です:
+
+1. ネットワーク中の **$k$-クリーク**（$k$ ノードの完全部分グラフ）を全て列挙する
+2. $k-1$ 個のノードを共有する 2 つの $k$-クリークを「隣接」と定義する
+3. 隣接する $k$-クリークを辿って到達可能な全ての $k$-クリークの和集合を 1 つのコミュニティとする
+
+例えば、タンパク質間相互作用ネットワーク（PPI）において $k=4$ で CPM を適用すると、4 つのタンパク質が全て相互作用している密な複合体をビルディングブロックとして、より大きな機能モジュールを検出できます。
+
+CPM の重要な特徴は、ノードが複数のコミュニティに同時に属する **重複コミュニティ (overlapping communities)** を自然に検出できる点です。$k$-クリークの「連鎖」は交差し得るため、あるノードが複数の連鎖に属する場合、そのノードは複数のコミュニティに同時にメンバーシップを持ちます。実際の社会ネットワークでは、1 人の人間が「会社の同僚」「大学の友人」「趣味のサークル」など複数のコミュニティに属するのが普通であり、CPM はこの現実を反映しています。
+
+ただし、CPM にはパラメータ $k$ の選択が結果に大きく影響するという課題と、スパースなネットワークでは $k$-クリーク自体がほとんど存在しないという制約があります。CPM は $k$-クリークという特定の高次構造に特化していましたが、次のセクションでは、任意のネットワークモチーフに一般化したアプローチを見ていきます。
+
+### ネットワークモチーフの基礎
+
+**ネットワークモチーフ (network motif)** とは、ネットワーク中に統計的に有意に頻出する小さな部分グラフパターンのことです。モチーフの概念は、生物学者 Uri Alon らの先駆的研究 (Milo et al., 2002) によって確立されました。彼らは大腸菌の遺伝子調節ネットワークにおいて、フィードフォワードループなどの特定のパターンがランダムネットワークに比べて圧倒的に多く出現することを発見しました。
+
+<MotifCatalog />
+
+モチーフが重要である理由は、それが **機能的な意味** を持つからです:
+
+- **三角形**: 社会ネットワークにおける信頼・情報伝達の効率性。「A が B を信頼し、B が C を信頼するなら、A も C を信頼しやすい」
+- **フィードフォワードループ**: 遺伝子調節における信号のフィルタリング機能
+- **4-サイクル**: 二部ネットワーク（ユーザー-商品）における協調フィルタリングの基盤
+
+### Benson-Gleich-Leskovec のモチーフベース・コミュニティ検出 (2016)
+
+高次構造に基づくコミュニティ検出の最も影響力のある研究は、Benson, Gleich, Leskovec による "Higher-order organization of complex networks" (Science, 2016) です。彼らのアイデアは明快です:
+
+> 辺の密度ではなく、**モチーフの密度** に基づいてコミュニティを定義する。
+
+#### アルゴリズムの核心: Motif Conductance
+
+通常の Conductance（前編参照）は以下のように定義されます:
+
+$$
+\phi(S) = \frac{\text{cut}(S, \bar{S})}{\min(\text{vol}(S), \text{vol}(\bar{S}))}
+$$
+
+Benson らはこれを モチーフ $M$ に拡張した **Motif Conductance** を定義しました:
+
+$$
+\phi_M(S) = \frac{\text{cut}_M(S, \bar{S})}{\min(\text{vol}_M(S), \text{vol}_M(\bar{S}))}
+$$
+
+ここで:
+
+- $\text{cut}_M(S, \bar{S})$: モチーフ $M$ のインスタンスのうち、$S$ と $\bar{S}$ の両方にノードを持つもの（「境界をまたぐモチーフ」）の数
+- $\text{vol}_M(S)$: $S$ 内のノードのモチーフ加重次数の合計。形式的には $\text{vol}_M(S) = \sum_{i \in S} d_i^{(M)}$、ここで $d_i^{(M)} = \sum_j W_{ij}^{(M)}$（後述するモチーフ重み付き隣接行列の行和）
+
+直感的には、$\phi_M(S)$ が小さいほど「コミュニティ $S$ の内部でモチーフ $M$ が密であり、境界をまたぐモチーフが少ない」ことを意味します。
+
+#### モチーフ重み付き隣接行列
+
+Motif Conductance を実際に最小化するために、Benson らは **モチーフ重み付き隣接行列** $W^{(M)}$ を構築します:
+
+$$
+W^{(M)}_{ij} = \text{（辺 } (i,j) \text{ を含むモチーフ } M \text{ のインスタンス数）}
+$$
+
+<MotifWeightedAdjacencyDiagram />
+
+この行列を使って **モチーフ加重ラプラシアン** を構成し、スペクトラルクラスタリングを適用します:
+
+$$
+L^{(M)} = D^{(M)} - W^{(M)}
+$$
+
+ここで $D^{(M)}$ は $W^{(M)}$ の行和を対角要素とする次数行列です。
+
+重要なのは、Benson らがこのモチーフ加重ラプラシアンに対する **Cheeger 不等式の類似物** を証明したことです (Benson et al., 2016):
+
+$$
+\frac{\lambda_2^{(M)}}{2} \leq \phi_M^* \leq \sqrt{2 \lambda_2^{(M)}}
+$$
+
+ここで $\lambda_2^{(M)}$ はモチーフ加重ラプラシアンの 2 番目に小さい固有値、$\phi_M^*$ は最適な Motif Conductance です。この不等式は、スペクトラル法による近似が最適解に対して一定の保証を持つことを意味します。前編で紹介した通常のスペクトラルクラスタリングにおける Cheeger 不等式とまったく同じ構造の結果です。
+
+以下のデモで、三角形モチーフに基づくコミュニティ検出の具体的なプロセスを確認できます:
+
+<MotifCommunityVisualizer />
+
+#### なぜモチーフベースの手法が優れているのか
+
+辺ベースの手法と比較すると、モチーフベースの手法には以下の利点があります:
+
+1. **情報量の増加**: 辺（2 体関係）だけでなく、3 体以上の関係パターンを見ることで、ネットワークのより豊かな構造情報を活用できる
+2. **ドメイン知識の統合**: 分析対象に合ったモチーフを選択できる。例えば、生物ネットワークではフィードフォワードループ、社会ネットワークでは三角形
+3. **ノイズ耐性**: ランダムに存在する辺はモチーフを形成しにくいため、モチーフの密度はランダムなノイズに対してロバスト
+
+### ハイパーグラフによるコミュニティ検出
+
+モチーフベースのアプローチでは、辺を拡張してモチーフの密度に注目しましたが、もう一つの発展方向として **ハイパーグラフ (hypergraph)** に基づくアプローチがあります。
+
+通常のグラフでは辺は 2 ノード間の関係ですが、ハイパーグラフでは **ハイパーエッジ** が任意の数のノードの集合を直接結びます:
+
+$$
+e = \{v_1, v_2, ..., v_k\}, \quad k \geq 2
+$$
+
+これは現実の多体関係を自然にモデル化します:
+
+- 論文の共著関係（3 人以上の共著）
+- メールの CC（複数人に同時送信）
+- 化学反応（複数の物質が同時に関与）
+
+例えば、DBLP の共著ネットワークでは、3 人以上が共著した論文はハイパーエッジとして自然にモデル化できます。この論文を 3 本のペアワイズ辺に分解すると、「3 人が同時に共同研究した」という情報が失われます。ハイパーグラフを使うことで、こうした多体関係を正確に保持できます。
+
+ハイパーグラフ上のコミュニティ検出は、以下のアプローチで行われます:
+
+**クリークへの展開 (Clique Expansion)**: ハイパーエッジ $e = \{v_1, ..., v_k\}$ を $\binom{k}{2}$ 個のペアワイズ辺に変換し、通常のグラフとして処理します。しかしこの変換は情報を失います——4 人が同時に会議している（1 つのハイパーエッジ）のと、4 人の全ペアが個別に会話している（6 本の辺）のとでは意味が異なるからです。
+
+**ハイパーグラフ直接法**: ハイパーグラフ上のスペクトラルクラスタリングでは、Zhou, Huang, Schölkopf (2006) が導入した **ハイパーグラフラプラシアン** を用います:
+
+$$
+\Delta_H = D_v - H W_e D_e^{-1} H^T
+$$
+
+ここで $H$ は接続行列（ノード $\times$ ハイパーエッジ）、$D_v$ はノード次数行列、$W_e$ はハイパーエッジの重み行列、$D_e$ はハイパーエッジ次数（サイズ）の対角行列です。
+
+Kumar et al. (2020) は、異なるアプローチとして、ハイパーグラフの構造を直接保持しつつ **重み付き Modularity を反復的に最大化** する手法を提案し、ハイパーエッジのサイズを活用した柔軟なモジュラリティ定義を実現しました。
+
+### 単体複体 (Simplicial Complex) によるアプローチ
+
+ハイパーグラフをさらに発展させたのが **単体複体 (simplicial complex)** に基づくアプローチです。単体複体はトポロジー（位相幾何学）から借用した概念で、$k$-単体（$k$-simplex）とは $k+1$ 個のノードの集合であり、その全ての部分集合も単体に含まれるという **包含条件** を満たす構造です。
+
+- 0-単体: ノード
+- 1-単体: 辺
+- 2-単体: 三角形（3 ノード + 3 辺）
+- $k$-単体: $(k+1)$ ノードの完全グラフ（とその全ての部分面）
+
+単体複体上では **ホッジラプラシアン (Hodge Laplacian)** が定義でき、$k$-次の境界作用素を用いて $k$-チェインの「滑らかさ」を測ることができます。これにより、辺のフロー（1-チェイン）に基づくコミュニティ検出も可能になります。Schaub et al. (2020) はホッジラプラシアンのスペクトルを用いたシグナル処理の枠組みを提案しました。
+
+ここまで、静的なグラフにおける高次構造の活用を見てきました。辺 → クリーク → モチーフ → ハイパーエッジ → 単体と、「関係の表現力」を拡張する方向での発展です。しかし、現実のネットワークには **時間** というもう一つの重要な軸があります。SNS の友人関係は日々変化し、論文の共著ネットワークは年ごとに成長します。こうした時間変化をどう扱うかが、次の研究課題です。
+
+## 第 II 部: 動的ネットワークにおけるコミュニティ検出
+
+### 動的ネットワークの定式化
+
+現実のネットワークは時間とともに変化します。友人関係の形成と解消、論文の出版と引用、タンパク質の発現パターンの変化——これらは全て **動的ネットワーク** の問題です。
+
+動的ネットワークの表現方法は主に 2 つあります:
+
+**離散スナップショットモデル**: 時刻 $t_1, t_2, ..., t_T$ におけるグラフのスナップショット $G_1, G_2, ..., G_T$ として表現。各 $G_t = (V_t, E_t)$ は静的グラフ。
+
+**連続時間モデル**: 辺の出現・消失をイベントとして扱い、$(i, j, t_{\text{start}}, t_{\text{end}})$ の形でタイムスタンプ付きで記録。より詳細な情報を保持するが、分析が複雑。
+
+実用上はスナップショットモデルが広く使われますが、時間粒度の選択（どの間隔でスナップショットを取るか）が結果に大きく影響するという問題があります。
+
+### コミュニティのライフサイクル
+
+動的ネットワークにおけるコミュニティ検出の核心は、単に各時刻でコミュニティを見つけるだけでなく、**時間を通じてコミュニティを追跡する** ことにあります。コミュニティは以下のライフサイクルイベントを経験します:
+
+<CommunityLifecycleDiagram />
+
+これらのイベントを正確に同定するには、連続するスナップショット間でコミュニティの対応付け（マッチング）を行う必要があります。
+
+以下のデモで、動的ネットワークにおけるコミュニティのライフサイクルを実際に確認してみましょう:
+
+<TemporalCommunityVisualizer />
+
+### 主要アプローチ 1: 独立検出 + 対応付け (Two-Stage Approach)
+
+最もシンプルな手法は、各時刻のスナップショットに独立にコミュニティ検出を適用し、その後、連続する時刻間でコミュニティの対応を取るというものです。
+
+```text
+Two-Stage Approach:
+  1. 各時刻 t でコミュニティ C_t = {C_t^1, C_t^2, ...} を独立に検出
+  2. 隣接する時刻 t, t+1 間で Jaccard 係数によるマッチング:
+     J(C_t^i, C_{t+1}^j) = |C_t^i ∩ C_{t+1}^j| / |C_t^i ∪ C_{t+1}^j|
+  3. J が閾値以上のペアを対応とし、ライフサイクルイベントを同定:
+     - 対応先がない C_t^i → 消滅 (Death)
+     - 対応元がない C_{t+1}^j → 誕生 (Birth)
+     - 1 対多 → 分裂 (Split)
+     - 多対 1 → 統合 (Merge)
+```
+
+この手法の利点は、任意の静的コミュニティ検出アルゴリズムを「そのまま」使えることです。Louvain、Leiden、Infomap——前編で紹介したどの手法でも各スナップショットで使えます。
+
+しかし重大な欠点があります: **時間的一貫性 (temporal coherence)** が保証されません。各スナップショットのノイズ（辺がわずかに増減しただけ）でコミュニティ構造が大きく変わってしまう場合があり、「実際には安定しているコミュニティ」が見かけ上は激しく変動する結果になり得ます。
+
+### 主要アプローチ 2: Evolutionary Clustering (2006)
+
+Chakrabarti, Kumar, Tomkins (KDD 2006) が提案した **Evolutionary Clustering** は、時間的一貫性の問題に対する体系的な解決策です。
+
+核心のアイデアは、**各時刻の目的関数に「前時刻からの変化コスト」を加える** ことです:
+
+$$
+\mathcal{L}_t = \alpha \cdot \text{quality}(C_t, G_t) + (1 - \alpha) \cdot \text{similarity}(C_t, C_{t-1})
+$$
+
+- $\text{quality}(C_t, G_t)$: 時刻 $t$ のグラフ $G_t$ に対するコミュニティ分割 $C_t$ の品質（例: Modularity Q）
+- $\text{similarity}(C_t, C_{t-1})$: 前時刻のコミュニティ分割 $C_{t-1}$ との類似度（例: NMI, Jaccard 係数）
+- $\alpha \in [0, 1]$: 「現時点のデータへの適合」と「過去との一貫性」のトレードオフパラメータ
+
+$\alpha = 1$ なら完全に独立検出（前時刻を無視）、$\alpha = 0$ なら前時刻と完全に同じ構造を維持（新しいデータを無視）。
+
+実用上は $\alpha$ をどう設定するかが問題です。ネットワークが急激に変化する時期（例: SNS における世界的イベント）では $\alpha$ を大きく、安定期では小さくすべきですが、その切り替え判断自体が困難です。
+
+Evolutionary Clustering は「動的コミュニティ検出」を明示的な最適化問題として定式化した最初の体系的研究であり、後続の多くの手法に影響を与えました。
+
+### 主要アプローチ 3: Multislice Modularity (Mucha et al., 2010)
+
+Mucha, Richardson, Macon, Porter, Onnela による "Community Structure in Time-Dependent, Multiscale, and Multiplex Networks" (Science, 2010) は、動的コミュニティ検出の最も影響力のある研究です。
+
+彼らのアイデアは、**時間スナップショットを「スライス」として積み重ね、スライス間を結合辺で繋いだ超グラフ** を構築することです:
+
+$$
+Q_{\text{multislice}} = \frac{1}{2\mu} \sum_{ijsr} \left[ \left( A_{ijs} - \gamma_s \frac{k_{is} k_{js}}{2m_s} \right) \delta_{sr} + \delta_{ij} \omega_{jsr} \right] \delta(g_{is}, g_{jr})
+$$
+
+この見慣れない式を分解しましょう:
+
+**インデックスの意味:**
+- $i, j$: ノード
+- $s, r$: スライス（時刻やレイヤーのインデックス）
+- $g_{is}$: ノード $i$ のスライス $s$ におけるコミュニティ割り当て
+
+**第 1 項:** $\left( A_{ijs} - \gamma_s \frac{k_{is} k_{js}}{2m_s} \right) \delta_{sr}$
+
+これは「同一スライス内」の Modularity です。$\delta_{sr}$ があるので、$s = r$（同じスライス）のときだけ寄与します。$\gamma_s$ は resolution parameter（前編参照）で、スライスごとに異なる値を設定可能です。
+
+**第 2 項:** $\delta_{ij} \omega_{jsr}$
+
+これが Mucha らの革新です。$\delta_{ij}$ によって「同一ノード」のみに適用され、$\omega_{jsr}$ は **スライス間結合強度** です。直感的には「時刻 $s$ のノード $i$ と時刻 $r$ の同じノード $i$ を仮想的な辺で繋ぐ」操作です。
+
+**$\omega_{jsr}$ の選択:**
+- 時間的に隣接するスナップショット間のみ結合: $\omega_{jsr} = \omega$ if $|s - r| = 1$
+- 全スナップショット間を一様に結合: $\omega_{jsr} = \omega$ for all $s \neq r$
+- ノードごと・時刻ごとに異なる結合: $\omega_{jsr}$ が $j, s, r$ に依存
+
+$\omega$ が大きいほど「同じノードは時刻が変わっても同じコミュニティにいるべき」という時間的一貫性が強くなり、小さいほど各スナップショットの独立性が高まります。
+
+**正規化:** $2\mu = \sum_{jr} \kappa_{jr}$ で、$\kappa_{jr} = k_{jr} + c_{jr}$（ノード $j$ のスライス $r$ における次数 $k_{jr}$ とスライス間結合の強度 $c_{jr}$ の合計）
+
+この定式化の画期的な点は:
+
+1. **動的ネットワークと多重ネットワークの統一**: スライスを「時刻」と解釈すれば動的ネットワーク、「レイヤー」と解釈すれば多重ネットワーク
+2. **既存手法の利用**: この拡張 Modularity は、通常の Modularity と同様に Louvain/Leiden 型の貪欲法で最適化可能
+3. **マルチスケール解析**: $\gamma_s$ と $\omega$ を変化させることで、異なるスケールの構造を探索可能
+
+### 主要アプローチ 4: テンソル分解アプローチ
+
+De Domenico et al. (2013) は、多重・動的ネットワークを **テンソル** として表現する数学的枠組みを提案しました。
+
+$L$ 個のレイヤー（または時間スナップショット）を持つ多重ネットワークは、4 階テンソル $\mathcal{M}$ として表現できます:
+
+$$
+\mathcal{M}_{ij\alpha\beta}
+$$
+
+- $i, j$: ノード
+- $\alpha, \beta$: レイヤー
+- $\mathcal{M}_{ij\alpha\alpha}$: レイヤー $\alpha$ におけるノード $i$ と $j$ の間の辺の重み
+- $\mathcal{M}_{ii\alpha\beta}$: ノード $i$ のレイヤー $\alpha$ と $\beta$ の間の結合（inter-layer coupling）
+
+このテンソルに対して、**テンソル分解** (CP 分解や Tucker 分解) を適用してコミュニティ構造を抽出します。テンソル分解は、行列分解（PCA や NMF）の多次元拡張であり、ノードとレイヤーの両方の構造を同時に捉えることができます。
+
+テンソルアプローチの利点は数学的な一般性ですが、大規模ネットワークへのスケーラビリティに課題があります。Gauvin, Panisson, Cattuto (2014) は、対面接触ネットワークに非負テンソル因子分解 (NTF) を適用し、コミュニティのメンバーシップとその時間的活動パターンを同時に推定することに成功しています。
+
+第 II 部では、時間軸に沿ったコミュニティの追跡を中心に見てきましたが、Multislice Modularity やテンソル分解の枠組みは、実は **多重ネットワーク** にもそのまま適用できます。第 III 部では、この多重ネットワーク固有の課題と手法を探ります。
+
+## 第 III 部: 多重 (Multiplex) ネットワークにおけるコミュニティ検出
+
+### 多重ネットワークとは何か
+
+**多重ネットワーク (multiplex network)** とは、同じノード集合の間に複数種類の関係（レイヤー）が存在するネットワークです。
+
+<MultiplexNetworkDiagram />
+
+例:
+- SNS: 「フォロー」「メッセージ」「いいね」が別レイヤー
+- 交通: 「鉄道」「バス」「航空」が別レイヤー
+- 生物: 「タンパク質-タンパク質相互作用」「遺伝子調節」「代謝経路」が別レイヤー
+
+多重ネットワークは **多層ネットワーク (multilayer network)** のサブクラスです。多層ネットワークの一般的な定式化は Kivelä et al. (2014) のサーベイで整理されていますが、その中でも「全レイヤーでノード集合が同一」という制約を持つのが多重ネットワークです。
+
+### アプローチ 1: レイヤー集約 (Layer Aggregation)
+
+最もシンプルな手法は、全レイヤーの隣接行列を足し合わせた集約グラフに対して通常のコミュニティ検出を行うことです:
+
+$$
+A_{\text{agg}} = \sum_{\alpha=1}^{L} w_\alpha A^{(\alpha)}
+$$
+
+ここで $A^{(\alpha)}$ はレイヤー $\alpha$ の隣接行列、$w_\alpha$ は重みです。
+
+この手法は簡単ですが、**レイヤー固有の情報が失われます**。あるレイヤーでは明確にコミュニティ A に属するノードが、別のレイヤーではコミュニティ B に属する場合、集約するとその情報が消えてしまいます。
+
+### アプローチ 2: Multislice Modularity（再訪）
+
+先ほど動的ネットワークの文脈で紹介した Mucha et al. (2010) の Multislice Modularity は、多重ネットワークにも直接適用できます。スライスを「レイヤー」として解釈するだけです。
+
+結合パラメータ $\omega$ は、異なるレイヤー間でのコミュニティの一貫性を制御します。$\omega$ が大きいほど、同じノードは全てのレイヤーで同じコミュニティに属しやすくなります。
+
+### アプローチ 3: レイヤー固有 + 統合の組み合わせ
+
+Interdonato, Tagarelli, Ienco, Sallaberry, Roche (2017) は、多重ネットワークのコミュニティ検出を以下の 3 カテゴリに分類しています:
+
+1. **レイヤー非依存 (Layer-independent)**: 各レイヤーで独立に検出し、結果を統合
+2. **レイヤー集約 (Aggregation-based)**: レイヤーを事前に集約
+3. **レイヤー統合 (Layer-coupled)**: 全レイヤーを同時に考慮して最適化
+
+3 番目の「レイヤー統合」アプローチが最も情報量を活用しますが、計算コストが高くなります。
+
+### GenLouvain: Multislice Modularity の実用的実装
+
+Multislice Modularity の最適化のためによく使われるのが **GenLouvain** (Jutla, Jeub, Mucha, 2011–) です。これは Louvain アルゴリズムの多重・動的ネットワーク版で、以下の手順で動作します:
+
+```text
+GenLouvain:
+  入力: 多重/動的ネットワーク (隣接行列 A^(s), 結合パラメータ ω)
+  1. Multislice Modularity 行列 B を構築:
+     B_{isjs} = A_{ijs} - γ_s * k_{is}*k_{js}/(2*m_s)  (同一スライス内)
+     B_{isir} = ω_{isr}                                  (スライス間・同一ノード)
+  2. この B 行列上で Louvain の局所移動 + 集約を適用
+  3. Multislice Modularity Q_multislice を最大化
+  → 各ノードの各スライスにおけるコミュニティ割り当てが得られる
+```
+
+## 第 IV 部: 近年の最前線
+
+### GNN ベースのコミュニティ検出
+
+Graph Neural Network (GNN) を用いたコミュニティ検出は 2020 年代に急速に発展しています。
+
+**DMoN (Tsitsulin et al., 2023)**: Modularity を微分可能にし、GNN のエンコーダで得られたノード埋め込みから直接コミュニティ割り当て行列を予測します。損失関数は:
+
+$$
+\mathcal{L} = -\frac{1}{2m} \text{Tr}(C^T B C) + \frac{\sqrt{k}}{n} \left\| C^T \mathbf{1}_n \right\| - 1
+$$
+
+- 第 1 項: Modularity の最大化（符号が負なので最小化すると最大化に相当）
+- 第 2 項: collapse 正則化。$C^T \mathbf{1}_n$ はクラスタサイズベクトル $\mathbf{s}$（各クラスタに割り当てられたノード数）。全クラスタが均等サイズ（$s_i = n/k$）のとき最小値 0 となり、全ノードが 1 クラスタに集中すると大きなペナルティを与える
+- $C$: GNN が出力するソフトなコミュニティ割り当て行列 ($n \times k$)
+- $B$: Modularity 行列 ($B_{ij} = A_{ij} - k_i k_j / 2m$)
+
+**MinCutPool (Bianchi et al., 2020)**: 正規化カットを微分可能にし、グラフプーリング層として GNN に統合。Graph U-Net 的なアーキテクチャでコミュニティを階層的に検出。
+
+GNN ベース手法の利点は **ノードの特徴量** を活用できることです。SNS のプロフィール情報、論文の内容、タンパク質の配列情報——これらをグラフ構造と同時に考慮できます。一方で、以下の課題があります:
+
+- **解釈性**: GNN の中間表現の意味が不透明
+- **汎化性**: 学習データと異なる構造のグラフに適用できるか不明
+- **スケーラビリティ**: 大規模グラフでの訓練コスト
+
+### Flow-Based Dynamic Community Detection
+
+時間的なフロー（情報の流れ）に着目した手法も発展しています。Rosvall と Bergstrom (2010) は Infomap を動的ネットワークに拡張し、テレポーテーション付きランダムウォークを時間スライス間で接続するフレームワークを提案しました。
+
+これは Map Equation の動的拡張で、スライス内のランダムウォークとスライス間の「テレポート」（同一ノードでの時間遷移）を統合的に記述します。Mucha らの Multislice Modularity と同様のスライス間結合の考え方を、情報理論的な枠組みで実現しています。
+
+### ストリーミングアルゴリズム
+
+辺が一本ずつ到着するストリーミング設定でのコミュニティ検出も重要な研究方向です。大規模 SNS のリアルタイムコミュニティ検出を想定しています。
+
+OSLOM (Lancichinetti, Radicchi, Ramasco & Fortunato, 2011) は、統計的に有意なコミュニティを検出する手法であり、辺の追加・削除に対して局所的にコミュニティを更新する仕組みも備えています。全体を再計算することなくインクリメンタルに結果を更新できるため、ストリーミング的な運用にも適しています。
+
+## 手法の比較と選択指針
+
+<AdvancedCDComparisonTable />
+
+### 実践的なアルゴリズム選択ガイド
+
+前編のガイドに追加する形で、高次・動的・多重ネットワークの場合の指針を示します:
+
+| 状況 | 推奨アプローチ |
+|---|---|
+| 三角形の密度が重要（社会ネットワーク） | **Motif-based Spectral** (Benson et al., 2016) |
+| 多体関係を直接モデル化したい | **ハイパーグラフ法** |
+| 時間発展するネットワーク、一貫性重視 | **Multislice Modularity** (Mucha et al., 2010) |
+| 各スナップショットの品質重視 | **独立検出 + マッチング** |
+| 複数レイヤーの統合分析 | **GenLouvain** (Multislice Modularity の実装) |
+| ノード特徴量が豊富 | **GNN ベース** (DMoN 等) |
+| リアルタイム処理が必要 | **ストリーミングアルゴリズム** (OSLOM 等) |
+| マルチスケール + 多重 | **テンソル分解** |
+| コミュニティが重複する可能性がある | **CPM** (Palla et al., 2005) / **BigCLAM** (Yang & Leskovec, 2013) |
+
+## まとめ — 統合的な視座
+
+前編と合わせて、Community Detection の全体像を振り返りましょう。
+
+**第 1 世代** (1970–2000 年代前半): グラフ分割問題から社会ネットワーク分析へ。Modularity の定式化、Girvan-Newman の開拓。辺密度に基づく「静的・単一レイヤー・ペアワイズ」のパラダイム。
+
+**第 2 世代** (2000 年代後半–2010 年代前半): Louvain/Leiden のスケーラビリティ、SBM の統計的推論、Resolution Limit や検出限界の発見。「より良い手法」の追求と「本質的な困難」の認識。
+
+**第 3 世代** (2010 年代後半–現在): 本稿で扱った「辺を超えた」パラダイムの発展。
+- 高次構造の考慮（モチーフ、ハイパーグラフ、単体複体）
+- 時間的ダイナミクスの統合（Evolutionary Clustering、Multislice Modularity）
+- 多重関係の統合（多重ネットワーク、テンソルアプローチ）
+- 深層学習との融合（GNN ベース手法）
+
+これらの発展を通じて見えてくるのは、**Community Detection は単一の正解を求める問題ではなく、ネットワークの構造を多面的に理解するための道具箱** であるということです。辺の密度、モチーフの密度、情報圧縮効率、統計的な有意性、時間的一貫性、レイヤー間の整合性——それぞれ異なる「コミュニティ」の定義に対応し、異なる視点からネットワークの構造を照らし出します。
+
+この分野は今なお活発に研究が進んでおり、特に以下の方向性が注目されています:
+
+1. **ハイパーグラフ上の GNN**: ハイパーグラフニューラルネットワーク (HGNN) を用いた教師なしコミュニティ検出
+2. **因果的コミュニティ**: ノード・辺の時間的因果関係に基づくコミュニティの定義
+3. **スケーラブルな動的手法**: 数十億ノード規模のリアルタイム処理
+4. **理論的保証の拡張**: 高次構造や動的設定における検出限界の解明
+
+前編で述べた「完璧な Community Detection は原理的に不可能」という認識は、この続編で扱った高度な設定ではさらに強まります。しかし同時に、道具箱は着実に豊かになっており、現実のネットワークの複雑さにより深く迫ることが可能になっています。
+
+## 参考文献
+
+- Milo, R., Shen-Orr, S., Itzkovitz, S., Kashtan, N., Chklovskii, D., & Alon, U. (2002). *Network motifs: simple building blocks of complex networks*. Science, 298(5594), 824–827.
+- Palla, G., Derényi, I., Farkas, I., & Vicsek, T. (2005). *Uncovering the overlapping community structure of complex networks in nature and society*. Nature, 435(7043), 814-818.
+- Chakrabarti, D., Kumar, R., & Tomkins, A. (2006). *Evolutionary clustering*. KDD 2006, 554–560.
+- Mucha, P. J., Richardson, T., Macon, K., Porter, M. A., & Onnela, J.-P. (2010). *Community structure in time-dependent, multiscale, and multiplex networks*. Science, 328(5980), 876–878.
+- Rosvall, M., & Bergstrom, C. T. (2010). *Mapping change in large networks*. PLoS ONE, 5(1), e8694.
+- Lancichinetti, A., Radicchi, F., Ramasco, J. J., & Fortunato, S. (2011). *Finding statistically significant communities in networks*. PLoS ONE, 6(4), e18961.
+- De Domenico, M., Solé-Ribalta, A., Cozzo, E., Kivelä, M., Moreno, Y., Porter, M. A., Gómez, S., & Arenas, A. (2013). *Mathematical formulation of multilayer networks*. Physical Review X, 3(4), 041022.
+- Yang, J., & Leskovec, J. (2013). *Overlapping community detection at scale: a nonnegative matrix factorization approach*. WSDM 2013, 587-596.
+- Kivelä, M., Arenas, A., Barthelemy, M., Gleeson, J. P., Moreno, Y., & Porter, M. A. (2014). *Multilayer networks*. Journal of Complex Networks, 2(3), 203–271.
+- Gauvin, L., Panisson, A., & Cattuto, C. (2014). *Detecting the community structure and activity patterns of temporal networks: a non-negative tensor factorization approach*. PLoS ONE, 9(1), e86028.
+- Benson, A. R., Gleich, D. F., & Leskovec, J. (2016). *Higher-order organization of complex networks*. Science, 353(6295), 163–166.
+- Interdonato, R., Tagarelli, A., Ienco, D., Sallaberry, A., & Roche, M. (2017). *Local community detection in multilayer networks*. Data Mining and Knowledge Discovery, 31(5), 1444–1479.
+- Bianchi, F. M., Grattarola, D., & Alippi, C. (2020). *Spectral clustering with graph neural networks for graph pooling*. ICML 2020.
+- Kumar, T., Vaidyanathan, S., Ananthapadmanabhan, H., Parthasarathy, S., & Ravindran, B. (2020). *Hypergraph clustering by iteratively reweighted modularity maximization*. Applied Network Science, 5, 52.
+- Schaub, M. T., Benson, A. R., Horn, P., Lippner, G., & Jadbabaie, A. (2020). *Random walks on simplicial complexes and the normalized Hodge 1-Laplacian*. SIAM Review, 62(2), 353–391.
+- Tsitsulin, A., Palowitch, J., Perozzi, B., & Müller, E. (2023). *Graph clustering with graph neural networks*. JMLR, 24(127), 1–21.
+- Zhou, D., Huang, J., & Schölkopf, B. (2006). *Learning with Hypergraphs: Clustering, Classification, and Embedding*. NeurIPS 2006.
+- Jutla, I. S., Jeub, L. G. S., & Mucha, P. J. (2011–). *A generalized Louvain method for community detection implemented in MATLAB*. http://netwiki.amath.unc.edu/GenLouvain
+
+### 参考資料（発展的読書）
+
+- Ahn, Y.-Y., Bagrow, J. P., & Lehmann, S. (2010). *Link communities reveal multiscale complexity in networks*. Nature, 466(7307), 761-764.
+- Benson, A. R., Gleich, D. F., & Lim, L.-H. (2017). *The spacey random walk: a stochastic process for higher-order data*. SIAM Review, 59(2), 321–345.
+- Rossetti, G. (2021). *CDlib: Community Discovery Library*. SoftwareX, 16, 100842.
+- Fortunato, S. (2010). *Community detection in graphs*. Physics Reports, 486(3-5), 75-174.
+- Fortunato, S., & Hric, D. (2016). *Community detection in networks: A user guide*. Physics Reports, 659, 1-44.

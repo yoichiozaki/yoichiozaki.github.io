@@ -78,6 +78,15 @@ export { ImperativeVsDeclarative } from "./ImperativeVsDeclarative";
 export { LambdaCalculusVisualizer } from "./LambdaCalculusVisualizer";
 export { OOPVisualizer } from "./OOPVisualizer";
 export { ParadigmComparison } from "./ParadigmComparison";
+export { StreamingCommunityVisualizer } from "./StreamingCommunityVisualizer";
+export {
+  StreamingCDTimeline,
+  BatchVsStreamingDiagram,
+  StreamingCDComparisonTable,
+  StreamingDesignSpaceDiagram,
+  TILESProcessDiagram,
+  DeltaScreeningDiagram,
+} from "./StreamingCDDiagrams";
 export { TestRunnerVisualizer } from "./TestRunnerVisualizer";
 export { GraphTraversalVisualizer } from "./GraphTraversalVisualizer";
 export { DijkstraVisualizer } from "./DijkstraVisualizer";
@@ -100,3 +109,35 @@ export {
 export { BytecodeExecutionVisualizer } from "./BytecodeExecutionVisualizer";
 export { StackVsRegisterComparison } from "./StackVsRegisterComparison";
 export { JITTieringVisualizer } from "./JITTieringVisualizer";
+export { AgenticWorkflowVisualizer } from "./AgenticWorkflowVisualizer";
+export {
+  SequentialPatternDiagram,
+  ConcurrentPatternDiagram,
+  ConditionalPatternDiagram,
+  HandoffPatternDiagram,
+  WriterCriticPatternDiagram,
+  GroupChatPatternDiagram,
+} from "./WorkflowPatternDiagrams";
+export { BSPVisualizer } from "./BSPVisualizer";
+export { BSPArchitectureDiagram } from "./BSPArchitectureDiagram";
+export { GraphRAGPipelineVisualizer } from "./GraphRAGPipelineVisualizer";
+export { CommunityDetectionVisualizer } from "./CommunityDetectionVisualizer";
+export {
+  CommunityDetectionTimeline,
+  AlgorithmComparisonTable,
+  ModularityConceptDiagram,
+  ResolutionLimitDiagram,
+  DetectabilityThresholdDiagram,
+} from "./CommunityDetectionDiagrams";
+export {
+  AdvancedCDTimeline,
+  MotifCatalog,
+  MultiplexNetworkDiagram,
+  AdvancedCDComparisonTable,
+  CommunityLifecycleDiagram,
+  MotifWeightedAdjacencyDiagram,
+  EdgeVsTriangleDiagram,
+} from "./AdvancedCommunityDetectionDiagrams";
+export { MotifCommunityVisualizer } from "./MotifCommunityVisualizer";
+export { TemporalCommunityVisualizer } from "./TemporalCommunityVisualizer";
+export { MCPProtocolVisualizer } from "./MCPProtocolVisualizer";

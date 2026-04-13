@@ -1,0 +1,610 @@
+---
+title: "Streaming Community Detection — The Science of Tracking Communities in Real-Time Evolving Graphs"
+date: "2026-04-13"
+description: "A deep dive into the research history and frontiers of Community Detection in streaming settings where edges arrive and depart one by one, featuring TILES, delta-screening Louvain, LabelRankT, and other landmark algorithms."
+tags: ["Graph Theory", "Community Detection", "Streaming Algorithms", "Network Science", "Dynamic Graphs"]
+---
+
+## Introduction — Why "Streaming"?
+
+In the [first article](/en/blog/community-detection), we covered the fundamentals of community detection—Modularity, Louvain/Leiden, Infomap, SBM. In the [second article](/en/blog/advanced-community-detection), we extended these ideas to higher-order structures, dynamic networks, and multiplex networks.
+
+However, the "dynamic network" approaches in the second article carried an implicit assumption: **graph snapshots are given at discrete time points, and community detection is executed in batch mode on each snapshot.** For real-world large-scale networks—Twitter/X follow graphs, financial transaction networks, IoT sensor networks—this assumption breaks down in two ways:
+
+1. **Scale**: Re-running Louvain from scratch on a graph with billions of nodes and tens of billions of edges every time a single edge changes is computationally infeasible
+2. **Real-time requirements**: Use cases like fraud detection and trend prediction demand **immediate** awareness of community structure changes, with no time to wait for the next snapshot
+
+**Streaming Community Detection** addresses these demands. Given an **edge stream** where edges arrive (or are removed) one at a time, the goal is to **incrementally** maintain the community structure—this is the topic of this article.
+
+### What This Article Covers
+
+- The **research history** of streaming CD—how the field escaped batch processing
+- The **three-tier distinction** between "batch recompute," "incremental update," and "true streaming"
+- **Detailed analysis** of landmark algorithms: LabelRankT, OSLOM, DEMON, TILES, DynaMo, delta-screening Louvain, ANGEL
+- The **design space** of streaming CD—independent dimensions to consider when designing algorithms
+- Recent **GNN-based and LLM-integrated** approaches
+- Practical **algorithm selection guidelines**
+
+<StreamingCDTimeline />
+
+## Part I: Foundations — From Batch to Streaming
+
+### Formal Definition of Edge Streams
+
+In the streaming setting, a graph is defined as:
+
+$$
+S = \langle (e_1, t_1, \text{op}_1), (e_2, t_2, \text{op}_2), \ldots \rangle
+$$
+
+Where:
+
+- $e_i = (u_i, v_i)$: an edge (pair of nodes)
+- $t_i$: timestamp ($t_i \leq t_{i+1}$)
+- $\text{op}_i \in \{+, -\}$: operation (edge addition $+$ or deletion $-$)
+
+At any time $t$, the graph $G_t = (V_t, E_t)$ is the cumulative result of all stream events up to that point:
+
+$$
+E_t = \{e_i \mid t_i \leq t, \text{op}_i = +\} \setminus \{e_j \mid t_j \leq t, \text{op}_j = -\}
+$$
+
+The goal of streaming CD is to efficiently maintain a community partition $\mathcal{C}_t$ of $G_t$ at each time $t$. Ideally, the update cost per edge arrival should be $O(1)$ or $O(\text{polylog}(n))$. Methods requiring $O(m + n)$ (full graph traversal) are inadequate for streaming.
+
+### Three Processing Paradigms
+
+To understand streaming CD, it is essential to distinguish three paradigms based on processing granularity:
+
+<BatchVsStreamingDiagram />
+
+**1. Batch Recompute**
+
+Re-run the community detection algorithm on the entire graph for every edge change. Accurate, but with $O(m + n)$ or higher computational cost, each update takes seconds to minutes on large graphs. Applying Louvain from scratch falls into this category.
+
+**2. Incremental Update**
+
+Recompute only the **local scope** affected by the edge change. By targeting only the endpoints of the changed edge and their neighborhoods, the update cost is reduced to roughly $O(\Delta \cdot k)$ ($\Delta$ = number of changed edges, $k$ = average degree). Delta-screening Louvain is the representative example.
+
+**3. True Streaming**
+
+Update the algorithm's internal state in **constant** or **logarithmic** time per edge arrival. No graph traversal is needed; decisions are made using only the arriving edge and its immediate neighborhood information. TILES conceptually belongs to this category (though in practice, triangle detection incurs cost proportional to node degree).
+
+### The Stability–Responsiveness Trade-off
+
+The fundamental dilemma of streaming CD is the trade-off between **stability** and **responsiveness**:
+
+- **Stability**: Community structure should be robust against noise (random edge appearances and disappearances). Assignments that flip-flop with minor changes are undesirable
+- **Responsiveness**: When the graph structure genuinely changes (a community splits, a new community emerges, etc.), the algorithm should reflect this promptly
+
+The Evolutionary Clustering parameter $\alpha$ from the second article directly controls this trade-off:
+
+$$
+\mathcal{L}_t = \alpha \cdot \text{quality}(C_t, G_t) + (1 - \alpha) \cdot \text{similarity}(C_t, C_{t-1})
+$$
+
+In the streaming setting, this trade-off is posed at the granularity of a single edge. "Is this edge addition a sign of genuine structural change, or just noise?"—this judgment must be made with the context of just one edge.
+
+## Part II: Research History — Escaping Batch Processing
+
+### Prehistory: The Arrival of LPA (2007)
+
+To understand the history of streaming CD, we must first appreciate the **Label Propagation Algorithm (LPA)**. Proposed by Raghavan, Albert, and Kumara (2007), LPA's simplicity made it a natural candidate for streaming adaptation.
+
+```text
+Label Propagation Algorithm (LPA):
+  1. Assign each node a unique label
+  2. Repeat:
+     For each node v:
+       Assign v the most frequent label among its neighbors
+       (break ties randomly)
+  3. Stop when labels converge
+  → Nodes with the same label form a community
+```
+
+LPA's complexity is $O(km)$ ($k$ = iterations until convergence, typically around 5), making it very lightweight. Moreover, each node's update requires **only neighborhood information**, so when an edge is added, only the relevant nodes need updating—an inherently local operation.
+
+This "locality" made LPA a prime candidate for streaming extension.
+
+### GraphScope (2007): Pioneer of Change-Point Detection
+
+Sun, Faloutsos, Papadimitriou, and Yu (KDD 2007) proposed **GraphScope**, an early important work on streaming-capable CD. GraphScope uses information theory (Minimum Description Length principle, MDL) to automatically detect **change points** in the graph structure within edge streams.
+
+The core idea:
+
+1. Segment the edge stream into intervals $[t_i, t_{i+1})$
+2. Assume stable graph structure within each segment; estimate community structure
+3. Segment boundaries are determined automatically via MDL: compare the cost of introducing a new segment vs. encoding new data with the existing segment's model
+
+$$
+\text{MDL}(\text{segment}) = L(\text{model}) + L(\text{data} \mid \text{model})
+$$
+
+- $L(\text{model})$: description length of the model (community structure)
+- $L(\text{data} \mid \text{model})$: description length of data given the model
+
+When a new edge upsets this cost balance—i.e., the existing community structure can no longer efficiently describe the new data—a change point is detected and the community structure is updated.
+
+GraphScope's innovation was determining "when to recompute" in a **data-driven** manner. Rather than taking periodic snapshots, it recomputes only when structural change occurs, avoiding unnecessary computation.
+
+### iLCD (2010): Incremental Local Community Detection
+
+Cazabet, Amblard, and Hanachi (IEEE SocialCom 2010) proposed **iLCD (incremental Local Community Detection)**, one of the earliest methods designed specifically for detecting communities in dynamically growing networks.
+
+iLCD's key idea is to process each new edge by evaluating whether its endpoints should join existing communities or form a new one, based on a **local quality function**. When edge $(u, v)$ arrives:
+
+1. If neither $u$ nor $v$ belongs to any community, create a new community containing both
+2. If one endpoint belongs to an existing community $C$, evaluate whether the other should join $C$ using local density criteria
+3. If both belong to different communities, evaluate whether to merge them
+4. Periodically check whether nodes at community borders should be reassigned
+
+iLCD naturally produces overlapping communities, since nodes can qualify for membership in multiple communities simultaneously. Importantly, it operates incrementally: only the local neighborhood of the arriving edge is examined, making it efficient for streaming settings.
+
+iLCD's significance lies in establishing the idea that community detection can be performed **truly online** — processing each graph event as it occurs rather than waiting for batch snapshots. This approach directly influenced later methods like TILES and ANGEL.
+
+### DiDiC (2010): Distributed Diffusive Approach
+
+Gehweiler and Meyerhenke (2010) introduced **DiDiC (Distributed Diffusive Clustering)**, an entirely different paradigm. Each node maintains a "diffusion vector" $\mathbf{d}_v \in \mathbb{R}^k$, and by locally diffusing (averaging) this vector with neighbors, clusters naturally form.
+
+```text
+DiDiC:
+  Each node v holds a k-dimensional diffusion vector d_v
+  Initialization: d_v = e_v (one-hot vector)
+  For each node v (asynchronously, locally):
+    d_v ← (1-α) · d_v + α · (1/|N(v)|) Σ_{u ∈ N(v)} d_u
+  Node v's community = argmax_i d_v[i]
+```
+
+The diffusion parameter $\alpha$ controls how much neighborhood information is absorbed at each step. Larger $\alpha$ means stronger neighbor influence and faster convergence, but reduced stability.
+
+Key properties of DiDiC:
+
+1. **Fully local**: Each node's update references only its neighbors' diffusion vectors
+2. **Asynchronous execution**: Nodes need not update simultaneously; only nodes incident to arriving edges need updating
+3. **Distributed-friendly**: Each node independently manages its own state with no centralized coordination
+
+In a streaming setting, when edge $(u, v)$ arrives, only the diffusion vectors of $u$ and $v$ (and optionally their neighbors) need to be updated — no full graph traversal is required.
+
+### LabelRankT (2013): Incrementalizing Label Propagation
+
+Xie, Chen, and Szymanski (2013) extended LPA for dynamic networks with **LabelRankT**. The core insight is "restrict label propagation to only those nodes affected by edge changes."
+
+```text
+LabelRankT:
+  Initialize communities with standard LPA
+  For each edge (u, v, op) arriving from the stream:
+    1. Build affected set Δ:
+       Δ = {u, v} ∪ N(u) ∪ N(v)  (u, v and their neighbors)
+    2. Run label propagation only within Δ:
+       For each w ∈ Δ:
+         w's label ← majority vote among w's neighbors
+    3. Until labels in Δ converge (typically 2-3 iterations)
+    4. Output updated labels
+```
+
+LabelRankT's per-edge complexity is $O(k \cdot |\Delta|)$, where $|\Delta|$ is the neighborhood size of changed edges (sum of endpoint degrees) and $k$ is iterations to local convergence. For a node with degree $d$, $|\Delta| = O(d)$, so overall cost is $O(k \cdot d)$—independent of graph size $n, m$.
+
+However, LabelRankT has important limitations:
+
+- **Convergence instability**: LPA itself is non-deterministic (random tie-breaking), so local re-runs may produce different results
+- **No overlapping communities**: Each node holds only one label, so overlapping communities cannot be detected
+- **No quality guarantee**: No explicit optimization of Modularity or other quality metrics
+
+## Part III: Landmark Algorithms in Detail
+
+### OSLOM (2011): Statistically Significant Incremental Detection
+
+Lancichinetti, Radicchi, Ramasco, and Fortunato (2011) developed **OSLOM (Order Statistics Local Optimization Method)**, which tests the "statistical significance" of communities. We touched on it in the second article; here we focus on its streaming aspects.
+
+OSLOM's core idea is to evaluate whether a node set $S$ constitutes a community via **hypothesis testing** using **order statistics** — hence the name.
+
+The procedure works as follows:
+
+1. For each node $i$ neighboring community $S$, compute a score $r_i$: the probability that $i$ has at least $k_i^{\text{int}}$ connections to $S$ under the Configuration Model (null model)
+2. Sort these scores in increasing order: $r_{(1)} \leq r_{(2)} \leq \cdots$
+3. For the $k$-th smallest score, compute the **order-statistic p-value**: the probability that the $k$-th order statistic of $n$ uniform random variables is $\leq r_{(k)}$
+4. The community's overall significance is determined by the rank $k$ that yields the smallest such p-value
+
+If the resulting p-value is sufficiently small (e.g., $< 0.05$), $S$ is deemed a statistically significant community. The key insight is that OSLOM tests significance **per-node** rather than for the community's total edge count, making it robust to individual outlier nodes.
+
+OSLOM's streaming application:
+
+```text
+OSLOM incremental update:
+  When edge (u, v) is added:
+    1. Identify communities C_u, C_v containing u, v
+    2. Recompute p-value for C_u (and C_v):
+       - Evaluate p-value if neighbors of u not in C_u are added
+       - If p-value improves, add that node to C_u
+    3. Also evaluate p-value if nodes are removed from C_u
+    4. Consider merging C_u and C_v
+  When edge (u, v) is deleted:
+    1. Recompute p-value for C_u (if C_u = C_v)
+    2. If p-value exceeds threshold, decompose C_u and re-test
+```
+
+OSLOM's strength is its **theoretical foundation**. P-value-based decisions provide a clear criterion for distinguishing "meaningful communities" from "chance groupings," unlike ad hoc metrics like Modularity. Critically, it avoids the Resolution Limit problem—small communities are detected as long as they are statistically significant.
+
+However, p-value computation itself is costly, presenting scalability challenges for large-scale streams.
+
+### DEMON (2012): Democracy of Ego-Nets
+
+Coscia, Rossetti, Giannotti, and Pedreschi (2012) proposed **DEMON (Democratic Estimate of the Modular Organization of a Network)**, an elegant "bottom-up" local community detection method.
+
+DEMON's philosophy: "Communities should be determined by nodes' **votes**." Specifically:
+
+```text
+DEMON:
+  For each node v:
+    1. Extract ego-net ego(v)
+       ego(v) = subgraph induced by v and all neighbors N(v)
+    2. Remove node v from ego(v) (delete all edges to v)
+    3. Apply LPA to the remaining graph to detect local communities
+    4. Add v to each local community found
+  Integrate all nodes' results:
+    - Merge local communities with similarity above threshold
+    - Merge criterion: Jaccard(C_i, C_j) > ε
+```
+
+Why remove v from its ego-net? By definition, v connects to all members of ego(v). Including v would cause the entire ego-net to be detected as a single community. Removing v reveals **natural groupings** within v's neighborhood—for instance, "v's college friends" and "v's coworkers" become separate groups without v, though v's presence would unify them.
+
+DEMON naturally applies to streaming:
+
+1. Edge $(u, v)$ arrives → reconstruct only $u$ and $v$'s ego-nets and re-run LPA
+2. Re-evaluate only affected local community merges
+
+A key strength is that DEMON naturally detects **overlapping communities**. Local communities from different ego-nets can overlap, resulting in nodes belonging to multiple communities.
+
+### DynaMo (2019): Incremental Modularity Tracking
+
+Zhuang, Chang, and Li (2019) proposed **DynaMo**, which **incrementally** updates Modularity $Q$ in response to edge additions and deletions.
+
+DynaMo's key insight is that when edge $(u, v)$ changes, the **modularity gain** of moving nodes between communities can be efficiently recomputed using only local information — without rerunning Louvain from scratch.
+
+Recall the Modularity definition:
+
+$$
+Q = \frac{1}{2m} \sum_{ij} \left[ A_{ij} - \frac{k_i k_j}{2m} \right] \delta(c_i, c_j)
+$$
+
+When edge $(u, v)$ is added, $A_{uv}$ changes from 0 to 1, $k_u$ becomes $k_u + 1$, $k_v$ becomes $k_v + 1$, and $m$ becomes $m + 1$. These changes affect only $u$, $v$, and their communities' internal statistics ($\Sigma_{\text{in}}$, $\Sigma_{\text{tot}}$). DynaMo exploits this locality:
+
+- If $u$ and $v$ are in the **same community**: the community's internal edge count increases by 1 and its total degree increases by 2. DynaMo updates the community's contribution to $Q$ in $O(1)$
+- If $u$ and $v$ are in **different communities**: DynaMo recomputes the modularity gain for moving $u$ to $v$'s community (and vice versa) and executes the move if the gain is positive
+
+```text
+DynaMo:
+  For each edge (u, v, op) arrival:
+    1. Update graph statistics (degrees, community Σ_in, Σ_tot)
+    2. If op = + (addition):
+       a. u, v in same community → internal edges increase, update Q
+       b. u, v in different communities → compute move gain:
+          gain(u → C_v) = (internal edge increase from u joining C_v)
+                        - (internal edge loss from u leaving C_u)
+          If gain > 0, move u to C_v
+    3. If op = - (deletion):
+       a. u, v in same community → internal edges decrease
+       b. Check community connectivity. If disconnected, split
+    4. Cascade: if u moves, compute move gains for u's neighbors (limited propagation)
+```
+
+DynaMo's advantage is tracking a widely-used metric accurately. Unlike batch Louvain, it directly recomputes modularity gains at each update using only local community statistics, making quality degradation easy to monitor.
+
+### TILES (2017): Triangle-Based True Streaming
+
+Rossetti, Pappalardo, Pedreschi, and Giannotti (2017) proposed **TILES**, one of the most influential methods to bear "streaming" in its name. TILES takes a unique approach using **triangle formation** as the fundamental unit of community.
+
+#### Core Idea
+
+"Two people being connected doesn't make a community. Only when they share a common friend does social cohesion emerge"—this is TILES' starting point. Formally, when edge $(u, v)$ arrives, TILES considers $u$, $v$, and any common neighbor $w$ (forming triangle $(u, v, w)$) as belonging to the same community.
+
+<TILESProcessDiagram />
+
+#### Algorithm Details
+
+```text
+TILES Algorithm:
+  Data structures:
+    - Adjacency list adj[v]: each node's current neighbors
+    - Community labels label[v]: each node's community set (overlapping allowed)
+    - Edge timestamps ts[(u,v)]: last arrival time of each edge
+    - TTL parameter τ: edge time-to-live
+
+  For each arriving edge (u, v, t):
+    1. ts[(u,v)] ← t    // Update timestamp
+    2. adj[u] ← adj[u] ∪ {v}, adj[v] ← adj[v] ∪ {u}
+    3. Common neighbors W ← adj[u] ∩ adj[v]
+    4. for each w ∈ W:
+         // Triangle (u, v, w) formed
+         // Take union of label sets for u, v, w
+         merged ← label[u] ∪ label[v] ∪ label[w]
+         if merged = ∅:
+           merged ← {new_label()}  // New community
+         label[u] ← label[v] ← label[w] ← merged
+    5. TTL check:
+       for each edge (a, b) where t - ts[(a,b)] > τ:
+         adj[a] ← adj[a] \ {b}, adj[b] ← adj[b] \ {a}
+         // Check if removal affects a, b's communities
+         re_evaluate(a, b)
+```
+
+#### Complexity Analysis
+
+TILES' per-edge complexity:
+
+- Step 3 common neighbor computation: $O(\min(\deg(u), \deg(v)))$ (intersection of sorted lists)
+- Step 4 label updates: $O(|W| \cdot |\text{labels}|)$
+
+Worst case is $O(\deg^2)$ ($\deg$ = maximum degree), but in real networks with power-law degree distributions, most nodes have small degree, keeping average cost low.
+
+#### TTL (Time-To-Live) Mechanism
+
+TILES' most unique feature is its **TTL mechanism**. Each edge is timestamped, and edges not seen again within period $\tau$ are removed as "expired."
+
+TTL's intuition: In social networks, if two people last interacted a year ago, that relationship should no longer be considered "active." TTL models this "relationship freshness" and automatically prunes stale edges.
+
+Key effects of TTL:
+
+1. **Memory management**: Bounds memory usage of endlessly growing graphs
+2. **Noise removal**: Distinguishes transient coincidental contacts from persistent relationships
+3. **Natural community death**: Communities whose edges all expire naturally dissolve
+
+Parameter $\tau$ depends on domain knowledge: $\tau = 30$ days for social media messages, $\tau = 5$ years for academic co-authorship, $\tau = 1$ hour for financial transactions.
+
+Explore the interactive demo below to see how communities form, split, and evolve as edges stream in:
+
+<StreamingCommunityVisualizer />
+
+### Delta-Screening Louvain (2021): Scoping the Impact
+
+Zarayeneh and Kalyanaraman (2021) proposed **delta-screening**, a general framework for incrementalizing the Louvain algorithm. It **pre-screens** which nodes' Modularity gains could change due to edge modifications, then applies Louvain's local move phase only to those nodes.
+
+<DeltaScreeningDiagram />
+
+#### Screening Principle
+
+When edge $(u, v)$ is added, Modularity can change only for:
+
+1. $u$ and $v$ themselves
+2. Nodes in $u$'s community whose gain from moving to $v$'s community may increase
+3. Nodes in $v$'s community whose gain from moving to $u$'s community may increase
+
+Formally, node $w$ is "affected" if:
+
+$$
+\Delta \text{gain}(w \to C') = \Delta \left[ \frac{\Sigma_{\text{in}}^{C'} + 2k_{w,\text{in}}^{C'}}{2m} - \left( \frac{\Sigma_{\text{tot}}^{C'} + k_w}{2m} \right)^2 \right] \neq 0
+$$
+
+Where $\Sigma_{\text{in}}^{C'}$ is the sum of internal edge weights in community $C'$, $k_{w,\text{in}}^{C'}$ is the sum of edge weights from $w$ to community $C'$, and $\Sigma_{\text{tot}}^{C'}$ is the sum of degrees of all nodes in $C'$.
+
+Adding edge $(u, v)$ changes only $k_u$, $k_v$, $m$, and the $\Sigma_{\text{in}}$, $\Sigma_{\text{tot}}$ of $u$ and $v$'s communities. Hence, only nodes depending on these values—those neighboring $u$'s or $v$'s community—become screening candidates.
+
+```text
+delta-screening Louvain:
+  Prerequisite: existing community assignment C
+  When edge (u, v) changes:
+    1. Screening:
+       affected ← ∅
+       for each node w in C_u ∪ C_v ∪ N(u) ∪ N(v):
+         if ΔQ(w → best_community) differs before/after edge change:
+           affected ← affected ∪ {w}
+    2. Local Louvain:
+       Run Louvain's local move phase only on affected nodes
+    3. Aggregation:
+       Aggregate only affected communities
+```
+
+#### Experimental Results
+
+In Zarayeneh et al.'s experiments on LFR benchmark graphs ($n = 100{,}000$, average degree 20), delta-screening achieved **10–100x speedup** compared to full Louvain per edge addition, with **near-zero Modularity quality degradation**.
+
+This reflects the fact that a single edge change rarely affects the entire graph's community structure—most edge additions and deletions have only local impact.
+
+### ANGEL (2020): Merge-Based Overlapping Communities
+
+Rossetti (2020) proposed **ANGEL**, building on DEMON's ideas for incremental processing.
+
+ANGEL differs from DEMON by modeling community evolution as **chains of merge operations**:
+
+```text
+ANGEL:
+  For each arriving edge (u, v):
+    1. Reconstruct ego-nets of u and v
+    2. Run LPA within ego-nets → extract local communities L_u, L_v
+    3. Search existing global community set G for communities
+       with high similarity to L_u, L_v
+    4. If Jaccard(L, G_i) > θ: merge G_i ← G_i ∪ L
+       If no G_i has sufficient similarity, add L as new global community
+```
+
+ANGEL's cleverness lies in its two-stage process: discovering communities from a **local perspective** (ego-net), then integrating them with **global knowledge** (existing global community set).
+
+## Part IV: The Design Space of Streaming CD
+
+Looking across the individual algorithms, we can identify **four independent dimensions** in streaming CD algorithm design.
+
+<StreamingDesignSpaceDiagram />
+
+### Dimension 1: Update Strategy
+
+- **Full recompute**: Recompute everything per edge arrival. Highest quality, highest cost
+- **Local update**: Recompute only the affected scope (OSLOM, delta-screening)
+- **Lazy update**: Buffer changes and batch-process periodically (DynaMo batch variant)
+
+### Dimension 2: Temporal Model
+
+- **Snapshot**: Discrete-time graphs (Multislice Modularity from the second article)
+- **Sliding window**: Keep only the most recent $W$ seconds/edges. Discard older data
+- **Decay**: Edge weights decrease exponentially over time: $w(e, t) = w_0 \cdot e^{-\lambda(t - t_e)}$. TILES' TTL is a discrete version
+
+### Dimension 3: Community Properties
+
+- **Disjoint**: Each node belongs to at most one community (LabelRankT, Louvain)
+- **Overlapping**: Nodes can belong to multiple communities (DEMON, TILES, ANGEL, OSLOM)
+- **Fuzzy**: Membership degree is a continuous value in $[0, 1]$. DiDiC's diffusion vectors approximate this
+
+### Dimension 4: Quality Criterion
+
+- **Modularity**: Comparison with Configuration Model (DynaMo, delta-screening)
+- **Statistical test**: Significance-based (OSLOM)
+- **Triangle density**: Triangle sharing defines communities (TILES)
+- **Information-theoretic**: Incremental Map Equation (dynamic Infomap)
+
+Each dimension is independent, yielding theoretically $3 \times 3 \times 3 \times 4 = 108$ possible combinations. Existing algorithms cover only a subset of this space, leaving many combinations unexplored.
+
+## Part V: Comparison and Integrated Evaluation
+
+### Concrete Example: TILES vs. LabelRankT
+
+Let's compare how TILES and LabelRankT process the same edge stream on a small 5-node graph (A–E).
+
+**Edge stream**: +(A,B), +(B,C), +(A,C), +(C,D), +(D,E), +(C,E)
+
+**TILES processing**:
+
+- +(A,B), +(B,C): No triangles → no communities formed
+- +(A,C): Triangle ABC formed → Community 1 = \{A, B, C\}
+- +(C,D), +(D,E): No triangles → D, E remain unassigned
+- +(C,E): Triangle CDE formed → Community 2 = \{C, D, E\}. C now belongs to both (overlap)
+
+**Result**: Two communities \{A, B, C\} and \{C, D, E\}, with C as an overlapping member. Note that D and E remained unassigned until a triangle formed.
+
+**LabelRankT processing**:
+
+- Initialize all connected nodes with labels via standard LPA (e.g., A,B,C share one label; D,E share another)
+- Upon +(C,E) arrival: Δ = \{C, E\} ∪ N(C) ∪ N(E) = \{A, B, C, D, E\} (all nodes)
+- Run label propagation within Δ. C has 4 neighbors; majority vote tends to converge all nodes to a single label
+
+**Result**: All nodes \{A, B, C, D, E\} in a single community. No overlap.
+
+**Key difference**: TILES requires triangles and is conservative, naturally producing overlapping communities. LabelRankT assigns nodes exclusively via majority vote, tending to merge densely connected regions into one large community.
+
+<StreamingCDComparisonTable />
+
+### Benchmarking and Evaluation Challenges
+
+Evaluating streaming CD presents unique challenges compared to static methods:
+
+**1. Need for Dynamic Benchmarks**
+
+Static LFR benchmarks are insufficient for streaming evaluation since the graph doesn't change. Dynamic benchmarks include:
+
+- **Dynamic LFR (Greene, Doyle, & Cunningham, 2010)**: Extends LFR temporally. At each timestep, nodes migrate between communities, with community birth, death, split, and merge events
+- **RDYN (Rossetti, 2017)**: Streaming-specific benchmark. Edge additions and deletions are generated as events, with ground-truth community evolution tracked
+
+**2. Evaluation Metrics**
+
+Beyond standard NMI (Normalized Mutual Information), streaming CD requires:
+
+- **Per-update computation time**: Response time per edge arrival
+- **NMI time series**: How alignment with ground truth evolves over the stream
+- **Community stability**: Magnitude of temporal fluctuation in community assignments (lower is more stable)
+- **Lag**: Time delay between genuine community structure change and algorithm's reflection of it
+
+**3. Scalability Experiments**
+
+The practical value of streaming methods hinges on scalability. Key metrics include:
+
+- **Throughput**: Edges processed per second
+- **Memory usage**: Memory consumption growth rate relative to graph size
+- **Latency**: Delay from edge arrival to result update
+
+### Practical Selection Guide
+
+| Scenario | Recommended Method | Rationale |
+|---|---|---|
+| Real-time social network analysis | **TILES** | Triangle-based; TTL for pruning stale relationships |
+| Large-scale + high quality | **delta-screening** | Maintains Louvain quality with 10–100x speedup |
+| Overlapping communities + streaming | **DEMON** / **ANGEL** | Ego-net based; natural overlap detection |
+| Statistical rigor required | **OSLOM** | P-value based significance; avoids Resolution Limit |
+| Simplicity first | **LabelRankT** | Simple implementation, parameter-free, fast |
+| Accurate Modularity tracking | **DynaMo** | Efficient incremental Modularity gain computation |
+| Fraud/anomaly detection | **GraphScope** | Built-in change-point detection |
+
+## Part VI: Recent Frontiers and Future Directions
+
+### GNN-Based Streaming CD
+
+Since the 2020s, applying Graph Neural Networks (GNNs) to streaming settings has progressed rapidly.
+
+**EvolveGCN (Pareja et al., 2020)** evolves GCN weight parameters through time using an RNN (LSTM/GRU):
+
+$$
+W_t = \text{GRU}(H_{t-1}, W_{t-1})
+$$
+
+Where $W_t$ is the GCN weight at time $t$ and $H_{t-1}$ is the node representation matrix from the previous time step (EvolveGCN-H variant). GCN is applied to each snapshot constructed from the edge stream while weights transition smoothly via the RNN.
+
+**ROLAND (You et al., 2022)** applies temporal modeling to each GNN layer's output, continuously updating node representations.
+
+Characteristics of these methods:
+
+1. **Node feature utilization**: Leverages attribute information (profiles, content, etc.) beyond graph structure alone
+2. **Representation learning integration**: Frames community detection as "node embedding evolution," trained with clustering-specific loss functions
+3. **Inductive inference**: Can immediately estimate communities for new nodes using learned parameters
+
+However, GNN-based methods face remaining challenges:
+
+- **Computational cost**: GNN forward passes require GPUs; per-edge execution is expensive
+- **Training data requirements**: Sufficient data needed for supervised/self-supervised learning
+- **Interpretability**: Why a particular partition was chosen remains opaque
+
+### Approximation + Sketch-Based Approaches
+
+Another direction for large-scale streams borrows from **streaming algorithm** theory:
+
+**MinHash / SimHash for node similarity approximation**: Summarize each node's neighbor set as a fixed-length hash sketch, updatable in $O(1)$ per edge change. Approximately compute Jaccard similarity between nodes and group high-similarity pairs into communities.
+
+**Count-Min Sketch for degree tracking**: Track node degrees in edge streams with minimal memory, used for approximate Modularity computation.
+
+These methods carry theoretical approximation guarantees ($\epsilon$-$\delta$ approximation) but remain nascent as community-detection-specific streaming algorithms.
+
+### Open Research Questions
+
+Streaming Community Detection is an active research area with several promising directions:
+
+1. **Theoretical detection limits**: Streaming analogues of the Kesten-Stigum threshold for static SBM. "How far can we detect communities when we can only see one edge at a time?"
+2. **Edge order dependence**: Quantifying how edge arrival order affects results. Does the same edge set yield different communities under different orderings?
+3. **Scalability barriers**: Developing methods that can process billion-edge streams on a single machine
+4. **Privacy preservation**: Executing streaming CD with differential privacy guarantees, protecting nodes' community memberships from external leakage
+5. **Multimodal streams**: Simultaneously handling not just edge additions/deletions, but also node attribute changes and edge weight changes
+
+## Conclusion — An Integrated View of Streaming CD
+
+Looking across the three-part series, the progression from **static** (Part 1) → **dynamic** (Part 2) → **streaming** (this article) becomes clear.
+
+| Generation | Period | Paradigm | Representative Methods |
+|---|---|---|---|
+| 1st | 1970–early 2000s | Static, batch, pairwise | KL, Girvan-Newman, Modularity |
+| 2nd | Late 2000s–early 2010s | Scalable, statistical inference | Louvain/Leiden, SBM, Infomap |
+| 3rd | Late 2010s– | Higher-order, dynamic, multiplex | Motif-based, Multislice, Tensor |
+| 4th | 2017– | Streaming, real-time | TILES, delta-screening, GNN |
+
+The essential difficulty of streaming CD lies in **sequential decision-making under incomplete information**. In batch processing, we can see the entire graph; in streaming, we must update community assignments based on just one edge's information, not knowing what comes next.
+
+Yet this constraint is also a source of algorithmic creativity—TILES using triangle formation as triggers, delta-screening pre-identifying the affected scope, DEMON employing democratic ego-net voting—each offers a different answer to "how to infer global structure from local information."
+
+As networks grow ever larger and more real-time, streaming CD will remain at the frontier of graph research.
+
+## References
+
+- Raghavan, U. N., Albert, R., & Kumara, S. (2007). *Near linear time algorithm to detect community structures in large-scale networks*. Physical Review E, 76(3), 036106.
+- Sun, J., Faloutsos, C., Papadimitriou, S., & Yu, P. S. (2007). *GraphScope: parameter-free mining of large time-evolving graphs*. KDD 2007, 687–696.
+- Gehweiler, J., & Meyerhenke, H. (2010). *A distributed diffusive heuristic for clustering a virtual P2P supercomputer*. IEEE International Parallel & Distributed Processing Symposium (IPDPS), 1–8.
+- Xie, J., Chen, M., & Szymanski, B. K. (2013). *LabelRankT: Incremental community detection in dynamic networks via label propagation*. Workshop on Dynamic Networks Management and Mining (DyNetMM), 25–32.
+- Lancichinetti, A., Radicchi, F., Ramasco, J. J., & Fortunato, S. (2011). *Finding statistically significant communities in networks*. PLoS ONE, 6(4), e18961.
+- Coscia, M., Rossetti, G., Giannotti, F., & Pedreschi, D. (2012). *DEMON: a local-first discovery method for overlapping communities*. KDD 2012, 615–623.
+- Zhuang, D., Chang, J. M., & Li, M. (2019). *DynaMo: Dynamic community detection by incrementally maximizing modularity*. IEEE Transactions on Knowledge and Data Engineering, 33(5), 1934–1945.
+- Rossetti, G., Pappalardo, L., Pedreschi, D., & Giannotti, F. (2017). *Tiles: an online algorithm for community discovery in dynamic social networks*. Machine Learning, 106(8), 1213–1241.
+- Rossetti, G. (2020). *ANGEL: efficient, and effective, node-centric community discovery in static and dynamic networks*. Applied Network Science, 5, 26.
+- Zarayeneh, N., & Kalyanaraman, A. (2021). *Delta-screening: A fast and efficient technique to update communities in dynamic graphs*. IEEE Transactions on Network Science and Engineering, 8(2), 1614–1629.
+- Pareja, A., Domeniconi, G., Chen, J., Ma, T., Suzumura, T., Kanezashi, H., Kaler, T., Schardl, T., & Leiserson, C. (2020). *EvolveGCN: Evolving graph convolutional networks for dynamic graphs*. AAAI 2020, 5363–5370.
+- You, J., Du, T., & Leskovec, J. (2022). *ROLAND: graph learning framework for dynamic graphs*. KDD 2022, 2358–2366.
+- Greene, D., Doyle, D., & Cunningham, P. (2010). *Tracking the evolution of communities in dynamic social networks*. International Conference on Advances in Social Network Analysis and Mining (ASONAM), 176–183.
+- Rossetti, G. (2017). *RDyn: graph benchmark handling community dynamics*. Journal of Complex Networks, 5(6), 893–912.
+- Cazabet, R., Amblard, F., & Hanachi, C. (2010). *Detection of overlapping communities in dynamical social networks*. 2010 IEEE Second International Conference on Social Computing (SocialCom), 309–314.
+
+### Further Reading
+
+- Fortunato, S., & Hric, D. (2016). *Community detection in networks: A user guide*. Physics Reports, 659, 1–44.
+- Rossetti, G., & Cazabet, R. (2018). *Community discovery in dynamic networks: a survey*. ACM Computing Surveys, 51(2), 1–37.
+- Chakrabarti, D., Kumar, R., & Tomkins, A. (2006). *Evolutionary clustering*. KDD 2006, 554–560.
