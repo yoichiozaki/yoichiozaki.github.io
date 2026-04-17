@@ -141,3 +141,7 @@ export {
 export { MotifCommunityVisualizer } from "./MotifCommunityVisualizer";
 export { TemporalCommunityVisualizer } from "./TemporalCommunityVisualizer";
 export { MCPProtocolVisualizer } from "./MCPProtocolVisualizer";
+export { HNSWSearchVisualizer } from "./HNSWSearchVisualizer";
+export { ProductQuantizationVisualizer } from "./ProductQuantizationVisualizer";
+export { IoUringRingVisualizer } from "./IoUringRingVisualizer";
+export { SyscallCostVisualizer } from "./SyscallCostVisualizer";
