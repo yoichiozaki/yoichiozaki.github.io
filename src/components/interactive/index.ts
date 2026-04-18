@@ -145,3 +145,4 @@ export { HNSWSearchVisualizer } from "./HNSWSearchVisualizer";
 export { ProductQuantizationVisualizer } from "./ProductQuantizationVisualizer";
 export { IoUringRingVisualizer } from "./IoUringRingVisualizer";
 export { SyscallCostVisualizer } from "./SyscallCostVisualizer";
+export { ClaudeCodeLoopVisualizer } from "./ClaudeCodeLoopVisualizer";

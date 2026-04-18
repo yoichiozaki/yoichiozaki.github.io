@@ -127,6 +127,7 @@ import {
   StreamingDesignSpaceDiagram,
   TILESProcessDiagram,
   DeltaScreeningDiagram,
+  ClaudeCodeLoopVisualizer,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -253,6 +254,7 @@ function getMdxComponents(locale: string) {
     StreamingDesignSpaceDiagram: () => <StreamingDesignSpaceDiagram locale={locale} />,
     TILESProcessDiagram: () => <TILESProcessDiagram locale={locale} />,
     DeltaScreeningDiagram: () => <DeltaScreeningDiagram locale={locale} />,
+    ClaudeCodeLoopVisualizer: () => <ClaudeCodeLoopVisualizer locale={locale} />,
   };
 }
 
