@@ -28,41 +28,44 @@ export default async function PortfolioPage({
   const dict = await getDictionary(locale as Locale);
 
   return (
-    <div className="space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">
-          {dict.portfolio.title}
+    <div className="space-y-10">
+      <header className="space-y-3">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          <span className="gradient-text">{dict.portfolio.title}</span>
         </h1>
         <p className="text-muted-foreground">{dict.portfolio.description}</p>
       </header>
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {projects.map((project) => (
           <div
             key={project.title}
-            className="border border-border rounded-lg p-6 space-y-4"
+            className="group relative overflow-hidden rounded-xl border border-border bg-muted/30 p-6 space-y-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-lg hover:shadow-accent/5"
           >
-            <h2 className="text-xl font-semibold">{project.title}</h2>
-            <p className="text-muted-foreground">
+            <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+            <h2 className="text-xl font-semibold transition-colors group-hover:text-accent">
+              {project.title}
+            </h2>
+            <p className="leading-relaxed text-muted-foreground">
               {project.description[locale as Locale]}
             </p>
             <div className="flex flex-wrap gap-2">
               {project.tech.map((t) => (
                 <span
                   key={t}
-                  className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded"
+                  className="rounded-full border border-border bg-background/50 px-2.5 py-1 text-xs text-muted-foreground"
                 >
                   {t}
                 </span>
               ))}
             </div>
-            <div className="flex gap-4">
+            <div className="flex gap-4 pt-1">
               {project.github && (
                 <a
                   href={project.github}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-accent hover:underline"
+                  className="text-sm font-medium text-accent hover:underline"
                 >
                   {dict.portfolio.viewSource} →
                 </a>
@@ -72,7 +75,7 @@ export default async function PortfolioPage({
                   href={project.demo}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-accent hover:underline"
+                  className="text-sm font-medium text-accent hover:underline"
                 >
                   {dict.portfolio.viewDemo} →
                 </a>
@@ -82,7 +85,7 @@ export default async function PortfolioPage({
                   href={project.link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-accent hover:underline"
+                  className="text-sm font-medium text-accent hover:underline"
                 >
                   {project.linkLabel?.[locale as Locale] ?? project.link} →
                 </a>

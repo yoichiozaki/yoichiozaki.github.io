@@ -52,6 +52,7 @@ export default async function LocaleLayout({
     <html
       lang={locale}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-scroll-behavior="smooth"
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">

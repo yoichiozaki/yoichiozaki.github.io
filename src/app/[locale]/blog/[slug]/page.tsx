@@ -4,6 +4,7 @@ import remarkMath from "remark-math";
 import rehypePrettyCode from "rehype-pretty-code";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+import Link from "next/link";
 import { type Locale, locales } from "@/i18n/config";
 import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
@@ -128,6 +129,11 @@ import {
   TILESProcessDiagram,
   DeltaScreeningDiagram,
   ClaudeCodeLoopVisualizer,
+  ConversationAxesTaxonomy,
+  DeterminismSpectrum,
+  TurnTakingLatencyDiagram,
+  EvalMetricMatrix,
+  ConversationBreakdownVisualizer,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -255,6 +261,13 @@ function getMdxComponents(locale: string) {
     TILESProcessDiagram: () => <TILESProcessDiagram locale={locale} />,
     DeltaScreeningDiagram: () => <DeltaScreeningDiagram locale={locale} />,
     ClaudeCodeLoopVisualizer: () => <ClaudeCodeLoopVisualizer locale={locale} />,
+    ConversationAxesTaxonomy: () => <ConversationAxesTaxonomy locale={locale} />,
+    DeterminismSpectrum: () => <DeterminismSpectrum locale={locale} />,
+    TurnTakingLatencyDiagram: () => <TurnTakingLatencyDiagram locale={locale} />,
+    EvalMetricMatrix: () => <EvalMetricMatrix locale={locale} />,
+    ConversationBreakdownVisualizer: () => (
+      <ConversationBreakdownVisualizer locale={locale} />
+    ),
   };
 }
 
@@ -304,15 +317,28 @@ export default async function BlogPostPage({
   return (
     <article className="space-y-8">
       <header className="space-y-4">
-        <time className="text-sm text-muted-foreground">{post.date}</time>
-        <h1 className="text-3xl font-bold tracking-tight">{post.title}</h1>
+        <Link
+          href={`/${locale}/blog`}
+          className="group inline-flex items-center gap-1 font-mono text-xs text-muted-foreground transition-colors hover:text-accent"
+        >
+          <span className="transition-transform group-hover:-translate-x-0.5">
+            ←
+          </span>
+          {locale === "ja" ? "記事一覧" : "All posts"}
+        </Link>
+        <time className="block font-mono text-sm text-muted-foreground">
+          {post.date}
+        </time>
+        <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+          {post.title}
+        </h1>
         <p className="text-lg text-muted-foreground">{post.description}</p>
         {post.tags.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {post.tags.map((tag) => (
               <span
                 key={tag}
-                className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded"
+                className="rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
               >
                 {tag}
               </span>

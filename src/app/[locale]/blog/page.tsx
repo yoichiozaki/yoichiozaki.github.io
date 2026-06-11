@@ -30,37 +30,40 @@ export default async function BlogPage({
   const posts = getAllPosts(locale as Locale);
 
   return (
-    <div className="space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">{dict.blog.title}</h1>
+    <div className="space-y-10">
+      <header className="space-y-3">
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          <span className="gradient-text">{dict.blog.title}</span>
+        </h1>
         <p className="text-muted-foreground">{dict.blog.description}</p>
       </header>
 
       {posts.length > 0 ? (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {posts.map((post) => (
             <article
               key={post.slug}
-              className="group border border-border rounded-lg p-5 hover:border-accent/50 transition-colors"
+              className="group relative overflow-hidden rounded-xl border border-border bg-muted/30 p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-lg hover:shadow-accent/5"
             >
+              <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
               <Link href={`/${locale}/blog/${post.slug}`}>
                 <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <time className="text-sm text-muted-foreground">
+                  <time className="font-mono text-xs text-muted-foreground">
                     {post.date}
                   </time>
                   {post.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded"
+                      className="rounded-full border border-border bg-background/50 px-2 py-0.5 text-xs text-muted-foreground transition-colors group-hover:border-accent/30"
                     >
                       {tag}
                     </span>
                   ))}
                 </div>
-                <h2 className="text-lg font-medium group-hover:text-accent transition-colors">
+                <h2 className="text-lg font-medium transition-colors group-hover:text-accent">
                   {post.title}
                 </h2>
-                <p className="text-sm text-muted-foreground mt-2">
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   {post.description}
                 </p>
               </Link>

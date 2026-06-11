@@ -27,13 +27,18 @@ export function Header({ locale, dict }: { locale: Locale; dict: Dict }) {
   ];
 
   return (
-    <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-50">
+    <header className="border-b border-border bg-background/70 backdrop-blur-md sticky top-0 z-50">
       <nav className="max-w-3xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link
           href={`/${locale}`}
-          className="text-lg font-bold tracking-tight hover:text-accent transition-colors"
+          className="group flex items-center gap-2.5"
         >
-          Yoichi Ozaki
+          <span className="grid size-7 place-items-center rounded-md bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white shadow-sm shadow-accent/30 transition-transform group-hover:scale-105">
+            Y
+          </span>
+          <span className="text-lg font-bold tracking-tight transition-colors group-hover:text-accent">
+            Yoichi Ozaki
+          </span>
         </Link>
 
         {/* Desktop nav */}
@@ -42,24 +47,27 @@ export function Header({ locale, dict }: { locale: Locale; dict: Dict }) {
             <Link
               key={item.href}
               href={item.href}
-              className={`text-sm transition-colors hover:text-accent ${
+              className={`relative text-sm transition-colors hover:text-accent ${
                 pathname === item.href
                   ? "text-accent font-medium"
                   : "text-muted-foreground"
               }`}
             >
               {item.label}
+              {pathname === item.href && (
+                <span className="absolute -bottom-1 left-0 right-0 h-px rounded-full bg-gradient-to-r from-accent to-accent-2" />
+              )}
             </Link>
           ))}
           <Link
             href={localeSwitchPath}
-            className="text-sm text-muted-foreground hover:text-accent transition-colors border border-border rounded px-2 py-1"
+            className="text-xs font-medium text-muted-foreground hover:text-accent hover:border-accent/50 transition-colors border border-border rounded-full px-2.5 py-1"
           >
             {otherLocale.toUpperCase()}
           </Link>
           <button
             onClick={toggleTheme}
-            className="text-sm text-muted-foreground hover:text-accent transition-colors p-1"
+            className="grid size-8 place-items-center rounded-full text-muted-foreground hover:text-accent hover:bg-muted transition-colors"
             aria-label={
               theme === "dark" ? dict.common.lightMode : dict.common.darkMode
             }
