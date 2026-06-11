@@ -70,7 +70,7 @@ For each diagram or visualization component:
 2. Verify **timeline ordering** — are events in the correct sequence?
 3. Check **labels and annotations** — do they match the text description?
 4. Identify **oversimplifications** — flag where a diagram might mislead
-5. **Validate Mermaid rendering** — for each ` ```mermaid ` block, run it through `npx @mermaid-js/mermaid-cli@latest` or equivalent validation to confirm it parses without errors. Common Mermaid pitfalls:
+5. **Validate Mermaid rendering** — check each ` ```mermaid ` block against the pitfalls below. Confirming a block actually parses requires rendering it with `npx @mermaid-js/mermaid-cli@latest`, which needs a terminal: run it if you have terminal access; if you do not, validate by inspection against these pitfalls and ask the orchestrator/caller to run the CLI (do not claim a diagram renders that you did not render). Common Mermaid pitfalls:
    - `opt` is a reserved keyword in sequenceDiagram (used for optional blocks) — do NOT use it as a participant ID
    - Other reserved sequenceDiagram keywords to avoid as IDs: `loop`, `alt`, `else`, `end`, `par`, `critical`, `break`, `rect`, `note`
    - Angle brackets `<T>` in message text or labels are interpreted as HTML — remove or escape them
@@ -85,13 +85,19 @@ For each code snippet:
 2. Verify **output claims** — if "this prints X", confirm it actually does
 3. Check **API usage** — are function signatures and return types correct?
 4. Confirm **version compatibility** — note if APIs are deprecated or version-specific
+5. **Verify SDK/library APIs against upstream source, not memory** — for any third-party SDK, framework, or library, confirm exact symbol names, option/field names, and method signatures against the package's current docs, npm/PyPI README, or source (e.g. raw GitHub). LLM memory routinely invents plausible-but-wrong API surfaces; fetch and check before trusting a snippet.
 
-### Step 6: Cross-Check Bilingual Consistency
+### Step 6: Cross-Check Bilingual & Cross-Article Consistency
 
 If both ja/ and en/ versions exist:
 1. Verify **technical content matches** — same algorithms, same numbers, same code
 2. Check that **corrections are applied to both** versions
 3. Note any **translation inaccuracies** in technical terms
+
+For **paired or series articles** (posts that reference each other or share code/UI):
+4. Verify **shared data shapes and code actually match** — e.g. an event/SSE payload or config claimed to be "identical" between two implementations must be byte-for-byte compatible, and a "reusable" UI/snippet must work unchanged in every article that claims it
+5. Check **comparison tables and claims about the other article** — every "A does X, B does Y" row must be accurate for both sides, with no over/understatement
+6. Confirm **reciprocal cross-links resolve** to existing slugs in both locales
 
 ### Step 7: Compile Findings
 
@@ -119,14 +125,16 @@ Present findings as a structured list:
 2. Discuss Minor issues with the user — fix if agreed
 3. Use `<strong>` instead of `**` for bold text in MDX (CJK compatibility)
 
-### Step 9: Verify Build
+### Step 9: Verify After Editing
 
-Run `npm run build` to confirm no regressions after edits.
+Always validate edited files with `get_errors` (no terminal required). The full `npm run build` and Mermaid CLI rendering require a terminal: run them if you have terminal access; otherwise state clearly that you validated via `get_errors` and hand off `npm run build` (and any Mermaid CLI check) to the orchestrator/caller. Never claim a build passed that you did not run.
 
 ## Key Rules
 
 - NEVER guess — if unsure about a claim, flag it as "needs verification" and use web search
 - ALWAYS check both ja/ and en/ versions
+- ALWAYS verify SDK/library API names and product facts against current upstream sources — never rely on memory for symbol names, option fields, or signatures
+- WATCH for stale product/pricing/plan/billing claims — vendor models change (e.g. a "per-request" billing model superseded by usage/token-based billing); confirm against current vendor docs and flag legacy-vs-current
 - ALWAYS preserve the article's overall structure and style when making corrections
 - PREFER specific corrections with references over vague "this might be wrong"
 - DO NOT rewrite sections unnecessarily — make minimal, targeted fixes
