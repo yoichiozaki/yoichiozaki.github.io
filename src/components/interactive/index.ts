@@ -1,6 +1,20 @@
 export { InteractiveDemo } from "./InteractiveDemo";
 export { StepPlayerControls } from "./StepPlayerControls";
+export { stepPlayerAriaLabels } from "./stepPlayerAriaLabels";
 export { useStepPlayer } from "./useStepPlayer";
+export { DuckDBVectorPlayground } from "./DuckDBVectorPlayground";
+export { DuckDBPipelineVisualizer } from "./DuckDBPipelineVisualizer";
+export { DuckDBMorselVisualizer } from "./DuckDBMorselVisualizer";
+export { DuckDBCompressionLab } from "./DuckDBCompressionLab";
+export { ARTNodeVisualizer } from "./ARTNodeVisualizer";
+export {
+  DuckDBArchitecture,
+  StringTLayout,
+  RowGroupLayout,
+  MVCCVersionDiagram,
+  RadixPartitionDiagram,
+  VectorSizeTradeoff,
+} from "./DuckDBDiagrams";
 export { GoRoutineVisualizer } from "./GoRoutineVisualizer";
 export { GCVisualizer } from "./GCVisualizer";
 export {
@@ -153,3 +167,31 @@ export {
   EvalMetricMatrix,
 } from "./ConversationUXDiagrams";
 export { ConversationBreakdownVisualizer } from "./ConversationBreakdownVisualizer";
+export { TaskSchedulingLab as TaskSchedulingVisualizer } from "./TaskSchedulingLab";
+export { LLMLoadBalancerLab } from "./LLMLoadBalancerLab";
+export { SignalStalenessLab } from "./SignalStalenessLab";
+export { PrefixCacheRoutingVisualizer } from "./PrefixCacheRoutingVisualizer";
+export { ContinuousBatchingVisualizer } from "./ContinuousBatchingVisualizer";
+export {
+  LBLayerMap,
+  LBMetricMap,
+  LBPolicyComparison,
+  QueueingKneeCurve,
+  RetryAmplificationDiagram,
+  HedgingTimeline,
+  AgentTrafficShape,
+} from "./LLMLoadBalancingDiagrams";
+export { SQLTokenizerVisualizer } from "./SQLTokenizerVisualizer";
+export { SQLPipelineVisualizer } from "./SQLPipelineVisualizer";
+export { VolcanoIteratorVisualizer } from "./VolcanoIteratorVisualizer";
+export { JoinOrderDPVisualizer } from "./JoinOrderDPVisualizer";
+export { SlottedPageVisualizer } from "./SlottedPageVisualizer";
+export { BufferPoolVisualizer } from "./BufferPoolVisualizer";
+export { SpillVisualizer } from "./SpillVisualizer";
+export {
+  ExecutionModelComparison,
+  AccessPathComparison,
+  PlanSpaceTable,
+  CardinalityErrorDiagram,
+  HeapTupleAnatomy,
+} from "./SQLEngineDiagrams";

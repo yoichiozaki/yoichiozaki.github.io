@@ -134,6 +134,41 @@ import {
   TurnTakingLatencyDiagram,
   EvalMetricMatrix,
   ConversationBreakdownVisualizer,
+  TaskSchedulingVisualizer,
+  LLMLoadBalancerLab,
+  SignalStalenessLab,
+  PrefixCacheRoutingVisualizer,
+  ContinuousBatchingVisualizer,
+  LBLayerMap,
+  LBMetricMap,
+  LBPolicyComparison,
+  QueueingKneeCurve,
+  RetryAmplificationDiagram,
+  HedgingTimeline,
+  AgentTrafficShape,
+  DuckDBVectorPlayground,
+  DuckDBPipelineVisualizer,
+  DuckDBMorselVisualizer,
+  DuckDBCompressionLab,
+  ARTNodeVisualizer,
+  DuckDBArchitecture,
+  StringTLayout,
+  RowGroupLayout,
+  MVCCVersionDiagram,
+  RadixPartitionDiagram,
+  VectorSizeTradeoff,
+  SQLTokenizerVisualizer,
+  SQLPipelineVisualizer,
+  VolcanoIteratorVisualizer,
+  JoinOrderDPVisualizer,
+  SlottedPageVisualizer,
+  BufferPoolVisualizer,
+  SpillVisualizer,
+  ExecutionModelComparison,
+  AccessPathComparison,
+  PlanSpaceTable,
+  CardinalityErrorDiagram,
+  HeapTupleAnatomy,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -268,6 +303,51 @@ function getMdxComponents(locale: string) {
     ConversationBreakdownVisualizer: () => (
       <ConversationBreakdownVisualizer locale={locale} />
     ),
+    TaskSchedulingVisualizer: () => (
+      <TaskSchedulingVisualizer locale={locale} />
+    ),
+    LLMLoadBalancerLab: () => <LLMLoadBalancerLab locale={locale} />,
+    SignalStalenessLab: () => <SignalStalenessLab locale={locale} />,
+    PrefixCacheRoutingVisualizer: () => (
+      <PrefixCacheRoutingVisualizer locale={locale} />
+    ),
+    ContinuousBatchingVisualizer: () => (
+      <ContinuousBatchingVisualizer locale={locale} />
+    ),
+    LBLayerMap: () => <LBLayerMap locale={locale} />,
+    LBMetricMap: () => <LBMetricMap locale={locale} />,
+    LBPolicyComparison: () => <LBPolicyComparison locale={locale} />,
+    QueueingKneeCurve: () => <QueueingKneeCurve locale={locale} />,
+    RetryAmplificationDiagram: () => (
+      <RetryAmplificationDiagram locale={locale} />
+    ),
+    HedgingTimeline: () => <HedgingTimeline locale={locale} />,
+    AgentTrafficShape: () => <AgentTrafficShape locale={locale} />,
+    DuckDBVectorPlayground: () => <DuckDBVectorPlayground locale={locale} />,
+    DuckDBPipelineVisualizer: () => <DuckDBPipelineVisualizer locale={locale} />,
+    DuckDBMorselVisualizer: () => <DuckDBMorselVisualizer locale={locale} />,
+    DuckDBCompressionLab: () => <DuckDBCompressionLab locale={locale} />,
+    ARTNodeVisualizer: () => <ARTNodeVisualizer locale={locale} />,
+    DuckDBArchitecture: () => <DuckDBArchitecture locale={locale} />,
+    StringTLayout: () => <StringTLayout locale={locale} />,
+    RowGroupLayout: () => <RowGroupLayout locale={locale} />,
+    MVCCVersionDiagram: () => <MVCCVersionDiagram locale={locale} />,
+    RadixPartitionDiagram: () => <RadixPartitionDiagram locale={locale} />,
+    VectorSizeTradeoff: () => <VectorSizeTradeoff locale={locale} />,
+    SQLTokenizerVisualizer: () => <SQLTokenizerVisualizer locale={locale} />,
+    SQLPipelineVisualizer: () => <SQLPipelineVisualizer locale={locale} />,
+    VolcanoIteratorVisualizer: () => (
+      <VolcanoIteratorVisualizer locale={locale} />
+    ),
+    JoinOrderDPVisualizer: () => <JoinOrderDPVisualizer locale={locale} />,
+    SlottedPageVisualizer: () => <SlottedPageVisualizer locale={locale} />,
+    BufferPoolVisualizer: () => <BufferPoolVisualizer locale={locale} />,
+    SpillVisualizer: () => <SpillVisualizer locale={locale} />,
+    ExecutionModelComparison: () => <ExecutionModelComparison locale={locale} />,
+    AccessPathComparison: () => <AccessPathComparison locale={locale} />,
+    PlanSpaceTable: () => <PlanSpaceTable locale={locale} />,
+    CardinalityErrorDiagram: () => <CardinalityErrorDiagram locale={locale} />,
+    HeapTupleAnatomy: () => <HeapTupleAnatomy locale={locale} />,
   };
 }
 

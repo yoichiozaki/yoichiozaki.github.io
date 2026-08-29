@@ -13,6 +13,15 @@ type StepPlayerControlsProps = {
   stepBackward: () => void;
   goTo: (step: number) => void;
   label?: (step: number) => string;
+  ariaLabels?: {
+    reset: string;
+    backward: string;
+    play: string;
+    pause: string;
+    forward: string;
+    goToStep: (step: number) => string;
+    progress: string;
+  };
 };
 
 export function StepPlayerControls({
@@ -28,11 +37,32 @@ export function StepPlayerControls({
   stepBackward,
   goTo,
   label,
+  ariaLabels,
 }: StepPlayerControlsProps) {
+  if (!Number.isInteger(totalSteps) || totalSteps <= 0) {
+    return null;
+  }
+  const labels = ariaLabels ?? {
+    reset: "Reset",
+    backward: "Step backward",
+    play: "Play",
+    pause: "Pause",
+    forward: "Step forward",
+    goToStep: (target: number) => `Go to step ${target}`,
+    progress: "Playback progress",
+  };
   return (
     <div className="flex flex-col gap-2">
       {/* Progress bar */}
-      <div className="relative h-1.5 w-full rounded-full bg-border overflow-hidden">
+      <div
+        className="relative h-1.5 w-full rounded-full bg-border overflow-hidden"
+        role="progressbar"
+        aria-label={labels.progress}
+        aria-valuemin={1}
+        aria-valuemax={totalSteps}
+        aria-valuenow={step + 1}
+        aria-valuetext={`${step + 1} / ${totalSteps}`}
+      >
         <div
           className="absolute inset-y-0 left-0 rounded-full bg-accent transition-all duration-300"
           style={{ width: `${((step + 1) / totalSteps) * 100}%` }}
@@ -43,9 +73,10 @@ export function StepPlayerControls({
         {/* Controls */}
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={reset}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            aria-label="Reset"
+            aria-label={labels.reset}
           >
             <svg
               className="h-4 w-4"
@@ -63,10 +94,11 @@ export function StepPlayerControls({
           </button>
 
           <button
+            type="button"
             onClick={stepBackward}
             disabled={isFirst}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30"
-            aria-label="Step backward"
+            aria-label={labels.backward}
           >
             <svg
               className="h-4 w-4"
@@ -84,10 +116,11 @@ export function StepPlayerControls({
           </button>
 
           <button
+            type="button"
             onClick={playing ? pause : play}
             disabled={isLast && !playing}
             className="rounded-md p-2 bg-accent text-accent-foreground hover:bg-accent/90 transition-colors disabled:opacity-30"
-            aria-label={playing ? "Pause" : "Play"}
+            aria-label={playing ? labels.pause : labels.play}
           >
             {playing ? (
               <svg
@@ -110,10 +143,11 @@ export function StepPlayerControls({
           </button>
 
           <button
+            type="button"
             onClick={stepForward}
             disabled={isLast}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30"
-            aria-label="Step forward"
+            aria-label={labels.forward}
           >
             <svg
               className="h-4 w-4"
@@ -149,17 +183,23 @@ export function StepPlayerControls({
         <div className="flex justify-center gap-1 py-1">
           {Array.from({ length: totalSteps }, (_, i) => (
             <button
+              type="button"
               key={i}
               onClick={() => goTo(i)}
-              className={`h-2 w-2 rounded-full transition-all ${
-                i === step
-                  ? "bg-accent scale-125"
-                  : i < step
-                    ? "bg-accent/40"
-                    : "bg-border"
-              }`}
-              aria-label={`Go to step ${i + 1}`}
-            />
+              className="flex h-6 w-6 items-center justify-center rounded focus-visible:outline-2 focus-visible:outline-accent"
+              aria-label={labels.goToStep(i + 1)}
+              aria-current={i === step ? "step" : undefined}
+            >
+              <span
+                className={`h-2 w-2 rounded-full transition-all ${
+                  i === step
+                    ? "bg-accent scale-125"
+                    : i < step
+                      ? "bg-accent/40"
+                      : "bg-border"
+                }`}
+              />
+            </button>
           ))}
         </div>
       )}

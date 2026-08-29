@@ -1,0 +1,945 @@
+---
+title: "Surface-Matching Metrics in NLP — Definitions, Perspectives, and Selection"
+date: "2026-07-13"
+description: "A systematic guide to major design families—whole-sequence identity, bag/set overlap, edit distance, n-grams, subsequences, alignment, and corpus-weighted consensus—covering definitions, evaluation perspectives, aggregation, and limitations."
+tags: ["NLP", "Evaluation", "BLEU", "ROUGE", "Machine Translation", "Metrics"]
+---
+
+## Introduction: The Same Strings Reveal Different Things to Different Metrics
+
+Natural language processing offers a long list of metrics for comparing system output with reference text: exact match, token F1, BLEU, ROUGE, chrF, METEOR, WER, and TER. They all appear to compare strings, but they answer different questions.
+
+- Is the complete output identical to a reference?
+- What fraction of the produced words also occur in the reference?
+- What fraction of the reference words was recovered?
+- How many edits would turn the output into a reference?
+- How similar are local word order and word forms?
+- How well is the global relative order of matched words preserved?
+- How closely does it match input-specific expressions that occur across references?
+
+For convenience, this article collectively calls them <strong>surface-matching metrics</strong>. This is an operational scope for the article, not a standardized, mutually exclusive taxonomy. Here, “surface” means that the primary matching signal comes from normalized characters, tokens, $n$-grams, subsequences, explicit edit operations, or dictionary-based alignments rather than direct comparison of learned contextual representations. Determinism alone does not define the boundary: BERTScore can also run deterministically once its model and settings are fixed.
+
+<strong>Whether an evaluation is reference-based is a separate axis.</strong> It describes a protocol that supplies human references, not whether the matching representation is surface-based or semantic. Most equations here compare a hypothesis with references, but Jaccard can also compare two system outputs. Conversely, BERTScore and reference-based COMET are reference-based yet outside this article's surface scope, while quality-estimation systems such as CometKiwi are reference-free and also outside it. Agreement with a reference is not the same as correctness against the input or external facts.
+
+METEOR and CIDEr are boundary cases for different reasons. METEOR stem matching is morphological, while synonym and paraphrase matching enters limited, context-independent lexical semantics. CIDEr obtains IDF weights from an external reference corpus, but its matching signal remains explicit TF-IDF $n$-gram overlap. This article includes both in its broad operational scope while not describing either mechanism as sentence-level semantic understanding.
+
+In short, the boundary of this article's scope is determined by the representation that supplies the final matching signal, not by whether references are present.
+
+Unless stated otherwise, implementation names, versions, commits, and defaults in this article were checked <strong>as of 2026-07-13</strong> and apply only to the explicitly named release, tag, or commit. They do not assert that later releases retain the same behavior or that a named version will remain the latest.
+
+The key conclusion is that <strong>there is no universal surface metric</strong>. Each metric projects text differences onto a different measurement perspective. Only after specifying its definition, denominator, aggregation unit, and preprocessing can we explain what its number means.
+
+---
+
+## 1. The Map: Classify Metrics by Unit and Perspective
+
+This article is not an exhaustive catalog of metric names. As a selection map, it covers seven recurring design families: (1) whole-sequence identity, (2) order-independent bag/set overlap, (3) edit paths, (4) contiguous $n$-grams, (5) subsequence- or rank-based global order, (6) explicit token alignment, and (7) corpus-statistics-weighted multi-reference consensus.
+
+These families are not mutually exclusive. CIDEr is a token $n$-gram metric and also a composite of IDF across inputs with a mean over all references within each input. METEOR extends unigram overlap into explicit alignments and chunks, while TER searches edit paths over a sequence alignment. This is therefore not a taxonomy that forces every metric into exactly one box.
+
+Moreover, <strong>matching unit</strong> (character, word, or subword token), <strong>order range</strong> (ignored, local, or global), <strong>score orientation</strong> (precision, recall, balanced score, distance, or error rate), and <strong>evaluation protocol</strong> (a general construction or a named task-originated specification) are orthogonal axes. The $n$-gram family alone contains precision-oriented BLEU, recall-oriented original ROUGE-N, and balanced chrF; a character metric is not necessarily recall-oriented, nor is every translation metric precision-oriented. EM, Jaccard, and Levenshtein are broadly applicable constructions, whereas SQuAD token F1, WER/CER, TER, BLEU, ROUGE, METEOR, RIBES, CIDEr, and GEC GLEU+ carry task-originated preprocessing, aggregation, or interpretations. A formula can be moved to another task without its empirical validity moving automatically.
+
+The following table organizes representatives of this map by what they primarily observe.
+
+| Metric | Basic unit | Score type | Main perspective | Order sensitivity | Direction | Typical use |
+|---|---|---|---|---|---|---|
+| Exact Match | Entire transformed sequence | Identity indicator | Exact equality of $T(h)$ and an allowed reference | Requires all order retained by $T$ | Higher is better | QA, class labels, canonicalized output |
+| Token Precision / Recall / F1 | Token multiset | Directed overlap ratios / F-score | Hypothesis-side surface overlap / reference-side surface coverage / their balance | Ignored | Higher is better | Extractive QA, short answers |
+| Jaccard / Dice | Set or multiset | Symmetric similarity | Symmetric element overlap | Ignored when elements are tokens | Higher is better | Similarity, duplicate detection |
+| Levenshtein | Character or token edits | Unnormalized distance | Minimum number of unit edits | Sequence-sensitive; no move operation | Lower is better | Orthographic and sequence comparison |
+| WER / CER | Word or character edits | Reference-length-normalized error rate | Transcription errors per reference unit | Reflected through sequence alignment | Lower is better | ASR, OCR |
+| TER | Token edits plus phrase shifts | Mean-reference-length-normalized error rate | Translation edits under TER operations | Shifts reduce phrase-movement cost | Lower is better | Machine translation |
+| BLEU | Token $n$-grams | Geometric mean of clipped precision × corpus BP | Local $n$-gram precision and corpus-level brevity | Within contiguous spans of $n$ tokens | Higher is better | Machine translation, mainly corpus evaluation |
+| chrF / chrF++ | Character $n$-grams, optionally word $n$-grams | $n$-gram F-score | Precision/recall overlap of character material | Within each $n$-gram | Higher is better | MT and multilingual evaluation |
+| ROUGE-N | Token $n$-grams | Recall in the original form; implementations may also return P/F | Surface coverage of reference $n$-grams | Within contiguous spans of $n$ tokens | Higher is better | Summarization |
+| ROUGE-L | Longest common subsequence | LCS precision/recall/F-score | Coverage by order-preserving elements | Reflected; contiguity not required | Higher is better | Summarization, sequence comparison |
+| RIBES | Reference ranks of matched words | Normalized rank correlation × unigram precision/length factors, depending on version | Global relative order of matched words and lexical coverage | Global relative order of all matched words | Higher is better | MT order diagnosis |
+| METEOR | Unigram alignment | Weighted harmonic mean × fragmentation penalty | Lexical correspondence plus alignment order and contiguity | Chunks reflect order and contiguity | Higher is better | Machine translation |
+| CIDEr | TF-IDF token $n$-grams | Mean cosine over all references; modified for CIDEr-D | Lexical agreement with the reference set and distinctiveness across inputs | Within contiguous spans of $n$ tokens | Higher is better | Image captioning |
+
+The order-sensitivity column says only when rearrangement can change the formula; it does not imply understanding of syntax, semantic roles, or meaning. “Typical use” is conventional and empirically motivated, not a task guarantee derivable from the equation alone.
+
+Even among “higher is better” metrics, some implementations return $[0,1]$ and others $[0,100]$. The cosine average in original CIDEr is normally in $[0,1]$, whereas CIDEr-D's factor of 10 gives it a nominal $[0,10]$ range. Raw Levenshtein distance has no shared upper bound unless sequence lengths are fixed. TER, WER, and CER are error rates, so lower is better, and an error count larger than the reference length can push them above $1$, or 100%. WER/CER call excess hypothesis units insertions; TER edits the hypothesis toward the reference and treats the same excess as deletions. A score without its metric, implementation, and scale is uninterpretable.
+
+### 1.1 How Far to Cover Important Neighboring Metrics
+
+The following coverage is intended to make the seven design families selectable without turning the article into a catalog of names.
+
+| Metric | Position by definition | Treatment here |
+|---|---|---|
+| NIST | A classic MT metric that weights matched token $n$-grams by the reference-corpus count ratio $\operatorname{Info}(w_1\ldots w_n)=\log_2\!\frac{C(w_1\ldots w_{n-1})}{C(w_1\ldots w_n)}$ (the unigram numerator is the total reference word count), adds order-specific components, and applies a shortness penalty different from BLEU's | It is an important weighting variant in BLEU's local $n$-gram precision family, so a comparison here is sufficient. Its additive score is not bounded by one and does not share BLEU's scale. Reproduction requires a full specification of tokenizer, maximum order, reference corpus, and implementation |
+| Google GLEU | A symmetric sentence score over the pooled multiset of 1- through 4-grams: $GLEU=\min(P,R)=M/\max(\lvert G_h\rvert,\lvert G_r\rvert)$. It is balanced but is not an F-score | Wu et al. (2016) introduced it as a sentence-level reinforcement-learning reward. It is summarized as a local $n$-gram variant, not treated as a synonym for corpus BLEU |
+| GEC GLEU+ | A source-aware grammatical-error-correction metric that also takes original sentence $s$, rewards output-reference $n$-gram matches, subtracts output $n$-grams retained from the source more often than supported by the reference through modified precision, and feeds that precision into the BLEU equation | It is a different design sharing the GLEU name, not a generic $(h,r)$ metric. Napoles et al. (2016) recommend GLEU+ over their original 2015 GLEU. With multiple references, it averages 500 corpus scores obtained by sampling one reference per sentence. An independent reimplementation must specify the sampling procedure, iteration count, and seed |
+| Mutton et al. GLEU (2007) | A reference-free sentence-level fluency evaluator, also named GLEU, that uses an SVM with parser-derived features | It is not a pairwise string-overlap metric and is outside this article's operational scope. Report author, year, and task rather than writing only `GLEU`, to distinguish it from Google GLEU and GEC GLEU+ |
+| RIBES | It maps matched words to their reference ranks and combines normalized Kendall rank correlation ($NKT$) with unigram precision $P$; a common later form also uses BLEU-style BP as $RIBES=NKT\cdot P^\alpha\cdot BP^\beta$ | It fills the global-reordering branch that fixed-width $n$-grams and LCS do not express in the same way, so it appears in the overview. Because it depends strongly on version, parameters, and word-matching rules, it remains a concise order diagnostic rather than receiving a full section |
+| ROUGE-W / S / SU | Alternative ROUGE designs based on weighted LCS, skip-bigrams, and skip-bigrams plus unigrams | Section 5.3 defines them briefly to expose the contiguity and skip-order branches. ROUGE-N and ROUGE-L/Lsum receive detail rather than collapsing the whole family into one “ROUGE” |
+
+For selection, use NIST when reproducing a NIST result, Google GLEU when a symmetric sentence $n$-gram reward is specifically required, GEC GLEU+ only when evaluating corrections relative to a source, and RIBES when global reordering is an explicit diagnostic target. None automatically adds a new quality dimension merely by replacing another representative of the same family.
+
+<strong>Reading path</strong>: The next two paragraphs on RIBES and GLEU+ are implementation notes that pin behavior not reproducible from the metric names alone. Readers interested only in conceptual selection can continue to Section 2. After the common definitions there, Sections 3–7 generally proceed through definition, perspective, strengths and limitations, and implementation cautions.
+
+As a version-pinned example, NTT RIBES 1.03.1 (dated 2014-09-08 in its distribution history and mirrored at GitHub commit `7e76cf24d32de70e9e6afd0c9b95d8c140b7235c`) defaults to $NKT\cdot P^{0.25}\cdot BP^{0.10}$ and expects tokenized input, lowercasing it unless `-c` is supplied. With multiple references, it selects the highest score per sentence and macro-averages those sentence scores. These conventions do not follow from the name of the 2010 paper alone; as of 2026-07-13, that distribution has no release after 1.03.1. Its README requires “Python 2.6 or later,” excludes Python 3.0, and separately says that RIBES 1.02.4 or earlier works only with Python 3.1 or later. That wording does not fully specify the Python 3 support range for 1.03.1, although the source contains Python 3 branches. The source's `_RIBES_VERSION` also still says `1.03`. This is a historical implementation whose distribution history, runtime, and commit must accompany its stale internal version string, not a current Python-package release.
+
+The authors' GEC GLEU+ code also changed after the paper. Its final commit, `50b5032a4ef2444b9381fb47a55b3bac0654a6d7` (2017-06-09), fixes an inverse brevity penalty in `gleu.py`. `compute_gleu` defaults to 500 iterations with multiple references and one iteration with one reference, reseeding Python's RNG with `j*101` for iteration $j$. External random state therefore does not change this pinned code's result. The code uses Python 2-era `print` statements and `xrange`; it is a historical distribution, not a maintained current-Python package API. A port must preserve its sampling, seed, BP, and aggregation semantics.
+
+In that same pinned revision, the CLI accepts `-n`, but `GLEU.__init__(n)` ignores the argument, sets `self.order = 4`, and fixes the geometric-mean divisor at four. Treat 1–4-grams as the verified author-script specification; do not treat `-n` as a working API for selecting another order.
+
+---
+
+## 2. Common Definitions: The Denominator Reveals the Design
+
+### 2.1 Hypotheses, references, and preprocessing
+
+Let the system output, or hypothesis, be $h$, and a reference be $r$. With multiple references, write
+
+$$
+R = \{r^{(1)}, r^{(2)}, \ldots, r^{(K)}\}.
+$$
+
+An evaluation corpus contains $S$ cases $(h_s,R_s)$.
+
+A metric rarely receives the raw string without qualification. Its input may undergo Unicode normalization, case folding, punctuation removal, whitespace processing, tokenization, stemming, or morphological analysis. A more accurate description of the evaluated object is therefore
+
+$$
+\operatorname{score}(T(h),T(r)),
+$$
+
+where $T$ is a preprocessing function. Changing $T$ changes the measurement even when the metric retains the same name.
+
+Unicode normalization is not one operation. NFC/NFD compose or decompose canonically equivalent representations, whereas NFKC/NFKD also fold compatibility characters such as full-width alphanumerics, ligatures, and circled numbers. Compatibility folding can help retrieval but can erase meaningful distinctions when evaluating product codes or orthographic quality. Moreover, “character” in many Python implementations means a Unicode code point obtained by iterating a Python string, not a grapheme cluster that keeps a combining sequence or emoji ZWJ sequence together. Fix the normalization form and character unit separately.
+
+Do not assume that major implementations silently convert inputs to NFC. The `13a` BLEU and chrF paths in sacreBLEU 2.6.0, JiWER 4.0.0's default transforms, and NLTK 3.10.0's METEOR do not apply NFC or NFKC in the evaluation layer. NLTK METEOR's default preprocessing is only `str.lower` on each token. A tokenizer such as SentencePiece may have a model-internal normalizer; in that case, the model itself is part of $T$ and must be versioned.
+
+Nor is a “word” a language-neutral unit. A simple `split()` treats an unspaced Japanese sentence as one token. For token metrics, use the same morphological analyzer, dictionary, user dictionary, normalization, and segmentation output for hypotheses and references, and preserve all their versions. Avoid re-tokenizing already tokenized input.
+
+### 2.2 Count multisets, not only sets
+
+Let $C_x(g)$ be the number of occurrences of an $n$-gram $g$ in sequence $x$. Overlap between a hypothesis and one reference is normally counted as the intersection of multisets:
+
+$$
+M_n(h,r)=\sum_g\min(C_h(g),C_r(g)).
+$$
+
+If `the` occurs once in the reference, producing it ten times yields only one match. This upper bounding is called clipping.
+
+A set-based Jaccard score instead removes duplicate occurrences first. “Set” and “multiset” overlap are separate definitions even when both are casually called overlap.
+
+The scope of clipping differs by metric. The displayed equation is a pairwise $\min$ against one reference. BLEU first forms the maximum count across references separately for each $n$-gram and then clips the hypothesis count; original multi-reference ROUGE-N sums pairwise matches against references; CIDEr-D clips counts separately for each candidate-reference pair. Original CIDEr does not use the same clipping as CIDEr-D. Concatenating references into one giant bag is generally equivalent to none of these rules.
+
+Clipping guarantees only that repetition of a symbol earns no match credit beyond its reference count. It does not establish semantic support or factuality, and it is not itself a length correction. With recall alone, for example, output occurrences beyond the reference count do not increase the numerator, but they do not lower the score either; a hypothesis-side precision denominator or another penalty is required for that.
+
+### 2.3 Precision, recall, and $F_\beta$
+
+<strong>Terminology</strong>: Precision, recall, and accuracy are distinct concepts. This article retains precision and recall in equations and API names, and uses accuracy only for quantities such as exact-match accuracy.
+
+Putting the number of hypothesis elements in the denominator gives precision:
+
+$$
+P_n=\frac{M_n}{\sum_g C_h(g)}.
+$$
+
+It asks: <strong>What fraction of the produced units also occurs as the same matching units in the reference?</strong> It is sensitive to unnecessary additions and overgeneration, but it is not the fraction whose truth the reference establishes.
+
+Putting the number of reference elements in the denominator gives recall:
+
+$$
+R_n=\frac{M_n}{\sum_g C_r(g)}.
+$$
+
+It asks: <strong>What fraction of the reference's matching units did the system recover?</strong> It is sensitive to omissions, but it does not directly measure how much of the reference's meaning was recovered.
+
+A common combination is $F_\beta$:
+
+$$
+F_\beta=\frac{(1+\beta^2)PR}{\beta^2P+R}.
+$$
+
+Values of $\beta>1$ emphasize recall; $\beta<1$ emphasizes precision; $\beta=1$ gives the harmonic mean $F_1$. The same number of matches answers a different question when the denominator changes.
+
+Swapping the hypothesis and reference swaps $P$ and $R$. With the same multiset match count $M$, $F_1$ is symmetric under that swap, but $F_\beta$ with $\beta\ne1$ is not. A statement that a score “emphasizes recall” therefore requires fixed hypothesis and reference roles.
+
+These ratios are mathematically undefined when their corresponding denominator is zero. The metric name alone does not decide whether two empty sequences score one or zero, or how to score a case where only one side is empty. Fix the implementation's empty-input convention and report it separately from the ordinary formula.
+
+### 2.4 Multiple references and aggregation are part of the metric
+
+Common ways to handle multiple references include:
+
+- taking the maximum score over references;
+- averaging scores over references;
+- taking the maximum reference count separately for each $n$-gram;
+- interpreting all references as human consensus and averaging similarity to them.
+
+BLEU uses maximum reference counts per $n$-gram, whereas CIDEr averages agreement with all references. These are intentionally different designs.
+
+Corpus aggregation also varies:
+
+- <strong>Macro average</strong>: score each case, then average the scores.
+- <strong>Micro average</strong>: sum sufficient statistics such as matches or edits across cases, then divide.
+- <strong>Metric-specific corpus score</strong>: use a metric's own corpus formula, as BLEU does.
+
+These approaches weight short and long texts differently. The average of sentence scores generally does not equal the corpus score.
+
+### 2.5 Similarity, distance, and error rate are not synonyms
+
+This article uses “metric” in the broad NLP sense, not only for a distance function satisfying the mathematical metric-space axioms.
+
+- A <strong>similarity or agreement score</strong> normally grows with agreement. EM, Jaccard, Dice, and F-scores are examples, although precision, recall, and BLEU are directed scores that can change when hypothesis and reference roles are swapped.
+- A <strong>distance</strong> becomes smaller as sequences get closer. Ordinary unit-cost Levenshtein distance is a mathematical distance on sequences, but its raw value is not normalized to $[0,1]$. “Normalized edit distance” is defined only after naming its denominator.
+- An <strong>error rate</strong> divides errors by reference-side opportunities. WER/CER and TER are directed and can exceed one when the error count exceeds the reference length, so merely computing $1-WER$ does not produce a bounded $[0,1]$ similarity. TER also depends on its shift definition and heuristic search.
+
+Reversing the better/worse direction does not by itself turn a distance into a similarity or an error rate into a mathematical distance. Tables and plots should state both score type and direction.
+
+### 2.6 “Length correction” covers different mechanisms
+
+Calling every appearance of length a length penalty obscures distinct designs.
+
+1. <strong>Denominator effects</strong>: precision reflects extra hypothesis elements, recall reflects missing reference elements, and F-scores combine them. Recall-only ROUGE does not directly penalize extra output.
+2. <strong>Scale normalization</strong>: dividing WER/CER or TER by reference length makes error counts more comparable across examples of different lengths. It is not a penalty that steers output toward a preferred length.
+3. <strong>Explicit length penalties</strong>: BLEU BP penalizes only a corpus hypothesis that is too short; it adds no independent penalty for being too long. Overlong output is disadvantaged mainly through the denominator of clipped precision. The CIDEr-D Gaussian penalizes candidate-reference length differences in either direction.
+4. <strong>Vector normalization</strong>: division by vector norms in CIDEr cosine compares vector direction; it is not a direct judgment that sequence length is appropriate.
+
+Raw Levenshtein distance has no length correction, while EM merely fails when lengths differ. In METEOR, chrF, and Jaccard/Dice, length effects already enter through precision/recall or set denominators rather than a separate universal length penalty. Report clipping and length penalties separately as well.
+
+---
+
+## 3. Exact and Bag-of-Tokens Matching: Start with the Strictest Contract
+
+### 3.1 Exact Match (EM)
+
+Exact Match is the simplest metric:
+
+$$
+EM(h,r)=\mathbf{1}[T(h)=T(r)].
+$$
+
+With multiple references, a common definition returns one if any reference matches:
+
+$$
+EM(h,R)=\max_k\mathbf{1}[T(h)=T(r^{(k)})].
+$$
+
+Corpus EM normally means exact-match accuracy, the average of per-case indicators: $S^{-1}\sum_s EM(h_s,R_s)$. It is therefore a macro aggregation that gives every case equal weight.
+
+<strong>Perspective</strong>: Is the entire output identical to one allowed answer?
+
+<strong>Strength</strong>: It is unambiguous and appropriate for IDs, labels, numbers, normalized short answers, or JSON fields with a strict output contract.
+
+<strong>Weakness</strong>: Every valid paraphrase is a mismatch. Moreover, “normalized EM” is defined by its normalizer. SQuAD-style evaluation uses lowercasing and removal of punctuation, articles, and excess whitespace, but blindly applying that normalizer to product codes or Japanese text may erase meaningful distinctions.
+
+Concretely, the official SQuAD Python normalizer removes the ASCII symbols in `string.punctuation` and the English articles `a`, `an`, and `the`. It is neither a general Unicode-punctuation specification nor a Japanese normalizer.
+
+### 3.2 Token Precision, Recall, and F1
+
+Treat the hypothesis and reference as token multisets and let $M$ be the number of matched tokens. Then
+
+$$
+P=\frac{M}{|h|},\qquad R=\frac{M}{|r|},\qquad F_1=\frac{2PR}{P+R}.
+$$
+
+Token F1 in extractive QA is commonly this bag-of-tokens measure. It ignores order.
+
+With multiple answer annotations, the official SQuAD v1.1 evaluation computes token F1 separately against each reference, takes the maximum, and then averages those case scores across questions. It does not pool all reference tokens into one bag.
+
+The ordinary formula cannot be used unchanged for empty token sequences. The official SQuAD 2.0 script returns F1 one when both normalized token lists are empty and zero when only one is empty. This is that implementation's no-answer convention, not a mathematical consequence of generic token F1.
+
+<strong>Perspective</strong>: How completely do the tokens of a short answer overlap, and how few extra tokens does the hypothesis add?
+
+<strong>Strength</strong>: It grants partial credit beyond exact match and handles span-boundary variation in short answers and named entities.
+
+<strong>Weakness</strong>: It cannot distinguish `dog bites man` from `man bites dog`. A one-token negation difference can also look small inside a long answer.
+
+### 3.3 Jaccard and Sørensen–Dice
+
+Using multiset overlap $M$, Jaccard similarity is
+
+$$
+J=\frac{M}{|h|+|r|-M},
+$$
+
+and the Sørensen–Dice coefficient is
+
+$$
+D=\frac{2M}{|h|+|r|}.
+$$
+
+With the same multiset match count, Dice is algebraically identical to token $F_1$. A set version first discards duplicates and therefore measures something different.
+
+<strong>Perspective</strong>: Element overlap under a symmetric definition that does not assign either side as the gold denominator.
+
+<strong>Suitable uses</strong>: Duplicate detection, tag sets, keyword sets, and output-to-output similarity.
+
+<strong>Caution</strong>: Jaccard and Dice are monotonically related but numerically different. Implementations must also define whether two empty sets receive a score of one or zero. There is no unique standard extension to multiple references, so state whether references are maximized, averaged, or combined.
+
+---
+
+## 4. Edit Metrics: Measure the Work Needed to Fix an Output
+
+### 4.1 Levenshtein distance
+
+Levenshtein distance is the minimum number of insertions, deletions, and substitutions required to transform $x=(x_1,\ldots,x_m)$ into $y=(y_1,\ldots,y_n)$. Its dynamic program is
+
+$$
+D_{i,j}=\min\begin{cases}
+D_{i-1,j}+1 & \text{deletion}\\
+D_{i,j-1}+1 & \text{insertion}\\
+D_{i-1,j-1}+\mathbf{1}[x_i\ne y_j] & \text{match or substitution}
+\end{cases}
+$$
+
+with $D_{0,j}=j$ and $D_{i,0}=i$.
+
+This ordinary recurrence does not include transposition of two adjacent elements. Damerau–Levenshtein distance, which can count a transposition as one operation, is a different metric.
+
+Bibliographically, Levenshtein's Russian original appeared in 1965 and its English translation in 1966. The English title uses “reversals,” whereas the Russian title refers to symbol substitutions; that translated title is not a basis for adding adjacent transposition to the recurrence shown here.
+
+<strong>Perspective</strong>: The minimum number of defined unit edits needed to turn a hypothesis into a reference.
+
+Raw distance tends to grow with length, so comparisons across sequences of different lengths often normalize it. There is no single universal denominator: reference length, maximum length, and the sum of both lengths are all used. Reporting only “normalized edit distance” is insufficient.
+
+### 4.2 WER and CER
+
+By convention, Word Error Rate aligns the reference token sequence to the hypothesis and counts substitutions $S$, deletions $D$ for reference words missing from the hypothesis, and insertions $I$ for extra hypothesis words:
+
+$$
+WER=\frac{S+D+I}{N_r},
+$$
+
+where $N_r$ is the number of reference words. Character Error Rate uses characters as the units in the same form.
+
+<strong>Perspective</strong>: The error rate of ASR or OCR output relative to a human transcription.
+
+<strong>Important property</strong>: Insertions can make WER or CER exceed one. They are not similarities. Corpus WER normally micro-aggregates all $S+D+I$ and divides by total reference length; this differs from averaging sentence WER values.
+
+As an ASR reference implementation, this article also checked NIST SCTK 2.4.12 `sclite` at the `v2.4.12` tag commit `62aabfa95938bfea284f8b68a374c7ddcb0fce52`. Its system summary pools reference-word and $S,D,I$ counts before reporting rates. The empty-input and transform conventions below are JiWER-specific behavior, not consequences of that general formula.
+
+The displayed ratio is undefined when $N_r=0$. JiWER 4.0.0 returns zero when the entire reference and hypothesis are both empty, and otherwise returns the insertion count itself when the entire reference is empty. Other implementations may reject empty references, so this boundary convention is part of reproducibility. Multiple-reference WER also has no universal rule; explicitly report a choice such as minimum WER.
+
+JiWER 4.0.0's default WER transform replaces runs of at least two whitespace characters with one `U+0020`, applies `strip()`, and splits each input line on its default delimiter `U+0020`. It does not treat an isolated tab as a word boundary through generic whitespace splitting, nor does it lowercase or remove punctuation. With multiple lines, it aligns corresponding lines and pools their edit counts; this differs from using `wer_contiguous` to concatenate the lines for one global alignment. The default CER transform strips outer whitespace and then converts to a sequence of Python code points, including internal spaces. When several alignments have the same minimum distance, library tie-breaking can also change the $S,D,I$ breakdown without changing WER.
+
+For CER, therefore specify whether a “character” is a Unicode code point, grapheme cluster, or normalized symbol. A combining sequence and a precomposed character can look identical but remain different before NFC normalization. Passing unsegmented, unspaced Japanese directly to JiWER's default WER treats the whole utterance as one word. Pre-segment hypotheses and references with the same Japanese segmenter and dictionary, and report CER alongside WER.
+
+### 4.3 TER and HTER
+
+Translation Edit Rate (TER) allows word insertion, deletion, and substitution, plus a <strong>shift</strong> that moves a contiguous phrase to another position at unit cost.
+
+Let $E_{\mathrm{TER}}(h,r)$ be the edit count returned by the TER search. The original multi-reference definition is
+
+$$
+TER(h,R)=
+\frac{\min_{1\le k\le K}E_{\mathrm{TER}}(h,r^{(k)})}
+{\frac{1}{K}\sum_{k=1}^{K}|r^{(k)}|}.
+$$
+
+The numerator selects the one reference reachable with the fewest edits, but the denominator is the mean length of all references, not the length of the selected reference. Corpus TER is not the mean of sentence TER values. Standard aggregation, including sacreBLEU 2.6.0, is
+
+$$
+TER_{\mathrm{corpus}}=
+\frac{\sum_s\min_k E_{\mathrm{TER}}(h_s,r_s^{(k)})}
+{\sum_s\frac{1}{K_s}\sum_k|r_s^{(k)}|}.
+$$
+
+Because the shift search space is large, standard TER uses a greedy heuristic; unlike plain Levenshtein distance, it does not simply guarantee a global mathematical minimum over every possible shift sequence.
+
+<strong>Perspective</strong>: A mean-reference-length-normalized edit count under TER's operations—a proxy for post-edit amount. Counting a long phrase movement as one operation assigns block reordering a lower cost than plain WER. The equation measures operation count, however, not actual editing time, cognitive effort, or translation acceptability itself.
+
+HTER (Human-targeted TER) compares against a targeted reference that a human creates by minimally post-editing a particular system output. It preserves acceptable wording from that output, but requires human labor and is therefore not a fully automatic metric. Its final score is still a count under defined operations rather than a direct measure of time spent.
+
+<strong>Implementation cautions</strong>: The empty-input, preprocessing, and search settings below are conventions of pinned implementations, not consequences of the original ratio.
+
+If every reference in the scored corpus is empty, the denominator is zero and the original ratio is undefined. SacreBLEU 2.6.0 implements the special convention of returning zero when every hypothesis is also empty and 100 when any hypothesis is nonempty. If only some cases have empty references, the deletion-equivalent edits that turn those nonempty hypotheses into empty references enter the numerator while other cases provide the denominator in the ordinary pooled calculation, so the result can exceed 100.
+
+The sacreBLEU 2.6.0 TER defaults are case-insensitive, `normalized=False`, punctuation-preserving, and `asian_support=False`. Default Japanese input is therefore effectively whitespace-split and is not automatically segmented. `asian_support` affects CJK processing only when normalization or punctuation removal is also enabled. TERCOM `normalized` here refers to rules for XML entities, line breaks, and punctuation tokenization—not Unicode NFC or NFKC.
+
+SacreBLEU describes its TER as a near-exact reimplementation of TERCOM, but its beam edit distance and shift-candidate limits can differ from TERCOM in extreme corner cases. Pin the implementation and version, not only the name “TER.”
+
+The TERCOM comparison target here is `jhclark/tercom` 0.10.0 at pinned commit `e413d077e5b9ecc96b0e7de5fe6015eb135c2f6d`. Its defaults disable normalization, ignore case, retain punctuation, use beam width 20, and limit maximum shift distance to 50 words. The original paper (Snover et al., 2006) and the later TERCOM distribution, whose README credits Matthew Snover, Shuguang Wang, and Spyros Matsoukas and carries a 2007 copyright, are distinct bibliographic and versioned artifacts. SacreBLEU 2.6.0 matches the preprocessing defaults but does not expose TERCOM's beam width as an equivalent public parameter.
+
+---
+
+## 5. $n$-gram Metrics: Measure Local Vocabulary and Order
+
+### 5.1 BLEU: Geometric Mean of Clipped Precision with a Shortness Penalty
+
+BLEU was proposed as a corpus-level machine-translation metric. Modified precision at order $n$ clips hypothesis counts by the maximum count in any reference:
+
+$$
+C_R^{\max}(g)=\max_k C_{r^{(k)}}(g),
+$$
+
+$$
+p_n=
+\frac{
+\sum_s\sum_g\min(C_{h_s}(g),C_{R_s}^{\max}(g))
+}{
+\sum_s\sum_g C_{h_s}(g)
+}.
+$$
+
+Standard BLEU-$N$ multiplies the weighted geometric mean of these precisions by a brevity penalty (BP), normally with $w_n\ge 0$ and $\sum_n w_n=1$:
+
+$$
+BLEU=BP\cdot\exp\left(\sum_{n=1}^{N}w_n\log p_n\right),
+$$
+
+$$
+BP=\begin{cases}
+1 & c>r\\
+\exp(1-r/c) & 0<c\le r.
+\end{cases}
+$$
+
+Here $c$ is total hypothesis length, and $r$ is the sum of the effective reference lengths selected for each hypothesis. Common BLEU-4 uses $N=4$ and $w_n=1/4$. With multiple references, common implementations select the reference length closest to the hypothesis length and choose the shorter one on a distance tie.
+
+The displayed BP assumes $c>0$. Assigning BLEU zero to an empty hypothesis corpus is a common implementation convention.
+
+<strong>Perspective</strong>: Do many local hypothesis token $n$-grams occur in the same form in at least one reference, and has corpus BP discouraged gaming precision with output that is too short?
+
+<strong>Design implication</strong>: BLEU does not directly calculate recall. BP penalizes corpus-level length deficiency, but it does not ask whether each reference unit was recovered and is not a substitute for recall. Because the mean is geometric, any unsmoothed $p_n=0$ makes the whole score zero. With multiple references, maximum counts are selected independently for each $n$-gram, so the set of clipped matches need not occur together in any one coherent reference sentence.
+
+The original BLEU targets corpus evaluation. Its unsmoothed corpus formula can be applied to one sentence when every required order has a positive denominator. A short sentence, however, can lack higher-order $n$-grams or have zero matches at one order, making the result degenerate at zero or leaving an order undefined. Practical sentence BLEU must specify smoothing or effective-order behavior. These are additional specifications, not one uniquely defined part of the original metric.
+
+<strong>Reporting caution</strong>: Tokenization, casing, reference count, smoothing, effective order, and implementation version change the score. Post (2018) documented how underreported configurations made supposedly comparable “BLEU” values incomparable. Store the complete setup, for example with a sacreBLEU metric signature.
+
+<strong>sacreBLEU 2.6.0 defaults</strong>: `BLEU()` and the ordinary corpus CLI use a 0–100 scale, maximum order 4, `smooth_method="exp"`, `effective_order=False`, and mixed case. With no tokenizer and no known target language, the fallback is `13a`. These are sacreBLEU implementation defaults, not the original unsmoothed equation itself. Available smoothing modes are `none`, `floor`, `add-k`, and `exp`; an omitted value means 0.1 for `floor` and 1 for `add-k`.
+
+The compatibility function `sacrebleu.sentence_bleu` is an exception: it defaults to `exp` smoothing and `effective_order=True`, and CLI `--sentence-level` also enables effective order for BLEU. In contrast, `BLEU().sentence_score` inherits the class default `effective_order=False` and emits a warning. SacreBLEU effective order excludes an order when its hypothesis denominator is zero—that is, when no hypothesis $n$-gram of that order exists. It does not exclude an existing order merely because its match count is zero; separate smoothing is required to avoid that zero.
+
+However, `add-k` adds $k$ to numerator and denominator for $n>1$ before the zero-denominator check, so it can retain a higher order that did not originally exist. Smoothing and effective order must therefore be recorded as the actual combination, not as independent labels.
+
+When target language `ja` is known through `--language-pair` or `trg_lang`, sacreBLEU selects `ja-mecab`, using MeCab segmentation with an IPA dictionary. Arbitrary files scored without a language setting retain `13a`, which can change Japanese BLEU drastically. The sacreBLEU layer does not add NFC/NFKC before `ja-mecab`; strict reproduction should lock `sacrebleu[ja]`, MeCab, and `ipadic`. The signature records the tokenizer, but not external Unicode normalization or a changed `max_ngram_order`, so preserve those separately.
+
+### 5.2 chrF and chrF++: Precision and Recall over Character $n$-grams
+
+The original chrF formulation calculates character $n$-gram $P_n$ and $R_n$ at every order up to $N$ and takes their arithmetic means,
+
+$$
+\overline{P}=\frac{1}{N}\sum_{n=1}^{N}P_n,
+\qquad
+\overline{R}=\frac{1}{N}\sum_{n=1}^{N}R_n,
+$$
+
+and combines them as
+
+$$
+chrF_\beta=
+\frac{(1+\beta^2)\overline{P}\,\overline{R}}
+{\beta^2\overline{P}+\overline{R}}.
+$$
+
+This definition averages precision and recall across orders before applying $F_\beta$. The implementation history also contains a different definition. Popović's 2017 reference `chrF++.py` first computes $F_\beta(P_n,R_n)$ at each order and takes their arithmetic mean. With its default `eps_smoothing=False`, sacreBLEU 2.6.0 averages $P_n$ and $R_n$ over effective orders for which both sides contain $n$-grams and then applies $F_\beta$; `eps_smoothing=True` uses epsilon and averages per-order F like the reference implementation. These variants generally differ, especially on short texts.
+
+<strong>Implementation cautions</strong>: Empty inputs, multiple references, whitespace, and runtime behavior differ across implementations. SacreBLEU 2.6.0's default effective-order mode returns zero when there is no effective order, so chrF for two empty strings is also zero. With `eps_smoothing=True`, precision or recall is set to $10^{-16}$ when its corresponding $n$-gram total is zero, and all configured orders are averaged. Two empty strings therefore score approximately $10^{-14}$ on the 0–100 scale, neither exactly zero nor the perfect-match value 100.
+
+<strong>Perspective</strong>: How much local character material is shared from both the precision and recall perspectives?
+
+Characters grant shared-substring credit across inflection, affixes, compounds, and tokenizer-boundary differences. This can be useful for morphologically rich languages and languages without trivial word segmentation, but the equation does not guarantee superiority over other metrics. On the other hand, it rewards orthographically similar but different words and does not capture long-range order or sentence meaning.
+
+chrF++ adds word $n$-grams to the character $n$-grams, improving sensitivity to word boundaries and local word order. Popović (2017) proposed adding word unigrams and bigrams and treating character and word orders as terms in the same arithmetic mean.
+
+For multiple references, the reference implementation and sacreBLEU select the reference with the highest pairwise chrF for each case and add that pair's sufficient statistics to the corpus. They neither merge per-reference $n$-gram caps as BLEU does nor average similarity to every reference as CIDEr does. Both implementations update the maximum with a strict `>`, retaining the first reference on a tie. If tied references have different statistics, the pooled corpus score can therefore depend on reference order, which must also be preserved. SacreBLEU corpus chrF sums the selected counts across cases before scoring. The reference `chrF++.py` reports both this kind of pooled document score and a separate macro average of sentence scores.
+
+Moreover, the 2017 `chrF++.py` initializes its maximum to zero, so an empty or completely disjoint case in which every pairwise score is zero can leave best statistics unselected and fail. That differs from sacreBLEU 2.6.0's convention of returning zero; the reference script itself must be treated together with its version and valid input domain.
+
+The name alone does not determine the configuration. For example, the sacreBLEU 2.6.0 defaults for chrF use maximum character order 6, $\beta=2$, exclude whitespace from character $n$-grams, and use word order 0. Setting maximum word order to 2 produces the displayed name `chrF2++`. These are widely used implementation defaults, not mathematical necessities implied by the word “chrF.”
+
+Character handling also differs. The reference `chrF++.py` calls `strip()` and then removes only `U+0020`, leaving other internal whitespace, whereas sacreBLEU 2.6.0 with `whitespace=False` removes every character that Python `str.split()` recognizes as whitespace. Neither explicitly applies NFC or NFKC. Under Python 3 they count code-point $n$-grams, but running the reference script on Python 2 byte strings can count UTF-8 bytes instead, so pin the runtime too. SacreBLEU's chrF++ word side also uses only whitespace splitting and simple ASCII punctuation separation; it does not share `ja-mecab`. For raw, unsegmented Japanese, use the default character-only `word_order=0`, or pin external segmentation if word orders are enabled.
+
+### 5.3 ROUGE: A Family of Coverage Metrics, Not One Score
+
+ROUGE was proposed as a family of metrics for summarization. “A ROUGE score” is not a complete definition.
+
+<strong>Version note</strong>: The reproducible artifact for this section is the PyPI 0.1.2 sdist with SHA-256 `c7d4da2683e68c9abf0135ef915d63a46643666f848e558a1b9f7ead17ff0f04`. Commit `910758241597e44871c7029654f5ed7813dc3344` is the nearby repository snapshot that first recorded version `0.1.2` about 32 minutes after that upload; it does not assert byte identity with the sdist.
+
+#### ROUGE-N
+
+For one reference, ROUGE-N recall is
+
+$$
+ROUGE\text{-}N_R=
+\frac{\sum_g\min(C_h(g),C_r(g))}
+{\sum_g C_r(g)}.
+$$
+
+Putting the reference in the denominator measures how much of its $n$-gram content the output recovered.
+
+Lin's (2004) multi-reference ROUGE-N adds match counts and reference counts over the reference summaries:
+
+$$
+ROUGE\text{-}N_R(h,R)=
+\frac{\sum_{k=1}^{K}\sum_g\min(C_h(g),C_{r^{(k)}}(g))}
+{\sum_{k=1}^{K}\sum_g C_{r^{(k)}}(g)}.
+$$
+
+This is therefore a reference-length-weighted recall aggregation, not the score against only the highest-scoring reference.
+
+<strong>Perspective</strong>: ROUGE-1 observes unigram lexical coverage; ROUGE-2 and higher orders observe local phrases and local order. Unless stopword processing is separately specified, ROUGE-1 itself does not distinguish content words from function words.
+
+The original paper centers recall, while modern libraries commonly return precision, recall, and $F_1$. The statements “ROUGE is recall-oriented” and “the reported value is ROUGE-L F1” are compatible, but the component must not be omitted. `rouge-score` 0.1.2 from the Google Research repository (PyPI release 2022-07-22) provides multi-reference `score_multi`, which independently selects the reference with maximum pairwise $F_1$ for each requested ROUGE variant. Its reproducible distribution artifact is the PyPI sdist with SHA-256 `c7d4da2683e68c9abf0135ef915d63a46643666f848e558a1b9f7ead17ff0f04`. Git commit `910758241597e44871c7029654f5ed7813dc3344` is the same-day nearby repository snapshot that first recorded version `0.1.2` about 32 minutes after that sdist was uploaded; no byte-identity claim is made. Its README explicitly says “not an official Google product,” so it is not described here as Google's official evaluation specification. On a tie, `numpy.argmax` returns the first reference, so returned precision/recall can depend on reference order even when F1 is unchanged. Its `BootstrapAggregator` resamples cases with replacement, computes a case-score mean for each bootstrap sample, and returns the 2.5th, 50th, and 97.5th percentiles. The target is a macro mean, not pooled corpus-wide $n$-gram counts. The aggregator has no seed argument and uses NumPy's global RNG, so seed NumPy before the call if the confidence interval itself must be reproduced. Do not mix the original summed-reference formula, maximum-reference scoring, and mean-reference scoring under one unspecified “ROUGE.”
+
+The `rouge-score` 0.1.2 default `DefaultTokenizer` lowercases text, replaces `[^a-z0-9]+` with spaces, and does no stemming by default. This is not a general Unicode tokenizer. Identical Japanese-only strings both become empty token lists and receive zero for ROUGE-1/2/L. Even canonically equivalent text can diverge: NFC `café` leaves `caf`, whereas NFD `cafe` plus a combining accent leaves `cafe`. For Japanese, provide a custom tokenizer that applies the same Unicode normalization and segmentation to both sides. The default implementation handles an empty $n$-gram denominator with `max(count,1)` and special-cases empty LCS input, so precision, recall, and F1 are all zero when either or both strings are empty.
+
+In the same implementation, even an exact match receives zero for ROUGE-N when both texts contain fewer than $n$ tokens, because both $n$-gram bags are empty. A value of one does not follow from the formula's $0/0$ case; zero is the implementation's empty-denominator convention.
+
+#### ROUGE-L
+
+Let reference token sequence $X$ have length $m$, hypothesis sequence $Y$ have length $n$, and let $LCS(X,Y)$ be their longest common subsequence length. Then
+
+$$
+R_{LCS}=\frac{LCS(X,Y)}{m},
+\qquad
+P_{LCS}=\frac{LCS(X,Y)}{n},
+$$
+
+which can be combined with $F_\beta$. Lin's equation permits recall/precision weighting through $\beta$, whereas the `fmeasure` returned by `rouge-score` fixes $\beta=1$ and is $F_1$. A subsequence preserves order but need not be contiguous.
+
+<strong>Perspective</strong>: Coverage by elements appearing in the same order. It can capture dependencies longer than a fixed-width $n$-gram, while allowing distant matches to form one subsequence.
+
+Implementations distinguish sentence-level `rougeL`, which compares each text as one sequence, from summary-level `rougeLsum`, which computes sentence-wise union-LCS. With the `rouge-score` 0.1.2 default `split_summaries=False`, newlines are sentence boundaries; `True` instead invokes NLTK's default sentence tokenizer. The latter depends on the NLTK and Punkt-resource versions and is not a Japanese sentence splitter, so pin those resources too. Confusing the variant, newlines, or `split_summaries` changes summarization results.
+
+#### ROUGE-W, ROUGE-S, and ROUGE-SU
+
+- <strong>ROUGE-W</strong>: weighted LCS, rewarding one long contiguous run more than fragmented runs of equal total length.
+- <strong>ROUGE-S</strong>: overlap of skip-bigrams—ordered word pairs that may have a configurable maximum gap.
+- <strong>ROUGE-SU</strong>: skip-bigrams plus unigrams, supporting short texts or cases with no skip-bigram matches.
+
+ROUGE-1, ROUGE-2, and ROUGE-L/Lsum dominate current practice, but they do not define the entire ROUGE family. The Google Research-repository `rouge-score` 0.1.2 implementation tracked here likewise implements ROUGE-N and ROUGE-L/Lsum rather than ROUGE-W/S/SU. Reporting the latter three requires naming a different implementation, variant, and parameters. Because of this implementation coverage and their overlap with designs already represented, this article positions W/S/SU briefly as comparators and gives detailed treatment to N and L/Lsum.
+
+---
+
+## 6. METEOR: Align Words and Penalize Fragmented Order
+
+METEOR constructs a one-to-one alignment between hypothesis and reference unigrams. The 2005 version used modules including exact match, Porter stemming, and WordNet synonyms. It selects an alignment with the maximum number of mapped unigrams and, when ambiguity remains, prefers fewer alignment crossings. Later versions add paraphrase tables, language-specific stemmers, and module weights.
+
+With $m$ aligned words,
+
+$$
+P=\frac{m}{|h|},\qquad R=\frac{m}{|r|}.
+$$
+
+A generalized weighted harmonic mean can be written as
+
+$$
+F_\alpha=\frac{PR}{\alpha P+(1-\alpha)R}.
+$$
+
+The 2005 choice $\alpha=0.9$ gives
+
+$$
+F_{mean}=\frac{10PR}{R+9P},
+$$
+
+which strongly emphasizes recall.
+
+Next, partition the alignment into maximal contiguous runs whose matched words are adjacent and in the same order in both texts. These runs form the fewest possible chunks. If there are $ch$ chunks, a generalized fragmentation penalty is
+
+$$
+Penalty=\gamma\left(\frac{ch}{m}\right)^\theta,
+$$
+
+and the final score is
+
+$$
+METEOR=(1-Penalty)F_\alpha.
+$$
+
+When there are no matches and $m=0$, returning zero is the standard implementation convention. With multiple references, the 2005-style and NLTK sentence METEOR rule takes the maximum score over references rather than pooling them.
+
+The 2005 version used $\gamma=0.5$ and $\theta=3$. Later versions, including Meteor Universal, tune parameters and resources for languages and tasks; do not assume that every `METEOR` implementation uses all 2005 constants.
+
+Under this fragmentation penalty, a finite nonempty exact match is not exactly one. For an exact match of length $L=m$, $P=R=1$ and $ch=1$, so the 2005 and NLTK defaults give
+
+$$
+METEOR_{\mathrm{exact}}=1-\frac{1}{2L^3}.
+$$
+
+It is therefore 0.5 for one token and 0.9375 for two tokens. This is a boundary property of the computation; its scale differs from EM or F1, which assign one to a nonempty exact match.
+
+<strong>Perspective</strong>: Measure word-level lexical adequacy with precision and recall, then measure whether matched words remain grouped in the same order through a fragmentation penalty.
+
+<strong>Boundary with surface matching</strong>: Exact and stem matches are surface or morphological. Synonym and paraphrase modules enter limited lexical-semantic matching. They still do not understand context-dependent word senses, negation, numbers, or logical relations. Language resources vary in coverage, which also complicates cross-language comparisons.
+
+<strong>Implementation cautions</strong>: The NLTK and CMU Meteor implementations below differ in matching resources, search, and aggregation APIs despite sharing the metric name.
+
+NLTK 3.10.0's `meteor_score` is not a wrapper around official Meteor 1.5. It requires pre-tokenized `Iterable[str]` references and hypothesis and raises `TypeError` for raw strings. By default it applies `str.lower` to each token and greedily aligns still-unmatched words in exact, Porter-stem, then NLTK English-WordNet-synonym stages. Its defaults are `alpha=0.9`, `beta=3.0`, and `gamma=0.5`; its `beta` corresponds to $\theta$ in the equation above. Multiple references use the maximum sentence score. A pair containing an empty token list scores zero, while an empty reference iterable makes `max()` fail. It has no paraphrase module, language/task-specific weights, corpus API, or Unicode normalization. Pin WordNet data and tokenizer/resource versions, and do not apply these English defaults unchanged to Japanese.
+
+The CMU Meteor 1.5 distribution, in contrast (official source pinned at commit `57a9ec5d5f65b8ceca6db5788ef876f3726614b3`), provides language- and task-dependent exact/stem/synonym/paraphrase modules, module weights, tuned parameters, and alignment search with default beam size 40. Japanese is not among its bundled fully or partially supported languages; `-l other` selects exact matches and language-independent scoring parameters and requires user-provided segmentation, tokenization, and lowercasing as needed. Its system-level score pools sufficient statistics such as hypothesis and reference lengths, weighted matches, and chunks from selected alignments before applying the scoring formula, so it is generally not the arithmetic mean of sentence METEOR.
+
+The bundled README heading and source `Constants.VERSION` say 1.5, but help text and sample output embedded in that README still contain old 1.4 strings. Do not infer the distribution version from those pasted examples; preserve the commit and runtime `Eval ID`. As of 2026-07-13, the official repository has no later commit or release tag.
+
+---
+
+## 7. CIDEr: Aggregate Multi-Reference Lexical Agreement with TF-IDF
+
+CIDEr was designed for image-caption evaluation, treating similarity to a set of human references as a proxy for description consensus. It downweights $n$-grams that occur in references for many images and emphasizes those that are relatively distinctive in the current image's references.
+
+The bibliographic year here is the CVPR 2015 publication year, not the first arXiv v1 submission in 2014. The CIDEr-D equation and gameability modifications below are sourced from the 2015-06-03 arXiv v2/CVPR text. Implementation behavior is checked separately against COCO Caption Evaluation commit `3a9afb2682141a03e1cdc02b0df6770d2c884f6f`.
+
+Let $\mathcal I$ be the image set and $\Omega$ the $n$-gram vocabulary. The paper defines TF and IDF as
+
+$$
+\operatorname{tf}_g(s)=
+\frac{C_s(g)}{\sum_{g'\in\Omega}C_s(g')},
+\qquad
+\operatorname{idf}_g=
+\log\frac{|\mathcal I|}
+{\sum_{p\in\mathcal I}\mathbf{1}\!\left[\sum_j C_{s_{pj}}(g)>0\right]},
+$$
+
+with $[\mathbf{g}_n(s)]_g=\operatorname{tf}_g(s)\operatorname{idf}_g$. An IDF document is an image, not one caption: $g$ is counted once if any reference for that image contains it. Original CIDEr maps candidate and reference words to stems or roots before counting. For candidate $c_i$ and $K$ references $s_{ij}$ for image $i$,
+
+$$
+CIDEr_n(c_i,S_i)=\frac{1}{K}\sum_{j=1}^{K}
+\frac{\mathbf{g}_n(c_i)\cdot\mathbf{g}_n(s_{ij})}
+{\|\mathbf{g}_n(c_i)\|\,\|\mathbf{g}_n(s_{ij})\|},
+$$
+
+$$
+CIDEr(c_i,S_i)=\sum_{n=1}^{4}w_n CIDEr_n(c_i,S_i),
+$$
+
+usually with $w_n=1/4$.
+
+If either vector has zero norm, the cosine ratio is mathematically undefined; assigning zero to that order is an implementation convention. Exact string equality does not override that convention. Corpus CIDEr estimates IDF once from a fixed image set and then takes the arithmetic mean of per-image scores computed with that shared IDF. It neither re-estimates IDF independently for each sentence score nor concatenates all images into one TF-IDF vector for one cosine.
+
+<strong>Perspective</strong>: On average, how closely does the candidate's TF-IDF $n$-gram vector agree by cosine with each reference vector for the same input? IDF downweights $n$-grams that also occur for many other inputs.
+
+<strong>Strength</strong>: Averaging over all references uses the complete reference set rather than selecting only a best reference. TF-IDF gives relatively more weight to $n$-grams that distinguish this input's references from boilerplate occurring across many evaluated inputs.
+
+<strong>Weakness and boundary with surface matching</strong>: “Consensus” is a design interpretation that uses mean lexical similarity to a small per-case reference set as a proxy. The equation does not directly count whether a majority of annotators used an $n$-gram, nor does it judge shared propositions, image fidelity, or grammaticality. If a candidate strongly matches only one of $K$ references, that high pairwise cosine contributes only $1/K$ to the average. IDF is corpus rarity by input, not semantic importance.
+
+CIDEr-D is a benchmark-oriented variant that removes stemming and adds $n$-gram count clipping, a Gaussian penalty for candidate/reference length differences, and scaling by 10. The paper defines
+
+$$
+CIDEr\text{-}D_n(c_i,S_i)=\frac{10}{K}\sum_{j=1}^{K}
+\exp\!\left(-\frac{(\ell(c_i)-\ell(s_{ij}))^2}{2\sigma^2}\right)
+\frac{\min(\mathbf{g}_n(c_i),\mathbf{g}_n(s_{ij}))\cdot\mathbf{g}_n(s_{ij})}
+{\|\mathbf{g}_n(c_i)\|\,\|\mathbf{g}_n(s_{ij})\|},
+$$
+
+where $\min$ is element-wise and $\sigma=6$. As in CIDEr, orders $n=1,\ldots,4$ are normally averaged uniformly afterward. `CIDEr` and `CIDEr-D` therefore should not be assumed to share preprocessing or a numerical scale.
+
+There is also an implementation distinction. Equation (1) in the paper writes normalized TF, whereas the COCO Caption Evaluation reference code uses raw count times IDF. Per-order scaling cancels in ordinary cosine CIDEr, but an independent reimplementation need not remain equivalent once CIDEr-D clipping is introduced. The reference code under `pycocoevalcap/cider` implements clipping, the Gaussian penalty, and multiplication by 10 while returning the method name `CIDEr`. Consequently, “CIDEr” displayed by a COCO-style benchmark may in fact be the CIDEr-D-style computation.
+
+The standard COCO pipeline runs Stanford PTBTokenizer before the scorer, lowercasing and removing a fixed list of punctuation tokens. It is not a Japanese segmenter. Calling `Cider` or `CiderScorer` directly bypasses that step: the scorer itself only calls a simple `split()` on an already whitespace-tokenized string and performs no Unicode normalization. The same reference code computes image-level document frequencies from the references passed for the evaluated set. Instantiating a separate scorer for one image makes every observed $n$-gram IDF $\log(1/1)=0$, so even an exact match scores zero. The wrapper requires at least one reference entry per image; an empty candidate against ordinary nonempty references scores zero, but a reference corpus containing no $n$-grams at all can fail its document-frequency check. Replacing PTBTokenizer for Japanese creates a variant distinct from the standard COCO score. Pin the pipeline, reference set, tokenizer, and code commit together.
+
+<strong>Caution</strong>: IDF depends on the evaluation corpus and its references, so CIDEr values from separate datasets are not directly comparable. If references are few, dependent, or unrepresentative of the annotator population, interpreting their mean agreement as broad “human consensus” is weakly supported.
+
+---
+
+## 8. Apply Multiple Metrics to the Same Difference
+
+### 8.1 Recalculate the Same One-Token Difference
+
+A small token example makes the denominators visible.
+
+```text
+Reference: refunds within thirty days
+Output A:  refunds within thirty
+Output B:  refunds within sixty days
+```
+
+The following values assume case-sensitive whitespace tokens and one reference. Token edit rate is unit-cost $d_{\mathrm{Lev}}(r,h)/|r|$; BLEU-1 is the unsmoothed corpus equation with this one case as the whole corpus. The reference has four tokens, and both outputs match three.
+
+| Metric | Output A | Output B | Interpretation |
+|---|---:|---:|---|
+| Exact Match | 0 | 0 | Neither is identical |
+| Token Precision | $3/3=1.00$ | $3/4=0.75$ | Every A token occurs in the reference; B's `sixty` is unmatched |
+| Token Recall | $3/4=0.75$ | $3/4=0.75$ | A misses `days`; B misses `thirty` |
+| Token $F_1$ | $6/7\approx0.857$ | $0.75$ | A is better under balanced surface overlap |
+| Jaccard | $3/4=0.75$ | $3/5=0.60$ | A also has greater overlap over the union |
+| Token edit rate | $1/4=0.25$ | $1/4=0.25$ | Reference-to-output alignment has one deletion for A and one substitution for B |
+| BLEU-1 | $e^{1-4/3}\approx0.7165$ | $0.75$ | A has $p_1=1$ but receives BP; B has $p_1=0.75$ and BP 1 |
+
+The crucial fact is that Output B changes a 30-day deadline to 60 days, a <strong>major semantic error</strong>. Edit rate ties A and B, while BLEU-1 ranks B above A. That is not a calculation mistake. Semantic importance is absent from these definitions.
+
+### 8.2 Duplicate Counts and Order Are Separate Axes
+
+A multiset that retains duplicate tokens differs from a set that discards them.
+
+```text
+Reference: red red blue
+Output:    red blue blue
+```
+
+One `red` and one `blue` align, so $M=2$.
+
+| Definition | Value |
+|---|---:|
+| Token Precision / Recall | $2/3\approx0.667$ |
+| Token $F_1$ = multiset Dice | $2/3\approx0.667$ |
+| Multiset Jaccard | $2/(3+3-2)=1/2$ |
+| Set Jaccard | $2/2=1$ |
+
+Set Jaccard converts both sides to `{red, blue}` and therefore returns one. It has not judged the frequency mismatch correct; its definition has discarded frequency.
+
+Now reverse order:
+
+```text
+Reference: dog bites man
+Output:    man bites dog
+```
+
+| Metric | Value | Reason |
+|---|---:|---|
+| Exact Match | $0$ | The complete sequences differ |
+| Token Precision / Recall / $F_1$ | $1$ | The three-token multisets are identical |
+| Multiset Jaccard | $1$ | Multiset union and intersection coincide |
+| Token edit rate $d_{\mathrm{Lev}}/\lvert r\rvert$ | $2/3$ | The first and last tokens require two substitutions |
+| ROUGE-L $F_1$ | $1/3$ | The LCS length is one |
+| Unsmoothed BLEU-2 | $0$ | $p_1=1$ but $p_2=0$ |
+
+Bag-of-token metrics give full credit despite the role reversal, while sequence metrics count an order difference. The latter still do not understand which meaning is correct.
+
+### 8.3 Exact Matches, Short Texts, and Empty Inputs
+
+In this table, “nonempty” means that metric units remain after preprocessing. Equations use a 0–1 scale; rows naming sacreBLEU use that implementation's 0–100 scale.
+
+| Metric or variant | Nonempty exact match $h=r$ | $h=r=\varnothing$ |
+|---|---|---|
+| Exact Match | $1$ | $1$ |
+| Token P/R/$F_1$ | $1$ | Ordinary formula is $0/0$; SQuAD 2.0 F1 defines it as $1$ |
+| Jaccard / Dice | $1$ | Ordinary formula is $0/0$; implementation must choose $0$ or $1$ |
+| Levenshtein distance | $0$ | $0$ |
+| WER / CER | $0$ | Ordinary formula is undefined; JiWER 4.0.0 returns $0$ |
+| TER | $0$ | Ordinary formula is undefined; sacreBLEU 2.6.0 returns $0$ |
+| BLEU-$N$ | $1$ if every requested order exists | Common implementation convention is $0$ |
+| chrF | sacreBLEU default is $100$ | sacreBLEU default is $0$ |
+| ROUGE-N / ROUGE-L | $1$ when required $n$-grams exist / ROUGE-L is $1$ | `rouge-score` 0.1.2 returns $0$ for all components |
+| METEOR (2005/NLTK defaults) | $1-1/(2L^3)$ | NLTK returns $0$ |
+| CIDEr / CIDEr-D | $1$ / $10$ if all references match and every weighted order is nonzero | A zero-norm order contributes $0$; an all-empty reference corpus can make the COCO scorer fail |
+
+METEOR is 0.5 for a one-token exact match and 0.9375 for two tokens. Because CIDEr averages all references, matching only one reference exactly does not guarantee the maximum. Exact equality can also yield zero vectors when IDF makes every component zero. Building the COCO scorer from one image makes every observed $n$-gram IDF $\log(1/1)=0$, so even an exact match scores zero.
+
+A short exact match does not create missing higher-order $n$-grams:
+
+```text
+Reference: a b
+Output:    a b
+```
+
+For BLEU-4, both numerator and denominator of $p_3$ and $p_4$ are zero. In sacreBLEU 2.6.0, `BLEU().sentence_score` returns zero with its default `effective_order=False`, whereas `BLEU(effective_order=True).sentence_score` uses only the existing unigram and bigram orders and returns 100. Likewise, `rouge-score` ROUGE-3 returns zero for this exact match under its empty-trigram-bag convention.
+
+When only one side is empty, keep denominator direction separate from implementation conventions.
+
+| Single-reference case | Representative results |
+|---|---|
+| $r\ne\varnothing$ and $h=\varnothing$ | $d_{\mathrm{Lev}}=\lvert r\rvert$. Reference-to-hypothesis WER/CER use all deletions and equal 1; ordinary single-reference TER edits hypothesis to reference, uses all insertions, and also equals 1. SQuAD F1, BLEU, `rouge-score`, NLTK METEOR, and COCO CIDEr against an ordinary nonempty reference return 0 |
+| $r=\varnothing$ and $h\ne\varnothing$ | Ordinary reference-length ratios are undefined. SQuAD F1, BLEU, `rouge-score`, and NLTK METEOR return 0. JiWER and sacreBLEU TER use the distinct special conventions below |
+
+### 8.4 Multiple References and Error Rates above 100%
+
+Because BLEU forms a maximum reference count for each $n$-gram, it can combine matches from different references.
+
+```text
+Reference 1: a b x
+Reference 2: y b c
+Output:      a b c
+```
+
+The output is not identical to either reference. However, `a b` occurs in Reference 1, `b c` occurs in Reference 2, and every unigram occurs in at least one reference. BLEU-2 is therefore $p_1=3/3=1$, $p_2=2/2=1$, and $BP=1$, giving a score of one. This is the intended multi-reference clipping rule, not evidence that the output exactly matches one coherent reference.
+
+Error rates can exceed 100% even with a nonempty reference:
+
+```text
+Reference: a
+Output:    a x y
+```
+
+Reference-to-output WER alignment has $S=0,D=0,I=2$, so $WER=2/1=2$, or 200%. TER is also 200% here, but it edits the hypothesis toward the reference: deleting the extra `x y` costs two edits, divided by one reference token. For the character strings `a` and `axy`, CER follows WER and counts two insertions, also giving 200%.
+
+In contrast, with a completely empty reference and Output `x y`, the ordinary ratio is undefined. JiWER 4.0.0 returns the insertion count itself, so WER is 2, while sacreBLEU 2.6.0 TER returns 100 under its special “all references empty but a hypothesis is nonempty” convention. Do not confuse this special value with the ordinary 200% calculation against a nonempty reference.
+
+### 8.5 Adversarial Counterexamples Built from the Definitions: What Can Game a High Score
+
+"Wrongly high or low" here does not mean the metric computed something contrary to its definition. It means <strong>the false positives and false negatives you get when you read the surface agreement a metric measured as task quality itself</strong>. Clipping, F-scores, BP, and fragmentation penalties each narrow specific loopholes, but none of them proves meaning, factuality, or task success.
+
+Start by separating repetition from copying reference fragments.
+
+```text
+Reference: alpha beta
+Output:    alpha beta beta beta
+```
+
+The multiset match is $M=2$. Token recall and ROUGE-1 recall are $1$, and set Jaccard, which discards duplicates, also stays at $1$. Token precision, however, is $1/2$, token $F_1$ is $2/3$, and multiset Jaccard is $1/2$. Clipping gives the extra `beta` no additional match credit, but neither does it lower a recall-only score or a score computed after set conversion.
+
+```text
+Reference: a b c
+Output:    a x b y c
+```
+
+Even when `x` and `y` are unsupported insertions, token recall, ROUGE-1 recall, and ROUGE-L recall are all $1$. ROUGE-L recovers `a b c` as a non-contiguous subsequence, so precision is $3/5$ and $F_1$ is $3/4$. In general, inserting arbitrary strings while keeping the whole reference in order never lowers ROUGE-L recall. ROUGE-N recall likewise does not fall under extra repetition or appended text, as long as the candidate contains every $n$-gram of the reference.
+
+<strong>Fixed-width local order can be gamed by moving long blocks globally.</strong> Take blocks $A,B$ of length $q$ made of mutually distinct tokens, let the reference be $AB$ and the hypothesis $BA$. Order inside each block is preserved and the vocabulary matches exactly.
+
+- Token multiset P/R/$F_1$ and multiset Jaccard are $1$.
+- For token $n$-grams with $1\le n\le q$, in the simple case where the $n$-grams straddling the boundary do not match each other, BLEU's $p_n$ and single-reference ROUGE-N recall are both $2(q-n+1)/(2q-n+1)$. Only the neighborhood of the boundary differs, so for a fixed maximum order this approaches $1$ as $q\to\infty$. chrF at a fixed order has the same locality, because it keeps most character $n$-grams inside the long blocks.
+- In METEOR all $2q$ words align and there are $2$ chunks. With the 2005/NLTK defaults $P=R=1$, so the score is $1-\frac{1}{2q^3}$ — already $0.9995$ at $q=10$. The chunk penalty looks only at $ch/m$, not at move distance or the semantic role of the blocks.
+- TER needs a single shift of one block, so the edit rate is at most $1/(2q)$. That is faithful to TER's operation set, but it is not the semantic importance of the reordering, nor real post-editing time.
+- If the blocks have equal length and share no tokens, ROUGE-L $F_1$ is $1/2$. The normalized Kendall value of NTT RIBES 1.03.1 is $(q-1)/(2q-1)$, approaching $1/2$ as $q\to\infty$. In this example LCS and rank correlation reflect global order far more strongly than fixed-width $n$-grams or chunk counts.
+
+Conversely, RIBES does not guarantee content adequacy either. In the same pinned implementation, inserting an equal number of unaligned tokens while keeping every reference token in order gives $NKT=1$, $P=1/2$, and $BP=1$, so with the defaults $RIBES=(1/2)^{0.25}\approx0.841$. Unmatched content enters only the unigram precision term, and its exponent is the version-pinned $0.25$.
+
+Mapping the main false positives and false negatives back to the definitions gives the following.
+
+| Metric or design family | When a high score or low error is easily misread as quality | When a low score or high error is easily misread as poor quality | Counter-diagnostics the definition demands |
+|---|---|---|---|
+| Exact Match | Copying a wrong, stale, or leaked reference verbatim, or $T$ collapsing a meaningful difference | Acceptable alternative spellings and paraphrases | Raw diffs, schema, types and ranges, normalizer collision tests |
+| Token P/R/$F_1$ | Precision alone can be perfect for a short correct fragment, recall alone for an overlong output that contains the reference words. $F_1$ still does not weight a word-order reversal, or a one-word substitution of a negation, number, or proper noun inside a long text, according to its importance | Correct synonymous expressions that share no surface words | Separating P and R, output length and repetition rate, exact checks on slots, negation, numbers, and named entities |
+| Set / multiset Jaccard and Dice | The set version discards repetition counts entirely, and both discard word order. On the same multiset, Dice inherits token $F_1$'s weaknesses | Synonyms and spelling variants | Stating set versus multiset explicitly, frequency differences, sequence metrics, semantic diagnostics |
+| Levenshtein / WER / CER | One substitution inside a long reference yields a low rate, yet substituting `not`, `30`, a unit, or a person's name can be fatal | Correct paraphrases, and differences in tokenizer or Unicode unit | Weighted errors on critical tokens or per-item errors, named-entity and numeric preconditions, an identical $T$ |
+| TER | It counts a global move of a long phrase as one shift, so the rate stays low even when semantic roles change, as in the block swap above | When an acceptable paraphrase happens to require many TER operations | A breakdown of shifts, measured post-editing time, word-order and semantic evaluation |
+| BLEU / NIST / Google and GEC GLEU | Locally stitching reference fragments, moving blocks longer than the fixed width, and BLEU's cross-reference $n$-gram composition can all raise the score. Corpus-level BP looks only at total length, so an empty or short output on a hard case can be offset by the length of another case. NIST's rare-$n$-gram weighting does not certify a rare typo or a leaked fragment as semantically important either | Correct synonymous expressions and reorderings, and outputs tokenized differently | Per-order match and total counts, BP together with per-case lengths, restricting source-aware GLEU to GEC, semantic and critical-error evaluation |
+| chrF / chrF++ | It can award high partial credit to a different word or proper noun with similar spelling, to a long block swap, and to copied character fragments of the reference | Synonyms that share no spelling, a different script or transliteration, and canonically equivalent but unnormalized strings | Unicode and whitespace settings, word- and entity-level units, long-distance order and semantic evaluation |
+| ROUGE-N | Recall alone does not directly penalize an overlong output that contains the reference $n$-grams, repetition, or an enumeration of source and reference fragments | Abstractive summaries and correct paraphrases | The P/R/$F_1$ components, length and redundancy, claim coverage and factuality |
+| ROUGE-L / RIBES | ROUGE-L recall is $1$ once the reference is embedded as a subsequence. Some RIBES versions exclude unaligned words from the rank correlation and penalize them only through a weak precision exponent | Correct reconstructions that share no vocabulary | Avoiding recall-only use and pairing it with unaligned tokens, length, and claims; pinning the version and alpha/beta |
+| METEOR | Stem collisions, wrong-sense synonyms under the NLTK default that consults every WordNet synset without restricting context or part of speech, and global moves made of few chunks can all raise the score | Synonyms and paraphrases absent from the resource, and unsupported languages | A per-module breakdown of exact/stem/synonym matches, pinning resources and language, semantic and word-order diagnostics |
+| CIDEr / CIDEr-D | The original paper itself reports that plain CIDEr can rise when high-confidence phrases are repeated. CIDEr-D mitigates this with clipping and a Gaussian, but it still does not judge copied rare reference $n$-grams, local stitching, or whether content absent from the image is true | Correct object descriptions and synonyms missing from the references, and corpus-wide expressions whose IDF is $0$ | Pinning IDF to one fixed reference set, checking object, attribute, and relation correctness, human evaluation, and repetition and length separately |
+
+The alpha/beta for RIBES in the table are that implementation's exponent parameters. They are distinct from METEOR's identically named parameters and from $F_\beta$.
+
+<strong>Multiple references are not all the same kind of defense.</strong> BLEU in Section 8.4 uses the maximum count from a different reference for each $n$-gram, which permits a composition present in no single reference. The pinned implementations of `rouge-score`, chrF, METEOR, and RIBES take the maximum per reference, so they do not perform that composition, but neither do they require agreement with the reference set as a whole. Moreover, `rouge-score.score_multi` may select a different best reference for each ROUGE variant. CIDEr averages over all references, so copying a single reference verbatim is diluted to $1/K$ — but that does not check truth outside the references, or faithfulness to the input.
+
+<strong>Choosing the preprocessing after inspecting the outputs is itself a way to game the metric.</strong> The pinned SQuAD 2.0 normalizer strips ASCII punctuation, so the product codes `A-10` and `A10` both become `a10` and EM is $1$. Conversely, an implementation that skips NFC treats visually identical composed and combining strings as a mismatch. The ASCII tokenizer in `rouge-score` 0.1.2 turns Japanese into an empty sequence. Do not look at the candidates first and then pick lowercasing, stemming, punctuation removal, and the tokenizer, reporting only the favorable configuration. Pin $T$, the implementation, the version, and a hash of the transformed data before evaluating.
+
+<strong>CIDEr's IDF is dataset-specific.</strong> If $g$ appears in the references of every input in the evaluation set, then $\operatorname{idf}_g=\log(|\mathcal I|/|\mathcal I|)=0$ and that $n$-gram contributes nothing even when it matches. Conversely, a rare typo or named entity appearing in a single input receives a large weight. The pinned COCO code recomputes document frequency from the `self.crefs` it is handed, so the same candidate–reference pair can yield a different value when the set of images scored alongside it changes. Do not compare a value obtained by rebuilding the scorer per subset against that subset's value from a whole-set scorer, or against another dataset, as if they were on the same scale.
+
+<strong>An evaluator reading the references while scoring is not the same as reference leakage.</strong> Leakage is when test references that should stay sealed, reference-derived IDF or vocabulary, or repeated test-score feedback enter candidate generation, prompt or checkpoint selection, or preprocessing choices. Surface metrics cannot distinguish legitimate generation from a leaked copy. Keep test references private, tune only on development data, audit exact and near-duplicate matches across train/dev/test, and record submission counts and selection history.
+
+Surface metrics accurately answer questions such as “how many symbols changed?” and “how much overlaps?” They cannot answer how operationally dangerous a difference is. That requires separate checks such as slot comparison, numeric and negation checks, entailment/contradiction evaluation, or a task-specific rubric.
+
+---
+
+## 9. Select Metrics by the Task's Failure Modes
+
+| Task | Initial surface metrics | Why | Required complements |
+|---|---|---|---|
+| Class label, ID, strict JSON | Exact Match / schema validation | Allowed outputs are strict | Types, ranges, business constraints |
+| Extractive QA, named-entity short answer | Normalized EM + token F1 | Captures both exactness and boundary variation | Multiple answers, number/unit checks |
+| ASR | WER + CER | Separates word- and character-level transcription errors | Entities, semantically critical words, speaker slices |
+| OCR | CER / edit distance | Directly measures correction amount | Layout and field-level accuracy |
+| Machine translation | Corpus BLEU + chrF/chrF++; RIBES when needed | Separates local token $n$-gram precision, character-material P/R overlap, and global matched-word order | Semantic metrics and human evaluation |
+| Summarization | ROUGE-1/2 + ROUGE-Lsum | Measures unigram/bigram and ordered-subsequence reference coverage | Factuality, required claims, redundancy |
+| Image captioning | CIDEr-D | Averages TF-IDF $n$-gram agreement over all references | Object/relation correctness and human evaluation |
+| Free-form LLM response | EM/ROUGE/chrF for diagnosis | Cheaply tracks surface regression | Claims/slots, grounding, NLI, human or LLM judge |
+
+It is safer to arrange metrics that detect different failures than to collapse everything into one score. Even if BLEU and chrF both rise, only the two composite scores are known to have risen; inspect BLEU's per-order precisions and BP and chrF's precision/recall components before attributing the change.
+
+---
+
+## 10. What Surface-Matching Metrics Commonly Miss
+
+### 10.1 They mark valid paraphrases as false negatives
+
+A reference is one sample from the set of correct answers. With few references, metrics penalize valid alternative wording, explanation order, and levels of detail. Multiple references mitigate this but cannot enumerate every valid realization.
+
+### 10.2 They do not understand the importance of a small string difference
+
+Negation, numbers, units, dates, named entities, and subject/object swaps may reverse meaning while producing a small surface distance. Conversely, a large paraphrase can preserve meaning despite a large surface distance.
+
+### 10.3 They inherit reference errors and bias
+
+Metrics assume references are correct. If a reference is stale, incomplete, stylistically narrow, or disputed between annotators, the score inherits that defect. Adding references does not by itself guarantee factual correctness.
+
+### 10.4 They do not directly measure document-level logic or factuality
+
+$n$-grams and LCS observe some local order, but not causal relations, coreference, discourse structure, cross-sentence contradictions, or agreement with external facts. A summary can achieve high ROUGE while introducing unsupported claims.
+
+### 10.5 Averages hide critical slices
+
+A corpus score can improve while performance declines for one language, long texts, named entities, or numerical cases. Inspect score distributions, length/domain slices, and worst cases in addition to the aggregate.
+
+### 10.6 A small score delta is not automatically a quality improvement
+
+<strong>Separate the levels of correlation</strong>. Correlation between an automatic metric and human judgments has at least two distinct forms.
+
+| Level | One observation in the correlation | Automatic-metric side | Human-judgment side | Primary question |
+|---|---|---|---|---|
+| Sentence / segment level | One system output for one case | An explicitly specified sentence metric | Rating or ranking of the same output | Do metric values and quality differences move in the same direction across individual outputs? |
+| System / corpus level | One system | Corpus score over all outputs | Aggregate human rating for that system | Do aggregate values or rankings agree across the systems being compared? |
+
+The latter is also called corpus-level correlation because its automatic score is computed over a corpus, but its sample size is normally the <strong>number of systems</strong>, not the number of sentences. The two levels target different estimands; high correlation at one level does not imply high correlation at the other. High system-level correlation does not guarantee correct ranking of individual outputs, calibrated quality probabilities, or correctness of any particular output. Report whether the statistic is Pearson, Spearman, or Kendall correlation, along with tie handling, weighting, and how systems and cases were pooled. If studying segment-level BLEU correlation, state that it is a sentence variant with fixed smoothing and effective order rather than original corpus BLEU, and do not call its average corpus BLEU.
+
+Mathur et al. (2020) primarily reanalyzed <strong>Pearson correlations whose observations were WMT 2019 systems</strong>. They showed that correlations among a small set of similarly performing systems can be unstable and that human-score outliers can substantially inflate correlations or change conclusions. They also compared system pairs against human Direct Assessment on the same data and reported that differences of roughly 1–2 BLEU corresponded to a genuine human-judged improvement only about half the time. This result is conditional on their WMT 2019 data, system set, human judgments, and testing procedure; it does not justify a universal one- or two-BLEU threshold.
+
+---
+
+## 11. Checklist for Reproducible Evaluation
+
+Store at least the following with every result.
+
+1. <strong>Data</strong>: dataset name, version, split, reference provenance, and case order.
+2. <strong>References</strong>: count, treatment of variable references, and multi-reference rule.
+3. <strong>Preprocessing</strong>: Unicode normalization, casing, punctuation, whitespace, tokenizer, dictionary, and stemming.
+4. <strong>Metric specification</strong>: name plus variant—for example, ROUGE-L versus Lsum, CIDEr versus CIDEr-D, or Google GLEU versus GEC GLEU+.
+5. <strong>Parameters</strong>: $n$-gram orders, weights, $\beta$, length penalties, smoothing, effective order, reference-sampling iterations, and random seed.
+6. <strong>Implementation</strong>: library, version, and metric signature when available.
+7. <strong>Aggregation</strong>: sentence/corpus, micro/macro, and behavior for empty inputs.
+8. <strong>Scale</strong>: $0$–$1$, $0$–$10$, $0$–$100$, or another range, and whether higher or lower is better.
+9. <strong>Uncertainty</strong>: case-level bootstrap confidence intervals and paired bootstrap or approximate randomization for comparisons.
+10. <strong>Diagnostics</strong>: overall score plus length, language, domain, and critical-entity slices.
+
+SacreBLEU 2.6.0 signatures have metric-specific fields. Preserve `nrefs`, `case`, `eff`, `tok`, `smooth`, and `version` for BLEU; `nrefs`, `case`, `eff`, `nc`, `nw`, `space`, and `version` for chrF; and `nrefs`, `case`, `tok`, `norm`, `punct`, `asian`, and `version` for TER. chrF $\beta$ appears in the metric name, such as `chrF2`. External Unicode normalization, a changed BLEU maximum order, and an external segmenter or dictionary are not in the signature, so separately preserve a hash of transformed evaluation data and a dependency lock. For ROUGE, similarly fix the tokenizer, stemmer, `rougeL` versus `rougeLsum`, `split_summaries`, multiple-reference rule, and aggregation.
+
+---
+
+## Conclusion: Read What the Numerator and Denominator Actually Measure
+
+Surface-matching metrics are not obsolete. They remain inexpensive, deterministic, fast, and auditable, making them valuable for large regression suites and failure analysis. The mistake is extending their interpretation beyond their definitions.
+
+- Exact Match asks <strong>whether the output obeys an exact contract</strong>.
+- Token F1, Jaccard, and Dice ask <strong>how much the elements overlap</strong>.
+- WER, CER, and TER ask <strong>how much editing is required to reach a reference</strong>.
+- BLEU asks <strong>whether generated local phrases are reference-supported without being too short</strong>.
+- chrF asks <strong>how much character material is shared from precision and recall perspectives</strong>.
+- ROUGE asks <strong>how much of the reference's phrases or ordered subsequences is covered</strong>.
+- RIBES asks <strong>how closely the global relative order of matched words follows the reference</strong>.
+- METEOR asks <strong>how much lexical material aligns and remains grouped in order</strong>.
+- CIDEr asks <strong>how closely input-distinctive $n$-grams agree on average with the reference set</strong>.
+
+Good evaluation design does not choose the most famous metric. It defines the properties a task must preserve, uses corresponding surface metrics as cheap diagnostic instruments, and supplements them with separate measurement of meaning, factuality, safety, and human acceptability.
+
+---
+
+## References
+
+1. Левенштейн, В. И. (1965). [«Двоичные коды с исправлением выпадений, вставок и замещений символов»](https://www.mathnet.ru/rus/dan31411). *Доклады АН СССР*, 163(4), 845–848. English translation: Levenshtein, V. I. (1966), “Binary Codes Capable of Correcting Deletions, Insertions, and Reversals,” *Soviet Physics Doklady*, 10(8), 707–710.
+2. Rajpurkar, P., Zhang, J., Lopyrev, K., & Liang, P. (2016). [SQuAD: 100,000+ Questions for Machine Comprehension of Text](https://aclanthology.org/D16-1264/). Its primary metrics include EM and token F1.
+3. Papineni, K., Roukos, S., Ward, T., & Zhu, W.-J. (2002). [Bleu: a Method for Automatic Evaluation of Machine Translation](https://aclanthology.org/P02-1040/).
+4. Chen, B., & Cherry, C. (2014). [A Systematic Comparison of Smoothing Techniques for Sentence-Level BLEU](https://aclanthology.org/W14-3346/).
+5. Post, M. (2018). [A Call for Clarity in Reporting BLEU Scores](https://aclanthology.org/W18-6319/).
+6. Popović, M. (2015). [chrF: character n-gram F-score for automatic MT evaluation](https://aclanthology.org/W15-3049/).
+7. Popović, M. (2016). [chrF deconstructed: beta parameters and n-gram weights](https://aclanthology.org/W16-2341/).
+8. Popović, M. (2017). [chrF++: words helping character n-grams](https://aclanthology.org/W17-4770/).
+9. Lin, C.-Y. (2004). [ROUGE: A Package for Automatic Evaluation of Summaries](https://aclanthology.org/W04-1013/).
+10. Banerjee, S., & Lavie, A. (2005). [METEOR: An Automatic Metric for MT Evaluation with Improved Correlation with Human Judgments](https://aclanthology.org/W05-0909/).
+11. Denkowski, M., & Lavie, A. (2014). [Meteor Universal: Language Specific Translation Evaluation for Any Target Language](https://aclanthology.org/W14-3348/).
+12. Snover, M., Dorr, B., Schwartz, R., Micciulla, L., & Makhoul, J. (2006). [A Study of Translation Edit Rate with Targeted Human Annotation](https://aclanthology.org/2006.amta-papers.25/).
+13. Vedantam, R., Zitnick, C. L., & Parikh, D. (2015). [CIDEr: Consensus-Based Image Description Evaluation](https://openaccess.thecvf.com/content_cvpr_2015/html/Vedantam_CIDEr_Consensus-Based_Image_2015_CVPR_paper.html) ([arXiv v2, 2015-06-03](https://arxiv.org/abs/1411.5726v2); v1 was first submitted 2014-11-20).
+14. Mathur, N., Baldwin, T., & Cohn, T. (2020). [Tangled up in BLEU: Reevaluating the Evaluation of Automatic Machine Translation Evaluation Metrics](https://aclanthology.org/2020.acl-main.448/).
+15. [sacreBLEU 2.6.0, annotated-tag target `2277caccfc7b956671a6a09f1646f62250034157`](https://github.com/mjpost/sacrebleu/tree/2277caccfc7b956671a6a09f1646f62250034157) — both the tag and PyPI upload are dated 2026-01-12 UTC; defaults, tokenizers, empty-input behavior, and metric signatures for BLEU, chrF, and TER.
+16. [`rouge-score` 0.1.2 from the Google Research repository](https://pypi.org/project/rouge-score/0.1.2/) — released 2022-07-22. Pin the sdist with SHA-256 `c7d4da2683e68c9abf0135ef915d63a46643666f848e558a1b9f7ead17ff0f04`; distinguish the [same-day later commit `910758241597e44871c7029654f5ed7813dc3344`, which first records version 0.1.2](https://github.com/google-research/google-research/tree/910758241597e44871c7029654f5ed7813dc3344/rouge), as a nearby repository snapshot. It implements ROUGE-N, ROUGE-L/Lsum, a default ASCII tokenizer, stemming, and bootstrap, while its README disclaims official Google-product status.
+17. [Popović's `chrF++.py`, commit `e96ea868b7451a006d281d8ed51b1b163dd8384b`](https://github.com/m-popovic/chrF/blob/e96ea868b7451a006d281d8ed51b1b163dd8384b/chrF%2B%2B.py) — that file's sole revision, added 2017-06-14; per-order F, multi-reference behavior, and document/macro aggregation.
+18. [Meteor 1.5 documentation](https://www.cs.cmu.edu/~alavie/METEOR/README.html) ([official CMU source commit `57a9ec5d5f65b8ceca6db5788ef876f3726614b3`](https://github.com/cmu-mtlab/meteor/tree/57a9ec5d5f65b8ceca6db5788ef876f3726614b3)) — modules, parameters, sufficient statistics, and system-level evaluation; some embedded README examples retain old 1.4 labels.
+19. [NLTK 3.10.0 METEOR, tag commit `bd49f9011d7dc8c6a36b3c4ae71f04060c9b3fb9`](https://github.com/nltk/nltk/blob/bd49f9011d7dc8c6a36b3c4ae71f04060c9b3fb9/nltk/translate/meteor_score.py) — released 2026-07-08; pre-tokenized input, default resources and parameters, multi-reference selection, and empty-input behavior.
+20. [JiWER 4.0.0, tag commit `19e88eae1815e7ca40db9b45b14af5f1f9d8b6ce`](https://github.com/jitsi/jiwer/tree/19e88eae1815e7ca40db9b45b14af5f1f9d8b6ce) — release commit dated 2025-02-03 and PyPI publication dated 2025-06-19; WER/CER operation counts, micro aggregation, default transforms, and the empty-reference conventions introduced in 4.0.
+21. [COCO Caption Evaluation, commit `3a9afb2682141a03e1cdc02b0df6770d2c884f6f`](https://github.com/tylin/coco-caption/tree/3a9afb2682141a03e1cdc02b0df6770d2c884f6f) — pinned 2018-04-23 snapshot containing PTBTokenizer and the COCO CIDEr-D-style scorer ($\sigma=6$, clipping, factor 10, and per-image averaging); this is not the definition year cited for CIDEr/CIDEr-D.
+22. Unicode Consortium. [Unicode Standard Annex #15: Unicode Normalization Forms](https://unicode.org/reports/tr15/).
+23. Official SQuAD Explorer evaluators at pinned commit `09eac9971f46889fa057ff2c870bf71092ba9d55`: [browser evaluator with the shared normalizer, max-over-references, and macro aggregation](https://github.com/rajpurkar/SQuAD-explorer/blob/09eac9971f46889fa057ff2c870bf71092ba9d55/views/js/evaluate.js), plus the [SQuAD 2.0 Python script](https://github.com/rajpurkar/SQuAD-explorer/blob/09eac9971f46889fa057ff2c870bf71092ba9d55/evaluate-v2.0.py), which also implements empty-answer handling.
+24. Zhang, T., Kishore, V., Wu, F., Weinberger, K. Q., & Artzi, Y. (2020). [BERTScore: Evaluating Text Generation with BERT](https://arxiv.org/abs/1904.09675) (arXiv v1 in 2019; ICLR 2020 [OpenReview](https://openreview.net/forum?id=SkeHuCVFDr)) — contextual-embedding soft matching against reference tokens.
+25. Rei, R., Stewart, C., Farinha, A. C., & Lavie, A. (2020). [COMET: A Neural Framework for MT Evaluation](https://aclanthology.org/2020.emnlp-main.213/) — learned MT evaluation using the source and a target-language reference.
+26. Rei, R., et al. (2022). [CometKiwi: IST-Unbabel 2022 Submission for the Quality Estimation Shared Task](https://aclanthology.org/2022.wmt-1.60/) — a quality-estimation family that does not require a reference at inference time.
+27. Doddington, George (2002). [Automatic Evaluation of Machine Translation Quality Using N-gram Co-Occurrence Statistics](https://aclanthology.org/www.mt-archive.info/HLT-2002-Doddington.pdf). *Proceedings of the Second International Conference on Human Language Technology Research*, 138–145 — primary NIST reference. This is an MT Archive PDF mirrored under the ACL Anthology site, not a regular Anthology record with an ACL ID.
+28. Isozaki, H., Hirao, T., Duh, K., Sudoh, K., & Tsukada, H. (2010). [Automatic Evaluation of Translation Quality for Distant Language Pairs](https://aclanthology.org/D10-1092/) — the primary source for RIBES.
+29. Hirao, T., Isozaki, H., Sudoh, K., Duh, K., Tsukada, H., & Nagata, M. (2014). [Evaluating Translation Quality with Word Order Correlations](https://doi.org/10.5715/jnlp.21.421), *Journal of Natural Language Processing* 21(3), 421–444 — later RIBES formulation. Implementation defaults were checked in [NTT RIBES 1.03.1, commit `7e76cf24d32de70e9e6afd0c9b95d8c140b7235c`](https://github.com/nttcslab-nlp/RIBES/blob/7e76cf24d32de70e9e6afd0c9b95d8c140b7235c/RIBES.py).
+30. Wu, Y., et al. (2016). [Google’s Neural Machine Translation System: Bridging the Gap between Human and Machine Translation](https://arxiv.org/abs/1609.08144) — the primary source for sentence-level Google GLEU.
+31. Napoles, C., Sakaguchi, K., Post, M., & Tetreault, J. (2015). [Ground Truth for Grammatical Error Correction Metrics](https://aclanthology.org/P15-2097/) — the original GEC GLEU.
+32. Napoles, C., Sakaguchi, K., Post, M., & Tetreault, J. (2016). [GLEU Without Tuning](https://arxiv.org/abs/1605.02592) — GLEU+ and the recommendation to replace the original form. The post-paper BP fix, 500 iterations, and fixed seed schedule were checked in the [authors' final code commit `50b5032a4ef2444b9381fb47a55b3bac0654a6d7`](https://github.com/cnap/gec-ranking/tree/50b5032a4ef2444b9381fb47a55b3bac0654a6d7).
+33. Mutton, A., Dras, M., Wan, S., & Dale, R. (2007). [GLEU: Automatic Evaluation of Sentence-Level Fluency](https://aclanthology.org/P07-1044/) — the primary source for the reference-free, parser-feature/SVM fluency metric.
+34. NIST. [SCTK 2.4.12 `sclite`, `v2.4.12` tag commit `62aabfa95938bfea284f8b68a374c7ddcb0fce52`](https://github.com/usnistgov/SCTK/tree/62aabfa95938bfea284f8b68a374c7ddcb0fce52) — version-pinned 2021-10-28 toolkit material for ASR alignment, $S,D,I$ counts, the reference-word denominator, and system summaries. Later commit `9688a268…` retained the same README version label but was a 2023 documentation update, not the release tag itself.
+35. Snover, M., Wang, S., & Matsoukas, S. [TERCOM 0.10.0, commit `e413d077e5b9ecc96b0e7de5fe6015eb135c2f6d`](https://github.com/jhclark/tercom/tree/e413d077e5b9ecc96b0e7de5fe6015eb135c2f6d) — post-2006-paper Java implementation and its search, preprocessing, beam, and shift defaults.
+36. Koehn, P. (2004). [Statistical Significance Tests for Machine Translation Evaluation](https://aclanthology.org/W04-3250/) — the classic sentence-resampling paired-bootstrap procedure for corpus BLEU.
+37. Riezler, S., & Maxwell, J. T. III. (2005). [On Some Pitfalls in Automatic Evaluation and Significance Testing for MT](https://aclanthology.org/W05-0908/) — approximate randomization and testing cautions for MT comparisons.
+38. Graham, Y., Mathur, N., & Baldwin, T. (2014). [Randomized Significance Tests in Machine Translation](https://aclanthology.org/W14-3333/) — an empirical comparison of randomized tests for MT.
+39. Dror, R., Baumer, G., Shlomov, S., & Reichart, R. (2018). [The Hitchhiker’s Guide to Testing Statistical Significance in Natural Language Processing](https://aclanthology.org/P18-1128/) — paired-test choices and assumptions for NLP metrics and designs.
+40. Holm, S. (1979). [A Simple Sequentially Rejective Multiple Test Procedure](https://www.jstor.org/stable/4615733). *Scandinavian Journal of Statistics*, 6(2), 65–70 — a sequential procedure controlling family-wise error.
+41. Benjamini, Y., & Hochberg, Y. (1995). [Controlling the False Discovery Rate: A Practical and Powerful Approach to Multiple Testing](https://doi.org/10.1111/j.2517-6161.1995.tb02031.x). *Journal of the Royal Statistical Society: Series B*, 57(1), 289–300.
