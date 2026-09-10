@@ -7,7 +7,7 @@ tags: ["データベース", "インデックス", "B+木", "LSM-Tree", "デー�
 
 ## なぜインデックスが必要なのか
 
-データベースにおいて、テーブルのフルスキャン（全行走査）は $O(n)$ の計算量がかかります。100万行のテーブルで1行を探すのに100万回のディスク読み取りが必要になりかねません。
+データベースにおいて、テーブルのフルスキャン（全行走査）は $O(n)$ の行チェックがかかります。100万行のテーブルで1行を探す場合でも、行はページに詰めて格納されるため通常「100万回のディスク読み取り」にはなりませんが、それでも数千ページを読み、全行を確認することになり得ます。
 
 インデックスはこの問題を解決するデータ構造です。適切なインデックスがあれば、検索は $O(\log n)$ で完了します。B+木インデックスでは高い分岐数（fan-out）のおかげで、100万行のテーブルでもわずか3〜4回のディスクアクセスで目的の行にたどり着けます。
 
@@ -67,7 +67,7 @@ B+木への挿入は以下のステップで行われます：
 2. リーフにキーを挿入（ソート順を維持）
 3. リーフが溢れた場合（キー数 > $m-1$）、<strong>分割（split）</strong>が発生：
    - リーフを2つに分ける
-   - 中央値（median）のキーを<strong>親ノードに昇格（promote）</strong>させる
+   - 区切りキー（リーフ分割では新しい右リーフの先頭キー）を<strong>親ノードにコピー</strong>する
    - 親も溢れた場合、再帰的に分割が上に伝播する
 4. ルートが分割されると、木の高さが1段増える
 
@@ -97,7 +97,7 @@ SplitLeaf(leaf):
   new_leaf.next = leaf.next
   leaf.next = new_leaf
   
-  // 中央値を親に昇格
+  // 区切りキーを親にコピー
   promote_key = new_leaf.keys[0]
   insert_into_parent(leaf.parent, promote_key, new_leaf)
 ```
@@ -146,7 +146,8 @@ MySQLのInnoDBはこの方式を採用しています。主キー（Primary Key�
 CREATE TABLE users (
   id INT PRIMARY KEY,      -- B+木のキー
   name VARCHAR(100),        -- リーフノードに格納されるデータ
-  email VARCHAR(200)        -- 同上
+  email VARCHAR(200),       -- 同上
+  KEY idx_email (email)     -- セカンダリインデックス
 );
 ```
 
@@ -157,7 +158,7 @@ CREATE TABLE users (
 
 ### 非クラスタードインデックス
 
-PostgreSQLでは、テーブルデータは<strong>ヒープ</strong>（順不同のページ列）に格納され、インデックスのリーフノードにはヒープ内の行ポインタ（TID: タプルID）が格納されます。
+PostgreSQLでは、テーブルデータは<strong>ヒープ</strong>（順不同のページ列）に格納され、既定の B-tree インデックス（テーブルタプルへはリーフエントリから到達するため B+木的な性質も持つ）のリーフにはヒープ内の行ポインタ（TID: タプルID）が格納されます。
 
 ```text
 PostgreSQLのインデックス構造:
@@ -265,9 +266,9 @@ Compaction(level_n, level_n1):
 
 ### 書込増幅と読取増幅のトレードオフ
 
-LSM-Treeはコンパクションによって書込増幅が発生します。Leveledコンパクションでは、1つのキーがL0→L1→L2と各レベルで書き直されるため、書込増幅は $O(L \times T)$（$L$: レベル数、$T$: サイズ比）です。サイズ比10、4レベルの場合、実効的な書込増幅は約40倍になり得ます。
+LSM-Treeはコンパクションによって書込増幅が発生します。Leveledコンパクションでは、キーがレベル間を移動するたびに既存データとマージされて書き直されるため、書込増幅はレベル数とサイズ比に応じて増えます（最悪ケースの目安として $O(L \times T)$ と表現されます）。サイズ比10、4レベルなら、コンパクション方針とワークロードによっては数十回規模の書き直しになり得ます。
 
-一方、B+木の書込増幅はページの部分更新がかかるため、一般にページサイズ / 変更サイズの比率（例: 16KB / 100B = 160倍）となりますが、バッファプールによるバッチ化で緩和されます。
+一方、B+木の書込増幅は、小さな論理変更でもページ単位の更新になることから発生します。孤立した 100B の変更で 16KB ページを dirty にすることはありますが、WAL の形式、ページ書き出し、group commit、バッファプールによるバッチ化に左右されるため、実効値はワークロード依存です。
 
 ## B+木 vs LSM-Tree — いつどちらを使うか
 
@@ -283,7 +284,7 @@ LSM-Treeはコンパクションによって書込増幅が発生します。Lev
 
 ### 選択の指針
 
-- <strong>読取が多い・範囲検索が多い</strong> → B+木（MySQL, PostgreSQL）
+- <strong>読取が多い・範囲検索が多い</strong> → B+木 / B-tree 系インデックス（MySQL/InnoDB、PostgreSQL の既定 B-tree）
 - <strong>書込みが多い・ログやイベントデータ</strong> → LSM-Tree（RocksDB, Cassandra）
 - <strong>混在ワークロード</strong> → チューニングやハイブリッド構成を検討
 
@@ -299,14 +300,14 @@ InnoDBはB+木ベースのクラスタードインデックスを採用してい
 -- EXPLAIN で実行計画を確認
 EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
 -- type: ref, key: idx_email → セカンダリインデックスを使用
--- Extra: NULL → クラスタードインデックスへの2次アクセスが発生
+-- SELECT * は idx_email だけではカバーできないため、InnoDB は主キーでクラスタードレコードを引き直す
 ```
 
 ### PostgreSQL
 
-PostgreSQLはヒープテーブル + B+木インデックスの構成です。HOT（Heap-Only Tuples）最適化により、インデックスカラムが変更されない更新ではインデックスの更新をスキップできます。
+PostgreSQLはヒープテーブル + B-tree インデックスの構成です。HOT（Heap-Only Tuples）最適化により、インデックスカラムが変更されず、かつ新しいタプルバージョンが同じヒープページに収まる更新ではインデックスの更新をスキップできます。
 
-また、<strong>GiST</strong>（Generalized Search Tree）、<strong>GIN</strong>（Generalized Inverted Index）、<strong>BRIN</strong>（Block Range Index）など、B+木以外のインデックスタイプも豊富に提供しています。
+また、<strong>GiST</strong>（Generalized Search Tree）、<strong>GIN</strong>（Generalized Inverted Index）、<strong>BRIN</strong>（Block Range Index）など、既定の B-tree 以外のインデックスタイプも豊富に提供しています。
 
 ### RocksDB
 

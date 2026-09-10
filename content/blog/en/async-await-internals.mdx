@@ -58,15 +58,14 @@ The event loop consists of:
 
 ### Event Loop Execution Order
 
-One iteration of the event loop follows this order:
+One browser event-loop turn is more accurately:
 
-1. Execute all code on the call stack
-2. Once the stack is empty, execute <strong>all tasks in the microtask queue</strong> (until the queue is empty)
-3. Once the microtask queue is empty, dequeue and execute <strong>one task from the macrotask queue</strong>
-4. Perform rendering if needed
-5. Return to step 1
+1. Dequeue and execute one task (the initial script, a timer callback, an input event, etc.)
+2. When that task's call stack becomes empty, run the <strong>microtask checkpoint</strong>: drain Promise jobs / `queueMicrotask()` callbacks until the queue is empty
+3. Update rendering if needed
+4. Return to step 1 and pick the next task
 
-The critical point is that <strong>microtasks always take priority over macrotasks</strong>. Let's verify with this code:
+The critical point is that <strong>microtasks do not interrupt the currently running task, but they are drained before the next task</strong>. Let's verify with this code:
 
 ```javascript
 console.log("1");             // synchronous
@@ -166,7 +165,7 @@ asyncio.run(main())
 
 The asyncio event loop internally works through:
 
-1. <strong>Selector-based I/O multiplexing</strong>: Uses OS system calls (Linux: `epoll`, macOS: `kqueue`, Windows: `IOCP`) to monitor multiple I/O sources on a single thread
+1. <strong>Event-loop I/O multiplexing</strong>: On Unix, `SelectorEventLoop` uses selector backends such as `epoll` and `kqueue`; on Windows, the default `ProactorEventLoop` uses IOCP rather than the selector API
 2. <strong>Coroutine scheduler</strong>: Schedules runnable coroutines
 3. <strong>Task queue</strong>: Manages `asyncio.Task` objects
 
@@ -281,7 +280,7 @@ impl Future for ExampleFuture {
 ```
 
 This transformation provides:
-- <strong>No heap allocation needed</strong>: The state machine can be placed on the stack as a single enum
+- <strong>No mandatory per-`await` heap allocation</strong>: The Future is a concrete state-machine value that can stay on the stack when awaited directly; it is heap-allocated when you box it, erase its type, or spawn it into a runtime task
 - <strong>No dynamic dispatch</strong>: Concrete types are determined at compile time
 - <strong>Each `await` corresponds to one state transition</strong>
 
@@ -296,14 +295,14 @@ pub struct Context<'a> {
 }
 ```
 
-Before a Future returns `Poll::Pending`, it registers a clone of the Waker with epoll or a socket callback. When I/O completes, the Waker fires, notifying the runtime that "this Future should be polled again."
+Before a Future returns `Poll::Pending`, it stores a clone of the Waker with the runtime's reactor/driver while that driver registers OS readiness interest (for example with epoll/kqueue/IOCP). When the OS reports readiness, the driver calls the Waker, notifying the runtime that "this Future should be polled again."
 
 ```text
 1. Runtime calls Future.poll()
-2. Future initiates I/O internally, registers Waker with the kernel
+2. Future initiates I/O internally; the runtime driver registers OS readiness and stores the Waker
 3. Returns Poll::Pending
 4. Runtime polls other Futures
-5. I/O completes -> kernel wakes the Waker
+5. I/O becomes ready -> the runtime driver wakes the task via the Waker
 6. Runtime polls that Future again
 7. Returns Poll::Ready(result)
 ```
@@ -441,6 +440,6 @@ async/await provides similar surface syntax, but the underlying implementations 
 
 - <strong>JavaScript</strong>: Transforms to Promise chains on a single-threaded event loop. Microtask vs macrotask priority determines behavior
 - <strong>Python</strong>: asyncio event loop schedules coroutines (extended generators). Achieves I/O concurrency under GIL constraints
-- <strong>Rust</strong>: Compiles to zero-cost Future state machines. Poll-based model where the runtime drives execution, achieving async without heap allocation
+- <strong>Rust</strong>: Compiles to Future state machines. Poll-based model where the runtime drives execution, avoiding mandatory per-`await` heap allocation
 
 The common design principle is <strong>never letting threads sit idle during I/O waits</strong>. async/await is the syntactic innovation that achieves this while maintaining the readability of synchronous code.

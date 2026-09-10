@@ -1005,7 +1005,7 @@ sequenceDiagram
     Txn->>Wal: WriteToWAL (undo buffer entries + block pointers)
     Wal-->>Txn: fsync
     Txn->>Txn: commit_id assigned, versions made visible
-    Note over Chk: WAL exceeds checkpoint_wal_size (16 MiB default)
+    Note over Chk: WAL exceeds checkpoint_threshold (16 MiB default)
     Chk->>Chk: write new metadata, switch DatabaseHeader, truncate WAL
 ```
 
@@ -1016,29 +1016,29 @@ sequenceDiagram
 
 That means a hundred-million-row `COPY` does not write its data twice. It also matters that `DuckTransaction::PreFlushOptimisticBlocks()` runs <strong>before</strong> the commit locks are taken, keeping slow operations like `fsync` out of the critical section.
 
-Checkpoints fire automatically once the WAL exceeds 16 MiB by default (`checkpoint_wal_size = 1 << 24`), and `RowGroupCollection::Checkpoint()` flushes all row groups. Even here there is a shortcut: unchanged row groups <strong>reuse their existing metadata and are skipped</strong> (`RowGroupWriteAction::REUSE_EXISTING_ROW_GROUP_METADATA`). Updating one row does not rewrite the whole table.
+Checkpoints fire automatically once the WAL exceeds the public `checkpoint_threshold` setting (16 MiB by default; internally stored as `checkpoint_wal_size`), and `RowGroupCollection::Checkpoint()` flushes all row groups. Even here there is a shortcut: unchanged row groups <strong>reuse their existing metadata and are skipped</strong> (`RowGroupWriteAction::REUSE_EXISTING_ROW_GROUP_METADATA`). Updating one row does not rewrite the whole table.
 
 And the flush is <strong>column-at-a-time</strong>:
 
 ```cpp
 // src/storage/table/row_group.cpp — https://github.com/duckdb/duckdb/blob/main/src/storage/table/row_group.cpp
-Everything so far has been the machine that runs a physical plan fast. The optimizer is what decides which plan it runs.
-
 // In order to co-locate columns across different row groups, we write column-at-a-time
 // i.e. we first write column #0 of all row groups, then column #1, ...
-```).
-
-That last one is a good miniature of the rest. When `regex_range` finds a two-argument `regexp_full_match` with a constant pattern, it asks RE2's `PossibleMatchRange` for bounds, and if it gets them it inserts `col >= min AND col <= max` as an extra filter <strong>below</strong> the original. The regex is still evaluated — but the zone maps of §5.3 get to prune first.
-
-Individual passes can be disabled with a comma-separated list (`SET disabled_optimizers='join_order'`), and `SELECT * FROM duckdb_optimizers();` lists every valid name,
+```
 
 That places data for the same column contiguously on disk, minimising seek distance for a single-column scan.
 
 ## 8. The Optimizer
 
+Everything so far has been the machine that runs a physical plan fast. The optimizer is what decides which plan it runs.
+
 ### 8.1 A sequence of passes
 
-DuckDB's optimizer is a sequence of transformations over the logical plan ([`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)): expression rewriting, filter pushdown, unused-column removal, statistics propagation, join ordering, common subexpression elimination, and regex range extraction (`regex_range` takes a two-argument `regexp_full_match` with a constant pattern and, <em>when</em> RE2's `PossibleMatchRange` can produce bounds, inserts `col >= min AND col <= max` as an extra filter <strong>below</strong> the original one — the regex is still evaluated, but the zone maps of §5.3 get to prune first). Individual passes can be turned off with a comma-separated list (`SET disabled_optimizers='join_order'`), and `SELECT * FROM duckdb_optimizers();` lists every valid name — so you can measure exactly what each one buys.
+DuckDB's optimizer is a sequence of transformations over the logical plan ([`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)): expression rewriting, filter pushdown, unused-column removal, statistics propagation, join ordering, common subexpression elimination, and regex range extraction (`regex_range`).
+
+That last one is a good miniature of the rest. When `regex_range` finds a two-argument `regexp_full_match` with a constant pattern, it asks RE2's `PossibleMatchRange` for bounds, and if it gets them it inserts `col >= min AND col <= max` as an extra filter <strong>below</strong> the original. The regex is still evaluated — but the zone maps of §5.3 get to prune first.
+
+Individual passes can be turned off with a comma-separated list (`SET disabled_optimizers='join_order'`), and `SELECT * FROM duckdb_optimizers();` lists every valid name — so you can measure exactly what each one buys.
 
 ### 8.2 Join ordering — DPccp
 
@@ -1342,7 +1342,7 @@ It even builds a <strong>separate strict-mode state machine</strong> just for th
 
 Since it is a guess, it can be wrong — so when reading in parallel with neither `ignore_errors` nor `store_rejects` set, a <strong>validator</strong> runs at the end:
 
-```cppcontiguous numeric columns are genuinely zero-copy (§10.2
+```cpp
 // src/execution/operator/csv_scanner/table_function/global_csv_state.cpp
 // If we are running multithreaded and not ignoring errors, we must run the validator
 scan.validator.Verify();

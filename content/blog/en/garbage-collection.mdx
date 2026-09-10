@@ -174,8 +174,9 @@ scan = free = start of To space
 Copy objects referenced by GC roots to To space, advance free
 while scan < free:
     For each field of the object at scan:
-        If referent is in From space → copy to To space, advance free
-        Set forwarding pointer at old location
+        If referent is in From space and not yet forwarded:
+            copy it to To space, set forwarding pointer at old location, advance free
+        Update the field to the referent's To-space address
     Advance scan to next object
 ```
 
@@ -266,11 +267,12 @@ Go combines Dijkstra and Yuasa barriers into a <strong>hybrid write barrier</str
 ```text
 writeBarrier(slot, new):
     shade(*slot)  // deletion barrier: shade the overwritten old value gray
-    shade(new)    // insertion barrier: shade the new value gray
+    if current stack is gray:
+        shade(new) // insertion barrier while the current stack still needs scanning
     *slot = new
 ```
 
-The key benefit of the hybrid approach is that <strong>stack rescanning becomes unnecessary</strong>. In Go 1.5–1.7 with only the Dijkstra barrier, all goroutine stacks needed to be rescanned at the end of marking — this was the main contributor to STW time. With the hybrid barrier, Go's STW is typically under 100μs.
+The key benefit of the hybrid approach is that <strong>stack rescanning becomes unnecessary</strong>. Go's runtime comment for `mbarrier.go` is precise: the deletion barrier always shades the overwritten old value, while the insertion barrier shades the new pointer only while the current goroutine stack is gray. Once that stack is black, `shade(new)` is unnecessary. In Go 1.5–1.7 with only the Dijkstra barrier, all goroutine stacks needed to be rescanned at the end of marking — a major contributor to STW time. With the hybrid barrier, Go's STW pauses are typically sub-millisecond and often much shorter, depending on workload and platform.
 
 ## Memory Allocation Strategies
 
@@ -297,9 +299,9 @@ alloc(size):
 
 Extremely fast (effectively one instruction) but requires contiguous free space.
 
-### TLAB (Thread-Local Allocation Buffer)
+### Thread-local / Per-processor Allocation Buffers
 
-Pre-allocates a portion of the heap to each thread to avoid allocation contention in multithreaded environments. Within a thread, allocation uses lock-free bump-pointer. Used by Java's HotSpot JVM and Go's runtime.
+Pre-allocates a portion of the heap to each execution context to avoid allocation contention in multithreaded environments. Java HotSpot uses TLABs (Thread-Local Allocation Buffers) where each Java thread can allocate with a lock-free bump pointer. Go's allocator is different: it uses per-P `mcache` structures and size-class spans rather than Java-style TLABs.
 
 ## GC Strategies by Language
 
@@ -314,7 +316,7 @@ Go prioritizes <strong>simplicity and low latency</strong> above all else.
 | Algorithm | Concurrent tri-color mark & sweep |
 | Generational | No |
 | Compaction | No |
-| STW | Mark start/end only (typically < 100μs) |
+| STW | Mark start/end only (typically sub-millisecond; workload-dependent) |
 | Write barrier | Hybrid (Dijkstra + Yuasa) |
 | Tuning | `GOGC` / `GOMEMLIMIT` |
 
@@ -340,7 +342,7 @@ Java has the <strong>most mature GC ecosystem</strong>, with multiple collectors
 
 <strong>How G1 GC works</strong>: The heap is divided into equal-sized <strong>regions</strong> (typically 1–32MB). Young/Old distinctions are assigned dynamically at the region level. G1 prioritizes collecting regions with the most garbage (Garbage-First), maximizing reclamation within a given pause time budget. Configure with `-XX:MaxGCPauseMillis=200`.
 
-<strong>ZGC's Colored Pointers</strong>: ZGC embeds GC metadata (mark state, relocation state) in unused bits of object pointers. This eliminates the need to write mark information to object headers, enabling concurrent marking and relocation using only load barriers. This technique is what allows ZGC to maintain sub-1ms STW even with TB-scale heaps.
+<strong>ZGC's Colored Pointers</strong>: ZGC embeds GC metadata (mark state, relocation state) in unused bits of object pointers. This eliminates the need to write mark information to object headers. Non-generational ZGC uses colored pointers with load barriers for concurrent marking and relocation; Generational ZGC also uses store barriers to track inter-generational references. These techniques are what allow ZGC to maintain sub-1ms STW even with TB-scale heaps.
 
 ### Python (CPython) — Reference Counting + Generational Tracing
 
@@ -361,7 +363,7 @@ Python uses a <strong>hybrid approach</strong>.
 
 Objects are promoted from Gen N to Gen N+1 after surviving just 1 collection. In other words, the thresholds control how frequently each generation is collected, not how many collections an object must survive. Check with `gc.get_threshold()`, adjust with `gc.set_threshold()`.
 
-CPython's GIL (Global Interpreter Lock) means reference count updates don't need atomic operations. However, the free-threaded build (`--disable-gil`) switches to <strong>biased reference counting</strong> — the owning thread uses regular increment/decrement while other threads use atomic operations, achieving thread-safe reference counting without the GIL. The free-threaded build arrived as an experiment in Python 3.13 and became **officially supported in Python 3.14** via [PEP 779](https://peps.python.org/pep-0779/), though it remains an optional build.
+CPython's GIL (Global Interpreter Lock) means reference count updates don't need atomic operations. However, the free-threaded build (`--disable-gil`) switches to <strong>biased reference counting</strong> — the owning thread uses regular increment/decrement while other threads use atomic operations, achieving thread-safe reference counting without the GIL. The free-threaded build arrived as an experiment in Python 3.13 and became <strong>officially supported in Python 3.14</strong> via [PEP 779](https://peps.python.org/pep-0779/), though it remains an optional build.
 
 <strong>A detour worth knowing about — the incremental GC that wasn't</strong>: the three-generation design described above did not evolve in a straight line. CPython 3.14.0–3.14.4 shipped an <strong>incremental</strong> cycle collector with only two generations (young and old), aiming to cut worst-case pause times on large heaps by an order of magnitude. After repeated reports of significant memory pressure in production, it was [reverted in 3.14.5 back to the 3.13 generational collector](https://docs.python.org/3/whatsnew/3.14.html#notable-changes-in-3-14-5). It is a useful reminder that GC design is decided not by benchmark pause times alone, but by the trade-off against peak memory under real workloads.
 
@@ -404,11 +406,11 @@ Rust doesn't rely on GC. Its <strong>ownership + borrowing + lifetime</strong> s
 
 ```text
 Ownership system → Memory deallocation timing decided at compile time
-                 → Zero runtime overhead
+                 → No GC runtime or GC pauses
                  → Zero GC pause time
 ```
 
-The <strong>RAII (Resource Acquisition Is Initialization)</strong> pattern ensures the `Drop` trait is called automatically when a variable goes out of scope. This code is inserted at compile time, so runtime cost is zero.
+The <strong>RAII (Resource Acquisition Is Initialization)</strong> pattern ensures the `Drop` trait is called automatically when a variable goes out of scope. The calls are determined at compile time, but the destructor and deallocation work still run at runtime; what Rust avoids is a tracing-GC runtime and GC pause.
 
 For circular references, `Rc<T>` / `Arc<T>` + `Weak<T>` provide reference counting. `Weak<T>` doesn't count toward `Rc`'s reference count, allowing cycles to be broken.
 
@@ -430,7 +432,7 @@ Swift's compiler includes <strong>ARC optimizations</strong> that eliminate redu
 
 | Language | GC Type | Generational | Concurrent | STW | Allocation |
 |---|---|---|---|---|---|
-| <strong>Go</strong> | Tri-color M&S | No | Yes | < 100μs | Segregated-fit |
+| <strong>Go</strong> | Tri-color M&S | No | Yes | sub-ms typical | Segregated-fit |
 | <strong>Java</strong> | Selectable (G1/ZGC/Shenandoah) | Yes | Yes | < 1ms+ | TLAB + bump pointer |
 | <strong>Python</strong> | Ref counting + tracing | Yes (3 gen) | No | Yes | pymalloc arena |
 | <strong>JavaScript (V8)</strong> | Copying + M&S/Compact | Yes | Yes | Short | Semispace + free list |

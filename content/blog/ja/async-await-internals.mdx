@@ -58,15 +58,14 @@ JavaScriptは<strong>シングルスレッド</strong>で動作します。1つ�
 
 ### イベントループの動作順序
 
-1つのイベントループのイテレーションは以下の順序で実行されます：
+ブラウザのイベントループ 1 ターンは、より正確には次の順序で進みます：
 
-1. コールスタック上のすべてのコードを実行する
-2. コールスタックが空になったら、<strong>マイクロタスクキューのタスクをすべて</strong>実行する（キューが空になるまで）
-3. マイクロタスクキューが空になったら、<strong>マクロタスクキューから1つだけ</strong>タスクを取り出して実行する
-4. 必要に応じてレンダリングを行う
-5. 1に戻る
+1. タスクを 1 つ取り出して実行する（最初の script、timer callback、入力イベントなど）
+2. そのタスクのコールスタックが空になったら、<strong>マイクロタスクチェックポイント</strong>を実行する。Promise job / `queueMicrotask()` callback をキューが空になるまで処理する
+3. 必要に応じてレンダリングを更新する
+4. 1 に戻り、次のタスクを取り出す
 
-重要なポイントは、<strong>マイクロタスクはマクロタスクより常に優先される</strong>という点です。以下のコードで確認してみましょう：
+重要なのは、<strong>マイクロタスクは実行中のタスクを割り込まないが、次のタスクへ進む前に必ず drain される</strong>ことです。以下のコードで確認してみましょう：
 
 ```javascript
 console.log("1");             // 同期
@@ -166,7 +165,7 @@ asyncio.run(main())
 
 asyncioのイベントループは内部的に以下の仕組みで動作しています：
 
-1. <strong>セレクタベースのI/O多重化</strong>: OS のシステムコール（Linux: `epoll`、macOS: `kqueue`、Windows: `IOCP`）を使って、複数のI/Oソースを1つのスレッドで監視
+1. <strong>イベントループによる I/O 多重化</strong>: Unix では `SelectorEventLoop` が `epoll` / `kqueue` などの selector backend を使います。Windows の既定は selector API ではなく、IOCP を使う `ProactorEventLoop` です
 2. <strong>コルーチンスケジューラ</strong>: 実行可能なコルーチンをスケジューリング
 3. <strong>タスクキュー</strong>: `asyncio.Task` オブジェクトを管理
 
@@ -281,7 +280,7 @@ impl Future for ExampleFuture {
 ```
 
 この変換により：
-- <strong>ヒープ割り当てが不要</strong>: 状態機械は1つの列挙型としてスタック上に配置可能
+- <strong>`await` ごとのヒープ割り当てが必須ではない</strong>: Future は具体的な状態機械の値なので、直接 `await` する場合はスタック上に置けます。一方、Box 化・型消去・ランタイムへの spawn ではヒープ割り当てされます
 - <strong>動的ディスパッチが不要</strong>: コンパイル時に具体的な型が確定
 - <strong>各 `await` が1つの状態遷移</strong>に対応
 
@@ -296,14 +295,14 @@ pub struct Context<'a> {
 }
 ```
 
-Futureが `Poll::Pending` を返す前に、Wakerのクローンをepollやソケットのコールバックに登録します。I/Oが完了すると、Wakerが呼ばれ、ランタイムに「この Future を再度ポーリングすべき」と通知します。
+Future が `Poll::Pending` を返す前に、ランタイムの reactor / driver が OS の readiness（epoll/kqueue/IOCP など）を登録し、Future はその driver 側に Waker のクローンを保存します。I/O が ready になると driver が Waker を呼び、ランタイムに「この Future を再度ポーリングすべき」と通知します。
 
 ```text
 1. ランタイムがFuture.poll()を呼ぶ
-2. Futureは内部でI/Oを開始し、Wakerをカーネルに登録
+2. Future は内部で I/O を開始する。ランタイム driver が OS readiness を登録し、Waker を保存
 3. Poll::Pending を返す
 4. ランタイムは他のFutureをポーリング
-5. I/O完了 → カーネルがWakerを起動
+5. I/O が ready になる → ランタイム driver が Waker 経由で task を起こす
 6. ランタイムが該当Futureを再度poll()
 7. Poll::Ready(result) を返す
 ```
@@ -441,6 +440,6 @@ async/awaitは表面上は似た構文を提供しますが、その裏側の実
 
 - <strong>JavaScript</strong>: シングルスレッドのイベントループ上でPromiseチェーンに変換。マイクロタスクとマクロタスクの優先順位が動作を決定する
 - <strong>Python</strong>: asyncioイベントループがコルーチン（ジェネレータ拡張）をスケジューリング。GILの制約下でI/O並行性を実現
-- <strong>Rust</strong>: ゼロコストのFuture状態機械に変換。ポーリングベースのモデルでランタイムが主導権を持ち、ヒープ割り当てなしで非同期処理を実現
+- <strong>Rust</strong>: Future 状態機械に変換。ポーリングベースのモデルでランタイムが主導権を持ち、`await` ごとのヒープ割り当てを必須にせず非同期処理を実現
 
 共通する設計原則は、<strong>I/O待ちの間にスレッドを遊ばせない</strong>ということです。async/awaitはこの原則を守りつつ、同期コードに近い読みやすさを提供する構文上の工夫なのです。

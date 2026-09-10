@@ -5,7 +5,7 @@ description: "SQLAlchemy や Django ORM は裏で何をしているのか？メ�
 tags: ["ORM", "Design Patterns", "Python", "Database", "Architecture"]
 ---
 
-`session.query(User).filter(User.age > 20).all()` と書くだけで、SQLが生成され、データベースから取得した行がPythonオブジェクトに変換される——ORMは「魔法」のように見えますが、その裏側には明確な設計原理があります。
+SQLAlchemy のレガシー構文である `session.query(User).filter(User.age > 20).all()` のように書くだけで、SQLが生成され、データベースから取得した行がPythonオブジェクトに変換される——ORMは「魔法」のように見えますが、その裏側には明確な設計原理があります。
 
 この記事では、ORM（Object-Relational Mapping）の内部構造をゼロからPythonで実装しながら解き明かします。Martin Fowlerの<strong>Patterns of Enterprise Application Architecture（PoEAA）</strong>で体系化されたパターンを軸に、SQLAlchemyやDjango ORMなど現実のORMの設計判断を理解できるようになることを目指します。
 
@@ -1069,8 +1069,10 @@ print(user.posts)
 遅延読み込みの最大の問題が<strong>N+1問題</strong>です。
 
 ```python
-# 全ユーザーを取得: 1回のSELECT
-users = session.query(User).all()  # SELECT * FROM users (1回)
+from sqlalchemy import select
+
+# 全ユーザーを取得: 1回のSELECT（SQLAlchemy 2.x style）
+users = session.scalars(select(User)).all()  # SELECT * FROM users (1回)
 
 # 各ユーザーの投稿にアクセス: ユーザー数分のSELECT
 for user in users:
@@ -1089,6 +1091,8 @@ for user in users:
 N+1問題の解決策が先行読み込みです。主に2つの方法があります。
 
 <strong>方法1: JOINベース</strong>
+
+以下の例では、`parent_table`、`child_table`、`fk_column` が信頼済みの ORM メタデータから来る前提にしています。SQL のバインドパラメータで守れるのは値であって識別子ではないため、実際の ORM はテーブル名やカラム名をユーザー入力として受け取らず、検証・クォートしてから SQL に埋め込みます。
 
 ```python
 def eager_load_join(connection, parent_table: str, child_table: str,
@@ -1129,10 +1133,13 @@ SELECT * FROM posts WHERE user_id IN (1, 2, 3, ...);
 各ORMでの先行読み込み指定方法：
 
 ```python
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload, selectinload
+
 # SQLAlchemy
-users = session.query(User).options(joinedload(User.posts)).all()
+users = session.scalars(select(User).options(joinedload(User.posts))).all()
 # または
-users = session.query(User).options(selectinload(User.posts)).all()
+users = session.scalars(select(User).options(selectinload(User.posts))).all()
 
 # Django ORM
 users = User.objects.prefetch_related("posts").all()
@@ -1385,7 +1392,7 @@ Entity Framework Core（EF Core）は .NET のORMで、Data Mapperパターン�
 | `UnitOfWork` | `DbContext.SaveChanges()` |
 | 変更追跡 | `ChangeTracker` (スナップショットベース) |
 
-EF Core は C# のLINQ（Language Integrated Query）を使い、コンパイラが生成する<strong>式木（Expression Tree）</strong>をSQLに変換します。Pythonの演算子オーバーロードによるSQL式生成と同じ原理ですが、言語レベルでサポートされている点が異なります。
+EF Core は C# のLINQ（Language Integrated Query）を使います。`DbSet<T>` に対するクエリは `IQueryable<T>` なので、LINQ のラムダ式が<strong>式木（Expression Tree）</strong>として捕捉され、EF Core がその式表現をSQLに変換します。Pythonの演算子オーバーロードによるSQL式生成と同じ原理ですが、言語レベルでサポートされている点が異なります。
 
 ```csharp
 // C# + EF Core: LINQがExpression Treeを生成し、EF CoreがSQLに変換
@@ -1423,15 +1430,17 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 長時間のセッションでは、Identity Mapにオブジェクトが蓄積し続けてメモリを圧迫します。
 
 ```python
+from sqlalchemy import select
+
 # 対策1: セッションを適切なスコープで管理
 with Session(conn, registry) as session:
     # リクエスト単位でセッションを使い、終了時に自動クリア
     ...
 
 # 対策2: 大量データの場合はストリーム処理
-for user in session.query(User).yield_per(1000):
+for user in session.scalars(select(User).execution_options(yield_per=1000)):
     process(user)
-    # yield_per は内部的に1000行単位でフェッチし、1オブジェクトずつ yield する
+    # yield_per は結果全体を一度に実体化せず、行をバッチ単位でフェッチする
 session.expunge_all()  # 処理後に Identity Map から全オブジェクトを排出
 ```
 

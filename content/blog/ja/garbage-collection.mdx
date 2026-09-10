@@ -172,8 +172,9 @@ scan = free = To空間の先頭
 GCルートから参照されるオブジェクトをTo空間にコピー, freeを進める
 while scan < free:
     scanが指すオブジェクトの各フィールドについて:
-        参照先がFrom空間にあれば → To空間にコピー, freeを進める
-        参照先にforwarding pointerを設定
+        参照先がFrom空間にあり、まだforwardingされていなければ:
+            To空間にコピーし、旧位置にforwarding pointerを設定し、freeを進める
+        フィールドを参照先のTo空間アドレスに更新する
     scanを次のオブジェクトに進める
 ```
 
@@ -264,11 +265,12 @@ Go は Dijkstra バリアと Yuasa バリアを組み合わせた<strong>ハイ�
 ```text
 writeBarrier(slot, new):
     shade(*slot)  // 削除バリア: 上書きされる古い値を灰色にする
-    shade(new)    // 挿入バリア: 新しい値を灰色にする
+    if current stack is gray:
+        shade(new) // 現在のスタックがまだスキャン対象の間だけ挿入バリア
     *slot = new
 ```
 
-このハイブリッド方式の最大の利点は、<strong>スタックの再スキャンが不要</strong>になることです。Go 1.5〜1.7 の Dijkstra バリアのみの実装では、マーク終了時にすべての goroutine のスタックを再スキャンする必要があり、これが STW 時間の主要因でした。ハイブリッドバリアにより、Go の STW は通常 100μs 以下にまで短縮されました。
+このハイブリッド方式の最大の利点は、<strong>スタックの再スキャンが不要</strong>になることです。Go の `mbarrier.go` のコメントはより正確で、削除バリアは上書きされる古い値を常に shade しますが、挿入バリアで新しいポインタを shade するのは現在の goroutine スタックが gray の間だけです。スタックが black になれば `shade(new)` は不要になります。Go 1.5〜1.7 の Dijkstra バリアのみの実装では、マーク終了時にすべての goroutine のスタックを再スキャンする必要があり、これが STW 時間の大きな原因でした。ハイブリッドバリアにより、Go の STW 停止は典型的にはサブミリ秒、ワークロードによってはさらに短く抑えられます。
 
 ## メモリアロケーション戦略
 
@@ -295,9 +297,9 @@ alloc(size):
 
 極めて高速（実質1命令）ですが、連続した空き領域が必要です。
 
-### TLAB（Thread-Local Allocation Buffer）
+### スレッドローカル / プロセッサローカルな割り当てバッファ
 
-マルチスレッド環境での割り当て競合を避けるため、各スレッドにヒープの一部を事前に割り当てます。スレッド内での割り当てはロックフリーのバンプポインタで行えます。Java の HotSpot JVM や Go のランタイムが採用しています。
+実行コンテキストごとにヒープの一部を事前に確保し、マルチスレッド環境での割り当て競合を避ける仕組みです。Java HotSpot は TLAB（Thread-Local Allocation Buffer）を使い、各 Java スレッドがロックなしのバンプポインタで割り当てます。Go のアロケータは別設計で、Java 風の TLAB ではなく、P ごとの `mcache` とサイズクラス別 span を使います。
 
 ## 言語ごとの GC 戦略
 
@@ -312,7 +314,7 @@ Go は<strong>シンプルさとレイテンシの低さ</strong>を最優先に
 | アルゴリズム | 並行三色マーク & スイープ |
 | 世代別 | なし（非世代別） |
 | コンパクション | なし |
-| STW | マーク開始・終了時のみ（通常 < 100μs） |
+| STW | マーク開始・終了時のみ（典型的にはサブミリ秒。ワークロード依存） |
 | 書き込みバリア | ハイブリッド（Dijkstra + Yuasa） |
 | チューニング | `GOGC` / `GOMEMLIMIT` |
 
@@ -338,7 +340,7 @@ Java は<strong>最も GC 研究が進んだエコシステム</strong>を持ち
 
 <strong>G1 GC の仕組み</strong>: ヒープを均等な<strong>リージョン</strong>（通常 1〜32MB）に分割します。Young/Old の区別はリージョン単位で動的に割り当てられます。G1 は「ガベージの多いリージョン」を優先的に回収（Garbage-First）することで、限られた停止時間内で最大の効果を得ます。`-XX:MaxGCPauseMillis=200` のように停止時間の目標を設定できます。
 
-<strong>ZGC の着色ポインタ（Colored Pointers）</strong>: ZGC はオブジェクトポインタの未使用ビットに GC のメタデータ（マーク状態、リロケーション状態）を埋め込みます。これにより、オブジェクトヘッダにマーク情報を書き込む必要がなく、ロードバリアだけで並行マークとリロケーションを実現しています。TB 級のヒープでも STW が 1ms 以下を維持できるのはこの技術のおかげです。
+<strong>ZGC の着色ポインタ（Colored Pointers）</strong>: ZGC はオブジェクトポインタの未使用ビットに GC のメタデータ（マーク状態、リロケーション状態）を埋め込みます。これにより、オブジェクトヘッダにマーク情報を書き込む必要がありません。非世代別 ZGC は着色ポインタとロードバリアで並行マーク / リロケーションを実現し、世代別 ZGC はさらに世代間参照を追跡するストアバリアも使います。TB 級のヒープでも STW が 1ms 以下を維持できるのはこれらの技術のおかげです。
 
 ### Python (CPython) — 参照カウント + 世代別トレース GC
 
@@ -359,7 +361,7 @@ Python は<strong>ハイブリッド方式</strong>を採用しています。
 
 オブジェクトは Gen N のコレクションを 1 回生存するだけで Gen N+1 に昇格します。つまり閾値はオブジェクトの生存回数ではなく、各世代のコレクション頻度を制御するパラメータです。`gc.get_threshold()` で確認、`gc.set_threshold()` で調整可能です。
 
-CPython の GIL（Global Interpreter Lock）の存在により、参照カウントの更新はアトミック操作が不要です。ただし、free-threaded ビルド（`--disable-gil`）では<strong>バイアス参照カウント（biased reference counting）</strong>方式に変更されています。これはオーナースレッドは通常のインクリメント/デクリメントを行い、他のスレッドはアトミック操作でカウンタを更新する方式で、GIL なしでもスレッドセーフな参照カウントを実現します。free-threaded ビルドは Python 3.13 で実験的に導入され、[PEP 779](https://peps.python.org/pep-0779/) により **Python 3.14 で正式サポート**（ただし依然としてオプションのビルド）となりました。
+CPython の GIL（Global Interpreter Lock）の存在により、参照カウントの更新はアトミック操作が不要です。ただし、free-threaded ビルド（`--disable-gil`）では<strong>バイアス参照カウント（biased reference counting）</strong>方式に変更されています。これはオーナースレッドは通常のインクリメント/デクリメントを行い、他のスレッドはアトミック操作でカウンタを更新する方式で、GIL なしでもスレッドセーフな参照カウントを実現します。free-threaded ビルドは Python 3.13 で実験的に導入され、[PEP 779](https://peps.python.org/pep-0779/) により <strong>Python 3.14 で正式サポート</strong>（ただし依然としてオプションのビルド）となりました。
 
 <strong>世代別 GC とインクリメンタル GC の遡及</strong>: ここで述べた 3 世代方式は一直線に進化したわけではありません。CPython 3.14.0〜3.14.4 は、大きなヒープでの最大停止時間を桁違いに短縮することを狙って、世代を young / old の 2 つに絞った<strong>インクリメンタル GC</strong> を採用していました。しかし本番環境でメモリ圧迫の報告が相次いだため、[3.14.5 で 3.13 相当の世代別 GC に巻き戻されました](https://docs.python.org/3/whatsnew/3.14.html#notable-changes-in-3-14-5)。GC の設計はベンチマーク上の停止時間だけでは決まらず、実ワークロードでのピークメモリとのトレードオフで決まるという、この分野の難しさを象徴する事例です。
 
@@ -402,11 +404,11 @@ Rust は GC に頼らず、<strong>所有権（ownership）+ 借用（borrowing�
 
 ```text
 所有権システム → コンパイル時にメモリ解放のタイミングが決定
-             → ランタイムオーバーヘッドゼロ
+             → GC ランタイムも GC 停止時間も不要
              → GC 停止時間もゼロ
 ```
 
-<strong>RAII（Resource Acquisition Is Initialization）</strong>パターンにより、変数がスコープを抜けると自動的に `Drop` トレイトが呼ばれてリソースが解放されます。これはコンパイル時に挿入されるコードなので、ランタイムコストはゼロです。
+<strong>RAII（Resource Acquisition Is Initialization）</strong>パターンにより、変数がスコープを抜けると自動的に `Drop` トレイトが呼ばれてリソースが解放されます。呼び出し位置はコンパイル時に決まりますが、デストラクタや解放処理そのものは実行時に走ります。Rust が避けているのは、トレース GC のランタイムと GC 停止です。
 
 循環参照が必要な場合は `Rc<T>` / `Arc<T>` + `Weak<T>` を使い、参照カウントで管理します。`Weak<T>` は所有権を持たない参照で、`Rc` の参照カウントに含まれないため、循環を断ち切れます。
 
@@ -428,7 +430,7 @@ Swift のコンパイラは<strong>ARC 最適化</strong>として、不要な r
 
 | 言語 | GC 方式 | 世代別 | 並行 | STW | 割り当て方式 |
 |---|---|---|---|---|---|
-| <strong>Go</strong> | 三色 M&S | No | Yes | < 100μs | Segregated-fit |
+| <strong>Go</strong> | 三色 M&S | No | Yes | sub-ms typical | Segregated-fit |
 | <strong>Java</strong> | 選択可（G1/ZGC/Shenandoah） | Yes | Yes | < 1ms〜 | TLAB + バンプポインタ |
 | <strong>Python</strong> | 参照カウント + トレース | Yes (3世代) | No | あり | pymalloc arena |
 | <strong>JavaScript (V8)</strong> | コピー + M&S/Compact | Yes | Yes | 短い | Semispace + Free list |

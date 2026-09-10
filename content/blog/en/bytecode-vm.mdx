@@ -15,7 +15,7 @@ Let's start by classifying how programs are executed.
 
 ### Native Compilation
 
-Languages like C, C++, Rust, and Go compile source code directly into <strong>machine code (native code)</strong>. The resulting binary is executed directly by the CPU, yielding the highest possible performance.
+Languages like C, C++, Rust, and Go compile source code directly into <strong>machine code (native code)</strong>. The resulting binary is executed directly by the CPU, avoiding VM dispatch overhead and usually delivering very high performance, though profile-guided JITs can sometimes beat ahead-of-time native code on specific workloads.
 
 ```text
 Source code (.c) → Compiler → Machine code (.exe) → CPU executes directly
@@ -31,7 +31,7 @@ Early BASIC and shell scripts work by <strong>reading and executing source code 
 Source code → Interpreter reads and executes one line at a time
 ```
 
-This is platform-independent and convenient, but parsing source code on every execution makes it the slowest approach.
+This is platform-independent and convenient, but repeatedly parsing and interpreting source tends to be slower than bytecode or native execution.
 
 ### Bytecode VM
 
@@ -62,7 +62,7 @@ x = 1 + 2 * 3
 
 ```text
 Token sequence:
-  NAME("x") → EQUAL("=") → NUMBER("1") → PLUS("+") 
+  NAME("x") → EQUAL("=") → NUMBER("1") → PLUS("+")
   → NUMBER("2") → STAR("*") → NUMBER("3") → NEWLINE
 ```
 
@@ -183,7 +183,7 @@ Example (CPython 3.12+, base instruction = 1 word = 2 bytes; some have inline ca
   BINARY_OP     0     → Pop 2 values from stack, add, push result
 ```
 
-Since CPython 3.6, all instructions use a <strong>word code</strong> format (2 bytes = 1 byte opcode + 1 byte operand). CPython 3.12 and later extended some instructions to 4 bytes. When an operand exceeds 255, an `EXTENDED_ARG` instruction is prepended to extend the operand.
+Since CPython 3.6, bytecode uses a <strong>word code</strong> format: each code unit is 2 bytes (1 byte opcode + 1 byte oparg). Some opcodes reserve additional 2-byte inline-cache entries after the instruction, but the base code unit remains 2 bytes. When an operand exceeds 255, one or more `EXTENDED_ARG` instructions are prepended to extend the operand.
 
 ### Code Objects
 
@@ -218,7 +218,7 @@ __pycache__/
 |---|---|---|
 | 0 | 4 bytes | Magic number (identifies Python version) |
 | 4 | 4 bytes | Bit field (invalidation mode flags) |
-| 8 | 8 bytes | Source file timestamp or hash |
+| 8 | 8 bytes | Timestamp mode: 4-byte source mtime + 4-byte source size; hash mode: 8-byte source hash |
 | 16 | onward | Marshalled code object |
 
 On subsequent imports, if the `.pyc` is up to date, Python skips recompilation and loads the bytecode directly, reducing startup time.
@@ -487,7 +487,7 @@ CPython limits the frame stack depth via `sys.getrecursionlimit()` (default 1000
 
 Frame creation and destruction are overhead, so VMs apply various optimizations:
 
-- <strong>CPython 3.11+</strong>: Inlined frames (`_PyInterpreterFrame`). Avoids heap allocation by placing frames directly on the C stack
+- <strong>CPython 3.11+</strong>: Inlined frames (`_PyInterpreterFrame`). Avoids eagerly allocating `PyFrameObject` instances by storing interpreter frames in an internal frame stack; frame objects are materialized only when needed
 - <strong>JVM</strong>: Frames are placed on the native stack. The JIT compiler may completely eliminate function calls through inlining
 - <strong>V8</strong>: The JIT compiler merges frames via inlining and optimizes stack frame layout for deoptimization metadata
 
@@ -511,8 +511,8 @@ typedef struct {
     PyObject_VAR_HEAD            // ob_refcnt + ob_type + ob_size
     digit ob_digit[1];           // Arbitrary-precision digit array (30 bits/digit)
 } PyLongObject;
-// Note: CPython 3.12+ introduced a "compact" representation for small ints,
-//   storing the value in ob_size bit fields and omitting ob_digit
+// Note: CPython 3.12+ changed PyLong internals so compact values are cheaper
+//   to inspect, but integers remain PyObject-based values
 ```
 
 Python's `int` is an arbitrary-precision integer that can represent values of any size. Even a small integer like `42` requires: reference count (8 bytes) + type pointer (8 bytes) + size (8 bytes) + digit array + memory allocator overhead = <strong>at least 28 bytes</strong>. Compare this to C's `int` at just 4 bytes — quite a luxurious use of memory.
@@ -565,7 +565,7 @@ Tagged pointer:
 
 V8 (Google's JavaScript engine) uses tagged pointers to distinguish Smi (Small Integer) from HeapObject:
 
-- Least significant bit is `0` → Smi (31-bit integer stored in upper 31 bits)
+- Least significant bit is `0` → Smi (small integer; commonly 31-bit with pointer compression)
 - Least significant bit is `1` → HeapObject pointer (mask off tag bit to dereference)
 
 CRuby (MRI) uses a similar technique, representing Fixnum (small integers) without heap allocation.
@@ -624,9 +624,9 @@ For integer addition, the interpreter incurs <strong>tens of times more overhead
 
 JIT compilers fall into two major approaches.
 
-#### Method JIT
+#### Method / Function JIT
 
-Compiles at the function (method) level. JVM (HotSpot C2), V8, and .NET's RyuJIT use this approach.
+Compiles at the function or method level. JVM (HotSpot C2), V8, and .NET's RyuJIT use this broad approach.
 
 ```text
 Function calculate() was called 1000 times
@@ -761,7 +761,7 @@ Normally, JIT compilation takes effect on a function's <strong>next invocation</
 ```text
 Running loop:
   for i in range(1000000):  ← During loop iteration...
-      ...                    
+      ...
                              ★ JIT compilation complete!
                              ★ OSR: Switch from interpreter to native code
                              ★ Remaining loop iterations run in native code

@@ -44,7 +44,7 @@ Linux optimised (1) for decades. The 2019 arrival of `io_uring` finally made (2)
 | Readiness | `select`, `poll`, `epoll`, `kqueue` (BSD) | Kernel says "fd is ready", user does the I/O | 2 syscalls per I/O (notify + read/write) |
 | Completion | Windows IOCP, POSIX `aio`, `io_uring` | Submit to kernel, wait for completion | 0–1 syscalls per I/O |
 
-A <strong>syscall</strong>, in this context, is the privileged mode switch a user-space program uses to enter the kernel. It involves a trap instruction and a CPU-mode transition, so it costs orders of magnitude more than a plain function call — typically 200–500 ns on modern CPUs, versus < 10 ns for a regular call. KPTI (described later) makes this worse still.
+A <strong>syscall</strong>, in this context, is the privileged mode switch a user-space program uses to enter the kernel. It involves a trap instruction and a CPU-mode transition, so it costs orders of magnitude more than a plain function call. Treat figures such as 200–500 ns for a simple syscall and < 10 ns for a regular call as order-of-magnitude examples; the exact cost depends heavily on CPU, kernel, mitigations, and cache/TLB state. KPTI (described later) can make this worse still.
 
 Two related pieces of jargon to anchor: a <strong>reactor</strong> is an event loop that receives "this fd is ready" notifications and then performs the I/O itself (the epoll style), while a <strong>proactor</strong> is an event loop that submits I/O requests and receives completions (the IOCP / `io_uring` style). Holding both terms in mind makes the epoll-vs-`io_uring` contrast below much easier to read.
 
@@ -217,7 +217,7 @@ Multiple processes / threads all watching the same listening socket with epoll c
 Fixes:
 
 - <strong>`SO_REUSEPORT`</strong> (Linux 3.9+) — kernel spreads incoming connections across listeners. Common in nginx.
-- <strong>`EPOLLEXCLUSIVE`</strong> (Linux 4.5+) — wake at most one waiter per event, by setting `WQ_FLAG_EXCLUSIVE` on the epoll wait-queue entry.
+- <strong>`EPOLLEXCLUSIVE`</strong> (Linux 4.5+) — reduce thundering-herd wakeups by marking the epoll wait-queue entry exclusive; the kernel wakes one or a small subset of exclusive waiters rather than every waiter.
 
 ### 3.6 Limits of epoll
 
@@ -364,7 +364,7 @@ process_completion(cqe);
 io_uring_cqe_seen(&ring, cqe);     /* head++ */
 ```
 
-The key property: <strong>many SQEs can be submitted in a single `io_uring_enter`</strong>. One syscall can send 1000 reads, amortising the syscall cost to nearly zero. Concretely: an epoll-shaped loop pays two syscalls per I/O (≈ 1 µs at 500 ns each), while batching 1000 io_uring requests spreads a single syscall across them — roughly 0.5 ns per request in overhead.
+The key property: <strong>many SQEs can be submitted in a single `io_uring_enter`</strong>. One syscall can send 1000 reads, amortising the syscall cost to nearly zero. As a back-of-the-envelope illustration rather than a portable benchmark: an epoll-shaped loop can pay two syscalls per I/O, while batching 1000 io_uring requests spreads one submission syscall across the whole batch.
 
 ### 5.6 Memory ordering
 
@@ -381,7 +381,7 @@ Because user and kernel share `head`/`tail` through memory, <strong>memory barri
 
 ### 6.1 `IORING_SETUP_SQPOLL` — kernel-side polling thread
 
-Set `IORING_SETUP_SQPOLL` and the kernel spawns a <strong>dedicated thread</strong> that polls SQ. Userspace just writes SQEs; <strong>no `io_uring_enter` needed</strong>. Truly <strong>zero syscalls</strong> for I/O. In call-centre terms, SQPOLL is the mode where an agent sits permanently at the shared counter, picking up request slips as soon as you place them down.
+Set `IORING_SETUP_SQPOLL` and the kernel spawns a <strong>dedicated thread</strong> that polls SQ. While that thread is awake and the ring stays busy, userspace can submit and reap I/O through shared memory without calling `io_uring_enter`; if the SQ thread goes idle and sets `IORING_SQ_NEED_WAKEUP`, userspace must make a wakeup `io_uring_enter` call. In call-centre terms, SQPOLL is the mode where an agent sits at the shared counter, picking up request slips as soon as you place them down, until the counter has been idle long enough for the agent to nap.
 
 ```c
 struct io_uring_params params = {
@@ -400,7 +400,7 @@ Sweet spot: <strong>single process fully saturating an NVMe</strong> (databases,
 
 ### 6.2 `IORING_SETUP_IOPOLL` — busy-poll completions
 
-For `O_DIRECT` block I/O, busy-polling the block layer for completion beats interrupt-driven delivery at NVMe latencies (µs range).
+For `O_DIRECT` block I/O on filesystems and devices that support polling, busy-polling the block layer for completion can beat interrupt-driven delivery at NVMe latencies (µs range). Applications still reap polled completions via `io_uring_enter`.
 
 ### 6.3 Linked SQEs (`IOSQE_IO_LINK`)
 
@@ -511,23 +511,23 @@ CQE writes are done under a spinlock and are <strong>copy-free</strong> — dire
 
 ## 8. Pitfalls and operations
 
-> <strong>TL;DR</strong>: powerful but also the source of many CVEs, and `seccomp` can't filter at opcode granularity. Production use demands current LTS kernels, decent observability, and awareness that some distros or platforms disable it by default.
+> <strong>TL;DR</strong>: powerful but also the source of many CVEs, and `seccomp` can't filter at opcode granularity. Production use demands current LTS kernels, decent observability, and awareness that some hardened platforms restrict or disable it by policy.
 
 ### 8.1 CVEs and security
 
 A very complex, very privileged API. There have been many local privilege escalation CVEs:
 
 - <strong>CVE-2022-29582</strong>, <strong>CVE-2023-2598</strong>, <strong>CVE-2023-21400</strong>, <strong>CVE-2024-0582</strong>, and more.
-- As a result, <strong>Google (Android / CrOS) and many LTS kernel packages disable `io_uring` by default</strong>.
+- As a result, <strong>some hardened platforms, notably Android and ChromeOS, disable or restrict `io_uring` by default</strong>; general-purpose server distributions vary, so check the platform policy.
 - Since RHEL 9.5, `sysctl kernel.io_uring_disabled=1/2` can outright disable it or allow root only.
 
-In production: stay on current LTS kernels, and consider `seccomp` filters that restrict allowed opcodes.
+In production: stay on current LTS kernels, use `seccomp` to block or restrict the `io_uring_*` syscalls where appropriate, and use `IORING_REGISTER_RESTRICTIONS` or LSM-based controls when you need opcode-level restrictions.
 
 ### 8.2 Observability
 
 - `strace` only sees `io_uring_enter`; SQE contents are invisible.
 - Workarounds: `bpftrace` / `perf trace` on tracepoints (`io_uring:io_uring_submit_req` …), or `iouring-tools` dumps.
-- Per-process stats live at `/proc/<pid>/io_uring`.
+- Per-ring details are exposed through `/proc/<pid>/fdinfo/<ring-fd>` on kernels that include the io_uring fdinfo hooks; tracepoints are usually more useful for live debugging.
 
 ### 8.3 Buffer ownership
 

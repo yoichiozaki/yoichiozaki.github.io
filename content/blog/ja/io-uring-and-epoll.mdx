@@ -44,7 +44,7 @@ tags: ["Linux", "Kernel", "io_uring", "epoll", "Async I/O"]
 | Readiness | `select`, `poll`, `epoll`, `kqueue` (BSD) | カーネルが「準備できた」と通知、ユーザが実際の I/O を呼ぶ | I/O 1 回につき syscall 2 回（通知 + read/write） |
 | Completion | Windows IOCP, POSIX `aio`, `io_uring` | カーネルに依頼し、完了だけ受け取る | I/O 1 回で syscall 0-1 回 |
 
-ここで言う <strong>syscall (システムコール)</strong> は、ユーザ空間のプログラムがカーネル機能を呼び出すための特権モード切替のこと。トランポリン命令と CPU モード遷移を伴うため、単純な関数呼び出しとは桁違いに重く、現代 CPU でも 1 回 200–500 ns 程度 — 普通の関数呼び出し (< 10 ns) の 20〜50 倍です。後述の KPTI でさらに重くなります。
+ここで言う <strong>syscall (システムコール)</strong> は、ユーザ空間のプログラムがカーネル機能を呼び出すための特権モード切替のこと。トランポリン命令と CPU モード遷移を伴うため、単純な関数呼び出しとは桁違いに重い処理です。単純な syscall が 200–500 ns 程度、普通の関数呼び出しが < 10 ns 程度という数字はあくまでオーダー感で、実際のコストは CPU・カーネル・緩和策・キャッシュ/TLB 状態に大きく依存します。後述の KPTI でさらに重くなることがあります。
 
 用語をもうひとつ。<strong>reactor</strong> は「ready になった fd を受け取って I/O を実行するループ」(epoll 型)、<strong>proactor</strong> は「I/O を依頼して完了通知を受け取るループ」(IOCP / io_uring 型) を指します。以下で epoll と io_uring の対比を見るとき、この 2 つの言葉が頭にあると見通しが良くなります。
 
@@ -218,7 +218,7 @@ ET モードのほうが高性能（スプリアス通知がない）ですが�
 対策:
 
 - <strong>`SO_REUSEPORT`</strong> (Linux 3.9+) — カーネルが fd レベルで受信を分散。nginx でよく使われる。
-- <strong>`EPOLLEXCLUSIVE`</strong> (Linux 4.5+) — 1 イベントにつき 1 waiter だけ起こす。epoll の内部 wait_queue エントリに `WQ_FLAG_EXCLUSIVE` を立てる。
+- <strong>`EPOLLEXCLUSIVE`</strong> (Linux 4.5+) — epoll の内部 wait_queue エントリに `WQ_FLAG_EXCLUSIVE` を立て、全 waiter を起こす代わりに 1 つまたは少数の exclusive waiter だけを起こして thundering herd を抑える。
 
 ### 3.6 epoll の限界
 
@@ -334,7 +334,7 @@ struct io_uring_cqe {
 
 `user_data` は、アプリケーションが「どの操作の完了か」を識別するための <strong>任意の 64 ビット値</strong>。ポインタや ID を詰めて使います。
 
-<strong>要するに</strong>: SQE が「依頼票」、CQE が「その控えエリ」で、`user_data` は両者を紐づける背番号。アプリ側は「いくつ依頼が出ていて」「それぞれが何、を `user_data` で記憶しておき、戻ってきた CQE の `user_data` で元のコンテキストを引く。
+<strong>要するに</strong>: SQE が「依頼票」、CQE が「その控え」で、`user_data` は両者を紐づける背番号。アプリ側は「いくつ依頼が出ていて」「それぞれが何か」を `user_data` で記憶しておき、戻ってきた CQE の `user_data` で元のコンテキストを引く。
 
 ### 5.4 リングバッファのセットアップ
 
@@ -365,7 +365,7 @@ process_completion(cqe);
 io_uring_cqe_seen(&ring, cqe);    /* head++ */
 ```
 
-ここで重要なのは、複数 SQE を <strong>1 回の `io_uring_enter` でまとめて送れる</strong> こと。1 syscall で 1000 個の read を投げられるので、syscall コストが償却されます。具体的には、epoll だと 1 回の I/O に syscall 2 回 → 500 ns × 2 = 1μs かかるところが、io_uring で 1000 依頼をバッチすれば syscall 1 回を 1000 で割って一件あたり 0.5 ns 、というオーダーの圧縮がかかります。
+ここで重要なのは、複数 SQE を <strong>1 回の `io_uring_enter` でまとめて送れる</strong> こと。1 syscall で 1000 個の read を投げられるので、syscall コストが償却されます。これは移植可能なベンチマーク値ではなく概算ですが、epoll 風のループでは 1 回の I/O に syscall 2 回を払う一方、io_uring では 1000 依頼をバッチして 1 回の submit syscall にまとめられます。
 
 ### 5.6 メモリ順序とリング操作
 
@@ -384,7 +384,7 @@ io_uring_cqe_seen(&ring, cqe);    /* head++ */
 
 ### 6.1 `IORING_SETUP_SQPOLL` — カーネルスレッドでポーリング
 
-`io_uring_setup` に `IORING_SETUP_SQPOLL` を立てると、カーネルが <strong>専用スレッド</strong> を作って SQ を監視し続けます。ユーザ空間は SQE を置くだけ、`io_uring_enter` も不要。<strong>完全な syscall 0</strong> で I/O が出せます。つまり「カウンターに専任の担当者を常駐させて、依頼票を置いたそばから取りに行かせる」究極モードです。
+`io_uring_setup` に `IORING_SETUP_SQPOLL` を立てると、カーネルが <strong>専用スレッド</strong> を作って SQ を監視し続けます。そのスレッドが起きていてリングが忙しい間は、ユーザ空間は共有メモリに SQE を置くだけで `io_uring_enter` なしに submit / reap できます。ただし SQ スレッドがアイドルで眠り `IORING_SQ_NEED_WAKEUP` を立てた場合は、起こすための `io_uring_enter` が必要です。つまり「カウンターに専任の担当者を常駐させて、依頼票を置いたそばから取りに行かせる。ただし暇が続くと仮眠に入る」モードです。
 
 ```c
 struct io_uring_params params = {
@@ -403,7 +403,7 @@ io_uring_queue_init_params(entries, &ring, &params);
 
 ### 6.2 `IORING_SETUP_IOPOLL` — ブロックデバイスのビジーポーリング
 
-`O_DIRECT` のブロック I/O は、カーネル内でブロックレイヤの完了を割込みでなく <strong>ビジーポーリング</strong> で取りに行けます。NVMe の μs オーダーのレイテンシではこれが優位です。
+`O_DIRECT` のブロック I/O で、ファイルシステムとデバイスが polling をサポートしている場合、カーネル内でブロックレイヤの完了を割込みでなく <strong>ビジーポーリング</strong> で取りに行けます。NVMe の μs オーダーのレイテンシではこれが優位になることがあります。polled completion の回収にも `io_uring_enter` を使います。
 
 ### 6.3 Linked SQEs (`IOSQE_IO_LINK`)
 
@@ -516,23 +516,23 @@ CQ ring への書き込みは `spin_lock` で保護された上で、<strong>コ
 
 ## 8. `io_uring` の落とし穴と運用
 
-> <strong>一言でいうと</strong>: 強力だが脆弱性報告も多く、seccomp でも細かく制御できない。本番で使うなら最新 LTS カーネル + 観測ツール + ディストリビューションのポリシー確認が必須。
+> <strong>一言でいうと</strong>: 強力だが脆弱性報告も多く、seccomp では opcode 単位に制御できない。本番で使うなら最新 LTS カーネル + 観測ツール + hardened platform / ディストリビューションのポリシー確認が必須。
 
 ### 8.1 CVE とセキュリティ
 
 非常に複雑で特権的な API なので、過去に多数の LPE (Local Privilege Escalation) 脆弱性が報告されました。
 
 - <strong>CVE-2022-29582</strong>, <strong>CVE-2023-2598</strong>, <strong>CVE-2023-21400</strong>, <strong>CVE-2024-0582</strong> など。
-- その結果、<strong>Google (Android/CrOS) や多くの LTS カーネルパッケージは `io_uring` を既定で無効化</strong>。
+- その結果、<strong>Android や ChromeOS など一部の hardened platform は `io_uring` を既定で無効化または制限</strong>している。汎用サーバーディストリビューションの方針はまちまちなので、実環境のポリシー確認が必要。
 - RHEL 9.5 以降、`sysctl kernel.io_uring_disabled=1/2` で全面禁止 / root のみ許可が選べるようになった。
 
-プロダクションで `io_uring` を使う場合、<strong>カーネルを常に最新 LTS にする</strong> ことと、seccomp で opcode を絞る運用が推奨されます。
+プロダクションで `io_uring` を使う場合、<strong>カーネルを常に最新 LTS にする</strong>こと、必要に応じて seccomp で `io_uring_*` syscall 自体を禁止・制限すること、opcode 単位の制限が必要なら `IORING_REGISTER_RESTRICTIONS` や LSM ベースの制御を使うことが重要です。
 
 ### 8.2 観測性
 
 - `strace` では `io_uring_enter` しか見えない。SQE の中身は見えません。
 - 代替: `bpftrace`/`perf trace` で tracepoint (`io_uring:io_uring_submit_req` 等) を取る、`iouring-tools` のダンプを使う。
-- カーネル側のカウンタ: `/proc/<pid>/io_uring` にリング統計が出る。
+- リングごとの情報: 対応カーネルでは `/proc/<pid>/fdinfo/<ring-fd>` に io_uring の fdinfo が出る。ライブ調査では tracepoint の方が有用なことが多い。
 
 ### 8.3 バッファ所有権
 

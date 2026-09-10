@@ -7,7 +7,7 @@ tags: ["Database", "Index", "B+ Tree", "LSM-Tree", "Data Structures"]
 
 ## Why Indexes Matter
 
-In a database, a full table scan costs $O(n)$. Searching for a single row in a million-row table could require a million disk reads.
+In a database, a full table scan costs $O(n)$ row checks. Searching for a single row in a million-row table does not usually mean a million disk reads — rows are packed into pages — but it can still require reading thousands of pages and checking every row.
 
 An index solves this problem. With a proper index, lookups complete in $O(\log n)$. With a B+ tree index, thanks to its high fan-out, even a million-row table needs only about 3–4 disk accesses to find the target row.
 
@@ -67,7 +67,7 @@ Insertion into a B+ tree follows these steps:
 2. Insert the key into the leaf (maintaining sorted order)
 3. If the leaf overflows (keys > $m-1$), a <strong>split</strong> occurs:
    - The leaf is divided into two
-   - The median key is <strong>promoted</strong> to the parent node
+   - A separator key (for a leaf split, the first key of the new right leaf) is <strong>copied</strong> into the parent node
    - If the parent also overflows, the split propagates upward recursively
 4. When the root splits, the tree height increases by one
 
@@ -97,7 +97,7 @@ SplitLeaf(leaf):
   new_leaf.next = leaf.next
   leaf.next = new_leaf
   
-  // Promote median to parent
+  // Copy separator key to parent
   promote_key = new_leaf.keys[0]
   insert_into_parent(leaf.parent, promote_key, new_leaf)
 ```
@@ -146,7 +146,8 @@ MySQL's InnoDB uses this approach. The primary key becomes the clustered index, 
 CREATE TABLE users (
   id INT PRIMARY KEY,      -- B+ tree key
   name VARCHAR(100),        -- Stored in leaf nodes
-  email VARCHAR(200)        -- Stored in leaf nodes
+  email VARCHAR(200),       -- Stored in leaf nodes
+  KEY idx_email (email)     -- Secondary index
 );
 ```
 
@@ -157,7 +158,7 @@ CREATE TABLE users (
 
 ### Non-Clustered Index
 
-PostgreSQL stores table data in a <strong>heap</strong> (unordered sequence of pages), and index leaf nodes contain row pointers (TID: tuple ID) into the heap.
+PostgreSQL stores table data in a <strong>heap</strong> (unordered sequence of pages), and its default B-tree indexes (B+ tree-like in that table tuples are reached from leaf entries) contain row pointers (TID: tuple ID) into the heap.
 
 ```text
 PostgreSQL index structure:
@@ -265,9 +266,9 @@ There are two main compaction strategies:
 
 ### Write Amplification vs Read Amplification
 
-LSM-Trees incur write amplification through compaction. With leveled compaction, a single key gets rewritten at each level (L0→L1→L2), so write amplification is $O(L \times T)$ where $L$ is the number of levels and $T$ is the size ratio. With a size ratio of 10 and 4 levels, effective write amplification can reach about 40×.
+LSM-Trees incur write amplification through compaction. With leveled compaction, a key may be merged and rewritten as it moves across levels, so write amplification grows with the number of levels and the size ratio (often summarized as $O(L \times T)$ in the worst case). With a size ratio of 10 and 4 levels, tens of rewrites are possible depending on compaction policy and workload.
 
-B+ tree write amplification comes from partial page updates, generally page size / change size (e.g., 16KB / 100B = 160×), though buffer pool batching mitigates this.
+B+ tree write amplification comes from updating whole pages for small logical changes: an isolated 100B change can dirty a 16KB page, though WAL format, page flushing, group commit, and buffer pool batching make the actual amplification workload-dependent.
 
 ## B+ Tree vs LSM-Tree — When to Use Which
 
@@ -283,7 +284,7 @@ B+ tree write amplification comes from partial page updates, generally page size
 
 ### Selection Guidelines
 
-- <strong>Read-heavy with frequent range scans</strong> → B+ tree (MySQL, PostgreSQL)
+- <strong>Read-heavy with frequent range scans</strong> → B+ tree / B-tree family indexes (MySQL/InnoDB, PostgreSQL's default B-tree)
 - <strong>Write-heavy with logs and event data</strong> → LSM-Tree (RocksDB, Cassandra)
 - <strong>Mixed workloads</strong> → Consider tuning or hybrid configurations
 
@@ -299,14 +300,14 @@ InnoDB uses B+ tree–based clustered indexing. The primary key's B+ tree is the
 -- Check the query plan with EXPLAIN
 EXPLAIN SELECT * FROM users WHERE email = 'test@example.com';
 -- type: ref, key: idx_email → using secondary index
--- Extra: NULL → secondary lookup to clustered index needed
+-- SELECT * is not covered by idx_email, so InnoDB looks up the clustered record by primary key
 ```
 
 ### PostgreSQL
 
-PostgreSQL uses a heap table + B+ tree index architecture. The HOT (Heap-Only Tuples) optimization skips index updates when indexed columns aren't modified.
+PostgreSQL uses a heap table + B-tree index architecture. The HOT (Heap-Only Tuples) optimization can skip index updates when no indexed column changes and the new tuple version fits on the same heap page.
 
-PostgreSQL also offers rich index types beyond B+ trees: <strong>GiST</strong> (Generalized Search Tree), <strong>GIN</strong> (Generalized Inverted Index), and <strong>BRIN</strong> (Block Range Index).
+PostgreSQL also offers rich index types beyond its default B-tree: <strong>GiST</strong> (Generalized Search Tree), <strong>GIN</strong> (Generalized Inverted Index), and <strong>BRIN</strong> (Block Range Index).
 
 ### RocksDB
 
