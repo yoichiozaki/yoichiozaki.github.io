@@ -169,6 +169,9 @@ import {
   PlanSpaceTable,
   CardinalityErrorDiagram,
   HeapTupleAnatomy,
+  ProtobufWireVisualizer,
+  WireFormatLab,
+  ApiLatencyBudgetLab,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -348,6 +351,9 @@ function getMdxComponents(locale: string) {
     PlanSpaceTable: () => <PlanSpaceTable locale={locale} />,
     CardinalityErrorDiagram: () => <CardinalityErrorDiagram locale={locale} />,
     HeapTupleAnatomy: () => <HeapTupleAnatomy locale={locale} />,
+    ProtobufWireVisualizer: () => <ProtobufWireVisualizer locale={locale} />,
+    WireFormatLab: () => <WireFormatLab locale={locale} />,
+    ApiLatencyBudgetLab: () => <ApiLatencyBudgetLab locale={locale} />,
   };
 }
 

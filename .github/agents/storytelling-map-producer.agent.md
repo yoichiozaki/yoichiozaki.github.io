@@ -1,4 +1,6 @@
 ---
+name: storytelling-map-producer
+displayName: "Storytelling Map Producer"
 description: "Interactive guide for creating Storytelling Map travel blog posts. Use when: create trip article, new storytelling map, 旅行記事を作る, add travel post with map."
 tools: [read, edit, search, execute, todo, web]
 argument-hint: "Trip slug (e.g., 'tokyo-osaka-2026')"

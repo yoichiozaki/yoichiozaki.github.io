@@ -1,0 +1,1292 @@
+---
+title: "RPC vs REST — Rethinking the API Design Fork from the Wire Up"
+date: "2026-09-10"
+description: "What actually separates RPC from REST: HTTP/2 frames and protobuf bytes, contracts and schema evolution, error design, caching, authn/authz, observability, and the operational traps — framed for real engineering decisions."
+tags: ["RPC", "REST", "gRPC", "API Design", "HTTP", "Protobuf", "Observability", "Security"]
+---
+
+"gRPC between internal services, REST for the public API." That conclusion is probably right. The problem is that <strong>surprisingly few engineers can explain why</strong>. Stop at "gRPC is faster" and you end up shipping a public gRPC API that no CDN can cache, or introducing protobuf on a sub-millisecond internal hop and improving nothing at all.
+
+This article walks down the stack — <strong>design philosophy → bytes on the wire → schema evolution → error design → operations</strong>. The goal is not to crown a winner but to decompose, at a resolution you can actually use, <strong>which constraints you are accepting and what each one buys you</strong>.
+
+> <strong>Think of a government office</strong>
+>
+> - <strong>RPC</strong> is phoning a specific clerk with a request: "Tanaka-san, please push this application through." It's fast because both sides already know the <em>procedure name</em>. But when the clerk changes or the procedure is renamed, every caller must be updated. And when the line drops mid-call, you have no idea whether the work was done.
+> - <strong>REST</strong> is reading and writing a filing cabinet using a standard form. The location (URL) and the operations (GET / PUT / DELETE) mean the same thing everywhere, so <em>anyone</em> — including intermediaries — can handle them. A photocopier (CDN) may keep copies; the front desk (a proxy) can sort things by looking at them. The price is translating <em>verbs</em> ("cancel this application") into <em>nouns</em>.
+>
+> So the real choice is not about speed. It is about <strong>where the semantics live</strong>: inside your application (RPC) or inside the protocol (REST). The former buys expressiveness; the latter buys <em>reusable intermediaries</em>.
+
+## 1. The question "RPC or REST?" doesn't type-check
+
+> <strong>In one line</strong>: RPC is a <em>technique for abstracting calls</em>; REST is an <em>architectural style</em> (a set of constraints). They sit at different levels, so comparing them directly makes the argument slide.
+
+### 1.1 The two sides aren't the same kind of thing
+
+- <strong>RPC (Remote Procedure Call)</strong> is a <em>programming model</em>: write code that crosses the network as if it were a local function call. gRPC, JSON-RPC, Thrift, and Cap'n Proto are all implementations of that idea.
+- <strong>REST (Representational State Transfer)</strong> is the <em>architectural style</em> Roy Fielding defined in his 2000 dissertation. It is a theory — "impose these constraints and you get these properties (scalability, independent evolvability, visibility)" — not a technology.
+
+The comparison only becomes coherent once you restate it:
+
+| The question people ask | What is actually being compared |
+| --- | --- |
+| "RPC or REST?" | <strong>Do you model the API as a set of procedures or as a set of resources?</strong> |
+| "gRPC or a REST API?" | <strong>Protobuf-over-HTTP/2 versus JSON-over-HTTP as concrete stacks</strong> |
+| "Which one is faster?" | <strong>Performance characteristics of a wire format and a multiplexing scheme</strong> |
+
+These three axes are independent. You can follow REST's resource model while shipping protobuf (Google's APIs do exactly that), and you can design resource-oriented APIs on top of gRPC. Conversely, "it's HTTP + JSON, therefore it's REST" is <strong>almost always wrong</strong>.
+
+### 1.2 Most "REST APIs" in the wild are RPC over HTTP
+
+`POST /api/getUserProfile`, `POST /api/sendEmail`, `GET /api/searchOrders?q=...`. The URL contains a procedure name, the HTTP method carries no meaning, and the response contains no next transitions. That is <strong>RPC using HTTP as a transport</strong>, not REST.
+
+There is nothing wrong with that — for many teams it is the right answer. The damage comes from <strong>believing it is REST and therefore never collecting REST's benefits</strong> (caching, intermediaries, a uniform interface). When the name and the reality diverge, the design trade-off never gets discussed.
+
+### 1.3 The Richardson Maturity Model — how far up HTTP do you climb?
+
+Leonard Richardson's four-level model (QCon 2008, popularised by Martin Fowler in 2010) is still the best ruler for measuring that gap.
+
+```mermaid
+graph LR
+    L0["Level 0<br/>single endpoint<br/>POST /api"] --> L1["Level 1<br/>resources<br/>POST /users/42"]
+    L1 --> L2["Level 2<br/>verbs + status codes<br/>GET /users/42 → 200"]
+    L2 --> L3["Level 3<br/>hypermedia<br/>responses carry transitions"]
+    style L0 fill:#b45309,color:#ffffff
+    style L1 fill:#a16207,color:#ffffff
+    style L2 fill:#0369a1,color:#ffffff
+    style L3 fill:#047857,color:#ffffff
+```
+
+- <strong>Level 0</strong>: HTTP as a tunnel for bytes. XML-RPC, SOAP — and GraphQL, with its effectively single `/graphql` endpoint — all live here.
+- <strong>Level 1</strong>: URLs identify resources, but the operation still lives in the body.
+- <strong>Level 2</strong>: HTTP methods and status codes carry semantics. <strong>This is what "REST API" means in practice</strong>, and it is where caching, idempotency, and intermediary support start paying off.
+- <strong>Level 3</strong>: HATEOAS — responses embed the available next transitions as links.
+
+Fielding himself pushed back hard in his 2008 post "REST APIs must be hypertext-driven", insisting that anything below Level 3 should not be called REST. In practice, though, <strong>most of the benefit is already collected at Level 2</strong> — that is the verdict twenty years have delivered.
+
+## 2. The RPC lineage — forty years chasing the same dream
+
+> <strong>In one line</strong>: The dream of "make a remote call look local" dates to 1984, failed repeatedly at scale, and each time was corrected in the direction of <em>abandoning transparency</em>.
+
+### 2.1 Birrell & Nelson (1984) — the source text
+
+Andrew Birrell and Bruce Nelson's *Implementing Remote Procedure Calls* (ACM TOCS 2(1), 1984), written at Xerox PARC, is where RPC begins. Almost every element of a modern RPC system is already there:
+
+- <strong>Stubs</strong> — client-side proxy functions that package the arguments.
+- <strong>Marshalling / unmarshalling</strong> — converting language values into bytes.
+- <strong>Binding</strong> — resolving a service name to an instance (today: service discovery).
+- <strong>Call semantics</strong> — the paper states plainly that exactly-once cannot be guaranteed, and adopts <em>at-most-once</em>.
+
+That last point has not changed in forty years. Without extra machinery (idempotency keys, a transactional outbox), you cannot guarantee that a network call executed exactly once.
+
+### 2.2 Sun RPC and XDR — RPC becomes infrastructure
+
+In the late 1980s Sun's ONC RPC (RFC 1050 → RFC 1831 → RFC 5531) spread widely as the substrate for NFS. Its <strong>XDR (External Data Representation, RFC 4506)</strong> is the direct ancestor of "language-independent, typed, binary encoding". Write the interface in an IDL, generate code — exactly the relationship `.proto` has with `protoc` today.
+
+### 2.3 The distributed-object era — CORBA, DCOM, Java RMI
+
+The 1990s swung toward treating objects as transparently remote: CORBA (OMG; 1.0 in 1991, IIOP from 2.0), Microsoft's DCOM (1996), Java RMI (JDK 1.1, 1997).
+
+None of them stuck at scale. Complexity was part of it, but the deeper cause is the "transparency lie" of the next section: <strong>something that looks exactly like a local object reference silently hangs for thirty seconds during a network partition</strong>. That experience drove architects away from RPC.
+
+### 2.4 XML-RPC → SOAP → WS-* — on HTTP, but not using HTTP
+
+XML-RPC (1998) and SOAP (1999–2000) chose HTTP because it traversed firewalls. But they used exactly one verb, `POST`, and put all semantics inside an XML envelope — textbook Level 0.
+
+Then came WS-Security, WS-ReliableMessaging, WS-Transaction, and the rest of the WS-* pile, until interoperability collapsed under its own weight. REST's rise was, more than anything, <strong>a reaction to that complexity</strong>.
+
+### 2.5 gRPC onward — RPC that gave up on transparency
+
+In 2015 Google released <strong>gRPC</strong>, a redesign of its internal Stubby (1.0 in 2016; accepted by the CNCF in February 2017 — and still an <em>incubating</em> project rather than a graduated one at the time of writing). The same year Facebook published <strong>GraphQL</strong>. Twitch open-sourced <strong>Twirp</strong> in 2018, Buf shipped <strong>Connect</strong> in 2022, and the TypeScript world produced <strong>tRPC</strong>.
+
+Modern RPC differs from 1990s distributed objects in one decisive way: <strong>it does not aim for transparency</strong>.
+
+- Deadlines are part of the protocol vocabulary (`grpc-timeout`). They are <em>not</em> mandatory, but the protocol gives you a place to enforce "every call sets one" as an organisational rule.
+- Failure appears in the type signature — `(resp, error)` in Go, `Result` in Rust.
+- Streaming is expressed as a distinct type, never hidden.
+
+Instead of pretending a remote call is local, modern RPC <strong>forces you to see that it is remote, through types and API shape</strong>. That is the endpoint of a forty-year learning curve.
+
+## 3. Why RPC kept failing — the transparency lie
+
+> <strong>In one line</strong>: There are four differences between local and remote calls that cannot be hidden. Every design that tried to hide them broke.
+
+### 3.1 A Note on Distributed Computing (1994)
+
+Jim Waldo and colleagues at Sun Labs wrote one of the most important short papers in distributed systems (TR-94-29). They gave four reasons why erasing the local/remote distinction fails in principle.
+
+| Difference | Why it breaks things | Modern mitigation |
+| --- | --- | --- |
+| <strong>Latency</strong> | Local calls are nanoseconds; remote calls are microseconds to milliseconds. A 10^3–10^6 gap is a difference of kind, not degree | Deadline propagation, batching, async APIs |
+| <strong>Memory access</strong> | Pointers are meaningless in another address space | Force pass-by-value (marshalling); never model references as types |
+| <strong>Partial failure</strong> | Locally, caller and callee die together. Remotely, <em>one side</em> dies — or its state becomes unknowable | Timeouts, retries + idempotency, circuit breakers |
+| <strong>Concurrency</strong> | A remote object is hit by many clients at once | Statelessness, optimistic locking (ETag / version) |
+
+<strong>Partial failure</strong> is the nastiest. When no response arrives, the client cannot distinguish "the request never landed" from "it was processed and the response was lost". That ambiguity is what forces the question "may I retry?" — and from there, the whole discipline of idempotency design.
+
+### 3.2 The eight fallacies of distributed computing
+
+L. Peter Deutsch's list (seven, circa 1994), with an eighth added by James Gosling. It still works as a checklist for evaluating any RPC design.
+
+1. The network is reliable.
+2. Latency is zero.
+3. Bandwidth is infinite.
+4. The network is secure.
+5. Topology doesn't change.
+6. There is one administrator.
+7. Transport cost is zero.
+8. The network is homogeneous.
+
+REST imposes "stateless", "cacheable", and "layered system" precisely to structurally resist these. RPC chose to answer the same problems inside the framework — deadlines, retry policies, load-balancer integration. <strong>Answer with a protocol, or answer with a library</strong>: that is the watershed.
+
+### 3.3 Why RPC survives anyway
+
+Even knowing transparency is a lie, RPC persists because <strong>"calling something" is a natural abstraction for humans</strong>.
+
+```go
+// readable
+user, err := userClient.GetUser(ctx, &pb.GetUserRequest{Id: 42})
+
+// also readable, but you must reassemble the meaning yourself
+resp, err := http.Get("https://api.example.com/v1/users/42")
+if err != nil { /* transport-level failure */ }
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusOK { /* classify HTTP-level failure yourself */ }
+var user User
+if err := json.NewDecoder(resp.Body).Decode(&user); err != nil { /* ... */ }
+```
+
+The difference is not line count. In the first form, <strong>types, errors, deadlines, retries, and trace propagation</strong> are all the framework's responsibility. In the second, the application writes them every time — or forgets to. <strong>What RPC sells is not speed; it is automated discipline.</strong>
+
+## 4. What REST really is — six constraints and what they buy
+
+> <strong>In one line</strong>: REST is a set of prohibitions, not features. Accept the prohibitions and you get <em>infrastructure you did not write</em> working on your behalf.
+
+### 4.1 The six architectural constraints
+
+Fielding's dissertation reverse-engineers why the Web scaled, and extracts these constraints.
+
+| Constraint | Content | What you get |
+| --- | --- | --- |
+| <strong>Client–server</strong> | Separate UI from data storage | Independent evolution |
+| <strong>Stateless</strong> | No server-side session state between requests | Horizontal scale; route to any node |
+| <strong>Cacheable</strong> | Responses declare their own cacheability | Fewer round trips; CDNs |
+| <strong>Uniform interface</strong> | All resources obey the same operation vocabulary | Generic clients and generic intermediaries |
+| <strong>Layered system</strong> | A client cannot tell whether it is talking to the origin | Freedom to insert proxies, LBs, gateways |
+| <strong>Code on demand</strong> (optional) | The server can ship code that extends the client | Shipping JS. The one optional constraint |
+
+<strong>Stateless</strong> is widely misread. It does not mean "no database". It means <em>session state between requests</em> must not live in server memory — which is exactly what lets a load balancer send any request to any node.
+
+### 4.2 The four sub-constraints of the uniform interface
+
+REST's core, and the part most often ignored.
+
+1. <strong>Identification of resources</strong> — a URI names a resource.
+2. <strong>Manipulation through representations</strong> — the client receives a <em>representation</em> (JSON, XML, HTML), not the resource itself, and sends one back to update it.
+3. <strong>Self-descriptive messages</strong> — each message carries enough information to be processed (`Content-Type`, `Cache-Control`, …).
+4. <strong>HATEOAS</strong> — hypermedia drives application state transitions.
+
+Number three is decisive. <strong>Because messages are self-descriptive, proxies, CDNs, WAFs, and browsers that know nothing about your domain can still do useful work.</strong> The cost of gRPC's opaque protobuf body shows up exactly here.
+
+### 4.3 Why HATEOAS never caught on
+
+The theory is elegant: the client only needs an entry point and follows links from there, so the server is free to reshape its URL space.
+
+In practice it barely happened, for clear reasons:
+
+- <strong>Clients hard-code anyway.</strong> Writing `/users/{id}` is cheaper than writing a generic link-following client.
+- <strong>It fights typed client generation.</strong> When clients are generated from OpenAPI, URLs are fixed at generation time.
+- <strong>Link relations still require domain knowledge.</strong> A machine cannot infer what `rel="cancel"` does.
+
+The exceptions that <em>did</em> succeed are <strong>pagination</strong> (`next` / `prev` links) and <strong>async jobs</strong> (`202 Accepted` plus a `Location` to poll). Both are cases where the client genuinely cannot construct the URL, so hypermedia earns its keep. Adopting hypermedia just there is the pragmatic settlement.
+
+If you do emit links, prefer an existing vocabulary — the `Link` header (RFC 8288), or HAL / JSON:API / Siren in the body — over inventing your own.
+
+### 4.4 Resource-oriented vs procedure-oriented — where do verbs go?
+
+This is where teams collide most often. `cancelOrder`, `sendEmail`, `reindexSearch` are plainly procedures, not resources.
+
+REST has three standard answers:
+
+| Approach | Example | When |
+| --- | --- | --- |
+| <strong>Update a state attribute</strong> | `PATCH /orders/42` with `status: "cancelled"` | Simple transition, few side effects |
+| <strong>Make the action a resource</strong> | `POST /orders/42/cancellations` | The action itself needs an ID, history, audit trail |
+| <strong>Custom method</strong> | `POST /v1/orders/42:cancel` | Nothing above fits. Google's API design guide (AIP-136) |
+
+The second is more powerful than it looks. <strong>Rewriting "cancel the order" as "create a cancellation resource"</strong> gives you idempotency on retry (same ID, no duplicate), async processing (return `202 Accepted`, finish later), and auditing (who cancelled, when) — all for free.
+
+On the gRPC side this dilemma simply does not exist: write `CancelOrder(CancelOrderRequest) returns (CancelOrderResponse)` and you're done. <strong>On raw expressiveness, RPC is the more honest fit.</strong>
+
+### 4.5 Designing collections — pagination and partial responses
+
+Resource-oriented or procedure-oriented, <strong>the "return a list" endpoint is the first thing that breaks</strong>. This design surface matters enormously in practice and is entirely independent of your protocol choice.
+
+<strong>Offset vs cursor</strong>
+
+| Aspect | Offset (`?offset=100&limit=20`) | Cursor (`?page_token=xxx&page_size=20`) |
+| --- | --- | --- |
+| Ease of implementation | Easy (`OFFSET` / `LIMIT`) | Fiddly — you must encode the sort key |
+| Deep-page performance | <strong>Poor</strong>; the database reads rows it throws away | Good; seeks directly via the index |
+| Tolerance of inserts/deletes | <strong>Weak</strong>; rows shift, causing duplicates and gaps | Strong; it points at a value, not a position |
+| "Jump to page N" | Possible | Not possible |
+| Total count | Fits page-number UIs, but an exact `COUNT(*)` is still expensive at scale | Expensive (separate query, or an estimate) |
+
+<strong>"The same item appears again on page 2" is almost always offset pagination.</strong> If the list can change while it is being read, make cursors the default.
+
+Three rules for implementing cursors:
+
+1. <strong>Use a stable sort key.</strong> `created_at` alone leaves ties unordered, so always append a <em>unique tiebreaker</em> — `(created_at, id)`.
+2. <strong>Keep the token opaque.</strong> Base64 is a useful URL-safe transport encoding, but <em>it does not by itself make a token opaque</em>. State that the internal format is not part of the contract, and sign it, encrypt it, or hand back a server-side handle when that matters. Publish the structure and clients will start constructing tokens themselves, freezing your internal sort order forever.
+3. <strong>Embed the query parameters in the token.</strong> If a filter or sort order changes mid-pagination the results are garbage, so carry the criteria in the token and detect the mismatch.
+
+Google's API design guide standardises this as `page_size` / `page_token` / `next_page_token`. The same shape works for REST and gRPC alike.
+
+```proto
+message ListUsersRequest {
+  int32  page_size  = 1;   // the server caps this; never trust the client's number
+  string page_token = 2;   // opaque; echo back the previous next_page_token
+}
+message ListUsersResponse {
+  repeated User users           = 1;
+  string        next_page_token = 2;  // empty string = last page
+}
+```
+
+<strong>Partial responses</strong> live at the same layer. "Returning every field is too heavy, but I don't want a bespoke endpoint" gets these answers:
+
+| Style | Mechanism | Drawback |
+| --- | --- | --- |
+| REST | `?fields=id,name`, JSON:API sparse fieldsets | Non-standard syntax; it fragments the cache key (needs `Vary`-style thought) |
+| gRPC | `google.protobuf.FieldMask` in the request | Decorative unless the server actually implements it |
+| GraphQL | The selection set itself | Built into the core of the model |
+
+FieldMask is not only about narrowing reads; it also fixes <strong>update semantics</strong>. Adding `update_mask` to `UpdateUser` states explicitly that "fields not named in the mask are left alone" — think of it as expressing the `PATCH` vs `PUT` distinction in the type system. <em>For AIP-134-style partial updates, FieldMask is the standard mechanism. On top of that, because proto3 implicit presence (§5.4) cannot distinguish "unset" from "zero", any field you need to <strong>update to a zero value</strong> also wants explicit presence, such as `optional`.</em>
+
+## 5. What actually happens on the wire
+
+> <strong>In one line</strong>: "gRPC is fast" decomposes into three separable things — header compression, multiplexing, and schema-driven metadata removal.
+
+### 5.1 REST / JSON over HTTP/1.1
+
+An entirely ordinary request for one user:
+
+```http
+GET /v1/users/42 HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Accept-Encoding: gzip, br
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+User-Agent: acme-client/1.4.2
+Traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: private, max-age=60
+ETag: "a1b2c3d4"
+Vary: Accept-Encoding
+Content-Length: 36
+
+{"id":42,"name":"Ada","active":true}
+```
+
+Look at the <strong>ratio</strong>. The body is 36 bytes; the request headers run to several hundred bytes — sometimes past a kilobyte — once a JWT, trace context, and user-agent are present. HTTP/1.1 has <strong>no header compression</strong>, so those hundreds of bytes are re-sent <em>as uncompressed header fields on every request</em> (TLS encrypts them; it does not compress them). For fine-grained service-to-service calls, <strong>headers routinely outweigh payloads</strong>.
+
+HTTP/1.1 also handles one request at a time per connection (pipelining is effectively dead), so concurrency comes from opening more connections — and most browser implementations cap HTTP/1.1 connections at roughly six per origin.
+
+### 5.2 gRPC over HTTP/2 — the frames
+
+gRPC is a thin RPC protocol layered on HTTP/2. The same call looks like this:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    Note over C,S: one HTTP/2 stream (id 3)
+    C->>S: HEADERS — path /users.v1.UserService/GetUser, te trailers
+    C->>S: DATA — 5B prefix + 9B protobuf, END_STREAM
+    S->>C: HEADERS — status 200, content-type application/grpc
+    S->>C: DATA — length-prefixed response message
+    S->>C: HEADERS (trailers) — grpc-status 0, END_STREAM
+```
+
+Representative headers for this call — the required ones plus the commonly used optional ones:
+
+```text
+:method       = POST
+:scheme       = https
+:path         = /users.v1.UserService/GetUser
+:authority    = api.example.com
+te            = trailers
+content-type  = application/grpc+proto
+grpc-timeout  = 1S
+grpc-encoding = identity
+```
+
+Of these, only `:method`, `:scheme`, `:path`, `content-type`, and `te: trailers` are required by the spec; `grpc-timeout` and `grpc-encoding` are <strong>optional</strong>. Three design decisions are visible here:
+
+1. <strong>`:path` <em>is</em> the service and method name</strong>, in the fixed form `/{package}.{Service}/{Method}`. The URL names a procedure, not a resource.
+2. <strong>`te: trailers` is mandatory.</strong> gRPC returns final success/failure in <em>trailers</em> — headers that arrive after the body — and the spec requires this header so that intermediaries which cannot handle trailers are detected. Trailers are <em>one</em> reason gRPC assumes HTTP/2; multiplexing, flow control, and per-stream cancellation matter just as much.
+3. <strong>`grpc-timeout` propagates a deadline.</strong> The value is a positive integer of at most 8 digits plus a unit — `H` hours, `M` minutes, `S` seconds, `m` milliseconds, `u` microseconds, `n` nanoseconds — so you write `1S` or `980m`. <em>`1000ms` is not valid syntax.</em> REST has no equivalent, and this is one of gRPC's biggest operational advantages (§7.5).
+
+### 5.3 Why trailers are necessary
+
+An HTTP status code is sent at the <em>start</em> of the response. But in server streaming you can send `200 OK`, stream a hundred rows, and only then have the database fall over. <strong>At that point the status line cannot be rewritten.</strong>
+
+gRPC solves this with trailers sent after the body:
+
+```text
+grpc-status: 13
+grpc-message: internal error while streaming rows
+```
+
+HTTP/1.1 trailers (with `Transfer-Encoding: chunked`) are too patchily implemented to rely on. Hence HTTP/2.
+
+### 5.4 Protobuf encoding, one byte at a time
+
+Protobuf's core is startlingly simple. Every field is <strong>a tag (field number &lt;&lt; 3 | wire type) followed by a value</strong>.
+
+| Wire type | Name | Used for |
+| --- | --- | --- |
+| 0 | VARINT | int32/int64/uint/bool/enum |
+| 1 | I64 | fixed64, sfixed64, double |
+| 2 | LEN | string, bytes, embedded messages, packed repeated |
+| 3 / 4 | SGROUP / EGROUP | deprecated (groups; historical) |
+| 5 | I32 | fixed32, sfixed32, float |
+
+<ProtobufWireVisualizer />
+
+Three practical consequences follow:
+
+- <strong>Field numbers 1–15 have a one-byte tag</strong> (16–2047 take two). Give your hottest and most repeated fields low numbers.
+- <strong>Under proto3 implicit presence, zero-valued fields never reach the wire.</strong> `0` / `false` / `""` are encoded by <em>omission</em> — which means you cannot distinguish "unset" from "explicitly zero". If you need that distinction, prefer proto3 `optional` for explicit presence (enabled by default since protoc 3.15). Wrapper types such as `google.protobuf.Int32Value` have receded to a fallback for older toolchains or JSON `null` interoperability.
+- <strong>Serialization is not deterministic.</strong> Field ordering and unknown-field handling depend on implementation and version, so <em>never hash protobuf bytes to build a signature or an idempotency key</em>. This is a common and expensive mistake.
+
+### 5.5 Actually counting the bytes
+
+"Protobuf is smaller than JSON" is true, but <strong>how much smaller depends heavily on the shape of your data</strong>. Numeric-heavy records shrink dramatically; long free text barely moves.
+
+<WireFormatLab />
+
+The most important caveat: <strong>gzip or brotli closes most of the gap</strong>. Most of JSON's redundancy is <em>repeated key names</em>, which is exactly the pattern compressors excel at. If bandwidth is your only motivation, enabling <code>Content-Encoding: br</code> may buy nearly the same win at zero migration cost.
+
+What compression does <em>not</em> remove:
+
+- <strong>CPU cost</strong> — JSON parsing means string scanning, escape handling, and number conversion; length-prefixed binary is intrinsically cheaper.
+- <strong>The guarantees a schema provides</strong> — types, presence, and compatibility checking are not byte-count concerns at all. Long term, this is the larger prize.
+
+### 5.6 The browser wall — gRPC-Web and Connect
+
+Browser `fetch` / `XMLHttpRequest` cannot drive HTTP/2 frames directly: no reading trailers, no touching request flow control. So <strong>a browser cannot speak native gRPC</strong>.
+
+Two answers exist:
+
+- <strong>gRPC-Web</strong> — a variant that embeds trailers as a special frame at the end of the body. It needs either a server that speaks gRPC-Web directly or a translating proxy (for example Envoy's `grpc_web` filter), and it supports neither client streaming nor bidirectional streaming.
+- <strong>Connect</strong> — Buf's protocol. `POST /pkg.Service/Method` with `application/json` or `application/proto`, so <strong>unary calls work with plain curl</strong>. One server can speak gRPC, gRPC-Web, and Connect simultaneously.
+
+```bash
+# With Connect you can debug without generated code or a proxy
+curl -X POST https://api.example.com/users.v1.UserService/GetUser \
+  -H "Content-Type: application/json" \
+  -d '{"id": 42}'
+```
+
+<strong>"Can I hit it with curl?" affects operational cost more than people expect</strong> — incident triage, support, and explaining things to external partners all depend on it.
+
+## 6. Contracts — IDLs and schema evolution
+
+> <strong>In one line</strong>: gRPC's real value is not speed; it is that <em>the schema breaks your build</em>. You can get the same discipline with REST, but only if you deliberately build it.
+
+### 6.1 A `.proto` can be the single source of truth
+
+```proto
+syntax = "proto3";
+package users.v1;
+
+message User {
+  int32  id     = 1;
+  string name   = 2;
+  string email  = 3;
+  bool   active = 4;
+}
+
+message GetUserRequest  { int32 id = 1; }
+message GetUserResponse { User user = 1; }
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+}
+```
+
+From this, client and server stubs are generated for Go, TypeScript, Java, Python. What matters is not that generation is fast — it is that <strong>a contract violation becomes a compile error</strong>. Remove a field on the server and the client's build fails, in CI, before anyone notices in production.
+
+### 6.2 OpenAPI usually describes rather than drives
+
+The same discipline is achievable with OpenAPI (3.1 aligns with JSON Schema 2020-12), and some teams do run schema-first. But in practice you see:
+
+| Practice | What happens |
+| --- | --- |
+| <strong>Code-first</strong> (generate OpenAPI from implementation annotations) | The spec never lies, because it follows the code. But it <em>cannot stop</em> a breaking change |
+| <strong>Schema-first</strong> (generate server/client from OpenAPI) | Equivalent discipline to gRPC. Toolchain maturity varies a lot by language |
+| <strong>Hand-written docs</strong> | Will drift from the implementation. The <em>worst</em> option |
+
+<strong>A large fraction of the "gRPC or REST" debate is really a debate about whether a schema is enforced.</strong> Go schema-first with REST and add breaking-change detection in CI, and the gap narrows sharply.
+
+### 6.3 Backward-compatibility rules
+
+Protobuf's compatibility rules double as a textbook on API evolution.
+
+| Change | Safe? | Notes |
+| --- | --- | --- |
+| Add a field (new number) | ✅ | Old clients preserve or ignore it as an unknown field |
+| Remove a field | ⚠️ | Always mark the number `reserved`. Reuse is catastrophic |
+| Rename a field | ✅ on the wire | But JSON mapping and generated code break |
+| Change a field number | ❌ | It becomes a different field |
+| Change a type | ⚠️ conditionally | `int32`/`int64`/`uint32`/`uint64`/`bool` are <em>wire-compatible</em>, but not automatically safe: out-of-range values truncate and change meaning. `sint32`/`sint64` are compatible with each other but not with the other integer types |
+| Add `optional` | ⚠️ | Presence semantics change |
+| Add an enum value | ⚠️ | Old clients receive an unknown value. Always make 0 an `UNSPECIFIED` sentinel |
+| Move an existing field into a `oneof` | ⚠️ conditionally | Safe only for a single <em>explicit-presence</em> field (or an extension) moved into a <em>new</em> `oneof`; moving into an existing `oneof`, or moving multiple fields, is unsafe |
+| `repeated` ↔ singular | ⚠️ conditionally | Breaks around packed scalar encoding; message types are safer but the semantics still change |
+
+```proto
+message User {
+  reserved 3;             // seal the removed field number
+  reserved "email";       // and the name
+  int32  id   = 1;
+  string name = 2;
+}
+```
+
+<strong>ProtoJSON — protobuf's canonical JSON mapping — is a separate hazard.</strong> If you expose JSON through grpc-gateway, Connect, or `protojson`, "wire-compatible therefore safe" no longer holds.
+
+- <strong>Renaming a field</strong> is harmless on the wire but changes the JSON key, so it is <em>breaking</em>. If you must rename, pin the old key with `json_name`.
+- <strong>Enums serialise as their names by default</strong>, so renaming an enum value is a breaking change on the JSON side.
+- <strong>Adding enum values is also risky in JSON.</strong> Because names are on the wire, an older parser can fail on a newly added name. Adding values is JSON-wire-safe only if every relevant client is configured to emit enums <em>as integers</em>; how unknown numeric values are then represented varies by language runtime.
+
+The equivalent rules for JSON APIs:
+
+- <strong>Adding is safe</strong> — unless the client throws on unknown fields (Jackson's `FAIL_ON_UNKNOWN_PROPERTIES` is on by default). Configure <em>tolerant reading</em> explicitly.
+- <strong>Removing or retyping is breaking.</strong> Changing `"id": 42` into `"id": "42"` fails silently in dynamically typed clients.
+- <strong>Adding a value to a string enum</strong> can also be breaking.
+
+### 6.4 Versioning — three schools
+
+| Approach | Example | Assessment |
+| --- | --- | --- |
+| URL path | `/v1/users`, `/v2/users` | Most common. Highly visible, trivial to route. Coarse — the whole API moves at once |
+| Media type | `Accept: application/vnd.acme.user+json;version=2` | Purest REST. But CDN cache keys and WAFs handle it poorly |
+| Field-level evolution | Add only, never remove | Protobuf's default. Removes the concept of a version entirely |
+
+Putting `users.v1` in the protobuf package name means: <strong>"create a whole new package only when field-level evolution can no longer absorb the change."</strong> Functionally that is URL-path versioning — the advantage is that you reach it orders of magnitude less often.
+
+### 6.5 Be careful how widely you share the contract
+
+Centralising every `.proto` into one company-wide repository looks ideal and produces <strong>tight coupling</strong>: one team edits `common.proto` and the whole company's builds are affected.
+
+Practical guidance:
+
+- <strong>Each service owns its `.proto`.</strong> Keep shared types minimal and prefer the existing `google.protobuf.*` / `google.type.*`.
+- <strong>Distribute through a schema registry</strong> (e.g. the Buf Schema Registry) — neither copy-paste nor a giant monorepo.
+- <strong>Run breaking-change detection in CI</strong> (`buf breaking`). This is the highest-ROI setting in gRPC operations.
+
+Treat the registry as a <strong>governance mechanism</strong>, not a storage location. At minimum, decide these five things:
+
+| Question | What to settle |
+| --- | --- |
+| <strong>Ownership</strong> | One team owns each module (≈ service) and is the only team that can push to it |
+| <strong>Breaking-change policy</strong> | BSR-side breaking-change checks — available on Enterprise dedicated/private BSR instances — enforce `FILE` (the default) or `WIRE_JSON` when enabled; local `buf breaking` can also use `PACKAGE` or `WIRE`. Keep stable packages backward-compatible by default and ship unavoidable breaks as a new package (`v2`) |
+| <strong>Review</strong> | Changes to `.proto` files that constitute a public API require a reviewer from the consuming side |
+| <strong>Artifacts</strong> | Publish generated code from the registry, so teams aren't each running `protoc` at drifting versions |
+| <strong>The escape hatch</strong> | Write down the procedure for pushing a breaking change anyway: who approves, how it's announced, when it lands |
+
+<strong>A registry policy missing that last row will eventually be ignored.</strong> A rule of "you may never break this" gets routed around the moment breaking becomes necessary. <em>Providing a sanctioned route is what actually keeps the rule intact.</em>
+
+### 6.6 How to remove things — API lifecycle
+
+Adding is easy; removing is hard. <strong>If you don't decide up front how things get deleted, the API only ever grows.</strong> Every layer offers a machine-readable way to signal deprecation.
+
+| Layer | Mechanism | Effect |
+| --- | --- | --- |
+| HTTP | `Deprecation` header (RFC 9745 — when deprecation is or will be in effect; the date may be past or future) + `Sunset` header (RFC 8594, when it stops working) + `Link` with `rel="deprecation"` | Clients can automate logging and alerting |
+| OpenAPI | `deprecated: true` | Generated clients emit warnings |
+| Protobuf | `option deprecated = true;` on fields, methods, or messages | Generated code carries compiler warnings |
+
+```proto
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option deprecated = true;  // generated code emits a warning
+  }
+}
+```
+
+The most important part is <strong>measurement</strong>. Emit a metric for "who is still calling the old endpoint", labelled by caller identity (`User-Agent`, API key, client ID). Without it you can neither set a sunset date nor act on one. <em>An API you cannot retire is an API you maintain forever.</em>
+
+### 6.7 Enforcing the contract — what belongs in CI
+
+A schema you don't check in CI is just documentation. <strong>Whether you find out you broke something in CI or in production</strong> accounts for almost all of a contract's value.
+
+Checks come in three layers:
+
+| Layer | What it catches | Example tooling |
+| --- | --- | --- |
+| <strong>Syntax and style</strong> | Naming-convention violations, missing comments | `buf lint`, Spectral (OpenAPI) |
+| <strong>Breaking changes</strong> | Removed fields, changed numbers, changed types | `buf breaking` (diff against the previous version), oasdiff |
+| <strong>Behaviour</strong> | "The schema matches but the behaviour changed" | Consumer-driven contract tests (Pact et al.), compiling generated clients |
+
+The first two layers are easy to automate and enormously cost-effective. <strong>If you adopted `.proto` but never wired `buf breaking` into CI, you threw away half of gRPC's main benefit.</strong>
+
+The third layer is the interesting one. A schema only constrains <em>shape</em>. All of these are schema-clean and still break consumers:
+
+- An optional field that was always populated stops being populated.
+- The sort order changes, destroying pagination stability.
+- An endpoint that returned an empty array starts returning `null`.
+- An error code changes from `NOT_FOUND` to `PERMISSION_DENIED` (correct as an information-leak fix, fatal to the client's branching).
+
+<strong>Consumer-driven contract testing</strong> has the consumer write down its concrete expectations as tests, which the provider's CI then verifies. Pact is the best-known tool, but the idea matters more than the tool: <em>a provider only has to preserve the parts that are actually used, not its entire surface</em>.
+
+A realistic minimum:
+
+1. Make `buf breaking` (or an OpenAPI diff check) a required check in the provider's CI.
+2. Keep representative consumer request/response examples as <strong>golden files</strong> in the provider's repository, so any change forces an explicit diff review.
+3. For your most important consumers, compile their generated clients in the provider's CI.
+
+That alone stops most incidents before release.
+
+## 7. Error design — where the real difference shows
+
+> <strong>In one line</strong>: An error must be a structure a machine can branch on, not a string a human reads — otherwise you cannot write retries or fallbacks.
+
+### 7.1 The semantics of HTTP status codes
+
+REST's strength is that <strong>the coarse classification of errors is built into the protocol</strong>, so intermediaries (LBs, CDNs, SDK retry layers) can act without understanding the payload.
+
+| Code | Meaning | Retry |
+| --- | --- | --- |
+| 400 | Malformed request | ❌ Same result until fixed |
+| 401 / 403 | Unauthenticated / forbidden | ❌ (401 is retryable after refreshing a token) |
+| 404 | No such resource | ❌ |
+| 409 | State conflict | ⚠️ Depends on state |
+| 412 | Precondition failed (`If-Match` mismatch) | ⚠️ After re-reading |
+| 422 | Syntactically valid, semantically unprocessable | ❌ |
+| 429 | Rate limited | ✅ Honour `Retry-After` |
+| 500 | Server error | ⚠️ Only for idempotent operations |
+| 503 | Temporarily unavailable | ✅ `Retry-After` |
+
+Two common abuses:
+
+- <strong>Always returning 200 and signalling failure in a `{"error": ...}` body.</strong> This completely disables retry logic in intermediaries and client SDKs. GraphQL's <em>execution</em> errors tend to arrive as 200 plus an `errors` array as a consequence of its single-endpoint design — but an ordinary HTTP API has no reason to copy that.
+- <strong>Confusing 4xx and 5xx.</strong> Returning 500 for a validation error poisons your error-rate monitoring, triggers pointless retries, and corrupts your SLO. <strong>4xx is the caller's fault; 5xx is yours.</strong> Hold that line.
+
+### 7.2 A standard error body — RFC 9457
+
+There is a standard for structuring error details: RFC 9457, <em>Problem Details for HTTP APIs</em> (successor to RFC 7807).
+
+```json
+{
+  "type": "https://api.example.com/problems/insufficient-funds",
+  "title": "Insufficient funds",
+  "status": 409,
+  "detail": "Account 42 has a balance of 30 USD; 50 USD required.",
+  "instance": "/accounts/42/transfers/8f2b",
+  "balance": 30,
+  "required": 50
+}
+```
+
+Return it as `Content-Type: application/problem+json`. `type` is a <strong>stable, machine-readable identifier</strong> and is what clients should branch on. `detail` is for humans — <em>never branch on it</em>, because rewording will break callers.
+
+### 7.3 The gRPC error model
+
+gRPC has 17 fixed status codes (0–16), finer-grained than HTTP and designed to be a <strong>strong input into retry decisions</strong>.
+
+| Code | Name | Typical meaning |
+| --- | --- | --- |
+| 0 | OK | Success |
+| 1 | CANCELLED | The caller cancelled |
+| 2 | UNKNOWN | Unknown error, including errors converted from another error space |
+| 3 | INVALID_ARGUMENT | Argument invalid regardless of state |
+| 4 | DEADLINE_EXCEEDED | Deadline expired |
+| 5 | NOT_FOUND | No such entity |
+| 6 | ALREADY_EXISTS | Entity already exists |
+| 7 | PERMISSION_DENIED | Not authorised |
+| 8 | RESOURCE_EXHAUSTED | Quota or rate limit |
+| 9 | FAILED_PRECONDITION | System state forbids it (<em>retrying is pointless</em>) |
+| 10 | ABORTED | Aborted due to a conflict (<em>retry at a higher level, e.g. read-modify-write</em>) |
+| 11 | OUT_OF_RANGE | Past the valid range |
+| 12 | UNIMPLEMENTED | Not implemented |
+| 13 | INTERNAL | Internal error |
+| 14 | UNAVAILABLE | Transient unavailability (<em>safe to retry</em>) |
+| 15 | DATA_LOSS | Unrecoverable data loss or corruption |
+| 16 | UNAUTHENTICATED | Not authenticated |
+
+<strong>Distinguishing 9 / 10 / 11</strong> is the most valuable part of gRPC's error design. The official guidance: `FAILED_PRECONDITION` means the client should not retry until the system state is fixed; `ABORTED` means a higher-level retry (read-modify-write) will help; `OUT_OF_RANGE` may succeed once state changes. Those three distinctions alone let you write most retry logic mechanically. But <strong>the code alone does not settle whether an automatic retry is safe</strong>: for a non-idempotent operation, even `UNAVAILABLE` leaves open the possibility that the request landed (§7.4).
+
+Structured detail rides in `google.rpc.Status.details`:
+
+```proto
+// google/rpc/error_details.proto provides the standard types:
+// ErrorInfo, RetryInfo, QuotaFailure, BadRequest, PreconditionFailure, ...
+message Status {
+  int32 code = 1;
+  string message = 2;
+  repeated google.protobuf.Any details = 3;
+}
+```
+
+`RetryInfo` says "retry after N seconds", `QuotaFailure` says which quota was hit, `BadRequest` says which field was invalid and why — all machine-readable. <strong>The REST equivalent is building the same thing yourself as RFC 9457 extension members.</strong>
+
+Put them side by side and the distance is smaller than it looks. Returning a validation error:
+
+```json
+// REST — RFC 9457 plus an "errors" extension member
+{
+  "type": "https://api.example.com/problems/validation-error",
+  "title": "Your request is not valid.",
+  "status": 422,
+  "errors": [
+    { "detail": "must be a positive integer", "pointer": "#/amount" },
+    { "detail": "must be a valid ISO 4217 code", "pointer": "#/currency" }
+  ]
+}
+```
+
+```proto
+// gRPC — code = INVALID_ARGUMENT, with BadRequest in details
+// (abridged; current FieldViolation also carries reason / localized_message)
+message BadRequest {
+  message FieldViolation {
+    string field = 1;        // "amount"
+    string description = 2;  // "must be a positive integer"
+  }
+  repeated FieldViolation field_violations = 1;
+}
+```
+
+The structures are near-isomorphic. The difference is only <strong>whether the standard type ships with the platform or your team has to agree on one</strong>. RFC 9457 does not specify extension member names (`errors` and `pointer` above), so <em>your organisation must pick one shape and hold every API to it</em>. Skip that step and you end up with `errors` in one service, `violations` in another, and `fieldErrors` in a third — at which point no shared client-side handler is possible. <strong>That is not a technology gap; it is a question of who owns the convention.</strong>
+
+### 7.4 Retries and idempotency — RPC's sore spot
+
+Partial failure (§3.1) bites here: <strong>a timed-out request may or may not have executed</strong>.
+
+REST solves part of this through HTTP method semantics (RFC 9110):
+
+- <strong>Safe</strong>: `GET`, `HEAD`, `OPTIONS`, `TRACE` — no state change.
+- <strong>Idempotent</strong>: the above plus `PUT`, `DELETE` — repeating yields the same result.
+- <strong>Not defined as idempotent by default</strong>: `POST`, `PATCH`. Individual resource semantics or an idempotency key can still make a specific operation safe to repeat.
+
+So a generic HTTP client can treat idempotent methods as retry candidates when a communication failure prevented it from reading the response, while declining to auto-retry non-idempotent methods without extra knowledge. <strong>That knowledge is embedded in the protocol, so no application has to write it.</strong>
+
+To make `POST` idempotent, use a client-generated key — the `Idempotency-Key` header popularised by Stripe, currently an IETF HTTPAPI Working Group Internet-Draft rather than a published RFC:
+
+```http
+POST /v1/payments HTTP/1.1
+Idempotency-Key: 8f2b1c40-3d2e-4f9a-9b1e-6c7a0d5e2f13
+Content-Type: application/json
+
+{"amount": 5000, "currency": "JPY"}
+```
+
+Accepting the header is not enough; the server needs four disciplines:
+
+1. <strong>Key scope</strong> — uniqueness should be per (endpoint × authenticated principal × key). A globally unique namespace invites cross-tenant key collisions.
+2. <strong>Request fingerprinting</strong> — store a fingerprint of the payload and reject a <em>same key, different body</em> replay with `422 Unprocessable Content`, as the Idempotency-Key draft specifies. Reserve `409 Conflict` for a retry that arrives while the original request is still outstanding. Silently returning the old result is the worst outcome.
+3. <strong>Response replay</strong> — persist the first response (status and body) and return exactly that for retries.
+4. <strong>TTL and in-flight state</strong> — expire after roughly 24 hours, and return `409` when a retry arrives while the original is still processing, so the work never runs twice.
+
+gRPC cannot infer idempotency from a method name (`CreateUser` may or may not be idempotent), so <strong>you declare a retry policy in the service config</strong>:
+
+```json
+{
+  "methodConfig": [{
+    "name": [{ "service": "users.v1.UserService", "method": "GetUser" }],
+    "retryPolicy": {
+      "maxAttempts": 4,
+      "initialBackoff": "0.1s",
+      "maxBackoff": "2s",
+      "backoffMultiplier": 2,
+      "retryableStatusCodes": ["UNAVAILABLE", "RESOURCE_EXHAUSTED"]
+    }
+  }]
+}
+```
+
+Always use <strong>exponential backoff with jitter and a hard cap on total attempts</strong>. Naive retries <em>amplify</em> a partial failure into a total one — a retry storm. gRPC's retry throttling (`retryThrottling`) exists precisely to damp that amplification. I covered the same amplification dynamics in the [LLM load-balancing article](/en/blog/llm-load-balancing).
+
+### 7.5 Deadline propagation — a weapon REST has no answer to
+
+A gRPC client sets a deadline, and it <strong>propagates downstream automatically</strong> via `grpc-timeout`:
+
+```text
+Client (deadline 1000ms)
+  └─ Gateway        980ms left  → grpc-timeout: 980m
+       └─ OrderSvc  940ms left  → grpc-timeout: 940m
+            └─ DB   900ms left
+```
+
+Why this matters: without deadlines, <strong>downstream services keep grinding on work the client abandoned long ago</strong>. During an incident that wasted work exhausts resources and delays recovery.
+
+But <strong>propagation is not magic</strong>. It works only because you pass the incoming call context (Go's `ctx`, Java's `Context`) into every outgoing call. Handing work to a worker pool, rebuilding with `context.Background()`, or firing an async task all quietly break the deadline chain. The discipline of threading context through comes with the feature.
+
+You can do the same in REST, but <strong>you have to build it</strong>: there is no standard header, so you define something like `X-Request-Deadline` and implement parsing, decrementing, and propagation in every service's middleware — the composition patterns from the [middleware chain article](/en/blog/middleware-chain-pattern) apply directly. <strong>A textbook case of "the framework does it, or you do".</strong>
+
+## 8. Interaction patterns
+
+> <strong>In one line</strong>: REST has exactly one shape — request/response — and everything else is a workaround. gRPC has four shapes as first-class types. But a stream is not a message queue.
+
+### 8.1 gRPC's four shapes
+
+```proto
+service Chat {
+  rpc Send(Msg) returns (Ack);                       // unary
+  rpc Subscribe(Filter) returns (stream Event);      // server streaming
+  rpc Upload(stream Chunk) returns (Summary);        // client streaming
+  rpc Session(stream Msg) returns (stream Msg);      // bidirectional
+}
+```
+
+Each maps to <strong>one HTTP/2 stream</strong>, with ordering guarantees and flow control (`WINDOW_UPDATE`). Cancellation propagates immediately via `RST_STREAM`.
+
+### 8.2 The REST equivalents
+
+| Need | REST approach | Drawback |
+| --- | --- | --- |
+| Continuous server → client notifications | SSE (`text/event-stream`) | One-directional; occupies a connection on HTTP/1.1 |
+| Bidirectional | WebSocket | Upgrades away from HTTP; no longer REST |
+| Large uploads | Chunked transfer, multipart, append via `PATCH` | No standard for resume or progress |
+| Async jobs | `202 Accepted` + `Location` + polling | Polling interval vs. scale trade-off |
+| Event notification | Webhooks | Delivery guarantees, signature verification, retries are all DIY |
+
+Worth noting: <strong>LLM token streaming has settled on SSE</strong> in practice. OpenAI-compatible APIs and [AG-UI](/en/blog/ag-ui-protocol) use it directly. [MCP](/en/blog/model-context-protocol) is a slightly different case: its early "HTTP+SSE" transport was superseded by <strong>Streamable HTTP</strong>, where SSE is an <em>optional</em> response format a server may choose when returning multiple messages for one POST — not the transport itself. Either way, what wins is that SSE works straight from a browser and rides existing HTTP infrastructure.
+
+### 8.3 Don't use streams as a message queue
+
+gRPC bidirectional streaming is powerful, but <strong>it is not durable</strong>:
+
+- Drop the connection and messages are gone.
+- Restart the server and every stream dies.
+- There is backpressure, but no persistent buffer.
+- A slow client accumulates memory on the server.
+
+If you want pub/sub, use Kafka, NATS, or a managed Pub/Sub. gRPC streams fit data that <strong>only matters while the connection is alive</strong> — live telemetry, progress of an in-flight job, tokens in an ongoing conversation.
+
+### 8.4 The chatty-API problem
+
+RPC-style designs accumulate fine-grained methods:
+
+```text
+GetUser(42) → GetUserOrders(42) → GetOrderItems(o1), GetOrderItems(o2), ...
+```
+
+One millisecond per call becomes 100 ms at a hundred calls. <strong>N+1 is not only a database phenomenon.</strong> Three remedies:
+
+1. <strong>Provide batch methods</strong> (`BatchGetOrders`) — the standard pattern in Google's API design guide.
+2. <strong>Add an aggregation layer (BFF)</strong> close to the client.
+3. <strong>Let the client choose</strong> — GraphQL, or REST's `?fields=` / `?expand=`.
+
+### 8.5 Flow control and backpressure
+
+If you stream, you cannot avoid the <strong>fast producer / slow consumer</strong> problem. This is one of the few places where gRPC and REST genuinely differ in <em>capability</em>, not just style.
+
+HTTP/2 maintains flow-control windows at two levels: <strong>per connection</strong> and <strong>per stream</strong>. The receiver returns `WINDOW_UPDATE` for what it has consumed, and the sender blocks once the window is exhausted. In other words, <strong>backpressure is built into the transport</strong> — a slow reader automatically throttles the writer.
+
+Exactly how this plays out <strong>depends on the runtime and its buffer settings</strong>. In most gRPC implementations, if the application stops calling `Recv` / read, HTTP/2 window credit eventually stops flowing back and the sender feels the pressure. But if the receive loop keeps draining into an internal queue, the transport sees the bytes as consumed and <em>backpressure stops at that queue instead</em>. Two common ways to break it:
+
+- <strong>Draining the receive loop straight into an internal queue.</strong> As far as the transport is concerned the bytes are consumed, so the window stays open, backpressure vanishes, and <em>your application heap overflows instead</em>. Bound the buffer and stop reading when it is full.
+- <strong>Queueing non-blocking sends.</strong> Go's `stream.Send` blocks, but some language bindings expose an API that merely enqueues — with exactly the same result.
+
+On the REST side, neither SSE nor the standard WebSocket API offers <strong>event-level application backpressure</strong>. WebSocket's `bufferedAmount` lets you <em>observe</em> the local send queue but does not throttle the producer for you (`WebSocketStream` does address backpressure, but it is not yet the common baseline). SSE carried over HTTP/2 does get transport-level flow control. Either way, the actual throttle — subscriber-specified rates, acknowledgements, sampling, coalescing — is <em>yours to design</em>.
+
+<strong>The design rule</strong>: never default to "send as fast as you can". The classic failure is one slow consumer eating the server's memory and <em>degrading every other client</em>. Pair a bounded buffer with an explicit disconnect policy — drop subscribers that fail to keep up for some interval.
+
+## 9. Performance — decomposing "faster"
+
+> <strong>In one line</strong>: In most real services the wire format accounts for a few percent of latency. Measure where the time goes before you choose.
+
+### 9.1 Decompose the latency budget
+
+<ApiLatencyBudgetLab />
+
+Move the sliders and the pattern is clear: <strong>when RTT and backend work dominate, changing the format barely moves total latency</strong>. Benchmarks claiming "gRPC is 7× faster than REST" are usually measured under one of these conditions:
+
+- Measured on localhost (RTT ≈ 0), erasing the network term and inflating serialization's share.
+- An empty backend (echo), erasing the dominant term.
+- Enormous payloads, making transfer and parsing dominant.
+- No connection reuse on the HTTP/1.1 side, so handshake cost is counted.
+- Many small requests with large headers, where HTTP/2's HPACK genuinely wins (<em>this one is real</em>).
+
+That last case matters in practice: tens of thousands of small JWT-bearing requests per second between services really do benefit from header compression. <strong>But that is HTTP/2 winning, not gRPC — run REST over HTTP/2 and you get the same benefit.</strong>
+
+### 9.2 What actually helps, in order
+
+Ordered by real-world impact:
+
+1. <strong>Make fewer calls</strong> (batching, caching, killing N+1). Orders of magnitude.
+2. <strong>Reuse connections</strong> (keep-alive, connection pools). A handshake costs several RTTs.
+3. <strong>Enable compression.</strong> Dramatic for JSON.
+4. <strong>Use HTTP/2 or later.</strong> Multiplexing and header compression.
+5. <strong>Shrink payloads</strong> (stop returning fields nobody reads).
+6. <strong>Change the serialization format.</strong> Only now.
+
+<strong>A remarkable number of projects start at step 6</strong> — understandable, because it needs no measurement and feels like a satisfying technology decision. It is also the lowest-ROI move on the list.
+
+### 9.3 Throughput and the tail
+
+Look at <strong>p99</strong> rather than the mean and different factors surface:
+
+- <strong>GC pressure</strong>: JSON parsing allocates large numbers of short-lived objects. Generated protobuf code writes into preallocated structs, allocating far less. Under high throughput <em>this can dominate p99</em> (see the [GC article](/en/blog/garbage-collection)).
+- <strong>TCP-level head-of-line blocking in HTTP/2</strong>: a lost packet stalls every stream on that connection. HTTP/3 (QUIC) fixes this, though gRPC-over-HTTP/3 support varies by implementation.
+- <strong>Connection count and congestion control</strong>: fewer connections means the congestion window ramps faster, but one stalled connection affects more requests.
+
+### 9.4 What a fair benchmark requires
+
+A "gRPC vs REST" benchmark is close to meaningless unless its conditions are stated. Check these — both when you measure and when you read someone else's numbers:
+
+1. <strong>Same HTTP version on both sides?</strong> If it is gRPC on HTTP/2 versus REST on HTTP/1.1, you are mostly measuring the HTTP version.
+2. <strong>Are connections warm?</strong> Warm up first, and don't silently include a TLS handshake per request (or, if you do, say so).
+3. <strong>Is the runtime warm?</strong> JVM, .NET, and V8 are all slow for the first few thousand requests.
+4. <strong>Is compression matched?</strong> Comparing uncompressed JSON against protobuf is not a fair fight.
+5. <strong>Is the payload realistic?</strong> A 20-byte numeric message and a 200 KB response full of prose give opposite conclusions. Reproduce the real distribution.
+6. <strong>Is there any backend work?</strong> An echo server benchmark is a serialization microbenchmark, not an API benchmark.
+7. <strong>Is the load generator saturated?</strong> If the client is pinned at 100% CPU, you are measuring the client.
+8. <strong>Are you reporting a distribution, not a mean?</strong> Publish p50, p99, p99.9. A mean-only comparison hides exactly the differences that show up in the tail.
+9. <strong>Have you avoided coordinated omission?</strong> A closed-loop generator that waits for each response before sending the next also stops sending when the server stalls, structurally under-reporting tail latency.
+
+Numbers that fail this checklist tell you <strong>nothing beyond "that is what happened on that machine that day"</strong>.
+
+### 9.5 Compression — where it helps and where it backfires
+
+§5.5 said "try compression first", but compression is not free either. The mechanisms also differ between REST and gRPC:
+
+| Aspect | REST | gRPC |
+| --- | --- | --- |
+| Negotiation | `Accept-Encoding` / `Content-Encoding` (RFC 9110) | `grpc-accept-encoding` / `grpc-encoding` |
+| Granularity | The whole response | <strong>Per message</strong> (signalled by the compressed flag in the framing) |
+| Mixing | Not possible (one encoding per response) | Compression can be turned on or off per message, but the algorithm itself is the RPC's `grpc-encoding` — not arbitrary per-message algorithm switching |
+| Headers | Uncompressed on HTTP/1.1; HPACK on HTTP/2 | HPACK (always, since it is HTTP/2) |
+
+The <em>per-message</em> granularity matters: in a stream you can compress large payloads with the RPC's selected encoding and leave small control messages uncompressed with compressed flag 0.
+
+<strong>For small messages, compression makes things worse.</strong> gzip's minimum wrapper is a 10-byte header plus an 8-byte trailer, with deflate's own overhead on top — so a few dozen bytes of payload frequently <em>grows</em> when compressed, and you pay CPU and allocations for the privilege. For high-frequency small RPCs, compression off is faster. This is why many implementations expose a minimum-size threshold.
+
+There is also a <strong>security consideration</strong>. If attacker-influenced content and a secret share a compression context, the compressed size leaks information about the secret (the CRIME/BREACH family of attacks). The risk is highest when <em>a response containing secrets also reflects request-derived strings</em>. The mitigations are design-level: don't reflect such values, and mask per-request CSRF tokens.
+
+Reasonable defaults:
+
+- <strong>Don't compress below ~1 KB</strong> (tune the threshold to your workload).
+- <strong>Use brotli for large text-heavy responses</strong> — high levels for static content, lower levels when compressing on the fly.
+- <strong>Never recompress already-compressed bytes</strong> (images, video, zip).
+- <strong>For internal gRPC traffic, measure uncompressed first.</strong> With small payloads, off is frequently faster.
+
+## 10. Caching — REST's biggest asymmetric advantage
+
+> <strong>In one line</strong>: HTTP caching is code you don't have to write. gRPC has no such layer at all.
+
+### 10.1 What comes for free
+
+Return the right `Cache-Control` and these layers cooperate automatically:
+
+```mermaid
+graph LR
+    B["browser<br/>cache"] --> C["CDN<br/>edge"]
+    C --> P["reverse<br/>proxy"]
+    P --> A["application<br/>server"]
+    style B fill:#0369a1,color:#ffffff
+    style C fill:#0369a1,color:#ffffff
+    style P fill:#0369a1,color:#ffffff
+    style A fill:#334155,color:#ffffff
+```
+
+They work <strong>without knowing anything about your domain</strong>, purely from the response's self-description. This is the moment the "self-descriptive messages" constraint (§4.2) turns into cash.
+
+Key directives (RFC 9111):
+
+```http
+Cache-Control: public, max-age=300, stale-while-revalidate=60
+ETag: "v3-a1b2c3"
+Vary: Accept-Encoding, Accept-Language
+```
+
+- `public` / `private` — may a shared cache (CDN) store it? <strong>Marking a user-specific authenticated response `public` is a data-leak bug.</strong>
+- `stale-while-revalidate` (RFC 5861) — serve the stale copy instantly and refresh in the background. Excellent for tail latency.
+- `Vary` — which request headers belong in the cache key. <strong>Omitting it is how language, encoding, and authorisation-dependent variants get cross-served.</strong>
+
+### 10.2 Conditional requests and optimistic locking
+
+`ETag` is not only about saving bandwidth; it gives you <strong>conflict detection on write</strong>:
+
+```http
+GET /v1/users/42
+→ 200 OK, ETag: "v3"
+
+# if another client updated it first
+PUT /v1/users/42
+If-Match: "v3"
+→ 412 Precondition Failed
+```
+
+That is textbook optimistic concurrency control. The gRPC equivalent is carrying a `version` field in the request message and implementing the comparison yourself. <strong>REST does it with one header.</strong>
+
+### 10.3 The reality on the gRPC side
+
+gRPC uses `POST`, its body is opaque binary, and its responses carry no standard cache semantics. Therefore:
+
+- CDNs are effectively unusable.
+- Intermediate caches do nothing.
+- Caching must be built inside the client or the service (Redis, etc.).
+
+This asymmetry is the technical basis for "REST wins for public, read-heavy, cacheable APIs". Conversely, for internal write-heavy traffic that must always be fresh, the caching advantage evaporates and so does gRPC's disadvantage.
+
+## 11. Operations — where teams actually get hurt
+
+> <strong>In one line</strong>: Most of gRPC's adoption cost is not the protocol; it is everything around it.
+
+### 11.1 The load-balancing trap
+
+The single most frequently detonated landmine in gRPC adoption.
+
+<strong>The problem</strong>: gRPC holds one long-lived HTTP/2 connection and multiplexes all requests over it. An L4 (TCP) load balancer balances <em>connections</em>, so once a connection is established <strong>every request on that channel keeps going to the same backend</strong>. When most traffic comes from a small number of clients, scaling to ten replicas can still leave the load on one — with many clients, per-connection spreading softens the symptom.
+
+Three remedies:
+
+| Approach | How | Caveat |
+| --- | --- | --- |
+| <strong>L7 proxy</strong> | Envoy / linkerd / NGINX terminates HTTP/2 and balances <em>per request</em> | Adds a hop |
+| <strong>Client-side LB</strong> | The client connects to all backends and picks (gRPC `round_robin`, xDS) | Requires service discovery |
+| <strong>Bounded connection lifetime</strong> | Server-side `MAX_CONNECTION_AGE` (plus grace) forces periodic reconnect | A complement, not a fix on its own |
+
+If you pick client-side load balancing, the implementation details decide the behaviour:
+
+- <strong>Name resolution.</strong> gRPC's default resolver is DNS, and it neither caches forever nor re-resolves aggressively. A normal Kubernetes `Service` (ClusterIP) returns one virtual IP, so the client sees exactly one backend and you are back to L4 balancing. Use a <strong>headless Service (`clusterIP: None`)</strong> so every Pod IP is returned.
+- <strong>The load-balancing policy.</strong> The default is `pick_first` — connect to one backend and keep using it. You must explicitly select `round_robin` to spread load. <em>"I enabled client-side LB and it still skews" is almost always this.</em>
+- <strong>xDS.</strong> The Envoy-derived control-plane protocol lets you push advanced policy — weighting, zone affinity, outlier detection — to gRPC clients without a sidecar. It is the option when you don't want a full service mesh.
+- <strong>Keepalive is not connection age.</strong> `KEEPALIVE_TIME` detects dead connections; `MAX_CONNECTION_AGE` redistributes live ones. They solve different problems.
+
+The same cause explains why <strong>traffic doesn't flow to newly added backends</strong>: existing connections never move on their own. Without connection rotation such as `MAX_CONNECTION_AGE`, existing clients can take a very long time to start sending traffic to new replicas.
+
+REST over HTTP/1.1 hides this because connections are shorter-lived and get redistributed often. But <strong>run REST over HTTP/2 and the same problem appears</strong>. This is a property of long-lived multiplexed connections, not of gRPC.
+
+### 11.2 Observability and debugging
+
+| Task | REST | gRPC |
+| --- | --- | --- |
+| One-off manual call | `curl` | `grpcurl` / `buf curl` (with reflection enabled) |
+| Reading packets | Plain text (after TLS termination) | Needs the schema to decode protobuf |
+| Logging bodies | Directly readable | Must be decoded and structured |
+| Browser DevTools | Visible as-is | Hard to read even with gRPC-Web |
+| Existing APM / WAF | Supported out of the box | Often limited support |
+
+Enabling <strong>server reflection</strong> lets `grpcurl` fetch the schema at runtime and transforms the debugging experience (the canonical service today is `grpc.reflection.v1.ServerReflection`; many servers and tools still also expose the deprecated `grpc.reflection.v1alpha.ServerReflection` for compatibility). But <strong>consider disabling it on externally exposed production endpoints</strong>, since it exposes your entire API surface. Enabled internally, disabled at the edge, is the usual settlement.
+
+<strong>Naming conventions for metrics and traces</strong> shape operations just as much as the protocol choice does — get them wrong and the observability stack itself breaks.
+
+- <strong>Label with the template, never the actual ID.</strong> `/v1/users/{id}`, not `/v1/users/8f2b...`. For gRPC, `pkg.Service/Method` is already a stable name. <em>Putting real IDs in labels detonates time-series cardinality and takes the metrics backend down</em> — a more common accident on the REST side; gRPC normally stays inside the finite set of declared methods, but unknown-method paths and custom labels can still manufacture high cardinality if you let them.
+- <strong>Normalise the status label.</strong> HTTP gives you both `2xx`/`4xx`/`5xx` buckets and exact codes; gRPC gives you a status code (`rpc.response.status_code` in current OpenTelemetry, `grpc_code` in older gRPC metrics). If both coexist during a migration, make them <em>additive on a dashboard</em> (the §13.4 mapping guidance pays off again here).
+- <strong>Follow the OpenTelemetry semantic conventions.</strong> Don't rename stable HTTP attributes such as `http.route`, or RPC attributes such as `rpc.system.name` and `rpc.method`, into something bespoke — `rpc.system` and `rpc.service` are deprecated, and `rpc.method` now carries the fully qualified service/method name. (The RPC conventions are still a Release Candidate, so expect to track them.) Whether off-the-shelf dashboards and alerts work at all is decided here.
+- <strong>Thread the same trace context through every signal.</strong> Accept or mint W3C Trace Context (`traceparent`) at the edge; write `TraceId` / `SpanId` into logs, let metric exemplars carry `trace_id` / `span_id`, and record spans in the trace. <em>Whether you can go from "this request was slow" to that single request's logs in one click</em> is what actually determines incident duration.
+
+### 11.3 Authentication and authorization — orthogonal to the protocol
+
+<strong>The headline: design authn/authz almost independently of the protocol choice.</strong> "We use gRPC, therefore this auth scheme" is a decision you will regret. That said, the two do <em>surface</em> differently.
+
+- <strong>Authentication (who are you)</strong>: gRPC separates channel credentials (TLS / mTLS) from call credentials (tokens) as distinct types, so "mTLS for the connection, an OAuth token per call" expresses naturally. REST typically funnels everything through one `Authorization` header, with mTLS managed separately as infrastructure configuration.
+- <strong>Authorization (what may you do)</strong>: here there is a real structural difference.
+
+| Granularity | REST | gRPC |
+| --- | --- | --- |
+| <strong>Per endpoint</strong> | Gateway policy over URL patterns (`/admin/*`) | Interceptor or proxy policy per `/pkg.Service/Method` |
+| <strong>Per object</strong> | "Does this order belong to this user?" — decided in the application | Also in the application |
+| <strong>Per field</strong> | Strip during response shaping | Same (pairs neatly with FieldMask) |
+
+<strong>Under either protocol, object-level authorization needs application and domain context.</strong> You can centralise the policy <em>decision</em> in OPA, Cedar, or a Zanzibar-style system, but supplying the subject/action/object attributes and enforcing the answer stays with the application. Keep the gateway as a <em>coarse doorman</em> (reject unauthenticated traffic, block admin APIs) and put fine-grained decisions next to the domain logic.
+
+For service-to-service authentication there are three options:
+
+1. <strong>mTLS</strong> — mutual TLS proves identity at the network layer. Combined with a workload-identity system such as SPIFFE/SPIRE, certificate issuance and rotation become automatic. This is one of the main reasons teams adopt a service mesh.
+2. <strong>Bearer tokens (JWT)</strong> — carried at the application layer. Easy to debug and survives gateway hops. But <em>anyone holding the token can use it</em>, so keep lifetimes short and always validate `aud` (the intended service).
+3. <strong>Both</strong> — mTLS says which workload; the JWT says which end user it is acting for. This is the standard answer at scale.
+
+<strong>The most-forgotten trap</strong>: never forward an end user's access token verbatim to downstream services. Propagate a constrained delegation instead — a short-lived token whose `aud` is the downstream service and whose scope is the minimum required. If the original token has a broad audience, or a downstream service validates `aud` weakly, raw forwarding lets that service reuse authority outside the intended delegation path: a confused-deputy-style failure. OAuth 2.0 Token Exchange (RFC 8693), or an internal STS that mints equivalent down-scoped tokens, is the correct approach.
+
+And the <strong>WAF / API gateway</strong> point: JSON bodies can be inspected; protobuf <strong>cannot be inspected without the descriptors</strong>. In regulated industries this becomes a hard requirement.
+
+<strong>Trace propagation</strong>: both carry W3C Trace Context (`traceparent` / `tracestate`) — REST in HTTP headers, gRPC in <em>metadata</em>, which is the same HTTP/2 header mechanism underneath, so OpenTelemetry propagators work in both. Two gRPC constraints to remember: metadata keys must be lowercase, and only keys with a `-bin` suffix may carry binary values.
+
+### 11.4 The browser safety boundary — CORS and CSRF
+
+<strong>Public APIs trip here long before they trip on wire-format performance.</strong> The moment a browser can call you, you are in same-origin-policy territory.
+
+| Style | Preflight | CSRF exposure |
+| --- | --- | --- |
+| REST (`application/json`) | Almost always (a JSON content type is not a "simple request") | Needs mitigation under cookie auth: `SameSite` plus a token |
+| REST (form-encoded / simple requests) | None | <strong>Dangerous</strong> — simple requests are sent without a preflight |
+| GraphQL (`POST` + JSON) | Yes | Especially risky with cookie auth plus `GET` queries enabled |
+| gRPC-Web / Connect | Yes (custom headers) | Safer by default, since `Authorization`-header auth doesn't rely on cookies |
+
+Two practical rules:
+
+1. <strong>Authenticate with an `Authorization` header rather than cookies</strong> and most CSRF disappears structurally, because browsers do not attach it automatically. If you must use cookies, pair `SameSite=Lax`/`Strict` with a CSRF token.
+2. <strong>`Access-Control-Allow-Origin: *` cannot be combined with credentials.</strong> If you return `Access-Control-Allow-Credentials: true`, you must enumerate origins explicitly. Loosening this is a direct data-exposure path.
+
+### 11.5 Middleboxes
+
+Old proxies, corporate firewalls, and some cloud load balancers still misbehave with HTTP/2 — especially h2c and long-lived streams. <strong>The further a call travels outside your control, the more the "it works everywhere" property of REST/JSON is worth.</strong>
+
+## 12. The third options — GraphQL, Connect, tRPC
+
+> <strong>In one line</strong>: Framing this as a binary narrows your vision. The real option space is organised by <em>who decides what gets fetched</em>.
+
+### 12.1 GraphQL — the client decides the shape
+
+GraphQL (Facebook, published 2015) sends a query language to a single endpoint, letting the client declare away both over-fetching and under-fetching.
+
+```graphql
+query {
+  user(id: 42) {
+    name
+    orders(last: 3) { id total items { sku } }
+  }
+}
+```
+
+In Richardson's terms, typical GraphQL APIs sit <strong>close to Level 0</strong> because they centre on a single endpoint (though the GraphQL-over-HTTP specification does permit `GET` for queries, with mutations using `POST`). The trade is explicit:
+
+| You gain | You lose |
+| --- | --- |
+| Client-driven fetching; aggregation in one round trip | HTTP caching (effectively a single URL plus POST) |
+| A strong type system and introspection | Error semantics expressible in the status code alone — execution errors mostly arrive as 200 plus an `errors` array, while malformed requests and method errors do use 4xx |
+| Front-end autonomy | You must control query complexity (depth limits, cost analysis) |
+| Schema composition (Federation) across owners | Server-side N+1 mitigation (DataLoader) is effectively mandatory |
+
+The caching problem has a mitigation: <strong>persisted queries</strong> — register the query, then call `GET /graphql?sha256Hash=...` — which restores CDN caching. Treat it as mandatory if you deploy GraphQL at the edge.
+
+<strong>GraphQL's sweet spot is the BFF</strong>: many clients (web, iOS, Android) needing different shapes, over many backend services.
+
+### 12.2 Connect — "gRPC you can curl"
+
+Buf's Connect keeps gRPC's type safety while restoring HTTP affinity:
+
+- One server speaks <strong>gRPC, gRPC-Web, and Connect</strong> simultaneously.
+- Unary calls are `POST /pkg.Service/Method` with `application/json` — <strong>curl works directly</strong>.
+- Browsers work without a proxy.
+- Your `.proto` files and code generation are unchanged.
+
+<strong>It answers the standard hesitation — "I want gRPC but I'm worried about browsers and debuggability" — head on.</strong> For a new internal API, it deserves consideration before plain gRPC.
+
+### 12.3 tRPC — the single-language optimum
+
+tRPC is TypeScript-only and has <strong>no code generation and no IDL</strong>. Types are inferred from the server's router definition and imported directly by the client.
+
+```ts
+// server
+const appRouter = router({
+  getUser: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .query(({ input }) => db.user.find(input.id)),
+});
+export type AppRouter = typeof appRouter;
+
+// client — fully typed with nothing generated
+const user = await trpc.getUser.query({ id: 42 });
+```
+
+<strong>The preconditions are strict</strong>: client and server in one TypeScript monorepo, deployed together. Meet them and the developer experience is excellent; violate them — another language, independent deploys, external exposure — and it collapses.
+
+### 12.4 Putting them side by side
+
+| Style | Who decides the shape | Schema | HTTP caching | Browser | Streaming |
+| --- | --- | --- | --- | --- | --- |
+| REST (Level 2) | Server | OpenAPI (optional) | ✅ full | ✅ | SSE / WebSocket |
+| gRPC | Server | `.proto` (required) | ❌ | Needs a proxy | ✅ four shapes |
+| Connect | Server | `.proto` (required) | △ limited | ✅ | ✅ |
+| GraphQL | <strong>Client</strong> | SDL (required) | △ partial via persisted queries | ✅ | Subscriptions |
+| tRPC | Server | TS types (implicit) | ❌ | ✅ | ✅ |
+| JSON-RPC 2.0 | Server | none (optional) | ❌ | ✅ | Transport-dependent |
+
+That last row deserves a note. <strong>[MCP (Model Context Protocol)](/en/blog/model-context-protocol) is built on JSON-RPC 2.0</strong> — one of the newest protocols of 2026 picked a thoroughly 1990s-flavoured RPC. The reason is clear: it is easy for both humans and LLMs to read and write, and the implementation bar is extremely low. RPC is not "old"; the <strong>reason to choose it has shifted from performance to readability and ease of implementation</strong>.
+
+## 13. Making the call
+
+> <strong>In one line</strong>: It is not decided by technical superiority but by the <em>nature of the boundary</em> — who is on each side.
+
+### 13.1 A decision tree
+
+```mermaid
+graph TD
+    Q1{"Is the caller a browser<br/>or a third party?"}
+    Q1 -->|Yes| REST["REST + OpenAPI<br/>(commit to Level 2)"]
+    Q1 -->|No| Q2{"Do varied clients need<br/>differently shaped data?"}
+    Q2 -->|Yes| GQL["GraphQL / BFF"]
+    Q2 -->|No| Q3{"Streaming or a strict<br/>typed contract needed?"}
+    Q3 -->|No| Q4{"Same-language monorepo,<br/>deployed together?"}
+    Q4 -->|Yes| TRPC["tRPC-style<br/>in-language RPC"]
+    Q4 -->|No| REST
+    Q3 -->|Yes| Q5{"Might a browser<br/>call it directly?"}
+    Q5 -->|Yes| CONNECT["Connect"]
+    Q5 -->|No| GRPC["gRPC"]
+    style REST fill:#0369a1,color:#ffffff
+    style GRPC fill:#047857,color:#ffffff
+    style CONNECT fill:#047857,color:#ffffff
+    style GQL fill:#7c3aed,color:#ffffff
+    style TRPC fill:#b45309,color:#ffffff
+```
+
+### 13.2 Think in terms of the boundary
+
+Simplified further, the whole decision collapses to one question: <strong>can one organisation change both sides of the contract at the same time?</strong>
+
+| Boundary | Change synchronisation | Recommendation | Why |
+| --- | --- | --- | --- |
+| Services inside one team | Deploy together | gRPC / Connect / tRPC | Maximum benefit from typed contracts; breaking changes are cheap |
+| Across internal teams | Requires coordination | gRPC / Connect + schema registry | Breaking-change detection earns its keep |
+| Internal → external partner | Months of lead time | REST + OpenAPI | You don't control their stack |
+| Public API | <strong>Can never break</strong> | REST + OpenAPI + explicit versioning | Universality, caching, visibility |
+| Browser ↔ your server | Usually deployed together | REST / GraphQL / Connect | Browser constraints dominate |
+
+Conway's law applies here. <strong>The shape of an API should reflect the relationship between the teams it separates.</strong> Where coupling is acceptable, strong typed contracts win; where decoupling is mandatory, "hard to break and readable by anyone" wins.
+
+### 13.3 Mixing is the realistic answer
+
+You don't have to choose one. The most common production shape:
+
+```mermaid
+graph LR
+    BR["browser / mobile"] -->|REST or GraphQL| GW["API gateway / BFF"]
+    EXT["external partner"] -->|REST + OpenAPI| GW
+    GW -->|gRPC| S1["Order Service"]
+    GW -->|gRPC| S2["User Service"]
+    S1 -->|gRPC| S3["Inventory Service"]
+    style GW fill:#7c3aed,color:#ffffff
+    style S1 fill:#047857,color:#ffffff
+    style S2 fill:#047857,color:#ffffff
+    style S3 fill:#047857,color:#ffffff
+    style BR fill:#0369a1,color:#ffffff
+    style EXT fill:#0369a1,color:#ffffff
+```
+
+Annotate the `.proto` with HTTP mappings and <strong>one definition can serve both gRPC and REST</strong>:
+
+```proto
+import "google/api/annotations.proto";
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option (google.api.http) = { get: "/v1/users/{id}" };
+  }
+}
+```
+
+Feed that to `grpc-gateway` and you get a REST/JSON reverse proxy. <strong>But don't over-trust it.</strong> A generated REST surface tends to be a literal transcription of protobuf methods — URL design, error representation, and cache headers are all afterthoughts, which is not the same as a good Level 2 REST API. <strong>If it's going public, design it deliberately instead of shipping the generated output.</strong>
+
+### 13.4 How to migrate — never all at once
+
+When moving an existing REST API to gRPC (or the reverse), <strong>big-bang migrations almost always fail</strong>. The workable procedure is the strangler-fig pattern.
+
+```mermaid
+graph LR
+    C["existing clients"] -->|REST| F["facade<br/>(existing URLs preserved)"]
+    F -->|new: gRPC| N["new service"]
+    F -->|not yet migrated: internal REST| O["legacy service"]
+    style F fill:#7c3aed,color:#ffffff
+    style N fill:#047857,color:#ffffff
+    style O fill:#b45309,color:#ffffff
+```
+
+1. <strong>Put a facade at the boundary.</strong> URLs and response shapes visible to clients do not change by a single byte. That invariance is the precondition for everything else.
+2. <strong>Write new endpoints in the new style first.</strong> Steering the increment is safer and easier to review than rewriting what exists.
+3. <strong>Move one endpoint at a time.</strong> After each move, compare the old and new paths' <em>response diffs</em> against mirrored production traffic (shadow / dark traffic).
+4. <strong>Meter calls to the old path.</strong> Delete when it reaches zero. §6.6's "you cannot retire what you cannot measure" applies directly.
+5. <strong>Use Connect as the waypoint.</strong> One server speaking gRPC, gRPC-Web, and Connect simultaneously lets you <em>move the server first and migrate clients afterwards, one at a time</em> — the cheapest way to run both worlds during the transition.
+
+The most commonly missed piece is the <strong>error-semantics mapping</strong>. Decide up front how HTTP statuses map to gRPC codes — `NOT_FOUND` ↔ 404, and in the canonical mapping `FAILED_PRECONDITION` ↔ 400 with `ABORTED` ↔ 409; write down the exceptions explicitly if you are deliberately preserving a legacy REST convention. Skip this and client retry behaviour changes silently mid-migration. <em>That is a day-one decision, not a final-day one.</em>
+
+## 14. Anti-patterns
+
+Things that have caused real incidents, or easily could:
+
+1. <strong>Always returning HTTP 200.</strong> Disables every retry and circuit breaker in intermediaries and client SDKs.
+2. <strong>Returning 500 for validation errors.</strong> Poisons error-rate monitoring, breaks SLOs, triggers useless retries.
+3. <strong>Side effects on `GET`.</strong> Prefetchers, crawlers, and browser reloads will fire them for you.
+4. <strong>`Cache-Control: public` on authenticated responses.</strong> The CDN will serve one user's data to another. This has happened more than once, in production.
+5. <strong>Forgetting `Vary`.</strong> Language- and encoding-specific responses get cross-served.
+6. <strong>Raw gRPC as a public API.</strong> You force a toolchain on your consumers and lose curl-based support.
+7. <strong>Reusing a protobuf field number.</strong> Old clients' values get reinterpreted with new meaning — <strong>a direct route to data corruption</strong>. Always `reserved`.
+8. <strong>Hashing protobuf bytes for an idempotency key.</strong> Serialization is non-deterministic, so identical messages can hash differently.
+9. <strong>gRPC calls without a deadline.</strong> They wait forever and exhaust resources. <strong>Every call gets a deadline.</strong>
+10. <strong>gRPC behind an L4 load balancer.</strong> Skewed load, and scaling out does nothing (§11.1).
+11. <strong>Using gRPC streams as a message queue.</strong> A disconnect loses messages.
+12. <strong>Hand-written OpenAPI.</strong> Drifts from the implementation and produces the worst possible state: documentation that exists and lies.
+13. <strong>Collection endpoints without pagination.</strong> Protocol-independent; it will fall over eventually.
+14. <strong>One company-wide `.proto` repository.</strong> A single change stops everyone's build.
+15. <strong>Not checking schemas in CI.</strong> Without `buf breaking` or an OpenAPI diff check, the contract reverts to being documentation.
+16. <strong>Draining streams into unbounded queues.</strong> You have not solved backpressure; you have <em>moved it from the transport into your application heap</em>.
+17. <strong>Compressing everything unconditionally.</strong> For small RPCs and already-compressed bytes you burn CPU and can even end up larger on the wire.
+
+## 15. Wrapping up
+
+> <strong>In one line</strong>: RPC buys <em>expressiveness and discipline</em>; REST buys <em>universality and intermediaries</em>. They purchase different things, so you may decide separately at each boundary.
+
+- <strong>RPC abstracts "the call".</strong> Over forty years it evolved by <em>giving up transparency</em>; modern gRPC makes deadlines, types, and streaming explicit. What you buy is expressiveness plus automated discipline.
+- <strong>REST is a set of constraints.</strong> Honour the uniform interface and statelessness and <em>infrastructure you did not write</em> — CDNs, proxies, browsers, generic clients — starts working for you.
+- <strong>The performance gap decomposes into three parts</strong>: header compression, multiplexing (both HTTP/2's doing), and metadata removal (the schema's doing). Each is adoptable independently, and REST over HTTP/2 already collects the first two.
+- <strong>The real differences show up in errors, caching, and contracts.</strong> gRPC dominates on deadline propagation and breaking-change detection; REST dominates on caching and visibility.
+- <strong>The decision follows the boundary.</strong> If both sides change together, favour the strong typed contract. If they can't, favour what is hard to break and readable by anyone.
+- <strong>Operations matter as much as the protocol.</strong> Choosing a style without designing load balancing, observability, authn/authz, and the browser boundary does not survive production. In particular, <em>the load-balancing trap is not gRPC-specific; it is a property of long-lived multiplexed HTTP/2 connections</em> — run REST over HTTP/2 the same way and §11.1's trap comes along with it.
+
+### 15.1 A pre-production checklist
+
+Once the style is chosen, these are the items teams actually miss.
+
+<strong>If you chose gRPC / Connect</strong>
+
+- [ ] Every call sets a deadline (§7.5)
+- [ ] Load balancing is per request, or `round_robin` plus a headless Service (§11.1)
+- [ ] `MAX_CONNECTION_AGE` is set, and you have verified that scale-out actually shifts traffic (§11.1)
+- [ ] `buf breaking` runs in CI (§6.7)
+- [ ] Reflection is enabled internally and disabled at the public edge (§11.2)
+- [ ] The retry policy has exponential backoff, jitter, and throttling (§7.4)
+- [ ] Stream receive buffers are bounded, with a policy for dropping slow subscribers (§8.5)
+- [ ] Metric labels are low-cardinality (§11.2)
+
+<strong>If you chose REST</strong>
+
+- [ ] OpenAPI is the single source of truth — schema-first, or generated from the implementation — and diff-checked in CI (§6.2 / §6.7)
+- [ ] Collection endpoints use cursor pagination (§4.5)
+- [ ] Errors use RFC 9457 with a stable `type` identifier (§7.2)
+- [ ] Retryable non-idempotent operations accept `Idempotency-Key` and implement the four server disciplines (§7.4)
+- [ ] `Cache-Control` and `Vary` are correct, and no authenticated response is marked `public` (§10.1)
+- [ ] 4xx and 5xx are not confused (§7.1)
+- [ ] Deprecations carry `Deprecation` / `Sunset` plus a usage metric (§6.6)
+- [ ] Timeouts are set and propagated at every hop (§7.5)
+
+One last thing: <strong>this is not a one-time, irreversible decision</strong>. gRPC internally with a REST gateway at the edge, a GraphQL BFF in front — these are ordinary architectures. What matters is that, <strong>for each boundary, your team can articulate which constraints they accepted</strong>.
+
+Not "gRPC because it's fast", but "gRPC because at this boundary we want contract enforcement and deadline propagation, and we don't need caching." If you can say that, the decision is probably right.
+
+## References
+
+1. A. D. Birrell and B. J. Nelson, "Implementing Remote Procedure Calls", *ACM Transactions on Computer Systems*, 2(1):39–59, 1984.
+2. R. T. Fielding, *Architectural Styles and the Design of Network-based Software Architectures*, Ph.D. dissertation, UC Irvine, 2000. [Online](https://ics.uci.edu/~fielding/pubs/dissertation/top.htm)
+3. J. Waldo, G. Wyant, A. Wollrath, S. Kendall, "A Note on Distributed Computing", Sun Microsystems Laboratories TR-94-29, 1994.
+4. R. T. Fielding, ["REST APIs must be hypertext-driven"](https://roy.gbiv.com/untangled/2008/rest-apis-must-be-hypertext-driven), 2008.
+5. M. Fowler, ["Richardson Maturity Model"](https://martinfowler.com/articles/richardsonMaturityModel.html), 2010.
+6. [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) — HTTP Semantics / [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) — HTTP Caching / [RFC 9112](https://www.rfc-editor.org/rfc/rfc9112) — HTTP/1.1
+7. [RFC 9113](https://www.rfc-editor.org/rfc/rfc9113) — HTTP/2 / [RFC 9114](https://www.rfc-editor.org/rfc/rfc9114) — HTTP/3 / [RFC 7541](https://www.rfc-editor.org/rfc/rfc7541) — HPACK
+8. [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) — Problem Details for HTTP APIs
+9. [RFC 5531](https://www.rfc-editor.org/rfc/rfc5531) — ONC RPC v2 / [RFC 4506](https://www.rfc-editor.org/rfc/rfc4506) — XDR
+10. [gRPC over HTTP/2 protocol specification](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)
+11. [gRPC status codes and their use](https://grpc.io/docs/guides/status-codes/)
+12. [Protocol Buffers — Encoding](https://protobuf.dev/programming-guides/encoding/) / [Proto Best Practices](https://protobuf.dev/best-practices/dos-donts/)
+13. [Google Cloud API Design Guide](https://cloud.google.com/apis/design) / [AIP-136 Custom methods](https://google.aip.dev/136) / [AIP-158 Pagination](https://google.aip.dev/158) / [AIP-134 Standard methods: Update (FieldMask)](https://google.aip.dev/134)
+14. [Connect protocol](https://connectrpc.com/docs/protocol) — Buf
+15. [GraphQL specification](https://spec.graphql.org/) / [GraphQL over HTTP](https://graphql.github.io/graphql-over-http/draft/)
+16. [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745) — The Deprecation HTTP Response Header Field / [RFC 8594](https://www.rfc-editor.org/rfc/rfc8594) — The Sunset HTTP Header Field
+17. [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) — IETF HTTPAPI WG Internet-Draft (not an RFC)
+18. [gRPC Compression](https://github.com/grpc/grpc/blob/master/doc/compression.md) / [gRPC Load Balancing](https://grpc.io/blog/grpc-load-balancing/)
+19. [Buf — breaking change detection](https://buf.build/docs/breaking/) / [BSR breaking change checks](https://buf.build/docs/bsr/checks/breaking/)
+20. [OpenTelemetry — HTTP semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/) / [RPC semantic conventions](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/)
+21. [W3C Trace Context](https://www.w3.org/TR/trace-context/) / [OpenTelemetry Metrics Data Model — Exemplars](https://opentelemetry.io/docs/specs/otel/metrics/data-model/#exemplars)
+22. [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) — OAuth 2.0 Token Exchange
+23. [SPIFFE Overview](https://spiffe.io/docs/latest/spiffe-about/overview/)
+24. [Pact — consumer-driven contract testing](https://docs.pact.io/)
+25. [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) — Web Linking / [RFC 5861](https://www.rfc-editor.org/rfc/rfc5861) — HTTP Cache-Control Extensions for Stale Content

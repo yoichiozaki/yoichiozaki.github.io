@@ -195,3 +195,6 @@ export {
   CardinalityErrorDiagram,
   HeapTupleAnatomy,
 } from "./SQLEngineDiagrams";
+export { ProtobufWireVisualizer } from "./ProtobufWireVisualizer";
+export { WireFormatLab } from "./WireFormatLab";
+export { ApiLatencyBudgetLab } from "./ApiLatencyBudgetLab";

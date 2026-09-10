@@ -1,4 +1,6 @@
 ---
+name: content-reviewer
+displayName: "Content Reviewer"
 description: "Review blog articles for technical accuracy and correctness. Use when: review article, check accuracy, レビュー, 正確性チェック, fact check."
 tools: [read, edit, search, web, todo]
 argument-hint: "MDX file path or blog slug to review (e.g., 'garbage-collection')"

@@ -1,0 +1,1294 @@
+---
+title: "RPC と REST — API 設計の分岐点を、ワイヤの上から捉え直す"
+date: "2026-09-10"
+description: "RPC と REST は何がどう違うのか。HTTP/2 フレームと Protobuf のバイト列から、契約とスキーマ進化、エラー設計、キャッシュ、認証認可、可観測性、運用の落とし穴まで、実務判断に直結する形で徹底解説します。"
+tags: ["RPC", "REST", "gRPC", "API Design", "HTTP", "Protobuf", "Observability", "Security"]
+---
+
+「内部サービス間は gRPC、公開 API は REST」——この結論自体は、たぶん正しい。問題は、<strong>なぜそうなるのかを説明できる人が驚くほど少ない</strong>ことです。「gRPC のほうが速いから」で止まってしまうと、公開 API に gRPC を選んで CDN が使えず苦しんだり、社内の 1ms 未満のホップに Protobuf を導入して何も改善しなかったり、という事故が起きます。
+
+本記事では、RPC と REST を <strong>設計思想 → ワイヤ上のバイト列 → スキーマ進化 → エラー設計 → 運用</strong> の順に降りていきます。目的は「どちらが優れているか」を決めることではなく、<strong>どの制約を受け入れると何が手に入り、何を失うのか</strong> を、判断に使える粒度まで分解することです。
+
+> <strong>役所の窓口で考える</strong>
+>
+> - <strong>RPC</strong> は「担当者に電話して用件を頼む」方式です。「田中さん、この申請通しておいて」。相手の<em>手続き名</em>を知っている前提で話が進むので速い。ただし、担当者が変わったり手続き名が変わったりすると、電話をかける側も全部直す必要がある。そして電話が切れたとき、頼んだ処理が実行済みなのかどうかは分かりません。
+> - <strong>REST</strong> は「書類棚に対して所定の様式で読み書きする」方式です。棚の場所（URL）と操作（GET / PUT / DELETE）の意味が全世界で共通なので、誰でも、どの中間業者でも扱える。コピー機（CDN）が勝手に写しを取って配ってもいいし、受付（プロキシ）が中身を見て仕分けできる。代わりに「この申請を取り消す」のような<em>動詞</em>を、無理やり<em>名詞</em>に翻訳する手間が発生します。
+>
+> つまり選択の本質は速さではなく、<strong>「意味論をどこに置くか」</strong>です。RPC はアプリケーションの中に、REST はプロトコルの中に置く。前者は表現力を、後者は<em>中間層の再利用</em>を買っています。
+
+## 1. 「RPC vs REST」という問いは、そのままでは噛み合わない
+
+> <strong>一言でいうと</strong>: RPC は「呼び出しの抽象化手法」、REST は「アーキテクチャスタイル（制約の集合）」。抽象度の階層が違うので、そのまま並べると議論が滑ります。
+
+### 1.1 比較の対象がずれている
+
+- <strong>RPC (Remote Procedure Call)</strong> は<em>プログラミングモデル</em>です。「ネットワーク越しの処理を、ローカル関数呼び出しのように書く」という発想。gRPC・JSON-RPC・Thrift・Cap'n Proto はすべてこの発想の実装です。
+- <strong>REST (Representational State Transfer)</strong> は Roy Fielding が 2000 年の博士論文で定義した<em>アーキテクチャスタイル</em>です。「こういう制約を課すと、こういう性質（スケーラビリティ・独立進化性・可視性）が得られる」という理論であって、実装技術ではありません。
+
+比較として成立するのは、こう言い換えたときです。
+
+| 問い | 実際に比較しているもの |
+| --- | --- |
+| 「RPC か REST か」 | <strong>API を「手続きの集合」としてモデル化するか、「リソースの集合」としてモデル化するか</strong> |
+| 「gRPC か REST API か」 | <strong>Protobuf/HTTP2 という具体的なスタックか、JSON/HTTP という具体的なスタックか</strong> |
+| 「速いのはどっち」 | <strong>ワイヤフォーマットと多重化方式の性能特性</strong> |
+
+この 3 つは独立した軸です。REST のリソースモデルに従いつつ Protobuf を運ぶこともできるし（実際 Google の API はそうしています）、gRPC の上でリソース指向の設計をすることもできます。逆に「HTTP + JSON だから REST」は<strong>ほぼ確実に間違い</strong>です。
+
+### 1.2 世の中の「REST API」の大半は RPC over HTTP である
+
+`POST /api/getUserProfile`、`POST /api/sendEmail`、`GET /api/searchOrders?q=...`。こうしたエンドポイントは、URL に手続き名が入っていて、HTTP メソッドが意味を持たず、レスポンスに次の遷移先も入っていません。これは <strong>HTTP をトランスポートとして使った RPC</strong> であって、REST ではありません。
+
+これ自体は悪ではありません。実際、多くのチームにとって最適解です。問題は<strong>「REST だと思い込んでいるせいで、REST の利点（キャッシュ・中間層・統一インターフェース）を取り損ねている</strong>」ことにあります。名前と実態が食い違うと、設計上のトレードオフが議論の俎上に載らなくなります。
+
+### 1.3 Richardson 成熟度モデル — どこまで HTTP に乗るか
+
+Leonard Richardson が 2008 年に提示し、Martin Fowler が 2010 年に広めた 4 段階のモデルは、この「食い違い」を測る物差しとして今も有効です。
+
+```mermaid
+graph LR
+    L0["Level 0<br/>単一エンドポイント<br/>POST /api"] --> L1["Level 1<br/>リソース<br/>POST /users/42"]
+    L1 --> L2["Level 2<br/>HTTP 動詞 + 状態コード<br/>GET /users/42 → 200"]
+    L2 --> L3["Level 3<br/>ハイパーメディア<br/>レスポンスに次の遷移"]
+    style L0 fill:#b45309,color:#ffffff
+    style L1 fill:#a16207,color:#ffffff
+    style L2 fill:#0369a1,color:#ffffff
+    style L3 fill:#047857,color:#ffffff
+```
+
+- <strong>Level 0</strong>: HTTP を「バイト列を運ぶトンネル」として使う。XML-RPC、SOAP、そして GraphQL（実質的に単一の `/graphql` エンドポイント）はここに属します。
+- <strong>Level 1</strong>: URL がリソースを識別する。ただし操作は body の中。
+- <strong>Level 2</strong>: HTTP メソッドと状態コードが意味論を担う。<strong>実務上の「REST API」はここを指していることがほとんど</strong>で、キャッシュ・冪等性・中間層の恩恵が得られるのもここからです。
+- <strong>Level 3</strong>: HATEOAS。レスポンスが次に可能な遷移をリンクとして含む。
+
+Fielding 自身は 2008 年のブログ記事「REST APIs must be hypertext-driven」で、Level 3 に達していないものを REST と呼ぶことに強く反対しました。ただ実務的には、<strong>Level 2 で得られる利益の大部分は回収できる</strong>——これが 20 年かけて出た答えだと言っていいでしょう。
+
+## 2. RPC の系譜 — 40 年、同じ夢を見続けている
+
+> <strong>一言でいうと</strong>: 「リモート呼び出しをローカル呼び出しに見せる」という夢は 1984 年からあり、何度も大規模に失敗し、そのたびに<em>透過性を諦める</em>方向へ修正されてきました。
+
+### 2.1 Birrell & Nelson (1984) — 原典
+
+Andrew Birrell と Bruce Nelson が Xerox PARC で書いた *Implementing Remote Procedure Calls*（ACM TOCS 2(1), 1984）が RPC の出発点です。ここで既に、現代の RPC がもつ要素はほぼ揃っていました。
+
+- <strong>スタブ (stub)</strong> — クライアント側の代理関数。引数を梱包して送る。
+- <strong>マーシャリング / アンマーシャリング</strong> — 言語の値をバイト列に変換する。
+- <strong>バインディング</strong> — サービス名から実体を解決する（現在のサービスディスカバリ）。
+- <strong>呼び出し意味論</strong> — 論文は「exactly-once は保証できない」と明言し、<em>at-most-once</em> を採用しました。
+
+最後の点は 40 年経っても変わっていません。ネットワーク越しの呼び出しで「ちょうど 1 回実行された」ことを、追加の仕組み（冪等キー、トランザクショナルアウトボックス）なしに保証することはできません。
+
+### 2.2 Sun RPC / XDR — RPC が「インフラ」になった
+
+1980 年代後半、Sun Microsystems の ONC RPC（RFC 1050 → RFC 1831 → RFC 5531）が NFS の基盤として広く普及します。ここで導入された <strong>XDR (External Data Representation, RFC 4506)</strong> は、「言語非依存の型付きバイナリ表現」という発想の直接の祖先です。IDL（Interface Definition Language）でインターフェースを書き、コードを生成する——`.proto` と `protoc` の関係とまったく同じ構図が、すでにここにあります。
+
+### 2.3 分散オブジェクトの時代 — CORBA / DCOM / Java RMI
+
+1990 年代は「オブジェクトをネットワーク越しに透過的に扱う」方向へ振れました。CORBA（OMG, 1.0 は 1991 年、IIOP は 2.0 から）、Microsoft の DCOM（1996）、Java RMI（JDK 1.1, 1997）。
+
+これらはいずれも大規模には定着しませんでした。理由は技術的な複雑さもありますが、本質的には次節の「透過性の嘘」に尽きます。<strong>ローカルのオブジェクト参照と同じ見た目をした何かが、ネットワーク分断で無言のまま数十秒ハングする</strong>——この体験がアーキテクトを RPC から遠ざけました。
+
+### 2.4 XML-RPC → SOAP → WS-* — HTTP に乗ったが、HTTP を使わなかった
+
+1998 年の XML-RPC、1999〜2000 年の SOAP は「ファイアウォールを通せる」という理由で HTTP を選びました。しかし使ったのは `POST` 1 つだけで、意味論はすべて XML エンベロープの中。Richardson Level 0 の典型です。
+
+その上に WS-Security、WS-ReliableMessaging、WS-Transaction……と仕様が積み上がり（俗に WS-*）、実装間の相互運用性が破綻していきました。REST が支持を集めた最大の理由は、<strong>その複雑さへの反動</strong>だったと言っていいでしょう。
+
+### 2.5 gRPC 以降 — 透過性を捨てた RPC
+
+2015 年、Google が社内で使っていた Stubby を再設計した <strong>gRPC</strong> を公開します（1.0 は 2016 年、2017 年 2 月に CNCF へ。なお本稿執筆時点でも <em>incubating</em> のままで、graduated には至っていません）。同年 Facebook が <strong>GraphQL</strong> を公開。2018 年に Twitch が <strong>Twirp</strong>、2022 年に Buf が <strong>Connect</strong>、そして TypeScript 界隈では <strong>tRPC</strong>。
+
+現代の RPC は、1990 年代の分散オブジェクトとは決定的に違う点があります。<strong>透過性を目指していない</strong>のです。
+
+- デッドラインがプロトコルの語彙に含まれる（`grpc-timeout`）。<em>必須ではない</em>ものの、「全呼び出しにデッドラインを設定する」規律を組織的に強制できる土台がある。
+- 呼び出しは必ず失敗しうるものとして型に現れる（Go なら `(resp, error)`、Rust なら `Result`）。
+- ストリーミングは明示的に別の型として表現される。
+
+「ローカル呼び出しに見せる」のをやめ、<strong>「リモート呼び出しであることを型と API で強制的に意識させる」</strong>方向に舵を切った。これが 40 年の学習曲線の到達点です。
+
+## 3. RPC が繰り返し失敗した理由 — 「透過性の嘘」
+
+> <strong>一言でいうと</strong>: ローカル呼び出しとリモート呼び出しには、隠しきれない 4 つの差がある。隠そうとした設計はすべて壊れました。
+
+### 3.1 A Note on Distributed Computing (1994)
+
+Jim Waldo らが Sun Labs で書いたこの短い論文（TR-94-29）は、分散システム設計における最重要文献のひとつです。彼らは「ローカルとリモートの区別を消す」試みが原理的に失敗する理由を 4 つ挙げました。
+
+| 差異 | 何が問題になるか | 現代の対処 |
+| --- | --- | --- |
+| <strong>レイテンシ</strong> | ローカル呼び出しは ns、リモートは µs〜ms。10^3〜10^6 倍の差は「量の差」ではなく「質の差」 | デッドライン伝播、バッチ化、非同期 API |
+| <strong>メモリアクセス</strong> | ポインタは相手のアドレス空間で意味を持たない | 値渡し（マーシャリング）を強制、参照を型で表現しない |
+| <strong>部分故障</strong> | ローカルなら呼び出し元と先は同時に死ぬ。リモートは<em>片方だけ</em>死ぬ、あるいは<em>生死不明</em>になる | タイムアウト、リトライ + 冪等性、サーキットブレーカ |
+| <strong>並行性</strong> | リモートオブジェクトは複数クライアントから同時に叩かれる | ステートレス化、楽観ロック（ETag / version） |
+
+このうち最も厄介なのが <strong>部分故障</strong> です。「レスポンスが返ってこない」とき、リクエストが届かなかったのか、処理されたがレスポンスが失われたのかを、クライアントは区別できません。この曖昧さが「リトライしていいのか」という問いを生み、そこから冪等性の設計が必要になります。
+
+### 3.2 分散コンピューティングの 8 つの誤謬
+
+L. Peter Deutsch が 1994 年頃にまとめ（7 つ）、James Gosling が 8 つ目を加えたリスト。RPC の設計を評価するときのチェックリストとして今も使えます。
+
+1. ネットワークは信頼できる
+2. レイテンシはゼロである
+3. 帯域は無限である
+4. ネットワークは安全である
+5. トポロジは変化しない
+6. 管理者は 1 人である
+7. 転送コストはゼロである
+8. ネットワークは均質である
+
+REST が「ステートレス」「キャッシュ可能」「階層化システム」を制約として課すのは、まさにこれらの誤謬に構造的に対抗するためです。RPC 側はこれをフレームワークの機能（デッドライン、リトライポリシー、ロードバランサ統合）として実装する道を選びました。<strong>同じ問題に、プロトコルで応えるか、ライブラリで応えるか</strong>——これが両者の分水嶺です。
+
+### 3.3 それでも RPC が残る理由
+
+透過性が嘘だと分かってなお RPC が使われ続けるのは、<strong>「呼び出し」が人間にとって自然な抽象だから</strong>です。
+
+```go
+// これは読める
+user, err := userClient.GetUser(ctx, &pb.GetUserRequest{Id: 42})
+
+// これは「読めるが、意味を組み立て直す必要がある」
+resp, err := http.Get("https://api.example.com/v1/users/42")
+if err != nil { /* ネットワーク層の失敗 */ }
+defer resp.Body.Close()
+if resp.StatusCode != http.StatusOK { /* HTTP 層の失敗を自分で分類する */ }
+var user User
+if err := json.NewDecoder(resp.Body).Decode(&user); err != nil { /* ... */ }
+```
+
+差は行数だけではありません。前者では <strong>型・エラー・デッドライン・リトライ・トレースの伝播</strong> がすべてフレームワークの責務になっています。後者はそれを毎回アプリケーションが書きます（あるいは書き忘れます）。<strong>RPC が売っているのは速さではなく、規律の自動化</strong>です。
+
+## 4. REST の本質 — 6 つの制約が何を買っているか
+
+> <strong>一言でいうと</strong>: REST は「機能」ではなく「禁止事項」の集合です。禁止を受け入れる見返りに、<em>自分で書いていない中間層</em>がタダで働いてくれます。
+
+### 4.1 6 つのアーキテクチャ制約
+
+Fielding の論文は、Web というシステムがなぜスケールしたのかを逆算して、次の制約を抽出しました。
+
+| 制約 | 内容 | 得られるもの |
+| --- | --- | --- |
+| <strong>クライアント・サーバ</strong> | UI とデータストレージの分離 | 独立した進化 |
+| <strong>ステートレス</strong> | リクエスト間でサーバがセッション状態を持たない | 水平スケール、任意のノードへルーティング可能 |
+| <strong>キャッシュ可能性</strong> | レスポンスがキャッシュ可否を自己申告する | ネットワーク往復の削減、CDN |
+| <strong>統一インターフェース</strong> | すべてのリソースが同じ操作体系に従う | 汎用クライアント・汎用中間層 |
+| <strong>階層化システム</strong> | クライアントは直接の相手が終端かどうかを知らない | プロキシ・LB・ゲートウェイの挿入が自由 |
+| <strong>コードオンデマンド</strong>（任意） | サーバがコードを送って動作を拡張できる | JS の配信。唯一の任意制約 |
+
+<strong>ステートレス</strong>は誤解されがちです。これは「サーバがデータベースを持つな」ではなく、「<em>リクエスト間のセッション状態</em>をサーバのメモリに置くな」という意味です。だからこそロードバランサが任意のノードにリクエストを投げられます。
+
+### 4.2 統一インターフェースの 4 つの下位制約
+
+REST の中核であり、最も無視されている部分です。
+
+1. <strong>リソースの識別</strong> — URI がリソースを一意に指す。
+2. <strong>表現を通じた操作</strong> — クライアントはリソースそのものではなく<em>表現</em>（JSON, XML, HTML）を受け取り、それを送り返して更新する。
+3. <strong>自己記述的メッセージ</strong> — メッセージ単体で処理方法が分かる（`Content-Type`, `Cache-Control` など）。
+4. <strong>HATEOAS</strong> — アプリケーション状態の遷移をハイパーメディアが駆動する。
+
+3 番目が決定的です。<strong>自己記述的だからこそ、中身のドメイン知識を持たないプロキシ・CDN・WAF・ブラウザが仕事をできる</strong>。gRPC のボディが Protobuf の不透明なバイト列であることの代償は、まさにここに現れます。
+
+### 4.3 HATEOAS はなぜ普及しなかったのか
+
+理屈は美しい。「クライアントはエントリポイントだけ知っていればよく、あとはレスポンスに含まれるリンクをたどる。サーバは URL 構造を自由に変えられる」。
+
+しかし実務では、ほぼ定着しませんでした。理由は明快です。
+
+- <strong>クライアントは結局ハードコードする</strong>。リンクをたどる汎用クライアントを書くより、`/users/{id}` と直接書くほうが安い。
+- <strong>型付きクライアント生成と相性が悪い</strong>。OpenAPI からコードを生成する世界では、URL は生成時に固定される。
+- <strong>リンクの意味（link relation）を理解するには結局ドメイン知識が要る</strong>。`rel="cancel"` が何をするかは、機械には分からない。
+
+例外的に成功しているのは、<strong>ページネーション</strong>（`next` / `prev` リンク）と <strong>非同期ジョブ</strong>（`202 Accepted` + `Location` でポーリング先を返す）です。この 2 つは「クライアントが URL を組み立てられない」場面なので、ハイパーメディアが本当に価値を持ちます。ここだけ採用するのが現実的な落とし所でしょう。
+
+なお、リンクを表現する標準はいくつかあります（HTTP ヘッダなら RFC 8288 の `Link`、ボディなら HAL・JSON:API・Siren）。<strong>独自形式を発明する前に、これらを検討する価値はあります</strong>。
+
+### 4.4 リソース指向 vs 手続き指向 — 「動詞」をどう置くか
+
+実務で最も頻繁に衝突するのがここです。`cancelOrder`、`sendEmail`、`reindexSearch`——これらは明らかに手続きであって、リソースではありません。
+
+REST 側の定石は 3 つあります。
+
+| 手法 | 例 | 使いどころ |
+| --- | --- | --- |
+| <strong>状態を表す属性の更新</strong> | `PATCH /orders/42` に `status: "cancelled"` | 状態遷移が単純で、副作用が少ない |
+| <strong>アクションをリソース化</strong> | `POST /orders/42/cancellations` | アクション自体に ID・履歴・監査ログが要る |
+| <strong>カスタムメソッド</strong> | `POST /v1/orders/42:cancel` | 上記に収まらない。Google API 設計ガイド (AIP-136) の流儀 |
+
+2 番目は「命令を名詞に変換する」という発想で、実は非常に強力です。<strong>「注文をキャンセルする」を「キャンセル要求というリソースを作る」に読み替える</strong>と、リトライ時の冪等性（同じ ID で作れば重複しない）、非同期処理（`202 Accepted` を返して後で完了）、監査（誰がいつキャンセルしたか）がすべて自然に表現できます。
+
+一方 gRPC では、この悩みは存在しません。`CancelOrder(CancelOrderRequest) returns (CancelOrderResponse)` と書けば終わりです。<strong>表現力という一点では、RPC のほうが素直</strong>なのです。
+
+### 4.5 コレクションの設計 — ページネーションと部分取得
+
+リソース指向でも手続き指向でも、<strong>「一覧を返す」API が最初に壊れます</strong>。ここはプロトコル選択と独立に効く、実務上きわめて重要な設計面です。
+
+<strong>オフセット方式 vs カーソル方式</strong>
+
+| 観点 | オフセット（`?offset=100&limit=20`） | カーソル（`?page_token=xxx&page_size=20`） |
+| --- | --- | --- |
+| 実装の容易さ | 簡単（`OFFSET` / `LIMIT`） | 面倒（ソートキーの符号化が要る） |
+| 深いページの性能 | <strong>悪い</strong>。DB は捨てる行も読む | 良い。インデックスで直接シーク |
+| 挿入・削除への耐性 | <strong>弱い</strong>。行がずれて重複・欠落する | 強い。位置ではなく値で指す |
+| 「N ページ目へ飛ぶ」 | できる | できない |
+| 総件数 | ページ番号 UI とは相性がよい。ただし大規模データでの正確な `COUNT(*)` はやはり高コスト | 高コスト（別クエリ、あるいは概算） |
+
+<strong>「ページ 2 に同じ項目がもう一度出る」というバグの正体はほぼ常にオフセット方式です。</strong>一覧が更新されうるなら、カーソル方式を既定にしてください。
+
+カーソルの実装では次の 3 点を守ります。
+
+1. <strong>安定なソートキーを使う</strong>。`created_at` だけでは同時刻の行で順序が定まらないので、`(created_at, id)` のように<em>一意なタイブレーカ</em>を必ず添える。
+2. <strong>トークンは不透明にする</strong>。Base64 は URL-safe な運搬形式としては有用ですが、<em>それだけで不透明になるわけではありません</em>。「内部形式は契約の一部ではない」と明記し、必要なら署名・暗号化するか、サーバ側に保存したハンドルを返す。構造を公開すると、クライアントが勝手にトークンを組み立て始め、内部のソート順を永久に変えられなくなります。
+3. <strong>トークンにクエリ条件を埋め込む</strong>。ページングの途中でフィルタやソート順が変わると結果が壊れるので、トークン側に条件を持たせて不一致を検出する。
+
+Google API 設計ガイドはこれを `page_size` / `page_token` / `next_page_token` という名前で標準化しています。gRPC でも REST でも同じ形が使えます。
+
+```proto
+message ListUsersRequest {
+  int32  page_size  = 1;   // 上限はサーバが決める（クライアントの言い値を信じない）
+  string page_token = 2;   // 不透明。前回の next_page_token をそのまま返す
+}
+message ListUsersResponse {
+  repeated User users           = 1;
+  string        next_page_token = 2;  // 空文字列 = 最終ページ
+}
+```
+
+<strong>部分取得（partial response）</strong>も同じ層の話です。「全フィールド返すと重い、でも専用エンドポイントは作りたくない」という要求に対して、各方式はこう答えます。
+
+| 方式 | 手段 | 難点 |
+| --- | --- | --- |
+| REST | `?fields=id,name`、JSON:API の sparse fieldsets | 構文が非標準。キャッシュキーが分岐する（`Vary` 相当の考慮が要る） |
+| gRPC | `google.protobuf.FieldMask` をリクエストに含める | サーバ側で真面目に実装しないと単なる飾りになる |
+| GraphQL | クエリの選択セットそのもの | 仕組みが最初から中核にある |
+
+FieldMask は「読み取りの絞り込み」だけでなく、<strong>更新時の意味論</strong>にも効きます。`UpdateUser` に `update_mask` を付けると、「マスクに含まれないフィールドは変更しない」を明示できます。これは REST の `PATCH` と `PUT` の違いを、型として表現したものだと考えると分かりやすい。<em>AIP-134 流の部分更新では FieldMask が標準の仕組みです。加えて、proto3 の暗黙的プレゼンス（§5.4）では「未設定」と「ゼロ値」が区別できないため、<strong>ゼロ値への更新</strong>を正しく扱いたいフィールドには `optional` などの明示的プレゼンスも併用します。</em>
+
+## 5. ワイヤの上で何が起きているか
+
+> <strong>一言でいうと</strong>: 「gRPC は速い」の実体は、(a) ヘッダ圧縮、(b) 多重化、(c) スキーマによるメタ情報の削除 の 3 つ。どれも独立に評価できます。
+
+### 5.1 REST / JSON over HTTP/1.1
+
+ユーザ 1 件を取得する、ごく普通のリクエストです。
+
+```http
+GET /v1/users/42 HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Accept-Encoding: gzip, br
+Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+User-Agent: acme-client/1.4.2
+Traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: private, max-age=60
+ETag: "a1b2c3d4"
+Vary: Accept-Encoding
+Content-Length: 36
+
+{"id":42,"name":"Ada","active":true}
+```
+
+注目すべきは<strong>比率</strong>です。ボディは 36 バイト。一方リクエストヘッダは、JWT・トレースコンテキスト・User-Agent が乗ると数百バイト、場合によっては 1KB を超えます。HTTP/1.1 には<strong>ヘッダ圧縮がない</strong>ため、この数百バイトが<em>毎リクエスト、非圧縮のヘッダフィールドとして</em>再送されます（TLS では暗号化されますが、圧縮はされません）。マイクロサービス間の細かい呼び出しでは、<strong>ペイロードよりヘッダのほうが大きい</strong>のが常態です。
+
+さらに HTTP/1.1 は 1 コネクションで 1 リクエストずつしか処理できません（パイプラインは事実上使われない）。並列度はコネクション数で稼ぐしかなく、多くのブラウザ実装は同一オリジンあたりおおむね 6 本前後に制限しています。
+
+### 5.2 gRPC over HTTP/2 — フレームの構造
+
+gRPC は HTTP/2 の上に薄く乗った RPC プロトコルです。同じ呼び出しは次のようになります。
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    Note over C,S: 1 本の HTTP/2 ストリーム (stream id 3)
+    C->>S: HEADERS — path /users.v1.UserService/GetUser, te trailers
+    C->>S: DATA — 5B プレフィクス + Protobuf 9B, END_STREAM
+    S->>C: HEADERS — status 200, content-type application/grpc
+    S->>C: DATA — 長さ前置きされたレスポンスメッセージ
+    S->>C: HEADERS (trailers) — grpc-status 0, END_STREAM
+```
+
+この呼び出しで流れる代表的なヘッダ（必須のものと、よく使われる任意のもの）はこうなります。
+
+```text
+:method       = POST
+:scheme       = https
+:path         = /users.v1.UserService/GetUser
+:authority    = api.example.com
+te            = trailers
+content-type  = application/grpc+proto
+grpc-timeout  = 1S
+grpc-encoding = identity
+```
+
+このうち仕様上の必須は `:method` / `:scheme` / `:path` / `content-type` と `te: trailers` で、`grpc-timeout` や `grpc-encoding` は<strong>任意</strong>です。ここに 3 つの重要な設計判断が現れています。
+
+1. <strong>`:path` がサービス名とメソッド名そのもの</strong>。`/{package}.{Service}/{Method}` という固定形式です。URL はリソースではなく手続きを指します。
+2. <strong>`te: trailers` が必須</strong>。gRPC は最終的な成否を<em>トレーラー</em>（ボディの後に来るヘッダ）で返すため、仕様はこのヘッダを「トレーラーを扱えない中間装置を検出する」目印として要求しています。トレーラーは gRPC が HTTP/2 を前提にする理由の<em>ひとつ</em>で、ほかに多重化・フロー制御・ストリーム単位のキャンセルも同じくらい効いています。
+3. <strong>`grpc-timeout` でデッドラインが伝播する</strong>。値は最大 8 桁の正整数と単位（`H` 時 / `M` 分 / `S` 秒 / `m` ミリ秒 / `u` マイクロ秒 / `n` ナノ秒）の組で、`1S` や `980m` と書きます。<em>`1000ms` のような書き方は無効</em>です。これは REST に対応物のない、gRPC の実務上最大の武器のひとつです（§7.5）。
+
+### 5.3 なぜトレーラーが必要なのか
+
+HTTP のステータスコードはレスポンスの<em>先頭</em>で送られます。ところがサーバストリーミングでは、「200 OK でストリームを開始したが、100 件目を送った時点でデータベースが落ちた」ということが起こります。<strong>この時点でステータス行は書き換えられません</strong>。
+
+gRPC はこれを、ボディの後に送るトレーラーで解決しました。
+
+```text
+grpc-status: 13
+grpc-message: internal error while streaming rows
+```
+
+そして HTTP/1.1 のトレーラー（`Transfer-Encoding: chunked` 時の trailer）は実装がまばらで信用できない。だから HTTP/2 が要る、という論理です。
+
+### 5.4 Protobuf のエンコーディングを 1 バイトずつ見る
+
+Protobuf の本体は驚くほど単純です。すべてのフィールドが <strong>「タグ (フィールド番号 &lt;&lt; 3 | ワイヤ型)」 + 「値」</strong> という形をとります。
+
+| ワイヤ型 | 名前 | 用途 |
+| --- | --- | --- |
+| 0 | VARINT | int32/int64/uint/bool/enum |
+| 1 | I64 | fixed64, sfixed64, double |
+| 2 | LEN | string, bytes, 埋め込みメッセージ, packed repeated |
+| 3 / 4 | SGROUP / EGROUP | 非推奨（group、歴史的遺物） |
+| 5 | I32 | fixed32, sfixed32, float |
+
+<ProtobufWireVisualizer />
+
+ここから読み取れる実務的な帰結が 3 つあります。
+
+- <strong>フィールド番号 1〜15 はタグが 1 バイトに収まる</strong>（16〜2047 は 2 バイト）。頻出フィールド・繰り返しフィールドの要素には小さい番号を割り当てるのが定石です。
+- <strong>proto3 の「暗黙的プレゼンス」では、ゼロ値のフィールドはワイヤに出ません</strong>。`0` / `false` / `""` は「送らない」で表現されます。裏を返せば、<em>「未設定」と「明示的にゼロ」を区別できません</em>。区別が必要なら proto3 の `optional`（protoc 3.15 以降は既定で有効）を付けて明示的プレゼンスにするのが現在の定石です。ラッパー型（`google.protobuf.Int32Value` など）は、古いツールチェーンや JSON の `null` との相互運用が要る場合の選択肢に後退しました。
+- <strong>直列化は決定論的ではありません</strong>。フィールドの出力順序や未知フィールドの扱いは実装・バージョンに依存します。したがって <em>Protobuf のバイト列をハッシュして署名や冪等キーにしてはいけません</em>。これは実際に事故が起きやすい落とし穴です。
+
+### 5.5 サイズを実際に数える
+
+「Protobuf は JSON より小さい」は正しいのですが、<strong>どれだけ小さいかはデータの形に強く依存します</strong>。数値主体なら劇的に、長い自然文が主体ならほとんど変わりません。
+
+<WireFormatLab />
+
+ここで最も重要な注意点は、<strong>gzip / brotli をかけると差が大きく縮む</strong>ことです。JSON の冗長性の大半は<em>繰り返されるキー名</em>にあり、これは圧縮アルゴリズムが最も得意とするパターンだからです。帯域だけが理由なら、Protobuf を導入する前に <code>Content-Encoding: br</code> を有効にするほうが、コストがゼロで効果もほぼ同じことがあります。
+
+圧縮で消えないのは次の 2 つです。
+
+- <strong>CPU コスト</strong> — JSON のパースは文字列走査・エスケープ処理・数値変換を伴い、長さ前置きのバイナリより本質的に重い。
+- <strong>スキーマがもたらす保証</strong> — 型・必須性・後方互換性チェックはバイト数の話ではありません。実はこちらのほうが、長期的な価値は大きい。
+
+### 5.6 ブラウザの壁 — gRPC-Web と Connect
+
+ブラウザの `fetch` / `XMLHttpRequest` は、HTTP/2 のフレームを直接制御できません。トレーラーを読むことも、リクエストのフロー制御を触ることもできない。したがって<strong>ブラウザから素の gRPC は話せません</strong>。
+
+これに対する解が 2 つあります。
+
+- <strong>gRPC-Web</strong> — トレーラーをボディの末尾に特別なフレームとして埋め込む変種。ブラウザ ↔ gRPC-Web を直接話せるサーバ、あるいはブラウザ ↔ 変換プロキシ（Envoy の `grpc_web` フィルタなど）↔ gRPC サーバ、という構成が必要です。クライアントストリーミングと双方向ストリーミングは使えません。
+- <strong>Connect</strong> — Buf が策定したプロトコル。`POST /package.Service/Method` に `application/json` または `application/proto` を載せるだけで、<strong>単項呼び出しは curl でそのまま叩けます</strong>。同じサーバが gRPC・gRPC-Web・Connect の 3 プロトコルを同時に話せるのが実務上の強みです。
+
+```bash
+# Connect なら、生成コードもプロキシもなしでデバッグできる
+curl -X POST https://api.example.com/users.v1.UserService/GetUser \
+  -H "Content-Type: application/json" \
+  -d '{"id": 42}'
+```
+
+<strong>「curl で叩けるか」は、思っている以上に運用コストを左右します。</strong>障害調査、サポート対応、外部パートナーへの説明——すべてに効きます。
+
+## 6. 契約 — IDL とスキーマ進化
+
+> <strong>一言でいうと</strong>: gRPC の真価は速さではなく、<em>スキーマがビルドを壊してくれる</em>ことにあります。REST でも同じ規律は作れますが、意識的に作らないと手に入りません。
+
+### 6.1 `.proto` は「単一の真実」になれる
+
+```proto
+syntax = "proto3";
+package users.v1;
+
+message User {
+  int32  id     = 1;
+  string name   = 2;
+  string email  = 3;
+  bool   active = 4;
+}
+
+message GetUserRequest  { int32 id = 1; }
+message GetUserResponse { User user = 1; }
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+}
+```
+
+このファイルから、Go・TypeScript・Java・Python のクライアントとサーバのスタブが生成されます。重要なのは<strong>生成が速いことではなく、契約違反がコンパイルエラーになること</strong>です。サーバがフィールドを削除すれば、クライアントのビルドが落ちる。CI で気づける。
+
+### 6.2 OpenAPI は「記述」であって「駆動」ではない、ことが多い
+
+OpenAPI（3.1 は JSON Schema 2020-12 に整合）でも同じことは原理的に可能です。実際、スキーマファーストで運用しているチームもあります。しかし現実には次のパターンが多い。
+
+| 運用 | 何が起きるか |
+| --- | --- |
+| <strong>コードファースト</strong>（実装のアノテーションから OpenAPI を生成） | 仕様が実装に追随するので嘘はつかない。ただし<em>破壊的変更を止める力がない</em> |
+| <strong>スキーマファースト</strong>（OpenAPI からサーバ/クライアントを生成） | gRPC と同等の規律。ただしツールチェーンの成熟度は言語差が大きい |
+| <strong>後付けドキュメント</strong>（手書きの OpenAPI） | ほぼ確実に実装と乖離する。<em>最悪の選択肢</em> |
+
+<strong>「gRPC か REST か」の議論の相当部分は、実は「スキーマを強制するか否か」の議論です。</strong>REST でもスキーマファーストにし、CI で破壊的変更を検出すれば、差は大きく縮まります。
+
+### 6.3 後方互換性の規則
+
+Protobuf の互換性ルールは、そのまま「API 進化の教科書」として使えます。
+
+| 変更 | 互換性 | 注意 |
+| --- | --- | --- |
+| フィールドの追加（新しい番号） | ✅ 安全 | 旧クライアントは未知フィールドとして保持または無視 |
+| フィールドの削除 | ⚠️ 条件付き | 番号を必ず `reserved` にする。再利用は致命的 |
+| フィールド名の変更 | ✅ ワイヤ的には安全 | ただし JSON マッピングと生成コードは壊れる |
+| フィールド番号の変更 | ❌ 破壊的 | 別のフィールドとして解釈される |
+| 型の変更 | ⚠️ 条件付き | `int32`/`int64`/`uint32`/`uint64`/`bool` は<em>ワイヤ互換</em>だが、範囲外の値が切り詰められて意味が変わりうるので「安全」ではない。`sint32`/`sint64` は相互互換だが他の整数型とは非互換 |
+| `optional` の追加 | ⚠️ 注意 | プレゼンス意味論が変わる |
+| enum 値の追加 | ⚠️ 注意 | 旧クライアントは未知の値を受け取る。既定値 0 を `UNSPECIFIED` にしておく |
+| 既存フィールドを `oneof` へ移動 | ⚠️ 条件付き | <em>明示的プレゼンスを持つ単一フィールド</em>（または extension）を<em>新しい</em> `oneof` に移す場合のみ安全。既存の `oneof` への移動や、複数フィールドの移動は非安全 |
+| `repeated` ↔ 単一 | ⚠️ 条件付き | スカラーの packed 表現が絡むと壊れる。メッセージ型なら比較的安全だが意味論は変わる |
+
+```proto
+message User {
+  reserved 3;             // 削除したフィールド番号を封印
+  reserved "email";       // 名前も封印
+  int32  id   = 1;
+  string name = 2;
+}
+```
+
+<strong>もうひとつの落とし穴が ProtoJSON（Protobuf の正規 JSON マッピング）です。</strong>grpc-gateway・Connect・`protojson` 経由で JSON を出している場合、「ワイヤ互換だから安全」は成立しません。
+
+- <strong>フィールド名の変更</strong>はワイヤ上は無害でも、JSON のキーが変わるので<em>破壊的</em>です。どうしても改名するなら `json_name` で旧名を固定します。
+- <strong>enum は既定で名前（文字列）で出力されます</strong>。値の改名は JSON 側では破壊的変更です。
+- <strong>enum の値追加も JSON では危険</strong>です。名前で直列化される以上、旧パーサが未知の名前を見て失敗しうるからです。「全クライアントが enum を<em>整数として</em>出力する」設定に揃えている場合に限り、値の追加は JSON ワイヤ上も安全になります。未知の数値をどう表現するかは言語ランタイムごとに異なります。
+
+JSON API 側の対応する規則はこうなります。
+
+- <strong>追加は安全</strong>。ただしクライアントが「未知フィールドで例外を投げる」実装だと壊れます（Jackson の `FAIL_ON_UNKNOWN_PROPERTIES` が既定で有効、など）。<em>寛容な読み取り</em>を明示的に設定しておくこと。
+- <strong>削除・型変更は破壊的</strong>。`"id": 42` を `"id": "42"` にする変更は、動的型付け言語では静かに壊れます。
+- <strong>enum 相当の文字列</strong>に新しい値を足すのも破壊的になりえます。
+
+### 6.4 バージョニング — 3 つの流儀
+
+| 方式 | 例 | 評価 |
+| --- | --- | --- |
+| URL パス | `/v1/users`, `/v2/users` | 最も一般的。可視性が高く、ルーティングが単純。粒度が粗い（API 全体が一斉に上がる） |
+| メディアタイプ | `Accept: application/vnd.acme.user+json;version=2` | REST 原理主義的には正しい。ただし CDN のキャッシュキーや WAF が対応しづらい |
+| フィールドレベル進化 | 追加のみ、削除しない | Protobuf の既定戦略。バージョンという概念自体を消す |
+
+Protobuf のパッケージ名に `users.v1` と入れるのは、<strong>「フィールドレベル進化で吸収しきれない変更が起きたときだけ、パッケージごと新設する」</strong>という戦略です。実質的には URL パス方式と同じですが、<em>そこに到達する頻度が桁違いに低い</em>のが利点です。
+
+### 6.5 契約の共有範囲に気をつける
+
+`.proto` を全社で 1 つのリポジトリに集約するのは、一見すると理想的です。しかし実際には<strong>密結合を生みます</strong>。あるチームが `common.proto` を変更すると、全社のビルドが影響を受ける。
+
+現実的なガイドラインはこうです。
+
+- <strong>サービスごとに `.proto` を所有する</strong>。共通型（`Money`, `Timestamp` など）は最小限に留め、既存の `google.protobuf.*` や `google.type.*` を優先する。
+- <strong>スキーマレジストリで配布する</strong>（Buf Schema Registry など）。「コピー&ペースト」も「巨大なモノレポ」も避ける。
+- <strong>CI に破壊的変更検出を入れる</strong>（`buf breaking`）。これが gRPC 運用で最も費用対効果の高い設定です。
+
+レジストリは「置き場所」ではなく<strong>ガバナンスの装置</strong>として設計してください。最低限、次の 5 点を決めます。
+
+| 論点 | 決めること |
+| --- | --- |
+| <strong>所有権</strong> | モジュール（≒サービス）ごとに 1 チームが所有し、そのチームだけが push できる |
+| <strong>破壊的変更ポリシー</strong> | BSR 側の breaking-change check（Enterprise の専用／プライベート BSR インスタンスで利用可）は、有効にすると `FILE`（既定）または `WIRE_JSON` を強制します。ローカルの `buf breaking` なら `PACKAGE` / `WIRE` も選べます。安定版パッケージは後方互換を既定にし、避けられない破壊的変更は新パッケージ（`v2`）として出す |
+| <strong>レビュー</strong> | 公開 API に相当する `.proto` の変更は、消費者側のレビュアーを必須にする |
+| <strong>成果物</strong> | 生成コードはレジストリから配布する。各チームが `protoc` を手元で回してバージョンがばらつく状態を避ける |
+| <strong>例外の出し方</strong> | 破壊的変更をどうしても通す手続き（誰が承認し、どう告知し、いつ実行するか）を明文化する |
+
+<strong>最後の 1 行が抜けているレジストリ運用は、いずれ形骸化します。</strong>「絶対に壊せない」ルールは、壊す必要が生じた瞬間に迂回されるからです。<em>迂回路を正規の手続きとして用意しておく</em>ほうが、結果的にルールが守られます。
+
+### 6.6 廃止の作法 — API のライフサイクル
+
+追加は簡単、削除は難しい。<strong>「消し方」を最初に決めておかないと、API は単調に膨らみ続けます</strong>。プロトコルごとに、廃止を機械可読に伝える手段が用意されています。
+
+| 層 | 手段 | 効果 |
+| --- | --- | --- |
+| HTTP | `Deprecation` ヘッダ（RFC 9745。廃止が有効になる日時で、過去でも未来でもよい）+ `Sunset` ヘッダ（RFC 8594、提供停止日時）+ `Link` の `rel="deprecation"` | クライアントがログ・アラートを自動化できる |
+| OpenAPI | `deprecated: true` | 生成クライアントに警告が出る |
+| Protobuf | `option deprecated = true;`（フィールド・メソッド・メッセージ単位） | 生成コードにコンパイラ警告が付く |
+
+```proto
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option deprecated = true;  // 生成コードに警告が出る
+  }
+}
+```
+
+そして<strong>最も重要なのは観測</strong>です。「誰がまだ古いエンドポイントを呼んでいるか」を、呼び出し元の識別子（`User-Agent`、API キー、クライアント ID）とともにメトリクス化してください。これがないと、廃止日を決めることも、決めた日に実行することもできません。<em>廃止できない API は、実質的に永久保守です。</em>
+
+### 6.7 契約を守らせる — CI に置くべき検査
+
+スキーマがあっても、CI で検査しなければただのドキュメントです。<strong>「壊れたと気づくのが本番か CI か」の差</strong>が、契約という仕組みの価値のほぼすべてを決めます。
+
+検査は 3 層に分かれます。
+
+| 層 | 何を検出するか | 道具の例 |
+| --- | --- | --- |
+| <strong>構文・スタイル</strong> | 命名規約違反、必須コメント欠落 | `buf lint`、Spectral（OpenAPI） |
+| <strong>破壊的変更</strong> | フィールド削除、番号変更、型変更 | `buf breaking`（前バージョンと比較）、oasdiff |
+| <strong>振る舞い</strong> | 「スキーマは合っているが挙動が違う」 | 消費者駆動契約テスト（Pact など）、生成クライアントのコンパイル検査 |
+
+上 2 層は自動化が容易で、費用対効果が極めて高い。<strong>`.proto` を採用したのに `buf breaking` を CI に入れていないなら、gRPC の主要な利点の半分を捨てています。</strong>
+
+3 層目が本題です。スキーマは<em>形</em>しか守れません。次のような変更はスキーマ的には無傷でも、消費者を壊します。
+
+- 今まで必ず入っていた省略可能フィールドが、入らなくなった。
+- ソート順が変わった。ページネーションの安定性が失われた。
+- 「空配列」を返していたところが `null` を返すようになった。
+- エラーコードが `NOT_FOUND` から `PERMISSION_DENIED` に変わった（情報漏洩対策としては正しいが、クライアントの分岐は壊れる）。
+
+<strong>消費者駆動契約テスト（consumer-driven contract testing）</strong>は、消費者側が「自分が依存している具体的な期待」をテストとして書き、提供者側の CI がそれを検証する方式です。Pact が代表格ですが、道具より発想が重要です——<em>「提供者は、自分の全機能ではなく、実際に使われている部分を守ればよい」</em>。
+
+現実的な最小構成はこうです。
+
+1. 提供者の CI で `buf breaking`（または OpenAPI の差分検査）を必須にする。
+2. 消費者の主要なリクエスト／レスポンス例を<strong>ゴールデンファイル</strong>として提供者のリポジトリに置き、変更時に差分レビューを強制する。
+3. 重要な消費者については、生成クライアントを提供者の CI でコンパイルする。
+
+これだけで、事故の大半は本番前に止まります。
+
+## 7. エラー設計 — ここが実務の分かれ目
+
+> <strong>一言でいうと</strong>: エラーは「人間が読む文字列」ではなく「機械が分岐できる構造」でなければ、リトライもフォールバックも書けません。
+
+### 7.1 HTTP ステータスコードの意味論
+
+REST の強みは、<strong>エラーの大分類がプロトコルに組み込まれている</strong>ことです。中間層（LB、CDN、SDK のリトライ層）が中身を知らずに判断できます。
+
+| コード | 意味 | リトライ |
+| --- | --- | --- |
+| 400 | リクエストが構文的に不正 | ❌ 不可（直さないと同じ） |
+| 401 / 403 | 未認証 / 権限なし | ❌（401 はトークン更新後なら可） |
+| 404 | リソースなし | ❌ |
+| 409 | 状態の競合 | ⚠️ 状態次第 |
+| 412 | 前提条件失敗（`If-Match` 不一致） | ⚠️ 再読み込み後 |
+| 422 | 構文は正しいが意味的に処理不能 | ❌ |
+| 429 | レート制限 | ✅ `Retry-After` に従う |
+| 500 | サーバ内部エラー | ⚠️ 冪等な操作のみ |
+| 503 | 一時的に利用不可 | ✅ `Retry-After` |
+
+よくある誤用が 2 つあります。
+
+- <strong>常に 200 を返し、ボディの `{"error": ...}` で失敗を伝える</strong>。中間層とクライアント SDK のリトライ機構が完全に無力化されます。GraphQL の<em>実行時</em>エラーが 200 + `errors` になりがちなのは単一エンドポイント設計の帰結ですが、通常の HTTP API がそれを真似る理由はありません。
+- <strong>4xx と 5xx の取り違え</strong>。バリデーションエラーを 500 で返すと、監視のエラー率が汚染され、無意味なリトライが発生し、SLO が壊れます。<strong>「4xx はクライアントのせい、5xx はこちらのせい」</strong>を厳守すること。
+
+### 7.2 エラーボディの標準 — RFC 9457
+
+エラーの詳細をどう構造化するかには標準があります。RFC 9457 <em>Problem Details for HTTP APIs</em>（RFC 7807 の後継）です。
+
+```json
+{
+  "type": "https://api.example.com/problems/insufficient-funds",
+  "title": "Insufficient funds",
+  "status": 409,
+  "detail": "Account 42 has a balance of 30 USD; 50 USD required.",
+  "instance": "/accounts/42/transfers/8f2b",
+  "balance": 30,
+  "required": 50
+}
+```
+
+`Content-Type: application/problem+json` で返します。`type` が<strong>機械可読な安定した識別子</strong>で、クライアントはこれで分岐します。`detail` は人間向けなので、<em>ここで分岐してはいけません</em>（文言変更で壊れる）。
+
+### 7.3 gRPC のエラーモデル
+
+gRPC は 17 個の固定ステータスコード（0〜16）を持ちます。HTTP より粒度が細かく、<strong>リトライ判断の強い入力になる</strong>設計です。
+
+| コード | 名前 | 典型的な意味 |
+| --- | --- | --- |
+| 0 | OK | 成功 |
+| 1 | CANCELLED | 呼び出し側が中断 |
+| 2 | UNKNOWN | 不明なエラー。別のエラー空間から変換された場合も含む |
+| 3 | INVALID_ARGUMENT | 引数が不正（状態に依存しない） |
+| 4 | DEADLINE_EXCEEDED | デッドライン超過 |
+| 5 | NOT_FOUND | 対象なし |
+| 6 | ALREADY_EXISTS | 既に存在 |
+| 7 | PERMISSION_DENIED | 権限なし |
+| 8 | RESOURCE_EXHAUSTED | クォータ超過・レート制限 |
+| 9 | FAILED_PRECONDITION | 前提状態が満たされない（<em>リトライしても無駄</em>） |
+| 10 | ABORTED | 競合により中断（<em>読み直して書き直すなど、上位レベルでの再試行が有効</em>） |
+| 11 | OUT_OF_RANGE | 範囲外 |
+| 12 | UNIMPLEMENTED | 未実装 |
+| 13 | INTERNAL | 内部エラー |
+| 14 | UNAVAILABLE | 一時的に利用不可（<em>リトライしてよい</em>） |
+| 15 | DATA_LOSS | 回復不能なデータ損失・破損 |
+| 16 | UNAUTHENTICATED | 未認証 |
+
+<strong>9 / 10 / 11 の区別</strong>は gRPC のエラー設計で最も価値のある部分です。公式ガイダンスはこう説明します。「`FAILED_PRECONDITION` はシステム状態を直すまでクライアントが再試行すべきでない。`ABORTED` はより高いレベルでの再試行（読み直して書き直す）が有効。`OUT_OF_RANGE` は状態が変われば成功しうる」。この 3 分類があるだけで、クライアントのリトライロジックの大部分が機械的に書けます。ただし<strong>コードだけで自動リトライの可否が決まるわけではありません</strong>。非冪等な操作では、`UNAVAILABLE` であっても「届いていたかもしれない」可能性が残るからです（§7.4）。
+
+構造化された詳細は `google.rpc.Status` の `details` に載せます。
+
+```proto
+// google/rpc/error_details.proto が標準の型を提供する
+// ErrorInfo, RetryInfo, QuotaFailure, BadRequest, PreconditionFailure, ...
+message Status {
+  int32 code = 1;
+  string message = 2;
+  repeated google.protobuf.Any details = 3;
+}
+```
+
+`RetryInfo` で「何秒後に再試行せよ」を、`QuotaFailure` で「どのクォータに引っかかったか」を、`BadRequest` で「どのフィールドがなぜ不正か」を機械可読に返せます。<strong>REST 側で同じことをやるなら RFC 9457 の拡張メンバーで自作する</strong>ことになります。
+
+具体的に見比べると、両者の距離が意外に近いことが分かります。バリデーションエラーを返す場合:
+
+```json
+// REST — RFC 9457 + 拡張メンバー "errors"
+{
+  "type": "https://api.example.com/problems/validation-error",
+  "title": "Your request is not valid.",
+  "status": 422,
+  "errors": [
+    { "detail": "must be a positive integer", "pointer": "#/amount" },
+    { "detail": "must be a valid ISO 4217 code", "pointer": "#/currency" }
+  ]
+}
+```
+
+```proto
+// gRPC — code = INVALID_ARGUMENT, details に BadRequest を載せる
+// （抜粋。現在の FieldViolation には reason / localized_message もある）
+message BadRequest {
+  message FieldViolation {
+    string field = 1;        // "amount"
+    string description = 2;  // "must be a positive integer"
+  }
+  repeated FieldViolation field_violations = 1;
+}
+```
+
+構造はほぼ同型です。違いは<strong>「標準の型が最初から用意されているか、チームで決めるか」</strong>だけ。RFC 9457 の拡張メンバー名（上の例では `errors` と `pointer`）は仕様で決まっていないので、<em>組織として 1 つに決めて全 API で守る</em>必要があります。決めずに始めると、サービスごとに `errors` / `violations` / `fieldErrors` が乱立し、クライアント側の共通ハンドラが書けなくなります。<strong>これは技術の差ではなく、規約を誰が決めるかの差です。</strong>
+
+### 7.4 リトライと冪等性 — RPC の急所
+
+§3.1 の「部分故障」がここで牙をむきます。<strong>タイムアウトしたリクエストは、実行されたかどうか分からない</strong>のです。
+
+REST は HTTP のメソッド意味論（RFC 9110）で一部を解決しています。
+
+- <strong>安全 (safe)</strong>: `GET`, `HEAD`, `OPTIONS`, `TRACE` — 状態を変えない。
+- <strong>冪等 (idempotent)</strong>: 上記 + `PUT`, `DELETE` — 何度実行しても結果が同じ。
+- <strong>既定では冪等と定義されない</strong>: `POST`, `PATCH`。ただし個々のリソース設計や冪等キーによって、実質的に冪等にすることはできます。
+
+だから汎用の HTTP クライアントは「通信失敗でレスポンスを読めなかった冪等メソッドは再試行候補、非冪等メソッドは追加の知識なしに自動再試行しない」と判断できます。<strong>これはプロトコルに埋め込まれた知識であり、アプリケーションが書かなくていい</strong>という点で強力です。
+
+`POST` を冪等にしたいときは、クライアント生成のキーを使います（Stripe などが広めた `Idempotency-Key` ヘッダ。IETF HTTPAPI WG の Internet-Draft として標準化作業中で、まだ RFC ではありません）。
+
+```http
+POST /v1/payments HTTP/1.1
+Idempotency-Key: 8f2b1c40-3d2e-4f9a-9b1e-6c7a0d5e2f13
+Content-Type: application/json
+
+{"amount": 5000, "currency": "JPY"}
+```
+
+冪等キーは「ヘッダを受け取る」だけでは機能しません。サーバ側に次の 4 つの規律が要ります。
+
+1. <strong>キーのスコープ</strong> — 「エンドポイント × 認証主体 × キー」で一意にする。グローバル一意にすると、別テナントのキー衝突で事故ります。
+2. <strong>リクエストの指紋</strong> — 本文の指紋（ハッシュ）を一緒に保存し、<em>同じキーで異なる本文</em>が来たら `422 Unprocessable Content` で拒否する（Idempotency-Key draft の規定）。`409 Conflict` は「同じキーの元リクエストがまだ処理中」の場合に使い分けます。黙って古い結果を返すのが最悪です。
+3. <strong>レスポンスの再生</strong> — 初回の応答（ステータス・本文）を保存し、再送には保存した応答をそのまま返す。
+4. <strong>TTL と進行中状態</strong> — 24 時間程度で失効させ、処理中に再送が来たら `409` を返すことで二重実行を防ぐ。
+
+gRPC 側はメソッド名から冪等性を推論できません（`CreateUser` が冪等かどうかは名前からは分からない）。そのため<strong>サービス設定でリトライポリシーを明示します</strong>。
+
+```json
+{
+  "methodConfig": [{
+    "name": [{ "service": "users.v1.UserService", "method": "GetUser" }],
+    "retryPolicy": {
+      "maxAttempts": 4,
+      "initialBackoff": "0.1s",
+      "maxBackoff": "2s",
+      "backoffMultiplier": 2,
+      "retryableStatusCodes": ["UNAVAILABLE", "RESOURCE_EXHAUSTED"]
+    }
+  }]
+}
+```
+
+ここで<strong>リトライは必ず指数バックオフ + ジッタ、かつ全体の試行回数に上限</strong>を設けてください。素朴なリトライは、部分的な障害を<em>全体障害に増幅</em>します（リトライストーム）。gRPC のリトライスロットル（`retryThrottling`）は、まさにこの増幅を抑えるための仕組みです。この増幅現象については[LLM ロードバランシングの記事](/ja/blog/llm-load-balancing)でも扱いました。
+
+### 7.5 デッドライン伝播 — REST に対応物がない武器
+
+gRPC のクライアントはデッドラインを設定し、それが `grpc-timeout` ヘッダで<strong>下流に自動伝播します</strong>。
+
+```text
+Client (deadline 1000ms)
+  └─ Gateway        残り 980ms  → grpc-timeout: 980m
+       └─ OrderSvc  残り 940ms  → grpc-timeout: 940m
+            └─ DB   残り 900ms
+```
+
+これがなぜ重要か。デッドラインがないシステムでは、<strong>クライアントがとっくに諦めた仕事を、下流が延々と続けます</strong>。障害時にこれが起きると、無駄な作業でリソースが枯渇し、回復が遅れます。
+
+ただし<strong>伝播は魔法ではありません</strong>。実際には「受け取った呼び出しコンテキスト（Go の `ctx`、Java の `Context`）を、下流呼び出しにそのまま渡す」ことで初めて機能します。ワーカープールに投げる、`context.Background()` で作り直す、非同期のファイアアンドフォーゲットにする——いずれもデッドラインの鎖を静かに断ち切ります。<em>コンテキストを引き回す規律</em>がセットで必要です。
+
+REST でも同じことは実現できますが、<strong>自分で作る必要があります</strong>。標準ヘッダは存在しないので、`X-Request-Deadline` のような独自ヘッダを定義し、全サービスのミドルウェアで解釈・減算・伝播を実装する——ミドルウェアの合成については[ミドルウェアチェーンパターン](/ja/blog/middleware-chain-pattern)で扱った構造がそのまま使えます。<strong>「フレームワークがやるか、自分でやるか」の典型例</strong>です。
+
+## 8. 通信パターン — 形の違い
+
+> <strong>一言でいうと</strong>: REST は request/response の 1 形態しか持たず、他はすべて<em>回避策</em>。gRPC は 4 形態を型として持ちます。ただしストリームはメッセージキューではありません。
+
+### 8.1 gRPC の 4 つの形態
+
+```proto
+service Chat {
+  rpc Send(Msg) returns (Ack);                       // 単項 (unary)
+  rpc Subscribe(Filter) returns (stream Event);      // サーバストリーミング
+  rpc Upload(stream Chunk) returns (Summary);        // クライアントストリーミング
+  rpc Session(stream Msg) returns (stream Msg);      // 双方向
+}
+```
+
+いずれも <strong>HTTP/2 の 1 ストリーム</strong>にマップされ、順序保証とフロー制御（`WINDOW_UPDATE`）が効きます。キャンセルは `RST_STREAM` で即座に下流まで伝わります。
+
+### 8.2 REST 側の対応物
+
+| 用途 | REST での実現 | 難点 |
+| --- | --- | --- |
+| サーバ → クライアントの継続的通知 | SSE (`text/event-stream`) | 単方向のみ。HTTP/1.1 ではコネクションを占有 |
+| 双方向 | WebSocket | HTTP から別プロトコルへアップグレード。もはや REST ではない |
+| 大きなアップロード | チャンク転送、マルチパート、`PATCH` の追記 | 再開・進捗の標準がない |
+| 非同期ジョブ | `202 Accepted` + `Location` + ポーリング | ポーリング間隔とスケールのトレードオフ |
+| イベント通知 | Webhook | 到達保証・署名検証・リトライを自作する必要がある |
+
+なお、<strong>LLM のトークンストリーミングは今のところ SSE が事実上の標準</strong>です。OpenAI 互換 API や [AG-UI](/ja/blog/ag-ui-protocol) は SSE をそのまま使います。[MCP](/ja/blog/model-context-protocol) は少し事情が違い、初期の「HTTP+SSE」トランスポートは <strong>Streamable HTTP</strong> に置き換えられました。現在の MCP では SSE は「単一の POST に対してサーバが複数メッセージを返すときに<em>選べる</em>応答形式」であって、トランスポートそのものではありません。いずれにせよ、ブラウザから直接扱え、HTTP のインフラをそのまま使えるという一点が効いています。
+
+### 8.3 ストリームをメッセージキューの代わりにしてはいけない
+
+gRPC の双方向ストリーミングは強力ですが、<strong>耐久性がありません</strong>。
+
+- コネクションが切れればメッセージは消える。
+- サーバが再起動すれば全ストリームが切れる。
+- バックプレッシャはあるが、永続バッファはない。
+- クライアントが遅いと、サーバ側にメモリが溜まる。
+
+「Pub/Sub が欲しい」なら Kafka / NATS / Pub/Sub を使うべきです。gRPC ストリームが適するのは、<strong>「そのコネクションが生きている間だけ意味がある」データ</strong>——ライブテレメトリ、進行中のジョブの進捗、対話中のトークンなど——に限られます。
+
+### 8.4 「おしゃべりな API」問題
+
+RPC 的な設計では、細かいメソッドが増えがちです。
+
+```text
+GetUser(42) → GetUserOrders(42) → GetOrderItems(o1), GetOrderItems(o2), ...
+```
+
+1 呼び出しが 1ms でも、100 回呼べば 100ms。<strong>N+1 問題はデータベースだけの話ではありません</strong>。対処は 3 つ。
+
+1. <strong>バッチメソッドを用意する</strong>（`BatchGetOrders`）。Google API 設計ガイドの標準パターン。
+2. <strong>集約層（BFF）を置く</strong>。クライアントに近い場所で 1 回にまとめる。
+3. <strong>クライアントに選ばせる</strong>（GraphQL、あるいは REST の `?fields=` / `?expand=`）。
+
+### 8.5 フロー制御とバックプレッシャ
+
+ストリーミングを使うなら、<strong>「速い送り手と遅い受け手」</strong>の問題を避けて通れません。ここは gRPC と REST で実際に差が出る、数少ない<em>機能面</em>の違いです。
+
+HTTP/2 は 2 階層のフロー制御ウィンドウを持ちます。<strong>コネクション単位</strong>と<strong>ストリーム単位</strong>です。受け手は自分が処理できた分だけ `WINDOW_UPDATE` を返し、送り手はウィンドウが空くまで送信をブロックします。つまり<strong>バックプレッシャがトランスポートに内蔵されている</strong>——遅い受け手は自動的に送り手を減速させます。
+
+ただし、この効き方は<strong>ランタイム実装とバッファ設定に依存します</strong>。多くの gRPC 実装では、アプリケーションが `Recv` / read を進めないと最終的に HTTP/2 のウィンドウが戻らず、送信側に圧力がかかります。逆に、受信ループが内部キューへ読み出し続けると、トランスポートからは「消費済み」に見えるため、<em>バックプレッシャはそのキューの手前で止まってしまいます</em>。よくある壊し方は次の 2 つ。
+
+- <strong>受信ループで即座に内部キューへ積む</strong>。トランスポートから見ると「消費済み」なのでウィンドウが開き続け、バックプレッシャが消えて<em>アプリのメモリが溢れます</em>。バッファは有界にし、満杯なら読むのを止めること。
+- <strong>送信側でノンブロッキング送信をキューに積み続ける</strong>。Go の `stream.Send` はブロックしますが、言語によってはバッファに積むだけの API があり、同じことが起きます。
+
+REST 側では、SSE も標準の WebSocket API も<strong>イベント単位のアプリケーションレベル・バックプレッシャを持ちません</strong>。WebSocket の `bufferedAmount` はローカル送信キューの<em>観測</em>には使えますが、自動的に送信を絞ってはくれません（`WebSocketStream` は backpressure を扱えますが、まだ標準的な選択肢とは言えません）。SSE を HTTP/2 で運べばトランスポート層のフロー制御は効きます。いずれにせよ、購読レートの指定・ack・サンプリング・間引きといった「イベントを絞る」仕組みは<em>自分で設計する</em>必要があります。
+
+<strong>設計上の要点</strong>: ストリーミングでは「送れるだけ送る」を既定にしないこと。遅い消費者 1 つがサーバのメモリを食い潰し、<em>他の全クライアントに影響する</em>のが典型的な障害の形です。有界バッファ + 明示的な切断ポリシー（一定時間追いつかない購読者は落とす）をセットにしてください。
+
+## 9. パフォーマンス — 「速い」の正体を分解する
+
+> <strong>一言でいうと</strong>: 多くの実サービスで、直列化フォーマットはレイテンシの数 % しか占めません。まず<em>どこに時間が消えているか</em>を測ってから選んでください。
+
+### 9.1 レイテンシ予算を分解する
+
+<ApiLatencyBudgetLab />
+
+スライダを動かすと分かりますが、<strong>RTT とバックエンド処理が支配的な領域では、フォーマットを変えても総レイテンシはほぼ動きません</strong>。「gRPC は REST の 7 倍速い」といったベンチマークは、たいてい次のいずれかの条件で測られています。
+
+- ローカルホスト（RTT ≈ 0）で測っている → ネットワーク項が消え、直列化の比重が不自然に上がる
+- バックエンド処理が空（エコー） → 支配項が消える
+- 巨大なペイロード → 転送とパースが支配的になる
+- HTTP/1.1 側でコネクション再利用をしていない → ハンドシェイクのコストが乗る
+- ヘッダが大きい多数の小リクエスト → HTTP/2 の HPACK が効く（<em>この差は本物です</em>）
+
+最後の条件は現実的です。マイクロサービス間で JWT 付きの小さなリクエストを毎秒数万回投げる状況では、HPACK によるヘッダ圧縮の効果は無視できません。<strong>ただしこれは「gRPC が速い」のではなく「HTTP/2 が効いている」のであって、REST を HTTP/2 で運べば同じ利得が得られます。</strong>
+
+### 9.2 実際に効く順序
+
+現場で効果が大きい順に並べると、おおむねこうなります。
+
+1. <strong>呼び出し回数を減らす</strong>（バッチ化、キャッシュ、N+1 の除去）。桁で効く。
+2. <strong>コネクションを再利用する</strong>（keep-alive、コネクションプール）。ハンドシェイクは RTT の数倍。
+3. <strong>圧縮を有効にする</strong>。JSON なら劇的に効く。
+4. <strong>HTTP/2 以降を使う</strong>。多重化とヘッダ圧縮。
+5. <strong>ペイロードを削る</strong>（不要フィールドを返さない）。
+6. <strong>直列化フォーマットを変える</strong>。ここまで来て、ようやく。
+
+<strong>6 番から始めるプロジェクトが驚くほど多い</strong>のが実情です。理由は分かります——測定が要らず、意思決定が「技術選定」として気持ちいいから。しかし費用対効果としては最下位です。
+
+### 9.3 スループットとテール
+
+平均レイテンシではなく <strong>p99</strong> を見ると、別の要素が効いてきます。
+
+- <strong>GC 圧</strong>: JSON のパースは短命オブジェクトを大量に生みます。Protobuf の生成コードは事前確保された構造体に直接書き込むため、アロケーションが少ない。高スループット環境では<em>ここが p99 に効く</em>ことがあります（[GC の記事](/ja/blog/garbage-collection)も参照）。
+- <strong>HTTP/2 の TCP レベル HoL ブロッキング</strong>: パケットロス時、1 本の TCP 接続上の全ストリームが止まります。HTTP/3 (QUIC) はこれを解消しますが、gRPC over HTTP/3 の対応状況は実装により差があります。
+- <strong>コネクション数と輻輳制御</strong>: HTTP/2 は接続数を減らすので、輻輳ウィンドウの立ち上がりが速い一方、1 本が詰まると影響範囲が大きい。
+
+### 9.4 まともなベンチマークの条件
+
+「gRPC vs REST」のベンチマークは、条件を書かなければほぼ無意味です。自分で測るときも、他人の数字を読むときも、次を確認してください。
+
+1. <strong>両者とも同じ HTTP バージョンか</strong>。HTTP/2 の gRPC と HTTP/1.1 の REST を比べているなら、測っているのは主に HTTP のバージョン差です。
+2. <strong>コネクションは温まっているか</strong>。計測前にウォームアップし、TLS ハンドシェイクを毎回含めていないか（含めるなら、それを明記する）。
+3. <strong>JIT / ランタイムは温まっているか</strong>。JVM・.NET・V8 は最初の数千リクエストが遅い。
+4. <strong>圧縮の有無を揃えているか</strong>。JSON に gzip をかけず Protobuf と比べるのはフェアではありません。
+5. <strong>ペイロードは現実的か</strong>。「数値だけの 20 バイトのメッセージ」と「長い自然文を含む 200KB のレスポンス」では結論が逆転します。分布ごと再現すること。
+6. <strong>バックエンド処理が入っているか</strong>。エコーサーバのベンチは「直列化のマイクロベンチ」であり、API のベンチではありません。
+7. <strong>負荷生成側が飽和していないか</strong>。クライアントが CPU 上限に張り付いていると、測っているのはクライアントの性能です。
+8. <strong>平均ではなく分布を見ているか</strong>。p50・p99・p99.9 を出す。平均だけの比較は、テールで起きる違いを丸ごと隠します。
+9. <strong>コーディネーテッド・オミッションを避けているか</strong>。閉ループ（前の応答を待って次を送る）の負荷生成器は、サーバが詰まった瞬間に送信も止まるため、テールレイテンシを構造的に過小評価します。
+
+このリストを満たしていない数字は、<strong>「その環境ではそうだった」以上のことを何も言っていません</strong>。
+
+### 9.5 圧縮 — 効く場所と、逆効果になる場所
+
+§5.5 で「まず圧縮を試せ」と書きましたが、圧縮も万能ではありません。REST と gRPC で仕組みが違う点も含めて整理します。
+
+| 層 | REST | gRPC |
+| --- | --- | --- |
+| 交渉 | `Accept-Encoding` / `Content-Encoding`（RFC 9110） | `grpc-accept-encoding` / `grpc-encoding` |
+| 単位 | レスポンス全体 | <strong>メッセージ 1 件ごと</strong>（フレーミングの圧縮フラグで示す） |
+| 混在 | 不可（1 レスポンス 1 方式） | メッセージごとに「圧縮する／しない」を切り替え可能。ただし圧縮方式自体はその RPC の `grpc-encoding` で決まり、同一ストリーム内で方式を自由に変えられるわけではない |
+| ヘッダ | HTTP/1.1 は非圧縮 / HTTP/2 は HPACK | HPACK（HTTP/2 なので常に効く） |
+
+gRPC が<em>メッセージ単位</em>なのは重要です。ストリーミングでは、大きなメッセージだけをその RPC で選ばれた方式で圧縮し、小さな制御メッセージは compressed flag 0 のまま素通しにできます。
+
+<strong>小さいメッセージでは圧縮が逆効果になります。</strong>gzip の最小ラッパーは 10 バイトのヘッダ + 8 バイトのトレーラで、そこに deflate 本体のオーバーヘッドも乗ります。数十バイトのメッセージは<em>圧縮すると膨らむ</em>ことが珍しくありません。さらに CPU 時間とアロケーションが増えるため、高頻度・小サイズの RPC では圧縮を切ったほうが速い。多くの実装が「一定サイズ以上のみ圧縮」という閾値を持つのはこのためです。
+
+もうひとつ、<strong>セキュリティ上の注意</strong>があります。攻撃者が一部を制御できる内容と秘密情報を同じ圧縮コンテキストに入れると、圧縮率の変化から秘密を推定される（CRIME / BREACH 系の攻撃）。<em>秘密情報を含むレスポンスで、リクエスト由来の文字列を反射している</em>場合は特に注意が必要です。対策は、そうした値を反射しない、CSRF トークンをリクエストごとにマスクする、といった設計側の手当てになります。
+
+実務的な既定値としては、こうなります。
+
+- <strong>1KB 未満は圧縮しない</strong>（閾値はワークロードで調整）。
+- <strong>テキスト主体の大きなレスポンスは brotli</strong>（静的なら `br`、動的なら圧縮レベルを下げる）。
+- <strong>既に圧縮済みのバイト列（画像・動画・zip）は再圧縮しない</strong>。
+- <strong>gRPC の内部通信では、まず無圧縮で測る</strong>。ペイロードが小さければ、圧縮しないほうが速いことが多い。
+
+## 10. キャッシュ — REST が持つ最大の非対称優位
+
+> <strong>一言でいうと</strong>: HTTP キャッシュは「書かなくていいコード」です。gRPC にはこの層が丸ごと存在しません。
+
+### 10.1 何がタダで手に入るのか
+
+`Cache-Control` を正しく返すだけで、次の層がすべて協調して働きます。
+
+```mermaid
+graph LR
+    B["ブラウザ<br/>キャッシュ"] --> C["CDN<br/>エッジ"]
+    C --> P["リバース<br/>プロキシ"]
+    P --> A["アプリ<br/>サーバ"]
+    style B fill:#0369a1,color:#ffffff
+    style C fill:#0369a1,color:#ffffff
+    style P fill:#0369a1,color:#ffffff
+    style A fill:#334155,color:#ffffff
+```
+
+これらは<strong>あなたのドメインを一切知らないまま</strong>、レスポンスの自己記述だけで動きます。§4.2 の「自己記述的メッセージ」制約が現金化される瞬間です。
+
+主要なディレクティブ（RFC 9111）:
+
+```http
+Cache-Control: public, max-age=300, stale-while-revalidate=60
+ETag: "v3-a1b2c3"
+Vary: Accept-Encoding, Accept-Language
+```
+
+- `public` / `private` — 共有キャッシュ（CDN）に置いてよいか。<strong>ユーザ固有の認証付きレスポンスに `public` を付けると情報漏洩になります</strong>。
+- `stale-while-revalidate`（RFC 5861）— 期限切れのコピーを即座に返しつつ裏で更新。テールレイテンシに強く効く。
+- `Vary` — キャッシュキーに含めるリクエストヘッダ。<strong>指定漏れは「言語・圧縮方式・認可条件の異なるレスポンスが混線する」事故に直結します</strong>。
+
+### 10.2 条件付きリクエストと楽観ロック
+
+`ETag` は帯域削減だけの機能ではありません。<strong>更新時の競合検出</strong>にも使えます。
+
+```http
+GET /v1/users/42
+→ 200 OK, ETag: "v3"
+
+# 別のクライアントが先に更新した場合
+PUT /v1/users/42
+If-Match: "v3"
+→ 412 Precondition Failed
+```
+
+これは分散システムにおける楽観的並行制御そのものです。gRPC で同じことをするなら、リクエストメッセージに `version` フィールドを持たせ、サーバで比較する実装を自分で書きます。<strong>REST では 1 ヘッダで済む</strong>。
+
+### 10.3 gRPC 側の現実
+
+gRPC は `POST` を使い、ボディは不透明なバイナリで、レスポンスに標準のキャッシュ意味論がありません。したがって:
+
+- CDN は事実上使えない。
+- 中間キャッシュは効かない。
+- キャッシュはクライアント内かサービス内（Redis など）に自作する。
+
+この非対称性は、<strong>「公開 API・読み取り主体・キャッシュ可能」なら REST が強い</strong>という結論の技術的根拠です。逆に「内部・書き込み主体・毎回最新が必要」ならキャッシュの利点は消え、gRPC の欠点でもなくなります。
+
+## 11. 運用 — ここで多くのチームが躓く
+
+> <strong>一言でいうと</strong>: gRPC の導入コストの大半は、プロトコルではなく<em>周辺装置</em>にあります。
+
+### 11.1 ロードバランシングの罠
+
+これは gRPC 導入で最も高頻度に踏まれる地雷です。
+
+<strong>問題</strong>: gRPC は 1 本の HTTP/2 コネクションを長時間維持し、その上に全リクエストを多重化します。L4 ロードバランサ（TCP レベル）は<em>コネクションを</em>分散するので、コネクションが張られた後は<strong>そのチャネル上のリクエストが同じバックエンドに行き続けます</strong>。トラフィックの大半が少数のクライアントから来る構成では、バックエンドを 10 台に増やしても負荷が 1 台に偏る、という現象が起きます（クライアント数が多ければコネクション単位でならされるので、症状は緩和されます）。
+
+対処は 3 つ。
+
+| 手法 | 内容 | 注意点 |
+| --- | --- | --- |
+| <strong>L7 プロキシ</strong> | Envoy / linkerd / NGINX が HTTP/2 を終端し、<em>リクエスト単位</em>で分散 | ホップが 1 つ増える |
+| <strong>クライアントサイド LB</strong> | クライアントが全バックエンドに接続し、自分で選ぶ（gRPC の `round_robin`、xDS 統合） | サービスディスカバリが必要 |
+| <strong>コネクション寿命の上限</strong> | サーバ側で `MAX_CONNECTION_AGE`（+ grace）を設定し、定期的に再接続させる | 上 2 つの補助。単体では不十分 |
+
+クライアントサイド LB を選ぶ場合、実装の細部が挙動を決めます。
+
+- <strong>名前解決の方式</strong>。gRPC の既定リゾルバは DNS で、<em>解決結果を無期限にキャッシュしない代わりに、頻繁に再解決もしません</em>。Kubernetes の通常の `Service`（ClusterIP）は単一の仮想 IP を返すため、クライアントから見るとバックエンドは 1 つに見え、L4 分散に逆戻りします。<strong>Headless Service（`clusterIP: None`）にして全 Pod IP を返す</strong>のが定石です。
+- <strong>負荷分散ポリシー</strong>。既定は `pick_first`（最初に繋がった 1 台を使い続ける）です。分散したいなら明示的に `round_robin` を選ぶ必要があります。<em>「クライアントサイド LB にしたのに偏る」の原因はたいていこれ</em>です。
+- <strong>xDS</strong>。Envoy 由来の制御プレーンプロトコルで、重み付け・ゾーン優先・アウトライア検出といった高度なポリシーを、サイドカーなしで gRPC クライアントに配れます。サービスメッシュを入れずに済ませたい場合の選択肢です。
+- <strong>キープアライブと接続寿命は別物</strong>。`KEEPALIVE_TIME` は死んだ接続の検出、`MAX_CONNECTION_AGE` は生きた接続の再分散のためのものです。混同しないこと。
+
+<strong>新しいバックエンドを追加してもトラフィックが流れない</strong>のも同じ原因です。既存のコネクションは自然には張り替わらないため、`MAX_CONNECTION_AGE` などで定期的に入れ替えないと、既存クライアントのトラフィックが新しいバックエンドへ移るまで長い時間がかかります。
+
+REST/HTTP1.1 でこの問題が目立たないのは、コネクションが短命でリクエストごとに再分散される機会が多いからです。ただし <strong>REST を HTTP/2 で運べば同じ問題が起きます</strong>。これは「gRPC の問題」ではなく「長寿命多重化コネクションの問題」です。
+
+### 11.2 可観測性とデバッグ
+
+| 作業 | REST | gRPC |
+| --- | --- | --- |
+| 手で 1 回叩く | `curl` | `grpcurl` / `buf curl`（+ リフレクション有効化） |
+| パケットを読む | 平文（TLS 終端後） | Protobuf のデコードにスキーマが必要 |
+| ログにボディを残す | そのまま読める | デコードして構造化する必要あり |
+| ブラウザの DevTools | そのまま見える | gRPC-Web でも読みづらい |
+| 既存の APM / WAF | 標準対応 | 対応が限定的なことが多い |
+
+<strong>サーバリフレクション</strong>を有効にしておくと、`grpcurl` がスキーマを実行時に取得できるため、デバッグ体験が劇的に改善します（現在の正式名は `grpc.reflection.v1.ServerReflection`。互換性のため、非推奨の `grpc.reflection.v1alpha.ServerReflection` を併せて公開しているサーバやツールもまだ多くあります）。ただし<strong>本番の外部公開エンドポイントでは、API 表面が全部見えるので無効化を検討</strong>してください。内部環境では原則有効、が実務的な落とし所です。
+
+<strong>メトリクスとトレースの命名規約</strong>も、プロトコル選択と同じくらい運用を左右します。ここを外すと、可観測性基盤そのものが壊れます。
+
+- <strong>ラベルには「テンプレート」を使い、実 ID を入れない</strong>。`/v1/users/{id}` であって `/v1/users/8f2b...` ではありません。gRPC なら `pkg.Service/Method` がそのまま安定した名前になります。<em>実 ID をラベルに入れると、時系列データベースのカーディナリティが爆発して落ちます</em>——これは REST 側で起こりやすい事故です（gRPC は通常、定義済みメソッドの有限集合に収まるので安全側ですが、未知メソッドのパスや独自ラベルで高カーディナリティを作らない設計は同じく必要です）。
+- <strong>ステータスのラベルを正規化する</strong>。HTTP は `2xx` / `4xx` / `5xx` の粒度と正確なコードの両方を、gRPC はステータスコード（現行の OpenTelemetry では `rpc.response.status_code`、旧来の gRPC メトリクスでは `grpc_code`）を持ちます。移行期に両方が混在するなら、<em>ダッシュボードで足せる形</em>に揃えておくこと（§13.4 の対応方針がここでも効きます）。
+- <strong>OpenTelemetry のセマンティック規約に寄せる</strong>。`http.route` のような安定した HTTP 属性や、`rpc.system.name` / `rpc.method` といった RPC 属性を独自命名で上書きしないこと（`rpc.system` と `rpc.service` は非推奨になり、`rpc.method` が完全修飾のサービス／メソッド名を持つ形に寄っています。RPC 側の規約はまだ Release Candidate なので、追随が必要です）。既製のダッシュボードとアラートがそのまま使えるかどうかが、ここで決まります。
+- <strong>同じトレースコンテキストで全シグナルを貫通させる</strong>。入口で W3C Trace Context（`traceparent`）を受け取るか採番し、ログには `TraceId` / `SpanId` を、メトリクスにはエグゼンプラの `trace_id` / `span_id` を、トレースには span を残す。<em>「遅いリクエスト」を見つけてから、その 1 本のログに 1 クリックで辿り着けるか</em>が、障害対応の所要時間を決めます。
+
+### 11.3 認証と認可 — プロトコルと直交する設計
+
+<strong>結論から言うと、認証・認可の設計はプロトコル選択とほぼ独立に決めるべきです。</strong>「gRPC だからこの認証方式」という発想は、たいてい後で困ります。とはいえ、両者で<em>現れ方</em>は違います。
+
+- <strong>認証（誰か）</strong>: gRPC はチャネル資格情報（TLS / mTLS）と呼び出し資格情報（トークン）を型として分離しており、「接続は mTLS で、呼び出しごとに OAuth トークンを載せる」を素直に書けます。REST は `Authorization` ヘッダ 1 本に集約するのが通例で、mTLS はインフラ層の設定として別管理になりがちです。
+- <strong>認可（何をしてよいか）</strong>: ここに構造的な差が出ます。
+
+| 認可の粒度 | REST | gRPC |
+| --- | --- | --- |
+| <strong>エンドポイント単位</strong> | URL パターン（`/admin/*`）でゲートウェイに書ける | `/pkg.Service/Method` 単位でインターセプタやプロキシに書ける |
+| <strong>オブジェクト単位</strong> | 「この注文はこのユーザのものか」はアプリ内で判定 | 同じくアプリ内 |
+| <strong>フィールド単位</strong> | レスポンス整形で落とす | 同上（FieldMask と組み合わせると整理しやすい） |
+
+<strong>どちらの方式でも「オブジェクト単位の認可にはアプリケーション／ドメインの文脈が要る」点は変わりません。</strong>OPA・Cedar・Zanzibar 型のシステムでポリシー<em>判定</em>を集約することはできますが、対象オブジェクトの所有関係や状態を渡し、結果を強制する責務はアプリケーション側に残ります。ゲートウェイは<em>粗い門番</em>（未認証を落とす、管理 API を遮断する）に留め、細かい判断はドメインロジックの隣に置くのが定石です。
+
+サービス間認証では、選択肢が 3 つあります。
+
+1. <strong>mTLS</strong> — 相互 TLS。ネットワーク層で相手を証明する。SPIFFE / SPIRE のようなワークロード ID 基盤と組み合わせると、証明書の配布と回転が自動化できます。サービスメッシュを入れる主要な動機のひとつ。
+2. <strong>ベアラトークン（JWT）</strong> — アプリ層で運ぶ。デバッグしやすく、ゲートウェイ越えにも強い。ただし<em>トークンが漏れれば誰でも使える</em>ので、寿命を短くし、`aud`（対象サービス）を必ず検証すること。
+3. <strong>両方</strong> — mTLS で「どのワークロードか」、JWT で「どのエンドユーザの代理か」を表す。大規模環境の標準解です。
+
+<strong>忘れられがちな落とし穴</strong>: エンドユーザのアクセストークンを、下流サービスへ<em>そのまま横流ししない</em>こと。伝えるべきなのは、下流サービスを `aud` に指定し、必要最小限のスコープだけを持つ短命の<strong>委譲トークン</strong>です。元のトークンの audience が広すぎたり、下流側の `aud` 検証が甘かったりすると、あるサービスが意図された委譲経路を越えて権限を再利用できてしまいます（混乱した代理人型の事故）。OAuth 2.0 Token Exchange（RFC 8693）や、同等のダウンスコープを行う内部 STS を挟むのが正攻法です。
+
+そして<strong>WAF / API Gateway</strong>: JSON なら中身を検査できます。Protobuf は<strong>ディスクリプタを渡さない限り検査不能</strong>です。規制産業ではこれが要件になることがあります。
+
+<strong>トレース伝播</strong>はどちらも W3C Trace Context（`traceparent` / `tracestate`）を運びます。REST は HTTP ヘッダ、gRPC は<em>メタデータ</em>——実体は同じ HTTP/2 ヘッダなので、OpenTelemetry の伝播器はほぼそのまま使えます。ただし gRPC のメタデータは、キー名を小文字にすること、`-bin` サフィックス付きのキーだけがバイナリ値を運べること、という制約があります。
+
+### 11.4 ブラウザの安全境界 — CORS と CSRF
+
+<strong>公開 API がつまずくのは、性能より先にここです。</strong>ブラウザから叩かれる可能性がある時点で、同一オリジンポリシーの世界に入ります。
+
+| 方式 | プリフライトの発生 | CSRF の危険 |
+| --- | --- | --- |
+| REST（`application/json`） | ほぼ常に発生（`Content-Type: application/json` は「単純リクエスト」ではない） | Cookie 認証なら要対策。`SameSite` + トークン |
+| REST（フォーム形式 / 単純リクエスト） | 発生しない | <strong>危険</strong>。単純リクエストはプリフライトなしで飛ぶ |
+| GraphQL（`POST` + JSON） | 発生する | Cookie 認証 + `GET` クエリ許可は特に注意 |
+| gRPC-Web / Connect | 発生する（カスタムヘッダのため） | `Authorization` ヘッダ方式なら Cookie に依存しないぶん安全側 |
+
+実務上の要点は 2 つです。
+
+1. <strong>Cookie ではなく `Authorization` ヘッダで認証する</strong>と、CSRF の大半は構造的に消えます（ブラウザが自動付与しないため）。Cookie を使うなら `SameSite=Lax`／`Strict` と CSRF トークンをセットで。
+2. <strong>`Access-Control-Allow-Origin: *` と資格情報は併用できません</strong>。`Access-Control-Allow-Credentials: true` を返すならオリジンを明示列挙する必要があります。ここを緩めた設定は、そのまま情報漏洩の経路になります。
+
+### 11.5 ネットワーク中間装置
+
+古いプロキシ、企業のファイアウォール、一部のクラウド LB は HTTP/2（特に h2c や長時間ストリーム）で問題を起こすことがあります。<strong>外部との境界を越える通信ほど、REST/JSON の「どこでも通る」性質の価値が上がります</strong>。
+
+## 12. 第三極 — GraphQL / Connect / tRPC
+
+> <strong>一言でいうと</strong>: RPC と REST の 2 択で考えると視野が狭くなります。実際の選択肢は、<em>誰が取得内容を決めるか</em>という軸で並びます。
+
+### 12.1 GraphQL — クライアントが形を決める
+
+GraphQL（Facebook 発、2015 年公開）は、<strong>単一エンドポイントに対してクエリ言語を投げる</strong>方式です。過剰取得（over-fetching）と過少取得（under-fetching）を、クライアント側の宣言で解決します。
+
+```graphql
+query {
+  user(id: 42) {
+    name
+    orders(last: 3) { id total items { sku } }
+  }
+}
+```
+
+典型的な GraphQL API は単一エンドポイント中心なので、Richardson の分類では <strong>Level 0 に近い</strong>運用になります（ただし GraphQL-over-HTTP 仕様では query に `GET` を使うことも許されており、mutation は `POST` を使います）。得られるものと失うものは明快です。
+
+| 得るもの | 失うもの |
+| --- | --- |
+| クライアント主導の柔軟な取得、1 往復での集約 | HTTP キャッシュ（実質的に単一 URL + POST のため） |
+| 強い型システムとイントロスペクション | ステータスコードだけで表せるエラー意味論（実行時エラーは多くが 200 + `errors` 配列。構文エラーやメソッド誤りは 4xx を使う） |
+| フロントエンドの自律性 | クエリ複雑度の制御が必須（深さ制限・コスト計算） |
+| スキーマ結合（Federation）による分散所有 | サーバ側の N+1 対策（DataLoader）が事実上必須 |
+
+キャッシュ問題には <strong>Persisted Query</strong>（クエリをハッシュ化して事前登録し、`GET /graphql?sha256Hash=...` で叩く）という緩和策があり、これで CDN キャッシュを取り戻せます。使うなら必須の設定と考えるべきでしょう。
+
+<strong>適所は BFF（Backends for Frontends）</strong>です。多様なクライアント（Web / iOS / Android）が異なるデータ形状を必要とし、バックエンドが多数に分かれている状況で最も効きます。
+
+### 12.2 Connect — 「curl で叩ける gRPC」
+
+Buf の Connect は、gRPC の型安全性を保ったまま HTTP の親和性を取り戻す設計です。
+
+- 同一サーバが <strong>gRPC / gRPC-Web / Connect</strong> の 3 プロトコルを同時に話す。
+- 単項呼び出しは `POST /pkg.Service/Method` + `application/json` で、curl から直接叩ける。
+- ブラウザからプロキシなしで動く。
+- `.proto` とコード生成はそのまま使える。
+
+<strong>「gRPC を入れたいがブラウザとデバッグ体験が心配」という典型的な躊躇に、そのまま答える選択肢</strong>です。新規に内部 API を作るなら、素の gRPC より先に検討する価値があります。
+
+### 12.3 tRPC — 単一言語スタックの最適解
+
+tRPC は TypeScript 専用で、<strong>コード生成も IDL も持ちません</strong>。サーバのルータ定義から型が推論され、クライアントがその型を直接 import します。
+
+```ts
+// server
+const appRouter = router({
+  getUser: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .query(({ input }) => db.user.find(input.id)),
+});
+export type AppRouter = typeof appRouter;
+
+// client — 生成物なしで型が効く
+const user = await trpc.getUser.query({ id: 42 });
+```
+
+<strong>成立条件は厳しい</strong>です。クライアントとサーバが同一の TypeScript モノレポにあり、同時にデプロイされること。この条件を満たすなら開発体験は最高ですが、満たさない瞬間（別言語のクライアント、独立デプロイ、外部公開）に破綻します。
+
+### 12.4 位置づけの整理
+
+| 方式 | 誰が形を決めるか | スキーマ | HTTP キャッシュ | ブラウザ | ストリーミング |
+| --- | --- | --- | --- | --- | --- |
+| REST (Level 2) | サーバ | OpenAPI（任意） | ✅ 完全 | ✅ | SSE / WebSocket |
+| gRPC | サーバ | `.proto`（必須） | ❌ | プロキシ必須 | ✅ 4 形態 |
+| Connect | サーバ | `.proto`（必須） | △ 限定的 | ✅ | ✅ |
+| GraphQL | <strong>クライアント</strong> | SDL（必須） | △ Persisted Query で部分的 | ✅ | Subscription |
+| tRPC | サーバ | TS の型（暗黙） | ❌ | ✅ | ✅ |
+| JSON-RPC 2.0 | サーバ | なし（任意） | ❌ | ✅ | トランスポート依存 |
+
+最後の行は補足に値します。<strong>[MCP (Model Context Protocol)](/ja/blog/model-context-protocol) は JSON-RPC 2.0 を採用しています</strong>。2026 年のもっとも新しいプロトコルのひとつが、1990 年代的な素朴な RPC を選んだわけです。理由は明快で、<em>人間と LLM の両方が読み書きしやすく、実装のハードルが極端に低い</em>から。「RPC は古い」わけではなく、<strong>選択の理由が性能から可読性・実装容易性へ移った</strong>だけなのです。
+
+## 13. 実務の判断基準
+
+> <strong>一言でいうと</strong>: 技術的な優劣ではなく、<em>境界の性質</em>（誰と誰の間か）で決まります。
+
+### 13.1 決定木
+
+```mermaid
+graph TD
+    Q1{"呼び出す側は<br/>ブラウザ or 外部の第三者?"}
+    Q1 -->|Yes| REST["REST + OpenAPI<br/>(Level 2 を徹底)"]
+    Q1 -->|No| Q2{"多様なクライアントが<br/>異なる形のデータを要求?"}
+    Q2 -->|Yes| GQL["GraphQL / BFF"]
+    Q2 -->|No| Q3{"ストリーミング or<br/>厳密な型契約が必要?"}
+    Q3 -->|No| Q4{"同一言語の<br/>モノレポ + 同時デプロイ?"}
+    Q4 -->|Yes| TRPC["tRPC 等の<br/>言語内 RPC"]
+    Q4 -->|No| REST
+    Q3 -->|Yes| Q5{"ブラウザから<br/>直接叩く可能性?"}
+    Q5 -->|Yes| CONNECT["Connect"]
+    Q5 -->|No| GRPC["gRPC"]
+    style REST fill:#0369a1,color:#ffffff
+    style GRPC fill:#047857,color:#ffffff
+    style CONNECT fill:#047857,color:#ffffff
+    style GQL fill:#7c3aed,color:#ffffff
+    style TRPC fill:#b45309,color:#ffffff
+```
+
+### 13.2 境界の性質で考える
+
+もっと単純化すると、判断軸は<strong>「契約の両側を同じ組織が同時に変更できるか」</strong>に集約されます。
+
+| 境界 | 変更の同期 | 推奨 | 理由 |
+| --- | --- | --- | --- |
+| 同一チーム内のサービス間 | 同時にデプロイ可能 | gRPC / Connect / tRPC | 型契約の恩恵が最大、破壊的変更のコストが低い |
+| 社内の別チーム間 | 調整が必要 | gRPC / Connect + スキーマレジストリ | 破壊的変更検出が価値を持つ |
+| 社内 → 社外パートナー | 数か月の猶予が必要 | REST + OpenAPI | 相手の技術スタックを選べない |
+| 公開 API | <strong>永久に壊せない</strong> | REST + OpenAPI + 明示的バージョニング | 汎用性・キャッシュ・可視性 |
+| ブラウザ ↔ 自社サーバ | 同時デプロイ可能なことが多い | REST / GraphQL / Connect | ブラウザの制約が支配的 |
+
+Conway の法則がここに効いてきます。<strong>API の形は、それを挟むチームの関係性を反映すべき</strong>です。密結合を許せる関係なら型契約の強い方式が有利で、疎結合でなければならない関係ほど「壊れにくく、誰でも読める」方式が有利になります。
+
+### 13.3 併用が現実解
+
+二者択一である必要はありません。実務で最も多いのは次の構成です。
+
+```mermaid
+graph LR
+    BR["ブラウザ / モバイル"] -->|REST or GraphQL| GW["API Gateway / BFF"]
+    EXT["外部パートナー"] -->|REST + OpenAPI| GW
+    GW -->|gRPC| S1["Order Service"]
+    GW -->|gRPC| S2["User Service"]
+    S1 -->|gRPC| S3["Inventory Service"]
+    style GW fill:#7c3aed,color:#ffffff
+    style S1 fill:#047857,color:#ffffff
+    style S2 fill:#047857,color:#ffffff
+    style S3 fill:#047857,color:#ffffff
+    style BR fill:#0369a1,color:#ffffff
+    style EXT fill:#0369a1,color:#ffffff
+```
+
+`.proto` に HTTP マッピングのアノテーションを書けば、<strong>1 つの定義から gRPC と REST の両方を提供する</strong>こともできます。
+
+```proto
+import "google/api/annotations.proto";
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option (google.api.http) = { get: "/v1/users/{id}" };
+  }
+}
+```
+
+これを `grpc-gateway` に食わせると、REST/JSON のリバースプロキシが生成されます。<strong>ただし過信は禁物</strong>です。自動生成された REST 面は、URL 設計・エラー表現・キャッシュヘッダのいずれも「Protobuf のメソッドをそのまま写した」ものになりがちで、Level 2 の REST として良質かというと別問題です。<strong>公開 API にするなら、生成物をそのまま出さず、意識的に設計してください。</strong>
+
+### 13.4 移行のしかた — 一斉切り替えをしない
+
+既存の REST API を gRPC に寄せる（あるいはその逆）とき、<strong>ビッグバン移行はほぼ必ず失敗します</strong>。実務的な手順は「絞め殺しの木 (strangler fig)」パターンです。
+
+```mermaid
+graph LR
+    C["既存クライアント"] -->|REST| F["ファサード<br/>(既存 URL を維持)"]
+    F -->|新規: gRPC| N["新サービス"]
+    F -->|未移行: 内部 REST| O["旧サービス"]
+    style F fill:#7c3aed,color:#ffffff
+    style N fill:#047857,color:#ffffff
+    style O fill:#b45309,color:#ffffff
+```
+
+1. <strong>境界にファサードを置く</strong>。クライアントから見える URL とレスポンス形状は 1 ミリも変えない。ここが不変であることが移行の前提条件です。
+2. <strong>新規エンドポイントから先に新方式で書く</strong>。既存の書き換えより、増分を新方式に寄せるほうが安全でレビューもしやすい。
+3. <strong>エンドポイント単位で移す</strong>。1 つ移すごとに、旧経路と新経路の<em>レスポンス差分</em>を本番トラフィックの複製で比較する（シャドウ / ダークトラフィック）。
+4. <strong>旧経路の呼び出しをメトリクス化する</strong>。ゼロになったら削除。§6.6 の「観測なしに廃止はできない」がここで効きます。
+5. <strong>Connect を中継点に使う</strong>。同一サーバが gRPC / gRPC-Web / Connect を同時に話せるため、<em>サーバを先に移し、クライアントを後から順次移す</em>ことができます。移行期間中に両方を維持するコストが最も低い選択肢です。
+
+移行で最も見落とされるのは<strong>エラー意味論の対応方針</strong>です。HTTP ステータスと gRPC コードの対応（`NOT_FOUND` ↔ 404。標準的な対応では `FAILED_PRECONDITION` ↔ 400、`ABORTED` ↔ 409。既存 REST の意味論を残すなら、その例外を明示的に書く）を先に決めておかないと、クライアントのリトライ挙動が移行の途中で静かに変わります。<em>これは移行の最終日ではなく初日に決めるべきことです。</em>
+
+## 14. アンチパターン集
+
+実際に事故になった／なりやすいものを挙げます。
+
+1. <strong>常に HTTP 200 を返す</strong>。中間層とクライアント SDK のリトライ・サーキットブレーカがすべて無効化されます。
+2. <strong>バリデーションエラーを 500 で返す</strong>。エラー率の監視が汚染され、SLO が壊れ、無意味なリトライが走ります。
+3. <strong>`GET` に副作用を持たせる</strong>。プリフェッチ、クローラ、ブラウザのリロードで勝手に実行されます。
+4. <strong>認証付きレスポンスに `Cache-Control: public`</strong>。CDN が他人のデータを配ります。実際に起きた事故が複数あります。
+5. <strong>`Vary` の指定漏れ</strong>。言語別・圧縮方式別のレスポンスが混線します。
+6. <strong>公開 API に素の gRPC</strong>。相手にツールチェーンを強制し、curl でのサポート対応ができなくなります。
+7. <strong>Protobuf のフィールド番号を再利用する</strong>。古いクライアントが送った値が、新しい意味で解釈されます。<strong>データ破損の直接原因</strong>になります。必ず `reserved`。
+8. <strong>Protobuf のバイト列をハッシュして冪等キーにする</strong>。直列化は決定論的ではないため、同一メッセージが別のハッシュを生みます。
+9. <strong>デッドラインを設定しない gRPC 呼び出し</strong>。無期限に待ち、リソースを枯渇させます。<strong>すべての呼び出しにデッドラインを</strong>。
+10. <strong>L4 LB の背後に gRPC を置く</strong>。負荷が偏り、スケールアウトが効きません（§11.1）。
+11. <strong>gRPC ストリームをメッセージキュー代わりに使う</strong>。切断でメッセージが消えます。
+12. <strong>手書きの OpenAPI</strong>。実装と乖離し、「ドキュメントがあるのに嘘」という最悪の状態を作ります。
+13. <strong>ページネーションなしのコレクション取得</strong>。プロトコルに関係なく、いつか必ず落ちます。
+14. <strong>`.proto` を全社共有の 1 リポジトリに集約</strong>。1 つの変更が全社のビルドを止めます。
+15. <strong>スキーマを CI で検査しない</strong>。`buf breaking` や OpenAPI の差分検査がなければ、契約はただのドキュメントに戻ります。
+16. <strong>ストリームの受信を無制限キューに流し込む</strong>。バックプレッシャを解決したのではなく、<em>トランスポートからアプリのヒープへ移しただけ</em>です。
+17. <strong>すべてを無条件に圧縮する</strong>。小さい RPC や既圧縮のバイト列では、CPU を余分に使ったうえにサイズが増えることすらあります。
+
+## 15. まとめ
+
+> <strong>一言でいうと</strong>: RPC は<em>表現力と規律</em>を、REST は<em>汎用性と中間層</em>を買う取引です。買っているものが違うので、境界ごとに別々に判断してよい。
+
+改めて整理します。
+
+- <strong>RPC は「呼び出し」の抽象</strong>。40 年かけて「透過性を諦める」方向に進化し、現代の gRPC はデッドライン・型・ストリーミングを明示的に扱います。買っているのは<em>表現力と規律の自動化</em>です。
+- <strong>REST は「制約」の集合</strong>。統一インターフェースとステートレス性を守る見返りに、<em>自分が書いていない中間層</em>（CDN・プロキシ・ブラウザ・汎用クライアント）が働いてくれます。
+- <strong>性能差の実体は 3 つに分解できる</strong>。ヘッダ圧縮（HTTP/2 の功績）、多重化（同上）、メタ情報の削除（スキーマの功績）。どれも独立に採用でき、REST を HTTP/2 で運べば最初の 2 つは手に入ります。
+- <strong>本当の差はエラー・キャッシュ・契約に出る</strong>。gRPC はデッドライン伝播と破壊的変更検出で圧倒的に強く、REST はキャッシュと可視性で圧倒的に強い。
+- <strong>判断は境界の性質で決まる</strong>。契約の両側を同時に変更できるなら型契約の強い方式、できないなら壊れにくく誰でも読める方式。
+- <strong>運用設計は方式選択と同じくらい重要</strong>。ロードバランシング・可観測性・認証認可・ブラウザ境界を設計しないまま方式だけ決めても、本番では勝てません。特に<em>ロードバランシングの罠は「gRPC 固有」ではなく「長寿命の HTTP/2 多重化コネクション」の問題</em>です——REST を HTTP/2 で同じように運べば、§11.1 の罠はそのまま付いてきます。
+
+### 15.1 本番投入前のチェックリスト
+
+方式を決めたあと、実際に見落とされるのは次の項目です。
+
+<strong>gRPC / Connect を選んだなら</strong>
+
+- [ ] すべての呼び出しにデッドラインが設定されている（§7.5）
+- [ ] LB がリクエスト単位で分散している。または `round_robin` + headless Service（§11.1）
+- [ ] `MAX_CONNECTION_AGE` を設定し、スケールアウトが効くことを確認した（§11.1）
+- [ ] CI に `buf breaking` が入っている（§6.7）
+- [ ] リフレクションは内部のみ有効、外部公開では無効（§11.2）
+- [ ] リトライポリシーに指数バックオフ + ジッタ + スロットルがある（§7.4）
+- [ ] ストリームの受信バッファが有界で、遅い購読者の切断方針がある（§8.5）
+- [ ] メトリクスのラベルが低カーディナリティ（§11.2）
+
+<strong>REST を選んだなら</strong>
+
+- [ ] OpenAPI が単一の真実（スキーマファースト、または実装からの自動生成）になっており、CI で差分検査されている（§6.2 / §6.7）
+- [ ] 一覧エンドポイントにカーソルページネーションがある（§4.5）
+- [ ] エラーが RFC 9457 で、`type` が安定した識別子になっている（§7.2）
+- [ ] 再試行されうる非冪等操作に `Idempotency-Key` とサーバ側の 4 規律がある（§7.4）
+- [ ] `Cache-Control` と `Vary` が正しく、認証付きレスポンスが `public` になっていない（§10.1）
+- [ ] 4xx / 5xx を取り違えていない（§7.1）
+- [ ] 廃止予定に `Deprecation` / `Sunset` と利用状況メトリクスがある（§6.6）
+- [ ] タイムアウトが全ホップで設定・伝播されている（§7.5）
+
+最後にひとつ。<strong>この選択は「一度決めたら終わり」ではありません</strong>。内部を gRPC にしつつ外部境界に REST ゲートウェイを置く、GraphQL の BFF を挟む、といった構成は普通です。重要なのは、<strong>各境界でどの制約を受け入れているかを、チームが説明できる状態にしておくこと</strong>です。
+
+「速いから gRPC」ではなく、「この境界では契約の強制とデッドライン伝播が欲しく、キャッシュは不要だから gRPC」と言えるなら、その判断はきっと正しい。
+
+## 参考文献
+
+1. A. D. Birrell and B. J. Nelson, "Implementing Remote Procedure Calls", *ACM Transactions on Computer Systems*, 2(1):39–59, 1984.
+2. R. T. Fielding, *Architectural Styles and the Design of Network-based Software Architectures*, Ph.D. dissertation, University of California, Irvine, 2000. [オンライン版](https://ics.uci.edu/~fielding/pubs/dissertation/top.htm)
+3. J. Waldo, G. Wyant, A. Wollrath, S. Kendall, "A Note on Distributed Computing", Sun Microsystems Laboratories TR-94-29, 1994.
+4. R. T. Fielding, ["REST APIs must be hypertext-driven"](https://roy.gbiv.com/untangled/2008/rest-apis-must-be-hypertext-driven), 2008.
+5. M. Fowler, ["Richardson Maturity Model"](https://martinfowler.com/articles/richardsonMaturityModel.html), 2010.
+6. [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) — HTTP Semantics / [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) — HTTP Caching / [RFC 9112](https://www.rfc-editor.org/rfc/rfc9112) — HTTP/1.1
+7. [RFC 9113](https://www.rfc-editor.org/rfc/rfc9113) — HTTP/2 / [RFC 9114](https://www.rfc-editor.org/rfc/rfc9114) — HTTP/3 / [RFC 7541](https://www.rfc-editor.org/rfc/rfc7541) — HPACK
+8. [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) — Problem Details for HTTP APIs
+9. [RFC 5531](https://www.rfc-editor.org/rfc/rfc5531) — ONC RPC v2 / [RFC 4506](https://www.rfc-editor.org/rfc/rfc4506) — XDR
+10. [gRPC over HTTP/2 プロトコル仕様](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)
+11. [gRPC ステータスコードとその使い分け](https://grpc.io/docs/guides/status-codes/)
+12. [Protocol Buffers — Encoding](https://protobuf.dev/programming-guides/encoding/) / [Proto Best Practices](https://protobuf.dev/best-practices/dos-donts/)
+13. [Google Cloud API Design Guide](https://cloud.google.com/apis/design) / [AIP-136 Custom methods](https://google.aip.dev/136) / [AIP-158 Pagination](https://google.aip.dev/158) / [AIP-134 Standard methods: Update（FieldMask）](https://google.aip.dev/134)
+14. [Connect protocol](https://connectrpc.com/docs/protocol) — Buf
+15. [GraphQL 仕様](https://spec.graphql.org/) / [GraphQL over HTTP](https://graphql.github.io/graphql-over-http/draft/)
+16. [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745) — The Deprecation HTTP Response Header Field / [RFC 8594](https://www.rfc-editor.org/rfc/rfc8594) — The Sunset HTTP Header Field
+17. [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) — IETF HTTPAPI WG Internet-Draft（RFC ではない）
+18. [gRPC Compression](https://github.com/grpc/grpc/blob/master/doc/compression.md) / [gRPC Load Balancing](https://grpc.io/blog/grpc-load-balancing/)
+19. [Buf — breaking change detection](https://buf.build/docs/breaking/) / [BSR breaking change checks](https://buf.build/docs/bsr/checks/breaking/)
+20. [OpenTelemetry — HTTP semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/) / [RPC semantic conventions](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-spans/)
+21. [W3C Trace Context](https://www.w3.org/TR/trace-context/) / [OpenTelemetry Metrics Data Model — Exemplars](https://opentelemetry.io/docs/specs/otel/metrics/data-model/#exemplars)
+22. [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) — OAuth 2.0 Token Exchange
+23. [SPIFFE Overview](https://spiffe.io/docs/latest/spiffe-about/overview/)
+24. [Pact — 消費者駆動契約テスト](https://docs.pact.io/)
+25. [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) — Web Linking / [RFC 5861](https://www.rfc-editor.org/rfc/rfc5861) — HTTP Cache-Control Extensions for Stale Content
