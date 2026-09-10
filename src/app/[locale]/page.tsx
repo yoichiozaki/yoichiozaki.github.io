@@ -22,10 +22,10 @@ export default async function HomePage({
             <span className="text-muted-foreground">~/</span>whoami
           </p>
           <h1
-            className="animate-fade-in-up text-4xl font-bold leading-tight tracking-tight sm:text-5xl"
+            className="animate-fade-in-up display-serif text-4xl leading-tight sm:text-5xl"
             style={{ animationDelay: "60ms" }}
           >
-            <span className="gradient-text">{dict.home.greeting}</span>
+            {dict.home.greeting}
           </h1>
           <p
             className="animate-fade-in-up text-lg font-medium text-foreground/80"
@@ -45,14 +45,14 @@ export default async function HomePage({
           >
             <Link
               href={`/${locale}/blog`}
-              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-accent to-accent-2 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-accent/20 transition-transform hover:scale-[1.03]"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
             >
               {dict.nav.blog}
               <span aria-hidden>→</span>
             </Link>
             <Link
               href={`/${locale}/about`}
-              className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium transition-colors hover:border-accent/50 hover:text-accent"
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-5 py-2.5 text-sm font-medium transition-colors hover:border-accent/50 hover:text-accent"
             >
               {dict.nav.about}
             </Link>
@@ -63,8 +63,8 @@ export default async function HomePage({
 
       {/* Latest posts */}
       <section className="space-y-7">
-        <h2 className="flex items-center gap-3 text-xl font-semibold">
-          <span className="h-5 w-1 rounded-full bg-gradient-to-b from-accent to-accent-2" />
+        <h2 className="flex items-center gap-3 text-xl font-medium">
+          <span className="h-5 w-1 rounded-full bg-accent" />
           {dict.home.latestPosts}
         </h2>
         {posts.length > 0 ? (

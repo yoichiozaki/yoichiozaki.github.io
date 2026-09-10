@@ -26,10 +26,9 @@ export function CopyCodeBlock({
         type="button"
         onClick={handleCopy}
         aria-label="Copy code"
-        className="absolute top-2 right-2 transition-opacity
-          px-2 py-1 rounded text-xs
-          bg-neutral-700/80 text-neutral-200 hover:bg-neutral-600
-          dark:bg-neutral-600/80 dark:hover:bg-neutral-500"
+        className="absolute top-2.5 right-2.5 rounded-md px-2 py-1 text-xs
+          transition-colors
+          bg-[#252320]/85 text-[#a09d96] hover:bg-[#252320] hover:text-[#faf9f5]"
       >
         {copied ? "✓ Copied" : "Copy"}
       </button>

@@ -158,19 +158,19 @@ export function WireFormatLab({ locale = "ja" }: Props) {
             label={isJa ? "JSON (整形あり・2 スペース)" : "JSON (pretty, 2-space)"}
             bytes={stats.pretty}
             max={max}
-            color="bg-red-500"
+            color="bg-[#c64545]"
           />
           <Bar
             label={isJa ? "JSON (最小化)" : "JSON (minified)"}
             bytes={stats.compact}
             max={max}
-            color="bg-amber-500"
+            color="bg-[#e8a55a]"
           />
           <Bar
             label="Protobuf"
             bytes={stats.proto}
             max={max}
-            color="bg-emerald-500"
+            color="bg-[#5db872]"
           />
         </div>
 

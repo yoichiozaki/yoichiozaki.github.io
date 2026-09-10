@@ -32,9 +32,7 @@ export default async function BlogPage({
   return (
     <div className="space-y-10">
       <header className="space-y-3">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          <span className="gradient-text">{dict.blog.title}</span>
-        </h1>
+        <h1 className="display-serif text-3xl sm:text-4xl">{dict.blog.title}</h1>
         <p className="text-muted-foreground">{dict.blog.description}</p>
       </header>
 

@@ -33,10 +33,10 @@ export function Header({ locale, dict }: { locale: Locale; dict: Dict }) {
           href={`/${locale}`}
           className="group flex items-center gap-2.5"
         >
-          <span className="grid size-7 place-items-center rounded-md bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white shadow-sm shadow-accent/30 transition-transform group-hover:scale-105">
+          <span className="grid size-7 place-items-center rounded-md bg-accent text-sm font-bold text-accent-foreground transition-transform group-hover:scale-105">
             Y
           </span>
-          <span className="text-lg font-bold tracking-tight transition-colors group-hover:text-accent">
+          <span className="text-lg font-semibold tracking-tight transition-colors group-hover:text-accent">
             Yoichi Ozaki
           </span>
         </Link>
@@ -55,7 +55,7 @@ export function Header({ locale, dict }: { locale: Locale; dict: Dict }) {
             >
               {item.label}
               {pathname === item.href && (
-                <span className="absolute -bottom-1 left-0 right-0 h-px rounded-full bg-gradient-to-r from-accent to-accent-2" />
+                <span className="absolute -bottom-1 left-0 right-0 h-px rounded-full bg-accent" />
               )}
             </Link>
           ))}

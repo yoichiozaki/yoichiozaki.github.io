@@ -30,9 +30,7 @@ export default async function PortfolioPage({
   return (
     <div className="space-y-10">
       <header className="space-y-3">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          <span className="gradient-text">{dict.portfolio.title}</span>
-        </h1>
+        <h1 className="display-serif text-3xl sm:text-4xl">{dict.portfolio.title}</h1>
         <p className="text-muted-foreground">{dict.portfolio.description}</p>
       </header>
 
@@ -43,7 +41,7 @@ export default async function PortfolioPage({
             className="group relative overflow-hidden rounded-xl border border-border bg-muted/30 p-6 space-y-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-lg hover:shadow-accent/5"
           >
             <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-            <h2 className="text-xl font-semibold transition-colors group-hover:text-accent">
+            <h2 className="text-xl font-medium transition-colors group-hover:text-accent">
               {project.title}
             </h2>
             <p className="leading-relaxed text-muted-foreground">

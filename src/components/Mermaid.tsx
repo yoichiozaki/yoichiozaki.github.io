@@ -32,51 +32,51 @@ export function Mermaid({ chart }: { chart: string }) {
           ...(theme === "dark" && {
             themeVariables: {
               background: "transparent",
-              primaryColor: "#1e293b",
-              primaryBorderColor: "#3b82f6",
-              primaryTextColor: "#e2e8f0",
-              secondaryColor: "#1a1a2e",
-              secondaryBorderColor: "#6366f1",
-              secondaryTextColor: "#e2e8f0",
-              tertiaryColor: "#162032",
-              tertiaryBorderColor: "#22d3ee",
-              tertiaryTextColor: "#e2e8f0",
-              lineColor: "#64748b",
-              textColor: "#e2e8f0",
-              mainBkg: "#1e293b",
-              nodeBorder: "#3b82f6",
-              nodeTextColor: "#e2e8f0",
-              clusterBkg: "#0f172a",
-              clusterBorder: "#334155",
-              titleColor: "#f1f5f9",
-              edgeLabelBackground: "#1e293b",
+              primaryColor: "#252320",
+              primaryBorderColor: "#cc785c",
+              primaryTextColor: "#faf9f5",
+              secondaryColor: "#2b2724",
+              secondaryBorderColor: "#e8a55a",
+              secondaryTextColor: "#faf9f5",
+              tertiaryColor: "#1f1e1b",
+              tertiaryBorderColor: "#5db8a6",
+              tertiaryTextColor: "#faf9f5",
+              lineColor: "#8e8b82",
+              textColor: "#faf9f5",
+              mainBkg: "#252320",
+              nodeBorder: "#cc785c",
+              nodeTextColor: "#faf9f5",
+              clusterBkg: "#141312",
+              clusterBorder: "#3a352f",
+              titleColor: "#faf9f5",
+              edgeLabelBackground: "#252320",
               // Sequence diagram
-              actorBkg: "#1e293b",
-              actorBorder: "#3b82f6",
-              actorTextColor: "#e2e8f0",
-              signalColor: "#94a3b8",
-              signalTextColor: "#e2e8f0",
-              labelBoxBkgColor: "#1e293b",
-              labelBoxBorderColor: "#3b82f6",
-              labelTextColor: "#e2e8f0",
-              loopTextColor: "#e2e8f0",
-              activationBorderColor: "#3b82f6",
-              activationBkgColor: "#1e3a5f",
-              sequenceNumberColor: "#e2e8f0",
+              actorBkg: "#252320",
+              actorBorder: "#cc785c",
+              actorTextColor: "#faf9f5",
+              signalColor: "#a09d96",
+              signalTextColor: "#faf9f5",
+              labelBoxBkgColor: "#252320",
+              labelBoxBorderColor: "#cc785c",
+              labelTextColor: "#faf9f5",
+              loopTextColor: "#faf9f5",
+              activationBorderColor: "#cc785c",
+              activationBkgColor: "#3a2a22",
+              sequenceNumberColor: "#faf9f5",
               // State diagram
-              labelColor: "#e2e8f0",
-              altBackground: "#162032",
+              labelColor: "#faf9f5",
+              altBackground: "#1f1e1b",
               // Git graph
-              git0: "#3b82f6",
-              git1: "#22c55e",
-              git2: "#f59e0b",
-              git3: "#ef4444",
-              gitBranchLabel0: "#e2e8f0",
-              gitBranchLabel1: "#e2e8f0",
-              gitBranchLabel2: "#e2e8f0",
-              gitBranchLabel3: "#e2e8f0",
-              commitLabelColor: "#e2e8f0",
-              commitLabelBackground: "#1e293b",
+              git0: "#cc785c",
+              git1: "#5db872",
+              git2: "#e8a55a",
+              git3: "#c64545",
+              gitBranchLabel0: "#faf9f5",
+              gitBranchLabel1: "#faf9f5",
+              gitBranchLabel2: "#faf9f5",
+              gitBranchLabel3: "#faf9f5",
+              commitLabelColor: "#faf9f5",
+              commitLabelBackground: "#252320",
             },
           }),
         });
@@ -87,14 +87,12 @@ export function Mermaid({ chart }: { chart: string }) {
           normalizedChart,
         );
         if (!cancelled) {
-          // Strip any background paint mermaid bakes into the SVG
-          const cleaned =
-            theme === "dark"
-              ? rendered.replace(
-                  /background-color:\s*[^;"]+/g,
-                  "background-color: transparent",
-                )
-              : rendered;
+          // Strip any background paint mermaid bakes into the SVG so the
+          // container's cream / dark surface shows through in both modes.
+          const cleaned = rendered.replace(
+            /background-color:\s*[^;"]+/g,
+            "background-color: transparent",
+          );
           setSvg(cleaned);
           setError("");
         }
@@ -123,7 +121,7 @@ export function Mermaid({ chart }: { chart: string }) {
   return (
     <div
       ref={containerRef}
-      className="mermaid-diagram not-prose my-6 flex justify-center overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 p-4"
+      className="mermaid-diagram not-prose my-6 flex justify-center overflow-x-auto rounded-xl border border-border bg-surface-card p-5"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

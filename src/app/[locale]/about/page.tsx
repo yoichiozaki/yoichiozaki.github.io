@@ -37,9 +37,7 @@ export default async function AboutPage({
   return (
     <div className="space-y-12">
       <header className="space-y-3">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          <span className="gradient-text">{dict.about.title}</span>
-        </h1>
+        <h1 className="display-serif text-3xl sm:text-4xl">{dict.about.title}</h1>
         <p className="text-muted-foreground">{dict.about.description}</p>
       </header>
 
@@ -52,8 +50,8 @@ export default async function AboutPage({
       </section>
 
       <section className="space-y-4">
-        <h2 className="flex items-center gap-3 text-xl font-semibold">
-          <span className="h-5 w-1 rounded-full bg-gradient-to-b from-accent to-accent-2" />
+        <h2 className="flex items-center gap-3 text-xl font-medium">
+          <span className="h-5 w-1 rounded-full bg-accent" />
           {dict.about.skills}
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -81,8 +79,8 @@ export default async function AboutPage({
       </section>
 
       <section className="space-y-4">
-        <h2 className="flex items-center gap-3 text-xl font-semibold">
-          <span className="h-5 w-1 rounded-full bg-gradient-to-b from-accent to-accent-2" />
+        <h2 className="flex items-center gap-3 text-xl font-medium">
+          <span className="h-5 w-1 rounded-full bg-accent" />
           {dict.about.contact}
         </h2>
         <SocialLinks className="flex flex-wrap gap-4" />

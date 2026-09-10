@@ -17,11 +17,11 @@ import { InteractiveDemo } from "@/components/interactive";
 type Props = { locale?: string };
 
 const SEGMENTS = [
-  { key: "handshake", color: "bg-violet-500", ja: "接続確立", en: "connection setup" },
-  { key: "rtt", color: "bg-sky-500", ja: "RTT", en: "RTT" },
-  { key: "backend", color: "bg-slate-500", ja: "バックエンド処理", en: "backend work" },
-  { key: "transfer", color: "bg-amber-500", ja: "転送", en: "transfer" },
-  { key: "codec", color: "bg-emerald-500", ja: "直列化 + 復元", en: "serialize + parse" },
+  { key: "handshake", color: "bg-[#cc785c]", ja: "接続確立", en: "connection setup" },
+  { key: "rtt", color: "bg-[#5db8a6]", ja: "RTT", en: "RTT" },
+  { key: "backend", color: "bg-[#8e8b82]", ja: "バックエンド処理", en: "backend work" },
+  { key: "transfer", color: "bg-[#e8a55a]", ja: "転送", en: "transfer" },
+  { key: "codec", color: "bg-[#5db872]", ja: "直列化 + 復元", en: "serialize + parse" },
 ] as const;
 
 type SegKey = (typeof SEGMENTS)[number]["key"];

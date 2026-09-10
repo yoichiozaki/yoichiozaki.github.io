@@ -1,17 +1,26 @@
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 import { locales, type Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Body / UI sans. DESIGN.md names StyreneB with Inter as the documented substitute.
+const bodySans = Inter({
+  variable: "--font-body-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// Display serif. DESIGN.md names Copernicus / Tiempos Headline; Source Serif 4 is
+// the closest freely available transitional serif and holds up at display sizes.
+const displaySerif = Source_Serif_4({
+  variable: "--font-display-serif",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const codeMono = JetBrains_Mono({
+  variable: "--font-code-mono",
   subsets: ["latin"],
 });
 
@@ -51,7 +60,7 @@ export default async function LocaleLayout({
   return (
     <html
       lang={locale}
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${bodySans.variable} ${displaySerif.variable} ${codeMono.variable} h-full antialiased`}
       data-scroll-behavior="smooth"
       suppressHydrationWarning
     >

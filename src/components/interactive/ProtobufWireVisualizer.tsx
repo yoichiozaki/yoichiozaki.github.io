@@ -31,10 +31,10 @@ type ByteCell = {
 };
 
 const GROUP_STYLE: Record<ByteCell["group"], string> = {
-  frame: "border-slate-400/60 bg-slate-500/15 text-slate-600 dark:text-slate-300",
-  f1: "border-sky-500/60 bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  f2: "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  f3: "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  frame: "border-slate-400/60 bg-[#8e8b82]/15 text-slate-600 dark:text-slate-300",
+  f1: "border-sky-500/60 bg-[#5db8a6]/15 text-sky-700 dark:text-sky-300",
+  f2: "border-emerald-500/60 bg-[#5db872]/15 text-emerald-700 dark:text-emerald-300",
+  f3: "border-amber-500/60 bg-[#e8a55a]/15 text-amber-700 dark:text-amber-300",
 };
 
 const BYTES: ByteCell[] = [
@@ -271,19 +271,19 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
                 label="JSON"
                 bytes={JSON_TEXT.length}
                 max={JSON_TEXT.length}
-                color="bg-red-500"
+                color="bg-[#c64545]"
               />
               <SizeBar
                 label={isJa ? "Protobuf (本体)" : "Protobuf (body)"}
                 bytes={messageBytes}
                 max={JSON_TEXT.length}
-                color="bg-emerald-500"
+                color="bg-[#5db872]"
               />
               <SizeBar
                 label={isJa ? "gRPC フレーム込み" : "with gRPC framing"}
                 bytes={totalBytes}
                 max={JSON_TEXT.length}
-                color="bg-sky-500"
+                color="bg-[#5db8a6]"
               />
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
@@ -320,7 +320,7 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
         </div>
 
         {!consistent && (
-          <p className="rounded border border-red-500/50 bg-red-500/10 p-2 text-xs text-red-600 dark:text-red-400">
+          <p className="rounded border border-red-500/50 bg-[#c64545]/10 p-2 text-xs text-red-600 dark:text-red-400">
             {isJa
               ? "内部整合性チェックに失敗しました (バイト表とエンコーダの導出結果が一致しません)。"
               : "Internal consistency check failed: the byte table disagrees with the derived encoding."}
