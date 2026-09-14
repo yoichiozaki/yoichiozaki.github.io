@@ -1,0 +1,845 @@
+---
+title: "代数的データ型の実践入門 — 状態・エラー・継承を型から設計する"
+date: "2026-09-14"
+description: "フラグとnullで複雑になった状態を整理し、コンパイラに分岐漏れを検出させる。4つのインタラクティブな実験を通して、代数的データ型の使いどころ、防御的プログラミング、継承との関係を実務のコードで学びます。"
+tags: ["TypeScript", "Type System", "Software Design", "Interactive"]
+---
+
+「支払い済みなのに決済IDがない」「読み込み中なのに成功と失敗の両方が表示される」「状態を一つ増やしたら、帳票の分岐だけ直し忘れた」。こうした不具合は、条件分岐を丁寧に書くだけでは防ぎきれません。<strong>値の持たせ方によって、そもそも間違った組み合わせを作りやすくしている</strong>ことがあるからです。
+
+この記事では、代数的データ型（algebraic data type、ADT）を、数学の予備知識なしで使い始めます。題材は、画面の読み込み状態と、注文の支払い・返金です。型を使って減らせる確認作業と、実行時に残すべき確認を分け、最後にオブジェクト指向の継承との使い分けまで考えます。
+
+コード例はTypeScript 5.9.3で検証しています。型検査の設定は`strict: true`（`strictNullChecks`も有効）、`target: "ES2022"`、`lib: ["ES2022", "DOM"]`です。
+
+オブジェクトと`if`を読めれば始められます。`T`や`E`は、利用する側が具体的な型を指定するための引数です。なお、ここでのADTは「抽象データ型（abstract data type）」の略ではありません。
+
+## まず、何に役立つのか
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="ADTの用途と検証の分担" tabIndex="0">
+
+| よくある困りごと | ADTで変えるところ | それでも別に必要なこと |
+| --- | --- | --- |
+| フラグ同士の組み合わせが複雑 | 意味のある状態を列挙する | その列挙が業務仕様に合うかの確認 |
+| 状態によって必須項目が変わる | 必須項目を、その状態の型に置く | IDの実在確認や金額の検証 |
+| 状態を追加した後の分岐漏れ | 網羅性検査を置く | 各分岐の計算や表示の正しさ |
+| 想定内の失敗が例外処理に埋もれる | 成功と失敗を戻り値で分ける | 障害の記録、復旧、再試行の判断 |
+| 継承と`switch`のどちらにするか迷う | 状態と処理の、どちらが増えるかを見る | 拡張・公開API・チームの所有範囲の判断 |
+
+</div>
+
+<strong>目標は、すべての`if`をなくすことではありません。</strong>実行しなくても検出できる誤りを型検査に任せ、実行して初めてわかる問題の検証に集中することです。
+
+### 読み進め方
+
+1. <strong>まず使う:</strong> [状態の表現と更新（1〜7節）](#state-modeling)。実験1〜3で、状態を型にし、検証結果に応じて更新できるところを最初の到達点にします。
+2. <strong>設計を選ぶ:</strong> [継承との使い分け（8節〜9節の`chargeNotice`まで）](#inheritance-and-unions)。実験4と接続先の例で、共通の契約とADTを併用する理由を整理します。
+3. <strong>実務に組み込む:</strong> [支払い試行の記録から導入手順へ（9節後半〜12節）](#payment-attempts)。永続化、再試行、既存コードへの取り入れ方を検討します。
+
+最初からすべての設計判断を覚える必要はありません。まずは、自分のコードにある関連するフラグと必須項目を、業務上の状態ごとに整理できれば十分です。コード片は前に出てきた型や関数を使いながら、順に組み立てています。
+
+<h2 id="state-modeling" className="scroll-mt-28">1. フラグとnullだけでは、項目間の関係を表せない</h2>
+
+ユーザー情報を読み込む画面を考えます。この画面では、再取得中に以前の結果を表示せず、待機・読込中・成功・失敗のどれか一つを表示する仕様とします。
+
+```typescript
+type User = { readonly name: string };
+
+type LegacyUserRequest = {
+  isLoading: boolean;
+  data: User | null;
+  error: string | null;
+};
+
+const contradictory: LegacyUserRequest = {
+  isLoading: true,
+  data: { name: "Aki" },
+  error: "NETWORK_ERROR",
+};
+```
+
+これは型検査に通ります。各項目はそれぞれの型に合っているからです。しかし、この画面では「読込中で、成功データも失敗理由もある」という状態を使いません。
+
+`data`と`error`について値の内容を固定し、「ある／ない」だけを数えると、組み合わせは`2 × 2 × 2 = 8`通りです。仕様で使うのは次の4通りです。
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="読み込み状態と必須項目" tabIndex="0">
+
+| 状態 | isLoading | data | error |
+| --- | --- | --- | --- |
+| 待機 | false | null | null |
+| 読込中 | true | null | null |
+| 成功 | false | あり | null |
+| 失敗 | false | null | あり |
+
+</div>
+
+<ADTStateSpace />
+
+「データあり」と「エラーあり」を同時に選んでください。フラグを使った型には合っていても、この画面の仕様には合わないことを確認できます。
+
+もちろん、再取得中に古いデータを表示する画面なら、データが残るのは正しい動作です。<strong>どの状態を禁止するかは、型の流儀ではなく仕様で決まります。</strong>
+
+## 2. 「必要なものを全部持つ」と「どれか一つ」を組み合わせる
+
+代数的データ型の中心は、次の二つです。
+
+- <strong>積型（product type）</strong>: AとBを両方持つ。オブジェクトやタプルが身近な例です。
+- <strong>和型（sum type）</strong>: AかBのどちらかを選ぶ。状態ごとに違う情報を持たせられます。
+
+有限の選択肢で考えると、「通知する／しない」と「日本語／英語」を両方持つ設定は`2 × 2 = 4`通りです。一方、「未実行」か「成功して結果がある」なら、未実行1通りに成功結果の種類を足して数えます。この足し算・掛け算が「代数的」という名前の手がかりです。実務では、まず「全部必要」と「どれか一つ」を区別できれば十分です。
+
+読み込み状態を、TypeScriptの<strong>判別可能なユニオン（discriminated union）</strong>で書き直します。
+
+```typescript
+type RemoteData<T, E> =
+  | { readonly kind: "idle" }
+  | { readonly kind: "loading" }
+  | { readonly kind: "success"; readonly data: T }
+  | { readonly kind: "failure"; readonly error: E };
+
+const loaded: RemoteData<User, string> = {
+  kind: "success",
+  data: { name: "Aki" },
+};
+
+// @ts-expect-error: success requires data
+const missingData: RemoteData<User, string> = { kind: "success" };
+```
+
+`|`が「どれか一つ」を表します。それぞれのオブジェクトは、必要な項目をまとめた積型です。`kind`のように選択肢を区別する項目を<strong>判別子</strong>と呼びます。名前は`status`や`type`でも構いません。
+
+`kind: "success"`は「任意の文字列」ではなく、文字列`"success"`だけを許す型です。したがって、`success`には`data`が必須で、`failure`には`error`が必須だと型検査で確認できます。`data?`と書いて全状態の共通項目に戻すと、この関係が弱くなります。
+
+上の`@ts-expect-error`は、次の行で型エラーが発生することを確認するためのコメントです。正しい使い方ではなく、意図的に誤った例をテストするために置いています。
+
+厳密には、TypeScriptの任意の`A | B`が常に重なりのない和になるわけではありません。ここでは状態ごとに異なる判別子を使うことで区別しています。また、TypeScriptのオブジェクト型は、余分なプロパティが絶対に存在しないことを保証する型ではありません。この点は、後で外部入力の検証と合わせて扱います。
+
+## 3. コンパイラに「ここでは成功している」と伝える
+
+成功したか確かめずにデータを読むのは誤りです。
+
+```typescript
+function unsafeName(state: RemoteData<User, string>): string {
+  // @ts-expect-error: data does not exist in every variant
+  return state.data.name;
+}
+```
+
+判別子を調べると、その分岐の中では必要な項目を使えます。
+
+```typescript
+function assertNever(value: never): never {
+  throw new Error(`Unexpected variant: ${String(value)}`);
+}
+
+function userMessage(state: RemoteData<User, string>): string {
+  switch (state.kind) {
+    case "idle":
+      return "Ready";
+    case "loading":
+      return "Loading";
+    case "success":
+      return state.data.name;
+    case "failure":
+      return state.error;
+  }
+  return assertNever(state);
+}
+```
+
+`case "success"`では、コンパイラが`state`を成功の型に<strong>絞り込み（narrowing）</strong>ます。そのため、`data !== null`を繰り返し確認したり、`data!`で「必ずあるはず」と指定したりする必要がありません。
+
+最後の`never`は、値が存在しないことを表す型です。すべての選択肢を`return`で処理すると、末尾まで来る選択肢は残りません。そこへ新しい状態を追加し、分岐を追加し忘れると、その状態は`never`に渡せず型エラーになります。これが<strong>網羅性検査</strong>です。
+
+<ADTExhaustivenessLab />
+
+まず`cancelled`を追加し、次に分岐を追加してください。最後に`default`で代用すると、型検査が通っても、キャンセルを待機と同じ表示にしてしまうことがわかります。
+
+`default`自体が悪いのではありません。`default: return assertNever(state)`なら網羅性を検査できます。注意すべきなのは、<strong>未検討の状態にまで正常そうな既定値を返すこと</strong>です。意図した「その他」の処理なら、その意図を型や仕様に明記します。
+
+また、ユニオンを定義しただけで、あらゆる関数の分岐漏れが自動検出されるわけではありません。網羅性検査を置いた関数や、戻り値型の検査などが対象です。トランスパイルだけで済ませず、CIで`tsc --noEmit`などの型検査を実行する必要があります。
+
+## 4. 防御的プログラミングは「確認をなくす」より「確認する場所を分ける」
+
+フラグ中心の設計では、表示・帳票・通知のそれぞれに「成功なのにデータがない場合」の処理が増えがちです。成功状態が必ずデータを持つ型なら、検証済みの値を扱う内部処理で、同じ確認を何度も書く必要は減ります。
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="型検査と実行時検証の役割" tabIndex="0">
+
+| 確認したいこと | 主な担当 |
+| --- | --- |
+| 成功状態に必須データがあるか | 内部の型検査 |
+| 全状態に分岐があるか | `never`による網羅性検査 |
+| JSONに必要な項目があるか | 外部入力を受け取る場所の実行時検証 |
+| 金額が正しい範囲か | コンストラクター・入力検証・DB制約 |
+| 呼び出し元に返金の権限があるか | 認可処理 |
+| 他の処理が同じ注文を更新していないか | トランザクション・条件付き更新 |
+| 成功分岐で正しい金額を計算したか | テスト・業務ルールの確認 |
+
+</div>
+
+TypeScriptの型注釈は実行時には残りません。`as Order`と書いてもJSONは検証されず、`readonly`も実行時の凍結ではありません。TypeScriptは完全に健全な型システムを目指しているわけでもありません。`any`、型アサーション、検証不足の型ガード、別の参照からの書き換えなどで前提は崩れます。
+
+したがって、「型が付いているから外部入力も安全」ではなく、<strong>外部から受け取った値を検証し、その後のコードで検証済みの形を保つ</strong>、という順序が重要です。
+
+## 5. 注文を例に、状態ごとの必須項目を決める
+
+ここからは「未払いの注文」「支払い済み」「全額返金済み」の3状態だけを扱います。部分返金、決済処理中、キャンセル、失敗後の再試行は、まず除外します。実際の決済システム全体をこの3状態で表せるという意味ではありません。
+
+```typescript
+type OrderFields = {
+  readonly orderId: string;
+  readonly amountYen: number;
+};
+
+type DraftOrder = OrderFields & {
+  readonly kind: "draft";
+};
+
+type PaidOrder = OrderFields & {
+  readonly kind: "paid";
+  readonly paymentId: string;
+};
+
+type RefundedOrder = OrderFields & {
+  readonly kind: "refunded";
+  readonly paymentId: string;
+  readonly refundId: string;
+};
+
+type Order = DraftOrder | PaidOrder | RefundedOrder;
+```
+
+`amountYen`は注文総額であり、未返金の残額ではありません。この例では、全額返金後も注文総額は変えません。残額が必要なら、元の支払額と返金記録から別に求めます。
+
+共通項目と状態固有の項目を`&`で合わせています。この例では異なる項目をまとめていますが、一般にTypeScriptの交差型`A & B`を、そのまま数学の直積と同一視することはできません。矛盾する同名プロパティを交差させれば、作れない型になることもあります。
+
+以前の設計が`paymentId?: string`と`refundId?: string`なら、利用側は毎回その有無を調べる必要があります。新しい型では、支払い済みなら`paymentId`があり、返金済みなら両方のIDがあります。
+
+ただし、`number`は正の整数だけの型ではなく、`string`は実在する決済IDだけの型でもありません。<strong>項目があることと、その値が業務上正しいことは別の条件です。</strong>
+
+### 操作を、実行できる状態の引数に限定する
+
+```typescript
+function recordPayment(
+  order: DraftOrder,
+  paymentId: string,
+): PaidOrder {
+  return {
+    kind: "paid",
+    orderId: order.orderId,
+    amountYen: order.amountYen,
+    paymentId,
+  };
+}
+
+function recordRefund(
+  order: PaidOrder,
+  refundId: string,
+): RefundedOrder {
+  return {
+    kind: "refunded",
+    orderId: order.orderId,
+    amountYen: order.amountYen,
+    paymentId: order.paymentId,
+    refundId,
+  };
+}
+
+function invalidRefundExample(draft: DraftOrder): void {
+  // @ts-expect-error: a draft is not a paid order
+  recordRefund(draft, "refund-demo");
+}
+```
+
+返金の記録には`PaidOrder`が必要です。未払いの`DraftOrder`を渡す誤りは、関数を呼び出す場所で見つかります。このように、状態に応じて呼べる操作を型で区別する設計は<strong>typestate</strong>と呼ばれます。
+
+この二つの関数は、完了した支払い・返金を、新しい注文の値として記録するだけです。決済サービスへの通信はしません。呼び出す側には、次の確認が必要です。
+
+- 支払い記録の前には、対象の注文・注文総額・通貨に一致する支払いが完了したこと。
+- 全額返金の記録の前には、その`paymentId`に対して、同じ通貨・同じ金額の返金が完了したこと。
+
+単にIDが空でないことや、外部APIがリクエストを受け付けたことだけでは、この事前条件を満たしません。受付と完了が分かれるサービスでは、完了の通知や照会結果を確認します。
+
+また、元の値は消費されません。`recordPayment(draft, id)`を呼んだ後も、変数`draft`は残ります。TypeScriptではこの形のtypestateだけで、同じ注文を一度しか使えないことまでは保証できません。新しい値を返すことと、DBの同じ行を二度更新できないことは別です。
+
+## 6. 外部入力はunknownで受け、検証結果を型にする
+
+HTTP、フォーム、DB、メッセージキューから来る値は、型の外側から入ってきます。ここでは「新しい未払い注文を読み込む入口」を作ります。既存の全状態を復元する汎用デコーダーではありません。
+
+まず、成功か失敗かを戻り値にします。
+
+```typescript
+type Result<T, E> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: E };
+
+type DecodeError =
+  | "not-object"
+  | "not-draft"
+  | "invalid-order-id"
+  | "invalid-amount";
+```
+
+`unknown`は、使う前に型を確かめなければならない値です。型チェックを回避する`any`とは異なります。
+
+```typescript
+function decodeDraft(value: unknown): Result<DraftOrder, DecodeError> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "not-object" };
+  }
+  if (!("kind" in value) || value.kind !== "draft") {
+    return { ok: false, error: "not-draft" };
+  }
+  if (
+    !("orderId" in value) ||
+    typeof value.orderId !== "string" ||
+    value.orderId.trim().length === 0
+  ) {
+    return { ok: false, error: "invalid-order-id" };
+  }
+  if (
+    !("amountYen" in value) ||
+    typeof value.amountYen !== "number" ||
+    !Number.isSafeInteger(value.amountYen) ||
+    value.amountYen <= 0
+  ) {
+    return { ok: false, error: "invalid-amount" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "draft",
+      orderId: value.orderId,
+      amountYen: value.amountYen,
+    },
+  };
+}
+```
+
+この例の金額は、日本円の正の安全な整数と決めています。`0`、小数、`NaN`、無限大、安全な整数範囲外、文字列`"1200"`は受け付けません。これは説明用の金額規則です。実務では通貨、最小単位、上限、税・丸め規則も決め、必要なら整数や十進数のライブラリを選びます。
+
+検証後は入力オブジェクトをそのまま返さず、必要な項目だけで新しい値を作ります。この入口では、未知の項目はコピーせず無視し、未知の`kind`は拒否します。未知の項目も拒否すべきAPIなら、許可するキーの検査を追加します。
+
+TypeScriptは構造的型付けなので、変数を経由した余分な項目を持つオブジェクトが代入できる場合があります。新しいオブジェクトリテラルに対する余剰プロパティ検査だけを、外部入力の仕様検証として使うことはできません。
+
+### JSONの構文エラーも、成功として扱わない
+
+```typescript
+function parseDraftJson(
+  source: string,
+): Result<DraftOrder, DecodeError | "invalid-json"> {
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return { ok: false, error: "invalid-json" };
+    }
+    throw error;
+  }
+  return decodeDraft(value);
+}
+```
+
+JSONの構文を読む処理と、内容が業務の入力仕様に合うかを調べる処理は別です。`JSON.parse`の戻り値を`unknown`に受け、検証に進めます。ここでは構文エラーだけを変換し、それ以外の例外を「入力が悪かったこと」にして隠しません。
+
+大きな入力では、スキーマライブラリを使うと型定義と実行時検証の重複を減らせます。ただし、認可やIDの実在確認までスキーマだけで完了するわけではありません。手書きの`value is Order`という型ガードも、宣言した条件を本当に検査しているかは、テストとレビューが必要です。
+
+## 7. 動的に届く操作には、実行時の状態遷移検証も必要
+
+呼び出す時点で`PaidOrder`とわかっていれば、返金記録の関数を直接呼べます。一方、画面やキューから来る操作と、DBから読んだ現在の状態は、実行するまで組み合わせがわかりません。
+
+その場合は、`Order × OrderEvent`の各組み合わせを調べます。
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="注文の状態遷移表" tabIndex="0">
+
+| 現在の状態 | 支払いを記録 | 返金を記録 |
+| --- | --- | --- |
+| draft | paidへ | 拒否 |
+| paid | 拒否 | refundedへ |
+| refunded | 拒否 | 拒否 |
+
+</div>
+
+```typescript
+type OrderEvent =
+  | { readonly type: "payment-recorded"; readonly paymentId: string }
+  | { readonly type: "refund-recorded"; readonly refundId: string };
+
+type TransitionError =
+  | {
+      readonly kind: "invalid-transition";
+      readonly state: Order["kind"];
+      readonly event: OrderEvent["type"];
+    }
+  | {
+      readonly kind: "invalid-reference";
+      readonly field: "paymentId" | "refundId";
+    };
+
+function applyOrderEvent(
+  order: Order,
+  event: OrderEvent,
+): Result<Order, TransitionError> {
+  switch (event.type) {
+    case "payment-recorded":
+      if (event.paymentId.trim().length === 0) {
+        return {
+          ok: false,
+          error: { kind: "invalid-reference", field: "paymentId" },
+        };
+      }
+      if (order.kind !== "draft") {
+        return {
+          ok: false,
+          error: {
+            kind: "invalid-transition",
+            state: order.kind,
+            event: event.type,
+          },
+        };
+      }
+      return { ok: true, value: recordPayment(order, event.paymentId) };
+    case "refund-recorded":
+      if (event.refundId.trim().length === 0) {
+        return {
+          ok: false,
+          error: { kind: "invalid-reference", field: "refundId" },
+        };
+      }
+      if (order.kind !== "paid") {
+        return {
+          ok: false,
+          error: {
+            kind: "invalid-transition",
+            state: order.kind,
+            event: event.type,
+          },
+        };
+      }
+      return { ok: true, value: recordRefund(order, event.refundId) };
+  }
+  return assertNever(event);
+}
+```
+
+`Order["kind"]`は、`Order`の判別子に許される文字列の型を取り出す書き方です。これならエラー型の中で状態名を再列挙する必要はありません。
+
+この関数の`assertNever(event)`が網羅性を検査するのは<strong>イベントの種類</strong>です。注文に新しい状態を追加しても、この関数は型エラーにはならず、その状態からの操作を既存の`if`で拒否します。これは「許可した状態以外は拒否する」という方針です。状態追加のたびに遷移を必ず見直したいなら、状態側にも網羅的な`switch`を置き、拒否する組み合わせも明示します。<strong>安全に拒否できることと、新しい状態の扱いを検討したことは別です。</strong>
+
+この関数は<strong>既に形を検証したイベント</strong>を受け取ります。ここで確認しているのは記録IDが空でないことと、現在の状態でその操作が可能なことです。外部のJSONを、そのままこの関数に渡してよいわけではありません。
+
+<ADTBoundaryLab />
+
+まず未払いのまま返金を記録してください。拒否されたら、支払い、返金の順に進めます。その後、金額が文字列の入力や、未知の`kind`を読み込んでください。入力を拒否しても、現在の注文を勝手に初期状態へ戻していないことがわかります。
+
+この小さなモデルは、重複した支払い記録を拒否します。本番のイベント処理なら「同じイベントの再配送は同じ結果にする」などの冪等性方針が必要です。<strong>重複を拒否することと、冪等に処理することは同じではありません。</strong>
+
+### Resultにすれば、エラー処理を忘れなくなるのか
+
+`ok`で分岐するまで`value`を使えないのは利点です。しかし、TypeScriptでは`Result`を返す関数を呼び、戻り値そのものを捨てることもできます。すべての呼び出しで失敗処理が実行される、という保証ではありません。
+
+利用側では、入力不備なら修正箇所を表示し、不正な遷移なら競合や操作順序を説明します。復旧に必要な事実を上位へ返し、記録や通知の担当を決めます。何でも`false`に変えたり、空の注文を返したりして処理を続けないようにします。
+
+業務上予想する失敗は`Result`、プログラムの不具合や想定外の障害は例外、と分けると扱いやすくなります。ただしこれは設計上の方針です。TypeScriptは例外の型を関数シグネチャに強制せず、`Promise<Result<T, E>>`もrejectする可能性があります。非同期処理の最上位では、想定外の失敗を記録し、失敗として応答する処理が別に必要です。
+
+### 利用側は、成功したときだけ注文を置き換える
+
+デモ内部で行っていることを、ReactやDOMに依存しない小さな画面モデルで書くと、次のようになります。現在の注文と、表示するメッセージを持たせます。
+
+```typescript
+type OrderScreen = {
+  readonly order: Order;
+  readonly notice: string;
+};
+
+function loadDraftIntoScreen(
+  screen: OrderScreen,
+  source: string,
+): OrderScreen {
+  const decoded = parseDraftJson(source);
+  if (!decoded.ok) {
+    return { ...screen, notice: `Input rejected: ${decoded.error}` };
+  }
+  return { order: decoded.value, notice: "Draft loaded" };
+}
+
+function dispatchToScreen(
+  screen: OrderScreen,
+  event: OrderEvent,
+): OrderScreen {
+  const result = applyOrderEvent(screen.order, event);
+  if (!result.ok) {
+    const reason = result.error.kind === "invalid-transition"
+      ? `${result.error.state} + ${result.error.event}`
+      : `${result.error.field} is empty`;
+    return { ...screen, notice: `Operation rejected: ${reason}` };
+  }
+  return { order: result.value, notice: "Order updated" };
+}
+```
+
+`!decoded.ok`の分岐では`error`を読み、成功分岐で初めて`value`を採用します。失敗時の`{ ...screen, notice: ... }`は、注文を保持してメッセージだけ更新しています。後続の操作は、その時点の`screen.order`に適用します。
+
+```typescript
+let orderScreen: OrderScreen = {
+  order: { kind: "draft", orderId: "initial", amountYen: 1 },
+  notice: "Ready",
+};
+
+orderScreen = loadDraftIntoScreen(
+  orderScreen,
+  '{"kind":"draft","orderId":"order-42","amountYen":1200}',
+);
+orderScreen = dispatchToScreen(
+  orderScreen,
+  { type: "payment-recorded", paymentId: "pay-demo" },
+);
+orderScreen = dispatchToScreen(
+  orderScreen,
+  { type: "refund-recorded", refundId: "refund-demo" },
+);
+```
+
+最後の注文は`refunded`です。<strong>入力を読み込む処理と、読み込んだ注文への操作は別</strong>にしています。操作のたびに元のJSONから作り直すと、注文を毎回`draft`に戻してしまいます。実際の画面では、戻り値を画面の状態として保存し、`notice`を表示します。業務データの保存・認可・同時更新の制御は、前述のとおり別に必要です。
+
+<h2 id="inheritance-and-unions" className="scroll-mt-28">8. 継承と和型は、何が違うのか</h2>
+
+オブジェクト指向の継承でも、状態ごとにクラスを作れます。たとえば表示をオブジェクトに任せるなら、次のように書けます。
+
+```typescript
+abstract class OrderView {
+  abstract label(): string;
+}
+
+class DraftView extends OrderView {
+  override label(): string {
+    return "Awaiting payment";
+  }
+}
+
+class PaidView extends OrderView {
+  constructor(private readonly paymentId: string) {
+    super();
+  }
+
+  override label(): string {
+    return `Paid: ${this.paymentId}`;
+  }
+}
+
+function viewLabel(view: OrderView): string {
+  return view.label();
+}
+```
+
+`viewLabel`は、具体的なクラスの名前を知らずに`label()`を呼べます。どの実装が実行されるかは、渡されたオブジェクトで決まります。これが動的ディスパッチです。
+
+一方、ユニオンを受け取る関数は、判別子で状態を調べ、処理を選びます。
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="継承とユニオンの比較" tabIndex="0">
+
+| 観点 | 共通の基底型・インターフェース | 判別可能なユニオン |
+| --- | --- | --- |
+| 利用側が頼るもの | 共通の操作の契約 | 列挙された状態とそのデータ |
+| 典型的な処理の配置 | 各クラスのメソッド | 型の外に置いた関数 |
+| 新しい種類を追加 | 既存の契約を実装する型を増やす | ユニオンを広げて利用側を確認する |
+| 全種類を列挙できるか | 開いた階層では一般にできない | 宣言に列挙した選択肢を検査できる |
+| 向く例 | ストレージ、決済接続先、プラグイン | 業務状態、結果、コマンド、構文木 |
+
+</div>
+
+TypeScriptの`abstract class`は、派生クラスの集合を閉じません。また、TypeScriptでは構造が合えばインターフェースを満たせるので、共通の契約を使うために常に`extends`が必要なわけでもありません。
+
+### 「継承かADTか」の二者択一ではない
+
+Javaの`sealed`クラス／インターフェースのように、継承できる型を制限する機能もあります。枝を`final`またはさらに`sealed`にして閉じれば、クラス階層で選択肢を管理できます。`non-sealed`の枝は再び拡張可能になるため、全具象型が有限になるとは限りません。
+
+つまり、<strong>オブジェクトとして振る舞いを持つことと、取り得る選択肢を限定することは両立します。</strong>「オブジェクト指向なら継承、関数型ならADT」という分類だけでは、実際の設計は決まりません。
+
+### 継承は、業務状態の順序を表すものではない
+
+`PaidOrder extends DraftOrder`とすれば「支払い後になった」ことを表せる、という考え方には注意が必要です。継承は基本的に、基底型として扱える関係を作るものです。支払い済みを未払いとして扱ってよいとは限りません。
+
+同様に、基底型が「どの注文でも返金できる」という契約を持つのに、未払いの派生型だけ「返金不可」とするなら、利用側の期待を満たせません。契約が最初から失敗を許している場合は別ですが、その場合でも、`PaidOrder`だけを受け取る関数のほうが呼び出し条件を明確に表せることがあります。
+
+状態が進んだときは、新しい状態の値やオブジェクトを作ればよく、実行中に同じオブジェクトのクラスを変える必要はありません。
+
+## 9. 「種類が増える」と「処理が増える」では、変更しやすい配置が違う
+
+注文の状態を行、`label`や`toDto`のような処理を列にすると、コードの配置を比較しやすくなります。
+
+<ADTExtensionMatrix />
+
+ユニオンと外側の関数では、処理を追加するときは新しい関数を一つ作り、既存の状態をすべて扱います。状態を追加するときは、複数の関数に分岐を追加します。ここで網羅性検査が役立ちます。
+
+状態ごとのクラスに処理をまとめる設計では、新しい状態のクラスに既存の操作を実装します。共通の契約に新しい操作を追加するときは、各クラスの変更が必要になりやすくなります。
+
+これは<strong>式の問題（Expression Problem）</strong>として知られる論点の入口です。種類と処理の両方を、既存コードを変更・再コンパイルせず、静的な型安全性を保って拡張したい、という問題です。ここでは代表的なコード配置の違いを見ており、「どちらかが必ず優れている」と証明しているわけではありません。
+
+Visitor、継承による共通実装、拡張関数などで分担は変わります。ただし、新しい状態に対する表示、保存、監査の意味を決める作業自体はなくなりません。<strong>どこを変更するかと、何を考える必要があるかは分けて判断します。</strong>
+
+### 実務では、接続先をインターフェース、結果をADTにする
+
+決済サービスを切り替える部分は、開いた契約に向いています。一方、そのサービス呼び出しの結果は、利用側が扱うべき種類を列挙すると便利です。
+
+```typescript
+type PaymentAttemptIdentity = {
+  readonly attemptId: string;
+  readonly idempotencyKey: string;
+};
+
+type ChargeFailure =
+  | { readonly kind: "declined"; readonly reason: string }
+  | { readonly kind: "outcome-unknown"; readonly attemptId: string };
+
+type ChargeResult = Result<
+  { readonly paymentId: string },
+  ChargeFailure
+>;
+
+interface PaymentGateway {
+  readonly charge: (
+    order: DraftOrder,
+    attempt: PaymentAttemptIdentity,
+  ) => Promise<ChargeResult>;
+}
+```
+
+接続先ごとの認証や通信方式は`PaymentGateway`の実装側へ置きます。利用側は、成功、明確な拒否、処理結果が確認できない状態を区別します。`attemptId`は呼び出し側が通信前に発行・保存する試行IDで、連携先の決済IDとは別です。結果不明時も、入力で渡した同じ`attemptId`を返す契約とします。応答を受け取れなくても、どの試行かを自分の記録で追えるようにするためです。
+
+たとえばタイムアウトは「請求されていない」という証拠にはなりません。結果が不明なら、連携先が対応する取引IDや冪等性キーで照会する、同じキーで再送する、といった連携先の仕様に沿った対応が必要です。自分で発行した`attemptId`だけで、相手のAPIを照会できるとは限りません。
+
+この型を書いただけで外部サービスの冪等性が実現するわけではありません。キーの保存と再利用、同じキーへの応答、保存失敗後の照合などを含めて設計します。
+
+### 接続先の違いは実装に任せ、結果の違いは利用側で扱う
+
+通信を行わない、成功用と拒否用のテスト実装を作ります。`PaymentGateway["charge"]`で契約の関数型を再利用しています。この二つはコードの共有が不要なので、共通クラスを継承せず`implements`で同じ契約を満たしています。
+
+```typescript
+class ApprovingTestGateway implements PaymentGateway {
+  readonly charge: PaymentGateway["charge"] = async () => ({
+    ok: true,
+    value: { paymentId: "test-payment" },
+  });
+}
+
+class DecliningTestGateway implements PaymentGateway {
+  readonly charge: PaymentGateway["charge"] = async () => ({
+    ok: false,
+    error: { kind: "declined", reason: "TEST_DECLINE" },
+  });
+}
+
+async function chargeNotice(
+  gateway: PaymentGateway,
+  order: DraftOrder,
+  attempt: PaymentAttemptIdentity,
+): Promise<string> {
+  const result = await gateway.charge(order, attempt);
+  if (result.ok) {
+    return `Paid: ${result.value.paymentId}`;
+  }
+  switch (result.error.kind) {
+    case "declined":
+      return `Declined: ${result.error.reason}`;
+    case "outcome-unknown":
+      return `Check attempt: ${result.error.attemptId}`;
+  }
+  return assertNever(result.error);
+}
+```
+
+利用関数は接続先のクラス名を調べず、`charge`を呼びます。<strong>共通の契約で接続先を差し替えられるようにし、結果はADTで明示的に区別する</strong>という分担です。
+
+```typescript
+async function gatewayExamples(): Promise<readonly string[]> {
+  return [
+    await chargeNotice(
+      new ApprovingTestGateway(),
+      { kind: "draft", orderId: "test-approved", amountYen: 1200 },
+      { attemptId: "attempt-approved", idempotencyKey: "key-approved" },
+    ),
+    await chargeNotice(
+      new DecliningTestGateway(),
+      { kind: "draft", orderId: "test-declined", amountYen: 1200 },
+      { attemptId: "attempt-declined", idempotencyKey: "key-declined" },
+    ),
+  ];
+}
+```
+
+`gatewayExamples()`の結果を`await`すると、`["Paid: test-payment", "Declined: TEST_DECLINE"]`になります。別々の注文を使った、結果表示のテスト例です。試行や注文の保存は実装しておらず、本番の決済処理ではありません。
+
+接続先を増やすだけなら、新しい実装と、それを選んで渡す組み立て処理を追加します。`chargeNotice`は変更しません。一方、`ChargeFailure`に結果の種類を追加すると、末尾の`assertNever`で利用側の見直しを促せます。なお、`charge`が例外を投げたりrejectしたりした場合、この例はそれを呼び出し元へ伝えます。例外を「拒否された」という業務結果に勝手に変換しないためです。
+
+<h3 id="payment-attempts" className="scroll-mt-28">注文の状態と、支払い試行の結果を分けて保存する</h3>
+
+ここからは、基本の型と使い分けを理解したうえで、実サービスに組み込む際の設計を扱います。
+
+結果が不明でも、注文はまだ`draft`のままかもしれません。しかし、<strong>`draft`だから新しい支払いを開始してよい、とは限りません。</strong>未試行と結果不明を区別するため、実務では注文とは別に支払い試行を記録します。
+
+```typescript
+type PaymentAttempt = PaymentAttemptIdentity & {
+  readonly orderId: string;
+  readonly amountYen: number;
+  readonly currency: "JPY";
+  readonly outcome:
+    | { readonly kind: "pending" }
+    | { readonly kind: "succeeded"; readonly paymentId: string }
+    | { readonly kind: "declined"; readonly reason: string }
+    | { readonly kind: "unknown" };
+};
+```
+
+通信前に試行ID、冪等性キー、注文、金額、通貨を保存し、再送時には同じ試行の同じ内容を使います。`pending`や`unknown`の間に、新しいキーで別の請求を始めないようにします。成功を確認できたら、注文側にその`paymentId`を記録します。これはモデルの拡張例であり、デモの3状態に通信処理を追加したものではありません。
+
+キーの保存期間や照会方法は連携先によって異なります。連携先でキーの記録が削除された後は、<strong>同じキーで再送しても、新しいリクエストとして実行される場合があります。</strong>キーが同じでも新しくても、保存期間を過ぎた試行を無条件に再実行してはいけません。保存済みの試行と外部の取引を照合し、結果を確定させる手順が必要です。
+
+## 10. 型が保証しないことまで、設計に含める
+
+### 同時更新と二重実行
+
+二つの処理が同じ`draft`を読み、それぞれ`paid`を作ることは、型だけでは防げません。保存時には、たとえば注文IDと読込時のバージョンを条件に更新し、更新件数が0なら競合として扱います。支払いIDの一意制約や、トランザクションも必要に応じて使います。
+
+さらに、外部決済と自分のDB更新は、一般には同じDBトランザクションに入りません。<strong>外部では決済済みだが、注文の保存は失敗した</strong>という状態を、型検査だけでなく、再照会・冪等性・運用上の復旧手順で扱う必要があります。
+
+### 値の制約を内部でも維持したいとき
+
+先ほどのデコーダーは正の安全な整数を検証しますが、`amountYen`の型は`number`なので、別の箇所で`DraftOrder`を作る際には負数も指定できてしまいます。内部の生成箇所が増えるなら、検証済みの金額を区別するブランド型が選択肢になります。
+
+```typescript
+declare const positiveYenBrand: unique symbol;
+type PositiveYen = number & { readonly [positiveYenBrand]: true };
+
+function positiveYen(
+  value: unknown,
+): Result<PositiveYen, "invalid-amount"> {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value <= 0
+  ) {
+    return { ok: false, error: "invalid-amount" };
+  }
+  return { ok: true, value: value as PositiveYen };
+}
+```
+
+この例では、数値条件の検証に成功した後、この生成関数の中だけで`PositiveYen`への型アサーションを使っています。実務ではブランドの印をモジュールの外へ公開せず、生成関数を入口にします。使う側の`amountYen`も`PositiveYen`へ変更して初めて、未検証の`number`をそのまま渡す誤りを検出できます。
+
+ただし、型アサーションで強引に作ることまで防ぐ仕組みではなく、計算結果にも再検証が必要です。`PositiveYen + PositiveYen`の結果は単なる`number`で、上限超過の可能性もあります。JSONとの往復でも、ブランドが自動的に検証・復元されるわけではありません。
+
+### readonlyと、変更後の整合性
+
+`readonly`は、その型を通した代入を制限するもので、深い不変性や実行時の凍結を保証しません。たとえば成功データが配列なら、配列の要素の更新を別途考える必要があります。状態を部分的に書き換えるより、新しい値を作って置き換えると、状態と必須項目を一緒に更新しやすくなります。
+
+## 11. モデルを分けるべき場面と、増やすべき場面
+
+### 独立した状態を、一つの巨大なユニオンにしない
+
+支払いが3状態、配送が4状態あり、互いに独立なら、両方を持つ積型で考えられます。12通りの組み合わせすべてに別の名前を付ける必要はありません。
+
+逆に「未払いでは発送してはいけない」なら、その組み合わせ制約をどこで守るかを決めます。上位のユニオンで許す組み合わせを限定する方法も、集約の操作で検査する方法もあります。項目を分けるだけで、項目間の業務ルールまで型検査されるわけではありません。
+
+### 仕様が変わったら、禁止していた状態を見直す
+
+最初の画面で「再取得中も前のデータを表示したい」となったら、`refreshing`にデータを持たせる方法があります。さらに再取得が失敗しても前のデータを残すなら、データと再取得エラーの両方を持つ状態にも意味があります。
+
+ADTは、nullや複数の情報を禁止する規則ではありません。<strong>組み合わせに意味があるなら、それを一つの状態として正直に表します。</strong>
+
+### API・DBの型と、内部モデルを同一にしない
+
+古いクライアントは、新しい状態名を知らないことがあります。型定義を共有していても、既に配信済みのコードは更新されません。
+
+外部のデータ形式（DTO）と内部モデルの間に変換処理を置き、未知の判別子を拒否する、閲覧専用の`unsupported`として扱う、バージョンで変換する、といった方針を決めます。未知の状態を`draft`や「成功」に読み替えて操作を許可してはいけません。
+
+また、永続化済みの値には旧形式が残ります。型定義の変更だけでDBやキューの過去データは移行されないため、読み出し時の検証と移行方針も必要です。
+
+## 12. 既存コードに導入する手順
+
+全面的に書き換えるより、一つの「状態が曖昧な型」から始めると効果を確かめやすくなります。
+
+1. <strong>組み合わせを書き出す。</strong>関連するフラグ、nullable項目、状態別の必須項目を確認します。
+2. <strong>業務上の状態に名前を付ける。</strong>実在する状態だけを残します。失敗や処理中も忘れません。
+3. <strong>外部の形式から変換する入口を作る。</strong>いきなり既存値を型アサーションで新しい型にしないようにします。
+4. <strong>利用側を一つずつ切り替える。</strong>まず表示や通知など、効果を確認しやすい関数を網羅的にします。
+5. <strong>変更を試す。</strong>状態を一つ追加し、分岐漏れが型エラーになることを確認します。
+6. <strong>重複した内部チェックを整理する。</strong>外部入力、認可、DB競合の検査まで削除しないようにします。
+
+### テストは、型検査と実行時検証で役割を分ける
+
+- <strong>型のテスト:</strong>成功データの欠落、未払いへの返金、状態追加後の分岐漏れを検出できること。
+- <strong>値のテスト:</strong>金額の0・負数・小数・安全な整数範囲の境界、空のID、未知の判別子を検査すること。
+- <strong>遷移のテスト:</strong>状態とイベントの全組み合わせ、拒否時の状態不変、元の値を書き換えていないこと。
+- <strong>連携のテスト:</strong>同時更新、再配送、タイムアウト後の照合、保存失敗を扱うこと。
+- <strong>UIのテスト:</strong>失敗理由が表示され、古い入力の成功表示が残らないこと。
+
+テストの状態一覧を手動の配列にすると、型に状態を追加しても、テストデータの追加漏れには気付けません。たとえば次のように、全判別子をキーにするマップを型検査すると、一覧の更新も要求できます。
+
+```typescript
+const exampleDraft: DraftOrder = {
+  kind: "draft",
+  orderId: "order-42",
+  amountYen: 1200,
+};
+
+const orderExamples = {
+  draft: exampleDraft,
+  paid: recordPayment(exampleDraft, "pay-demo"),
+  refunded: recordRefund(
+    recordPayment(exampleDraft, "pay-demo"),
+    "refund-demo",
+  ),
+} satisfies { [K in Order["kind"]]: Extract<Order, { kind: K }> };
+```
+
+`satisfies`は、その値が指定した型の条件を満たすか検査します。`Extract<Order, { kind: K }>`は、`Order`の選択肢から、`kind`が`K`に一致する型だけを取り出します。ここでは、すべての状態名をキーに持ち、各値もその状態の型に一致することを要求しています。イベント側にも同様の一覧を用意し、全組み合わせをテストすると、データの列挙漏れを減らせます。遷移の期待値そのものが正しいかは、別途仕様と照合します。
+
+型検査は未実行の分岐も調べられます。一方、型が合っている誤計算、外部サービスの振る舞い、誤った状態表は実行時テストや仕様レビューの担当です。両方を使うほうが、テストだけで全組み合わせの型不整合を探すより、確認すべき対象を整理できます。
+
+## 理解を確かめる
+
+<details>
+<summary>「支払い済みならpaymentIdがある」は型にできます。では「そのIDは決済サービスに実在する」はどうでしょうか。</summary>
+
+通常の文字列型やタグ付きユニオンだけでは確認できません。決済サービスの応答を検証し、保存した記録との対応を確かめる必要があります。検証済みIDのブランド型で内部の取り違えを減らすことはできますが、そのIDが別の注文のものではないかという関係も確認が必要です。
+
+</details>
+
+<details>
+<summary>ストレージをS3互換・ローカル・テスト用に差し替えたい場合も、全実装のユニオンにするべきでしょうか。</summary>
+
+実装を追加するたびに呼び出し元が種類を知る必要がないなら、共通のインターフェースのほうが扱いやすいことが多いでしょう。その操作結果を「成功／未検出／アクセス拒否」のADTにする、といった併用もできます。
+
+</details>
+
+<details>
+<summary>網羅的なswitchにして型検査が通れば、返金ロジックのテストは不要でしょうか。</summary>
+
+不要にはなりません。網羅性検査は、分岐先が存在することを確かめるもので、正しい金額を返金したことや、二重実行を防いだことまでは確かめません。
+
+</details>
+
+## まとめ
+
+代数的データ型を実務で使う第一歩は、<strong>関連するフラグを増やす前に、業務上の状態と、その状態に必要な情報を並べること</strong>です。
+
+積型で必要な項目をまとめ、和型で選択肢を区別すると、必須項目の欠落や分岐漏れをコンパイラに検出させられます。その一方で、入力値の妥当性、認可、競合、外部処理の成否は、実行時に確認する設計が必要です。
+
+継承やインターフェースを置き換えることが目的ではありません。拡張する実装は共通の契約へ、利用側が区別して扱う状態や結果はADTへ。この分担から始めると、型の利点を既存のコードにも取り入れやすくなります。
+
+## 参考資料と次に読む記事
+
+以下は仕様と設計判断を確認するための一次資料です。本文のコードは本記事用の例です。
+
+- [TypeScript Handbook: Narrowing](https://www.typescriptlang.org/docs/handbook/2/narrowing.html) — 判別可能なユニオン、制御フロー解析、`never`による網羅性検査。
+- [TypeScript: strictNullChecks](https://www.typescriptlang.org/tsconfig/strictNullChecks.html) — nullとundefinedの検査条件。
+- [TypeScript Handbook: Object Types](https://www.typescriptlang.org/docs/handbook/2/objects.html) — `readonly`、余剰プロパティ検査、交差型。
+- [TypeScript Handbook: Type Compatibility](https://www.typescriptlang.org/docs/handbook/type-compatibility.html) — 構造的型付けと健全性の制約。
+- [TypeScript Handbook: Everyday Types](https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions) — 型アサーションは実行時の検証ではないこと。
+- [TypeScript 4.9: The satisfies Operator](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-4-9.html#the-satisfies-operator) — 値の型を検査し、状態一覧の追加漏れを検出する方法。
+- [Stripe: Idempotent requests](https://docs.stripe.com/api/idempotent_requests) — 同じキーの再利用、パラメーターの一致、キーの保存期間についての具体例。
+- [Oracle: Sealed Classes and Interfaces](https://docs.oracle.com/en/java/javase/21/language/sealed-classes-and-interfaces.html) — `sealed`、`final`、`non-sealed`による拡張範囲の違い。
+- [Philip Wadler: The Expression Problem](https://homepages.inf.ed.ac.uk/wadler/papers/expression/expression.txt) — 種類と処理の両方向への拡張という問題設定。
+- [型システム詳解](/ja/blog/type-systems) — 静的・動的型付けや構造的・公称型付けの全体像。
+- [プログラミングパラダイムの記事](/ja/blog/programming-paradigms) — オブジェクト指向・関数型などの考え方を比較する。

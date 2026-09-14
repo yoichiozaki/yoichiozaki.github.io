@@ -20,6 +20,28 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Algebraic data types article
+
+The practical ADT article is available in [Japanese](content/blog/ja/algebraic-data-types-in-practice.mdx)
+and [English](content/blog/en/algebraic-data-types-in-practice.mdx).
+Its four [interactive experiments](src/components/interactive/ADTLabs.tsx) share a
+[pure TypeScript model](src/lib/algebraic-data-types.ts).
+UI text lives in the `adt` section of the locale message files.
+
+```bash
+npm run test -- src/lib/algebraic-data-types.test.ts src/lib/algebraic-data-types-article.test.ts
+```
+
+These tests cover all eight request-presence combinations, input validation, and all six
+order/event combinations. They also type-check the compiler experiment with the installed
+TypeScript compiler, verify the article's intentional type errors, and compare the article's
+model declarations with the code used by the demos. The browser displays these tested
+compiler scenarios; it does not download or execute the TypeScript compiler.
+The order demo records example outcomes only: it makes no payments or network requests.
+The article's tables use keyboard-focusable horizontal scroll regions. Their MDX attributes
+are literals (`tabIndex="0"`), so they survive the serializer's default JavaScript-expression
+filter. A regression test checks this using the actual MDX serializer without disabling that filter.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

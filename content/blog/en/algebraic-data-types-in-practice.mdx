@@ -1,0 +1,845 @@
+---
+title: "Practical Algebraic Data Types — Designing States, Errors, and Inheritance"
+date: "2026-09-14"
+description: "Replace confusing flags and nullable fields with explicit states, and let the compiler detect missing cases. Four interactive experiments explain practical algebraic data types, defensive programming, runtime validation, and the trade-offs with inheritance."
+tags: ["TypeScript", "Type System", "Software Design", "Interactive"]
+---
+
+An order is marked paid but has no payment ID. A loading screen shows both a result and an error. A new state is added, but one report still uses the old cases. Careful conditional logic alone does not reliably prevent these defects. <strong>The representation itself may make contradictory combinations easy to construct.</strong>
+
+This article introduces algebraic data types, or ADTs, without requiring a mathematical background. We will model request states and order payment/refund states, separate checks the compiler can perform from checks that must run, and compare this approach with object-oriented inheritance.
+
+The examples are checked with TypeScript 5.9.3 using `strict: true` (including `strictNullChecks`), `target: "ES2022"`, and `lib: ["ES2022", "DOM"]`.
+
+Familiarity with objects and `if` statements is enough to start. `T` and `E` are parameters where callers supply concrete types. Here, ADT means algebraic data type, not abstract data type.
+
+## What does this help with?
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="ADT use cases and validation responsibilities" tabIndex="0">
+
+| Recurring problem | What changes with an ADT | What still needs separate attention |
+| --- | --- | --- |
+| Complicated flag combinations | Enumerate meaningful states | Check that those states match the requirements |
+| Different fields are required in different states | Put required fields in their state's type | Validate amounts and the existence of IDs |
+| Missing branches after adding a state | Add exhaustiveness checks | Test the calculations and behavior inside each branch |
+| Expected failures get buried in exception handling | Distinguish success and failure in return values | Logging, recovery, and retry decisions |
+| Uncertainty about inheritance versus `switch` | Identify whether cases or operations are growing | Extension boundaries, public APIs, and team ownership |
+
+</div>
+
+<strong>The goal is not to eliminate every `if`.</strong> It is to give the compiler errors it can detect without execution, so runtime checks can focus on facts only execution can establish.
+
+### A reading path
+
+1. <strong>Start using it:</strong> [Represent and update states (sections 1–7)](#state-modeling). Experiments 1–3 establish the first milestone: model states and update them according to validation results.
+2. <strong>Choose a design:</strong> [Compare with inheritance (section 8 through `chargeNotice` in section 9)](#inheritance-and-unions). Experiment 4 and the adapter example explain why shared contracts and ADTs work together.
+3. <strong>Integrate it:</strong> [From payment attempts to adoption (the rest of section 9 through section 12)](#payment-attempts). Consider persistence, retries, and migration of existing code.
+
+You do not need to memorize every design consideration on the first reading. Start by reorganizing one group of flags and required fields from your own code into meaningful states. The code blocks build on types and functions introduced earlier.
+
+<h2 id="state-modeling" className="scroll-mt-28">1. Flags and null do not express relationships between fields</h2>
+
+Consider a screen that loads a user. During a refetch, this particular screen hides the previous result. It displays exactly one of idle, loading, success, or failure.
+
+```typescript
+type User = { readonly name: string };
+
+type LegacyUserRequest = {
+  isLoading: boolean;
+  data: User | null;
+  error: string | null;
+};
+
+const contradictory: LegacyUserRequest = {
+  isLoading: true,
+  data: { name: "Aki" },
+  error: "NETWORK_ERROR",
+};
+```
+
+This passes type checking: each field matches its individual type. But the screen does not use a state that is loading while also holding success data and a failure reason.
+
+If we fix payload contents and count only whether `data` and `error` are present, there are `2 × 2 × 2 = 8` combinations. The specification uses only these four:
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="Request states and required fields" tabIndex="0">
+
+| State | isLoading | data | error |
+| --- | --- | --- | --- |
+| Idle | false | null | null |
+| Loading | true | null | null |
+| Success | false | Present | null |
+| Failure | false | null | Present |
+
+</div>
+
+<ADTStateSpace />
+
+Select both “Data present” and “Error present.” The representation satisfies the flag-based type, but not this screen's requirements.
+
+Of course, retaining data is correct for a screen that shows cached results during a refetch. <strong>Requirements determine which states are invalid; a typing convention does not.</strong>
+
+## 2. Combine “all of these” with “one of these”
+
+The core building blocks are:
+
+- <strong>Product types:</strong> hold both A and B. Objects and tuples are familiar examples.
+- <strong>Sum types:</strong> select A or B. Each alternative can carry different information.
+
+For finite choices, a setting with “notifications on/off” and “Japanese/English” has `2 × 2 = 4` combinations. In contrast, “not started” or “succeeded with a result” adds one not-started possibility to the possible success results. Addition and multiplication explain the name “algebraic.” To get started in practice, recognizing “all required” versus “one alternative” is enough.
+
+We can rewrite the request states as a TypeScript <strong>discriminated union</strong>:
+
+```typescript
+type RemoteData<T, E> =
+  | { readonly kind: "idle" }
+  | { readonly kind: "loading" }
+  | { readonly kind: "success"; readonly data: T }
+  | { readonly kind: "failure"; readonly error: E };
+
+const loaded: RemoteData<User, string> = {
+  kind: "success",
+  data: { name: "Aki" },
+};
+
+// @ts-expect-error: success requires data
+const missingData: RemoteData<User, string> = { kind: "success" };
+```
+
+`|` selects an alternative. Each object is a product grouping the fields that belong together. A field such as `kind` that distinguishes the alternatives is the <strong>discriminant</strong>. It could also be named `status` or `type`.
+
+`kind: "success"` permits the specific string `"success"`, not any string. Consequently, the compiler can check that a success has `data` and a failure has `error`. Making `data?` an optional field shared by every state weakens that relationship.
+
+`@ts-expect-error` checks that the following line produces a type error. It is here to test an intentionally incorrect example, not to demonstrate recommended application code.
+
+Strictly speaking, an arbitrary TypeScript `A | B` is not necessarily a disjoint sum. Distinct discriminant values separate the alternatives here. TypeScript object types also do not guarantee the absolute absence of extra properties. We will return to that distinction when validating external input.
+
+## 3. Make the success case visible to the compiler
+
+Reading data without first checking for success is an error:
+
+```typescript
+function unsafeName(state: RemoteData<User, string>): string {
+  // @ts-expect-error: data does not exist in every variant
+  return state.data.name;
+}
+```
+
+Check the discriminant, and the fields for that alternative become available:
+
+```typescript
+function assertNever(value: never): never {
+  throw new Error(`Unexpected variant: ${String(value)}`);
+}
+
+function userMessage(state: RemoteData<User, string>): string {
+  switch (state.kind) {
+    case "idle":
+      return "Ready";
+    case "loading":
+      return "Loading";
+    case "success":
+      return state.data.name;
+    case "failure":
+      return state.error;
+  }
+  return assertNever(state);
+}
+```
+
+Inside `case "success"`, the compiler <strong>narrows</strong> `state` to the success alternative. There is no need to repeatedly test `data !== null` or use `data!` to claim that it must exist.
+
+`never` is a type with no values. When every alternative returns, none remains at the end. If we add a state but forget its branch, that remaining state cannot be passed to a function requiring `never`. This is an <strong>exhaustiveness check</strong>.
+
+<ADTExhaustivenessLab />
+
+Add `cancelled`, then add its branch. Finally, select the default-based version: the type check passes, but cancelled requests now display the same message as idle requests.
+
+`default` itself is not the problem. `default: return assertNever(state)` still checks exhaustiveness. The risky pattern is <strong>returning a normal-looking default for a case nobody considered</strong>. If “all other cases” is intentional, document that policy in the model or requirements.
+
+Defining a union also does not automatically detect every missing case in every function. Exhaustiveness checks, return-type checks, and similar checks need to be present. Run a type checker such as `tsc --noEmit` in CI rather than relying on transpilation alone.
+
+## 4. Defensive programming: separate checks rather than remove them
+
+A flag-based design often repeats “success but no data” defenses in rendering, reports, and notifications. When a success type requires its payload, internal code working with validated values needs fewer repeated checks for that same structural contradiction.
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="Static and runtime validation responsibilities" tabIndex="0">
+
+| Fact to establish | Main responsibility |
+| --- | --- |
+| A success has its required payload | Internal type checking |
+| Every alternative has a branch | Exhaustiveness checking with `never` |
+| JSON has the required fields | Runtime validation at an input boundary |
+| An amount is within the valid range | Constructors, validation, and database constraints |
+| The caller may issue a refund | Authorization |
+| Another process has not updated the same order | Transactions and conditional updates |
+| The success branch calculated the correct amount | Tests and business-rule review |
+
+</div>
+
+TypeScript annotations do not remain at runtime. `as Order` does not validate JSON, and `readonly` does not freeze an object. TypeScript is not designed to be fully sound either. `any`, assertions, incomplete type guards, and mutation through other references can undermine assumptions.
+
+The sequence is therefore not “it has a type, so outside input is safe.” It is <strong>validate outside values, then preserve the validated representation inside the program</strong>.
+
+## 5. Specify the fields each order state requires
+
+We will use only three states: unpaid draft, paid, and fully refunded. Partial refunds, in-flight payments, cancellation, and retries are initially excluded. These three states are not intended to model an entire real-world payment system.
+
+```typescript
+type OrderFields = {
+  readonly orderId: string;
+  readonly amountYen: number;
+};
+
+type DraftOrder = OrderFields & {
+  readonly kind: "draft";
+};
+
+type PaidOrder = OrderFields & {
+  readonly kind: "paid";
+  readonly paymentId: string;
+};
+
+type RefundedOrder = OrderFields & {
+  readonly kind: "refunded";
+  readonly paymentId: string;
+  readonly refundId: string;
+};
+
+type Order = DraftOrder | PaidOrder | RefundedOrder;
+```
+
+`amountYen` is the order total, not the amount remaining to be refunded. A full refund does not change this total in our model. If a remaining balance is needed, derive it separately from the original payment amount and refund records.
+
+`&` combines common fields with the state-specific fields. Here it combines different fields, but a general TypeScript intersection `A & B` should not be equated with a mathematical Cartesian product. Intersecting contradictory properties with the same name can produce an uninhabitable type.
+
+With optional `paymentId?: string` and `refundId?: string`, consumers need repeated presence checks. In the new representation, a paid order has `paymentId`, and a refunded order has both IDs.
+
+However, `number` is not the type of positive integers only, and `string` is not the type of existing payment IDs only. <strong>A field's presence and its business validity are separate conditions.</strong>
+
+### Restrict an operation's input to the state that supports it
+
+```typescript
+function recordPayment(
+  order: DraftOrder,
+  paymentId: string,
+): PaidOrder {
+  return {
+    kind: "paid",
+    orderId: order.orderId,
+    amountYen: order.amountYen,
+    paymentId,
+  };
+}
+
+function recordRefund(
+  order: PaidOrder,
+  refundId: string,
+): RefundedOrder {
+  return {
+    kind: "refunded",
+    orderId: order.orderId,
+    amountYen: order.amountYen,
+    paymentId: order.paymentId,
+    refundId,
+  };
+}
+
+function invalidRefundExample(draft: DraftOrder): void {
+  // @ts-expect-error: a draft is not a paid order
+  recordRefund(draft, "refund-demo");
+}
+```
+
+Recording a refund requires a `PaidOrder`. Passing an unpaid `DraftOrder` is caught at the call site. Using types to distinguish which operations a state supports is known as <strong>typestate</strong>.
+
+These functions only record completed payments and refunds as new order values. They do not contact a payment service. Callers must establish these preconditions:
+
+- Before recording payment, a payment for this order, total amount, and currency has completed.
+- Before recording a full refund, a refund of the same amount and currency against this `paymentId` has completed.
+
+A nonblank ID or an API acknowledging a request is not sufficient. If acceptance and completion are separate, verify a completion notification or query result.
+
+The old value is not consumed. After `recordPayment(draft, id)`, the variable `draft` still exists. This form of typestate in TypeScript does not guarantee one-time use. Returning a new value and preventing two updates to the same database row are different problems.
+
+## 6. Accept unknown input and return a typed validation result
+
+Values from HTTP, forms, databases, or message queues arrive from outside the type system. Our next function is an entry point for loading a new unpaid order, not a general decoder for every persisted order state.
+
+First, represent validation success and failure:
+
+```typescript
+type Result<T, E> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: E };
+
+type DecodeError =
+  | "not-object"
+  | "not-draft"
+  | "invalid-order-id"
+  | "invalid-amount";
+```
+
+`unknown` requires checking a value before using it. This is different from `any`, which bypasses relevant type checks.
+
+```typescript
+function decodeDraft(value: unknown): Result<DraftOrder, DecodeError> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "not-object" };
+  }
+  if (!("kind" in value) || value.kind !== "draft") {
+    return { ok: false, error: "not-draft" };
+  }
+  if (
+    !("orderId" in value) ||
+    typeof value.orderId !== "string" ||
+    value.orderId.trim().length === 0
+  ) {
+    return { ok: false, error: "invalid-order-id" };
+  }
+  if (
+    !("amountYen" in value) ||
+    typeof value.amountYen !== "number" ||
+    !Number.isSafeInteger(value.amountYen) ||
+    value.amountYen <= 0
+  ) {
+    return { ok: false, error: "invalid-amount" };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "draft",
+      orderId: value.orderId,
+      amountYen: value.amountYen,
+    },
+  };
+}
+```
+
+The amount policy is a positive safe integer in Japanese yen. It rejects `0`, fractions, `NaN`, infinity, unsafe integers, and the string `"1200"`. This is an illustrative money policy. Production systems must also decide currency, minor units, upper bounds, tax, and rounding, choosing integer or decimal libraries where appropriate.
+
+After checking the input, we build a fresh value with only the required fields rather than returning the input object. This entry point ignores unrecognized properties without copying them and rejects unknown `kind` values. If an API must reject extra properties too, add an allowed-key check.
+
+Because TypeScript is structural, assignment can accept extra properties when an object comes through a variable. Excess-property checking on fresh object literals is not a replacement for external input validation.
+
+### A JSON syntax error is not a success
+
+```typescript
+function parseDraftJson(
+  source: string,
+): Result<DraftOrder, DecodeError | "invalid-json"> {
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return { ok: false, error: "invalid-json" };
+    }
+    throw error;
+  }
+  return decodeDraft(value);
+}
+```
+
+Parsing JSON syntax and checking its contents against business input requirements are separate steps. Store `JSON.parse`'s result in `unknown`, then validate it. Only syntax errors are converted here; other exceptions are not hidden by labeling them bad input.
+
+For larger inputs, schema libraries can reduce duplication between type declarations and runtime validation. A schema still does not establish authorization or the existence of referenced records. A hand-written `value is Order` predicate also needs tests and review to establish that its implementation actually checks its declared condition.
+
+## 7. Dynamic operations also need runtime transition checks
+
+When a caller already knows it has a `PaidOrder`, it can call the refund-recording function directly. But an operation arriving from a screen or queue and a current state loaded from a database are not paired until runtime.
+
+In that situation, check each combination of `Order × OrderEvent`:
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="Order transition table" tabIndex="0">
+
+| Current state | Record payment | Record refund |
+| --- | --- | --- |
+| draft | Move to paid | Reject |
+| paid | Reject | Move to refunded |
+| refunded | Reject | Reject |
+
+</div>
+
+```typescript
+type OrderEvent =
+  | { readonly type: "payment-recorded"; readonly paymentId: string }
+  | { readonly type: "refund-recorded"; readonly refundId: string };
+
+type TransitionError =
+  | {
+      readonly kind: "invalid-transition";
+      readonly state: Order["kind"];
+      readonly event: OrderEvent["type"];
+    }
+  | {
+      readonly kind: "invalid-reference";
+      readonly field: "paymentId" | "refundId";
+    };
+
+function applyOrderEvent(
+  order: Order,
+  event: OrderEvent,
+): Result<Order, TransitionError> {
+  switch (event.type) {
+    case "payment-recorded":
+      if (event.paymentId.trim().length === 0) {
+        return {
+          ok: false,
+          error: { kind: "invalid-reference", field: "paymentId" },
+        };
+      }
+      if (order.kind !== "draft") {
+        return {
+          ok: false,
+          error: {
+            kind: "invalid-transition",
+            state: order.kind,
+            event: event.type,
+          },
+        };
+      }
+      return { ok: true, value: recordPayment(order, event.paymentId) };
+    case "refund-recorded":
+      if (event.refundId.trim().length === 0) {
+        return {
+          ok: false,
+          error: { kind: "invalid-reference", field: "refundId" },
+        };
+      }
+      if (order.kind !== "paid") {
+        return {
+          ok: false,
+          error: {
+            kind: "invalid-transition",
+            state: order.kind,
+            event: event.type,
+          },
+        };
+      }
+      return { ok: true, value: recordRefund(order, event.refundId) };
+  }
+  return assertNever(event);
+}
+```
+
+`Order["kind"]` extracts the allowed discriminant strings from `Order`, avoiding a separately maintained list of state names in the error type.
+
+The `assertNever(event)` in this function checks <strong>event alternatives</strong>. Adding an order state does not cause a type error here: the existing `if` conditions reject operations from that new state. This is an explicit allowlist policy. If adding a state must force reconsideration of its transitions, use an exhaustive `switch` over states too, explicitly representing rejections. <strong>Rejecting a new state safely is not the same as having reviewed its intended behavior.</strong>
+
+This function accepts <strong>events whose structure has already been validated</strong>. It checks that the record ID is not blank and that the operation is legal in the current state. It is not safe to pass outside JSON straight into this function.
+
+<ADTBoundaryLab />
+
+Try recording a refund on the initial draft. Then record payment followed by refund. Next, load a string-valued amount or an unknown `kind`. Notice that rejecting input does not silently reset the current order to a draft.
+
+This small model rejects repeated payment records. A production event consumer needs an idempotency policy, such as returning the same result for redelivery of the same event. <strong>Rejecting duplicates and processing idempotently are not the same thing.</strong>
+
+### Does Result guarantee that errors are handled?
+
+A useful property is that `value` is unavailable until the `ok` branch is established. However, TypeScript permits calling a function that returns `Result` and discarding the entire result. It does not guarantee that every caller executes failure handling.
+
+Consumers should show correctable input issues or explain invalid operation order and conflicts. Return the facts needed for recovery, and assign responsibility for logging and notification. Do not turn every failure into `false` or return an empty order just to keep running.
+
+Using `Result` for expected business failures and exceptions for bugs or unexpected failures is a useful convention, not an enforced law. TypeScript does not enforce thrown exception types in function signatures, and `Promise<Result<T, E>>` can still reject. The top-level asynchronous boundary must separately record and report unexpected failures.
+
+### Consumers replace the order only after success
+
+We can express the demo's control flow with a small screen model independent of React or the DOM. It holds the current order and a message to display:
+
+```typescript
+type OrderScreen = {
+  readonly order: Order;
+  readonly notice: string;
+};
+
+function loadDraftIntoScreen(
+  screen: OrderScreen,
+  source: string,
+): OrderScreen {
+  const decoded = parseDraftJson(source);
+  if (!decoded.ok) {
+    return { ...screen, notice: `Input rejected: ${decoded.error}` };
+  }
+  return { order: decoded.value, notice: "Draft loaded" };
+}
+
+function dispatchToScreen(
+  screen: OrderScreen,
+  event: OrderEvent,
+): OrderScreen {
+  const result = applyOrderEvent(screen.order, event);
+  if (!result.ok) {
+    const reason = result.error.kind === "invalid-transition"
+      ? `${result.error.state} + ${result.error.event}`
+      : `${result.error.field} is empty`;
+    return { ...screen, notice: `Operation rejected: ${reason}` };
+  }
+  return { order: result.value, notice: "Order updated" };
+}
+```
+
+The `!decoded.ok` branch reads `error`; only the success branch adopts `value`. On failure, `{ ...screen, notice: ... }` keeps the order and updates only the message. Subsequent operations apply to the current `screen.order`.
+
+```typescript
+let orderScreen: OrderScreen = {
+  order: { kind: "draft", orderId: "initial", amountYen: 1 },
+  notice: "Ready",
+};
+
+orderScreen = loadDraftIntoScreen(
+  orderScreen,
+  '{"kind":"draft","orderId":"order-42","amountYen":1200}',
+);
+orderScreen = dispatchToScreen(
+  orderScreen,
+  { type: "payment-recorded", paymentId: "pay-demo" },
+);
+orderScreen = dispatchToScreen(
+  orderScreen,
+  { type: "refund-recorded", refundId: "refund-demo" },
+);
+```
+
+The final order is refunded. <strong>Loading input and operating on the loaded order are separate actions.</strong> Recreating the order from the original JSON on every operation would reset it to draft each time. In a real UI, store the returned screen model and display `notice`. Persistence, authorization, and concurrency control still need the separate mechanisms discussed earlier.
+
+<h2 id="inheritance-and-unions" className="scroll-mt-28">8. How does a sum type differ from inheritance?</h2>
+
+Object-oriented inheritance can also use a class for each state. For example, presentation can be delegated to objects:
+
+```typescript
+abstract class OrderView {
+  abstract label(): string;
+}
+
+class DraftView extends OrderView {
+  override label(): string {
+    return "Awaiting payment";
+  }
+}
+
+class PaidView extends OrderView {
+  constructor(private readonly paymentId: string) {
+    super();
+  }
+
+  override label(): string {
+    return `Paid: ${this.paymentId}`;
+  }
+}
+
+function viewLabel(view: OrderView): string {
+  return view.label();
+}
+```
+
+`viewLabel` calls `label()` without knowing concrete class names. The object supplied determines the implementation invoked: dynamic dispatch.
+
+A union-consuming function instead inspects a discriminant and selects the operation:
+
+<div className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent" role="region" aria-label="Inheritance and union comparison" tabIndex="0">
+
+| Perspective | Shared base type or interface | Discriminated union |
+| --- | --- | --- |
+| What consumers rely on | A contract of shared operations | Enumerated cases and their data |
+| Typical operation placement | Methods in each class | Functions outside the type |
+| Adding a new kind | Add a type implementing the existing contract | Extend the union and inspect consumers |
+| Can every kind be enumerated? | Not generally for an open hierarchy | Declared alternatives can be checked |
+| Useful examples | Storage, payment adapters, plugins | Business states, results, commands, syntax trees |
+
+</div>
+
+TypeScript's `abstract class` does not close the set of subclasses. Its structural interfaces also mean that sharing a contract does not always require `extends`.
+
+### Inheritance and ADTs are not mutually exclusive
+
+Some languages restrict permitted subtypes, such as Java's `sealed` classes and interfaces. Closing branches with `final` or further `sealed` declarations allows alternatives to be managed through a class hierarchy. A `non-sealed` branch reopens extension, so the set of all concrete types need not be finite.
+
+In other words, <strong>objects with behavior and a restricted set of alternatives can coexist</strong>. “Inheritance for OOP, ADTs for functional programming” is not enough to choose a design.
+
+### Inheritance does not describe the chronological order of business states
+
+Be careful with the idea that `PaidOrder extends DraftOrder` expresses “payment has now happened.” Inheritance primarily creates a relationship in which the subtype can be used as the base type. A paid order should not necessarily be usable as an unpaid order.
+
+Similarly, if a base contract promises that every order can be refunded, an unpaid subtype that refuses refunds breaks the caller's expectation. A contract that explicitly allows failure is a different situation. Even then, a function accepting only `PaidOrder` can express its precondition more clearly.
+
+Advancing a state can create a new value or object. It does not require changing the runtime class of an existing object.
+
+## 9. Adding cases and adding operations favor different organizations
+
+Place order states in rows and operations such as `label` and `toDto` in columns:
+
+<ADTExtensionMatrix />
+
+With a union and external functions, adding an operation means writing one new function over the existing cases. Adding a state means updating branches in several functions, where exhaustiveness checks help identify the required work.
+
+With operations grouped into per-state classes, a new state implements existing operations in one new class. Adding an operation to the common contract is more likely to require changes across the classes.
+
+This introduces the <strong>Expression Problem</strong>: extending both cases and operations without changing or recompiling existing code, while preserving static type safety. The experiment compares representative code organizations; it does not prove one universally superior.
+
+Visitors, inherited implementations, and extension functions can change the distribution of work. They do not eliminate the need to decide what rendering, persistence, and auditing mean for a new state. <strong>Separate where code changes from which semantic decisions must be made.</strong>
+
+### A practical combination: an interface for adapters, an ADT for results
+
+An open contract works well for interchangeable payment adapters. Enumerating outcomes is useful for their consumers:
+
+```typescript
+type PaymentAttemptIdentity = {
+  readonly attemptId: string;
+  readonly idempotencyKey: string;
+};
+
+type ChargeFailure =
+  | { readonly kind: "declined"; readonly reason: string }
+  | { readonly kind: "outcome-unknown"; readonly attemptId: string };
+
+type ChargeResult = Result<
+  { readonly paymentId: string },
+  ChargeFailure
+>;
+
+interface PaymentGateway {
+  readonly charge: (
+    order: DraftOrder,
+    attempt: PaymentAttemptIdentity,
+  ) => Promise<ChargeResult>;
+}
+```
+
+Adapter-specific authentication and transport live in the implementation. Consumers distinguish success, definite decline, and an outcome that cannot yet be confirmed. `attemptId` is a caller-issued ID persisted before the network call, distinct from the provider's payment ID. The contract returns the same input `attemptId` for an unknown outcome, so the caller can identify its attempt even without receiving a provider response.
+
+A timeout, for example, is not evidence that a charge did not occur. An unknown outcome needs a provider-supported response, such as querying by a supported transaction ID or idempotency key, or resending with that same key. A caller-generated `attemptId` is not necessarily a valid lookup key for the provider's API.
+
+The interface does not implement provider-side idempotency. Persisting and reusing keys, response semantics for repeated keys, and reconciliation after persistence failures all need explicit design.
+
+### Delegate adapter differences, but interpret outcomes explicitly
+
+Here are approving and declining test implementations with no network calls. `PaymentGateway["charge"]` reuses the contract's function type. These classes do not need shared implementation code, so they implement the same interface without inheriting from a common class.
+
+```typescript
+class ApprovingTestGateway implements PaymentGateway {
+  readonly charge: PaymentGateway["charge"] = async () => ({
+    ok: true,
+    value: { paymentId: "test-payment" },
+  });
+}
+
+class DecliningTestGateway implements PaymentGateway {
+  readonly charge: PaymentGateway["charge"] = async () => ({
+    ok: false,
+    error: { kind: "declined", reason: "TEST_DECLINE" },
+  });
+}
+
+async function chargeNotice(
+  gateway: PaymentGateway,
+  order: DraftOrder,
+  attempt: PaymentAttemptIdentity,
+): Promise<string> {
+  const result = await gateway.charge(order, attempt);
+  if (result.ok) {
+    return `Paid: ${result.value.paymentId}`;
+  }
+  switch (result.error.kind) {
+    case "declined":
+      return `Declined: ${result.error.reason}`;
+    case "outcome-unknown":
+      return `Check attempt: ${result.error.attemptId}`;
+  }
+  return assertNever(result.error);
+}
+```
+
+The consumer invokes `charge` without inspecting a concrete class name. <strong>The shared contract supports interchangeable implementations; the ADT makes outcome interpretation explicit.</strong>
+
+```typescript
+async function gatewayExamples(): Promise<readonly string[]> {
+  return [
+    await chargeNotice(
+      new ApprovingTestGateway(),
+      { kind: "draft", orderId: "test-approved", amountYen: 1200 },
+      { attemptId: "attempt-approved", idempotencyKey: "key-approved" },
+    ),
+    await chargeNotice(
+      new DecliningTestGateway(),
+      { kind: "draft", orderId: "test-declined", amountYen: 1200 },
+      { attemptId: "attempt-declined", idempotencyKey: "key-declined" },
+    ),
+  ];
+}
+```
+
+Awaiting `gatewayExamples()` produces `["Paid: test-payment", "Declined: TEST_DECLINE"]`. These are display tests for separate orders, not production payment processing: attempt and order persistence are not implemented.
+
+Adding an adapter requires its implementation and composition code that selects and supplies it, not a change to `chargeNotice`. Adding an outcome to `ChargeFailure`, in contrast, makes the trailing `assertNever` require consumer review. If `charge` throws or rejects, this example propagates that failure to its caller rather than misclassifying it as a business decline.
+
+<h3 id="payment-attempts" className="scroll-mt-28">Persist payment attempts separately from order state</h3>
+
+From here, we move beyond basic modeling and design choices to the work of integrating them into a real service.
+
+An order might remain a draft while the outcome is unknown. <strong>That does not make it safe to start another payment.</strong> Persist attempts separately to distinguish a never-attempted payment from one whose outcome is unresolved.
+
+```typescript
+type PaymentAttempt = PaymentAttemptIdentity & {
+  readonly orderId: string;
+  readonly amountYen: number;
+  readonly currency: "JPY";
+  readonly outcome:
+    | { readonly kind: "pending" }
+    | { readonly kind: "succeeded"; readonly paymentId: string }
+    | { readonly kind: "declined"; readonly reason: string }
+    | { readonly kind: "unknown" };
+};
+```
+
+Before the call, persist the attempt ID, idempotency key, order, amount, and currency. A resend must use the same attempt and payload. Do not start a separate charge with a new key while the first attempt is pending or unknown. After confirming success, record its `paymentId` on the order. This is a model extension, not networking added to the three-state demo.
+
+Providers differ in key-retention periods and reconciliation APIs. After a provider deletes its record of a key, <strong>resending even the same key may execute a new request.</strong> Whether the key is reused or new, do not unconditionally rerun an attempt after its retention window. Reconcile the persisted attempt with external transactions to establish its outcome.
+
+## 10. Design for what types cannot guarantee
+
+### Concurrent updates and duplicate execution
+
+Two processes can read the same draft and each construct a paid value. Types do not prevent this. Persistence might use an update conditional on the order ID and version read earlier, interpreting zero affected rows as a conflict. Unique constraints on payment IDs and transactions can help where appropriate.
+
+An external charge and a local database update generally do not belong to one database transaction. <strong>The charge can succeed while saving the order fails.</strong> Reconciliation, idempotency, and operational recovery procedures must handle that situation; type checking cannot.
+
+### Preserve value constraints inside the program
+
+The decoder validates positive safe integers, but `amountYen: number` still permits other code to construct a `DraftOrder` with a negative amount. When more internal construction sites appear, a brand can distinguish validated amounts:
+
+```typescript
+declare const positiveYenBrand: unique symbol;
+type PositiveYen = number & { readonly [positiveYenBrand]: true };
+
+function positiveYen(
+  value: unknown,
+): Result<PositiveYen, "invalid-amount"> {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value <= 0
+  ) {
+    return { ok: false, error: "invalid-amount" };
+  }
+  return { ok: true, value: value as PositiveYen };
+}
+```
+
+The assertion is deliberately confined to the constructor after numeric validation. Keep the brand marker private to its module and expose the constructor as the entry point. Consumers must also change their `amountYen` field to `PositiveYen`; only then does passing an unvalidated `number` become an error.
+
+A brand does not prevent somebody from forcing an assertion, and arithmetic results need revalidation. Adding two `PositiveYen` values produces a plain `number` that could exceed the safe range. JSON round-trips do not automatically validate or restore the brand either.
+
+### readonly and consistency after changes
+
+`readonly` restricts assignments through that type; it does not guarantee deep immutability or runtime freezing. If success data is an array, for example, element mutation needs separate consideration. Replacing state with a new value rather than mutating individual fields makes it easier to update the state and its required payload together.
+
+## 11. When to split a model and when to add a state
+
+### Do not flatten independent lifecycles into one huge union
+
+If payment has three states and delivery has four, and they are independent, a product can hold both. All 12 combinations do not need individually named alternatives.
+
+If unpaid orders must never ship, however, decide where to enforce that cross-field rule. You might restrict combinations with a higher-level union or validate aggregate operations. Merely separating the fields does not make their business relationship statically checked.
+
+### Revisit forbidden states when the requirements change
+
+If the original screen must retain old data during refetching, a `refreshing` alternative can carry data. If it must keep that data after a failed refetch, a state containing both data and the refresh error is meaningful.
+
+An ADT is not a rule forbidding null or multiple pieces of information. <strong>If a combination has a legitimate meaning, represent it explicitly.</strong>
+
+### Keep wire/storage types distinct from internal models
+
+Old clients may not know new state names. Sharing type definitions does not update already deployed code.
+
+Put a conversion boundary between external data transfer objects, or DTOs, and internal models. Decide whether to reject unknown discriminants, expose them as read-only `unsupported` cases, or convert based on a version. Do not reinterpret an unknown state as draft or success and then permit operations.
+
+Persisted values also outlive their original schema. Changing a type declaration does not migrate old database rows or queued messages. Plan validation on read and data migration separately.
+
+## 12. Introduce this incrementally
+
+Start with one ambiguous state representation rather than rewriting everything:
+
+1. <strong>List combinations.</strong> Identify related flags, nullable fields, and state-specific requirements.
+2. <strong>Name meaningful states.</strong> Include real failures and in-progress states.
+3. <strong>Build an entry-point conversion.</strong> Do not assert legacy values into the new type.
+4. <strong>Migrate consumers one at a time.</strong> Rendering or notifications are often manageable starting points for exhaustiveness.
+5. <strong>Try an extension.</strong> Add a state and confirm that a missing branch becomes a type error.
+6. <strong>Remove redundant internal checks.</strong> Do not remove boundary, authorization, or concurrency checks with them.
+
+### Divide testing between static and runtime responsibilities
+
+- <strong>Type tests:</strong> reject missing success data, refunds on drafts, and unhandled added states.
+- <strong>Value tests:</strong> cover zero, negative and fractional amounts, safe-integer limits, empty IDs, and unknown discriminants.
+- <strong>Transition tests:</strong> cover every state/event pair, unchanged state after rejection, and no mutation of the original value.
+- <strong>Integration tests:</strong> cover concurrency, redelivery, reconciliation after timeouts, and persistence failure.
+- <strong>UI tests:</strong> show failure reasons and clear stale success feedback after editing input.
+
+A manually maintained array of test states does not detect a missing fixture when the type gains a new alternative. A map keyed by every discriminant can require fixture updates too:
+
+```typescript
+const exampleDraft: DraftOrder = {
+  kind: "draft",
+  orderId: "order-42",
+  amountYen: 1200,
+};
+
+const orderExamples = {
+  draft: exampleDraft,
+  paid: recordPayment(exampleDraft, "pay-demo"),
+  refunded: recordRefund(
+    recordPayment(exampleDraft, "pay-demo"),
+    "refund-demo",
+  ),
+} satisfies { [K in Order["kind"]]: Extract<Order, { kind: K }> };
+```
+
+`satisfies` checks a value against a type constraint. `Extract<Order, { kind: K }>` selects only the members of `Order` whose `kind` matches `K`. Here the map requires every state name as a key and a correctly matched variant for each value. An equivalent event map lets tests enumerate all state/event pairs with less risk of missing fixture updates. Expected transition behavior must still be checked against the requirements.
+
+Type checking examines branches even when tests never execute them. Tests and specification reviews still own well-typed calculation errors, external behavior, and incorrect state tables. Combining them makes responsibilities clearer than relying on runtime tests alone to find every structural mismatch.
+
+## Check your understanding
+
+<details>
+<summary>A type can require paymentId on paid orders. Can it also establish that the payment service actually knows that ID?</summary>
+
+Not with an ordinary string type or tagged union alone. Validate the provider response and its relationship to stored records. A brand can reduce internal mix-ups, but you still need to establish that the ID belongs to this order rather than another one.
+
+</details>
+
+<details>
+<summary>Should interchangeable S3-compatible, local, and test storage implementations always be a union?</summary>
+
+If callers should not know each implementation whenever one is added, a shared interface is often more suitable. Its operation results can still use an ADT such as success, not found, or access denied.
+
+</details>
+
+<details>
+<summary>If an exhaustive switch passes type checking, are refund tests unnecessary?</summary>
+
+No. Exhaustiveness establishes that a branch exists for each case, not that it refunds the correct amount or prevents duplicate execution.
+
+</details>
+
+## Summary
+
+The first practical step is <strong>listing business states and their required information before adding more related flags</strong>.
+
+Use products to group required data and sums to distinguish alternatives. This lets the compiler catch missing payloads and forgotten cases. Input validity, authorization, concurrency, and external outcomes still require runtime design.
+
+Replacing inheritance and interfaces is not the goal. Use shared contracts for extensible implementations, and ADTs for states and outcomes consumers must distinguish. That division is a practical starting point for adopting these ideas in an existing codebase.
+
+## References and further reading
+
+These primary sources support the language rules and design trade-offs. The code in this article was written for this explanation.
+
+- [TypeScript Handbook: Narrowing](https://www.typescriptlang.org/docs/handbook/2/narrowing.html) — Discriminated unions, control-flow analysis, and exhaustiveness with `never`.
+- [TypeScript: strictNullChecks](https://www.typescriptlang.org/tsconfig/strictNullChecks.html) — Conditions for checking null and undefined.
+- [TypeScript Handbook: Object Types](https://www.typescriptlang.org/docs/handbook/2/objects.html) — `readonly`, excess-property checking, and intersections.
+- [TypeScript Handbook: Type Compatibility](https://www.typescriptlang.org/docs/handbook/type-compatibility.html) — Structural typing and soundness limitations.
+- [TypeScript Handbook: Everyday Types](https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions) — Assertions do not perform runtime validation.
+- [TypeScript 4.9: The satisfies Operator](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-4-9.html#the-satisfies-operator) — Checking values against constraints, including complete state-fixture maps.
+- [Stripe: Idempotent requests](https://docs.stripe.com/api/idempotent_requests) — A concrete example of key reuse, matching parameters, and key retention.
+- [Oracle: Sealed Classes and Interfaces](https://docs.oracle.com/en/java/javase/21/language/sealed-classes-and-interfaces.html) — Extension boundaries with `sealed`, `final`, and `non-sealed`.
+- [Philip Wadler: The Expression Problem](https://homepages.inf.ed.ac.uk/wadler/papers/expression/expression.txt) — Extending both cases and operations.
+- [Type systems in depth](/en/blog/type-systems) — Static/dynamic and structural/nominal typing in context.
+- [Programming paradigms](/en/blog/programming-paradigms) — Compare object-oriented, functional, and other approaches.

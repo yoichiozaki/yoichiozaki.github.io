@@ -172,6 +172,10 @@ import {
   ProtobufWireVisualizer,
   WireFormatLab,
   ApiLatencyBudgetLab,
+  ADTStateSpace,
+  ADTExhaustivenessLab,
+  ADTBoundaryLab,
+  ADTExtensionMatrix,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -354,6 +358,10 @@ function getMdxComponents(locale: string) {
     ProtobufWireVisualizer: () => <ProtobufWireVisualizer locale={locale} />,
     WireFormatLab: () => <WireFormatLab locale={locale} />,
     ApiLatencyBudgetLab: () => <ApiLatencyBudgetLab locale={locale} />,
+    ADTStateSpace: () => <ADTStateSpace locale={locale} />,
+    ADTExhaustivenessLab: () => <ADTExhaustivenessLab locale={locale} />,
+    ADTBoundaryLab: () => <ADTBoundaryLab locale={locale} />,
+    ADTExtensionMatrix: () => <ADTExtensionMatrix locale={locale} />,
   };
 }
 

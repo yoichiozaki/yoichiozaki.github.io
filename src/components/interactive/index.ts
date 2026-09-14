@@ -198,3 +198,9 @@ export {
 export { ProtobufWireVisualizer } from "./ProtobufWireVisualizer";
 export { WireFormatLab } from "./WireFormatLab";
 export { ApiLatencyBudgetLab } from "./ApiLatencyBudgetLab";
+export {
+  ADTStateSpace,
+  ADTExhaustivenessLab,
+  ADTBoundaryLab,
+  ADTExtensionMatrix,
+} from "./ADTLabs";
