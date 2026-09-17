@@ -8,11 +8,12 @@ import {
   buildSegmentPaths,
   buildCumulativePath,
   pathEndIndex,
-  remapProgressForMap,
+  getStoryScrollState,
   interpolateCoordsOnPath,
   interpolateZoomSmooth,
   fullGuidePath,
 } from "@/lib/storytelling-map-utils";
+import { stopsJa, stopsEn } from "@/data/trips/seattle-vancouver-2025";
 
 // ── Test fixtures ────────────────────────────────────────────
 
@@ -241,61 +242,129 @@ describe("pathEndIndex", () => {
   });
 });
 
-// ── remapProgressForMap ──────────────────────────────────────
+// ── Shared scroll timing ────────────────────────────────────
 
-describe("remapProgressForMap", () => {
-  it("returns 0 for rawP=0", () => {
-    expect(remapProgressForMap(0, threeStops)).toBe(0);
+describe("getStoryScrollState", () => {
+  const layouts = [
+    { top: 0, height: 1000 },
+    { top: 1000, height: 2000 },
+    { top: 3000, height: 1000 },
+  ];
+  const at = (scroll: number) => getStoryScrollState(threeStops, layouts, scroll, 1000);
+
+  it("clamps before the story and after its final card", () => {
+    expect(at(-500)).toEqual({ activeIndex: 0, imageIndex: 0, progress: 0, mapProgress: 0 });
+    expect(at(5000)).toEqual({ activeIndex: 2, imageIndex: 0, progress: 1, mapProgress: 1 });
   });
 
-  it("returns 1 for rawP=1", () => {
-    expect(remapProgressForMap(1, threeStops)).toBe(1);
-  });
-
-  it("returns 0 when within dwell zone of first segment", () => {
-    // First stop has 1 image → base dwell 0.15
-    // rawP = 0.05 → segIdx=0, segT=0.1 < 0.15 → mapT=0
-    const result = remapProgressForMap(0.05, threeStops);
-    expect(result).toBe(0);
-  });
-
-  it("multi-image stop has larger dwell", () => {
-    // Stop index 1 has 3 images → dwell = (3+1)/(3+2) = 0.8
-    // rawP=0.5, segments=2, raw=1.0, segIdx=1, segT=0.0
-    // segT=0 < dwellFraction → mapT=0 → result = (1+0)/2 = 0.5
-    expect(remapProgressForMap(0.5, threeStops)).toBe(0.5);
-    // Within the dwell zone it should stay at 0.5 (the segment start)
-    // rawP=0.7 → raw=1.4 → segIdx=1, segT=0.4 < 0.8 → still in dwell
-    expect(remapProgressForMap(0.7, threeStops)).toBe(0.5);
-  });
-
-  it("is monotonically non-decreasing", () => {
-    let prev = 0;
-    for (let p = 0; p <= 1; p += 0.001) {
-      const v = remapProgressForMap(p, seattleBarToNarita);
-      expect(v).toBeGreaterThanOrEqual(prev - 1e-10);
-      prev = v;
+  it("keeps the map at a stop while its photos advance", () => {
+    for (const [offset, imageIndex] of [[0, 0], [500, 1], [1000, 2], [1300, 2]]) {
+      const state = at(1000 + offset);
+      expect(state.activeIndex).toBe(1);
+      expect(state.imageIndex).toBe(imageIndex);
+      expect(state.mapProgress).toBe(0.5);
     }
   });
 
-  it("output is always in [0, 1]", () => {
-    for (let p = 0; p <= 1; p += 0.01) {
-      const v = remapProgressForMap(p, seattleBarToNarita);
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(1);
+  it("uses a full 700px transition after a multi-photo stop", () => {
+    expect(at(2300).mapProgress).toBe(0.5);
+    expect(at(2475).mapProgress).toBeCloseTo(0.625);
+    expect(at(2650).mapProgress).toBeCloseTo(0.75);
+    expect(at(2825).mapProgress).toBeCloseTo(0.875);
+    expect(at(3000).mapProgress).toBe(1);
+  });
+
+  it("highlights the next card at the map transition midpoint, not mid-slideshow", () => {
+    expect(at(2000).activeIndex).toBe(1);
+    expect(at(2649).activeIndex).toBe(1);
+    expect(at(2650).activeIndex).toBe(2);
+  });
+
+  it("keeps at least half of a short stop for reading", () => {
+    expect(at(500).mapProgress).toBe(0);
+    expect(at(750).mapProgress).toBe(0.25);
+    expect(at(1000).mapProgress).toBe(0.5);
+  });
+
+  it("uses the visible reading line below the mobile map", () => {
+    const mobileLayouts = [
+      { top: -800, height: 800 },
+      { top: 0, height: 1600 },
+      { top: 1600, height: 800 },
+    ];
+    expect(getStoryScrollState(threeStops, mobileLayouts, 64 + 224, 800).mapProgress).toBe(0.5);
+    const moved = mobileLayouts.map(layout => ({ ...layout, top: layout.top - 1032 }));
+    expect(getStoryScrollState(threeStops, moved, 288, 800).mapProgress).toBeCloseTo(0.75);
+  });
+
+  it("recomputes travel distance after a viewport resize", () => {
+    expect(at(2500).mapProgress).toBeGreaterThan(0.5);
+    expect(getStoryScrollState(threeStops, layouts, 2500, 600).mapProgress).toBe(0.5);
+  });
+
+  it("reaches every stop immediately after arbitrary forward and backward jumps", () => {
+    const tripLayouts = stopsJa.map((_, index) => ({ top: index * 2000, height: 2000 }));
+    for (const index of [0, 10, 3, 12, 1, 8, 0]) {
+      const state = getStoryScrollState(stopsJa, tripLayouts, index * 2000, 1000);
+      expect(state.activeIndex).toBe(index);
+      expect(state.mapProgress).toBeCloseTo(index / (stopsJa.length - 1));
+      expect(state.imageIndex).toBe(0);
     }
   });
 
-  it("long-distance segment gets boosted dwell", () => {
-    // gastown → narita is >8000km, dwell should be boosted beyond base
-    // segIdx=3 (gastown), images=2 → base dwell = (2+1)/(2+2) = 0.75
-    // dist > 500 → boost = min(0.15, dist/20000) ≈ 0.15
-    // capped at 0.92
-    const segStart = 3 / 4; // segment 3 starts at rawP = 0.75
-    const justInDwell = segStart + 0.01;
-    const result = remapProgressForMap(justInDwell, seattleBarToNarita);
-    // Should still be at segment 3 start (0.75) because within dwell
-    expect(result).toBeCloseTo(segStart, 1);
+  it("is bounded, monotonic, and reversible for both locales with unequal stop heights", () => {
+    for (const stops of [stopsJa, stopsEn]) {
+      let top = 0;
+      const tripLayouts = stops.map(stop => {
+        const height = 1000 + Math.max(0, (stop.images?.length ?? 0) - 1) * 500;
+        const layout = { top, height };
+        top += height;
+        return layout;
+      });
+      const forward = [];
+      let previous = 0;
+      for (let scroll = -1000; scroll <= top + 1000; scroll += 50) {
+        const state = getStoryScrollState(stops, tripLayouts, scroll, 1000);
+        expect(state.mapProgress).toBeGreaterThanOrEqual(previous);
+        expect(state.mapProgress).toBeLessThanOrEqual(1);
+        expect(state.progress).toBeGreaterThanOrEqual(0);
+        expect(state.progress).toBeLessThanOrEqual(1);
+        expect(state.activeIndex).toBeGreaterThanOrEqual(0);
+        expect(state.activeIndex).toBeLessThan(stops.length);
+        expect(state.imageIndex).toBeGreaterThanOrEqual(0);
+        expect(state.imageIndex).toBeLessThan(Math.max(1, stops[state.activeIndex].images?.length ?? 0));
+        previous = state.mapProgress;
+        forward.push({ scroll, state });
+      }
+      for (const { scroll, state } of forward.reverse()) {
+        expect(getStoryScrollState(stops, tripLayouts, scroll, 1000)).toEqual(state);
+      }
+    }
+  });
+
+  it("continues the final slideshow after the map has arrived", () => {
+    const stops = [threeStops[0], threeStops[1]];
+    const finalLayouts = layouts.slice(0, 2);
+    const arrival = getStoryScrollState(stops, finalLayouts, 1000, 1000);
+    const lastPhoto = getStoryScrollState(stops, finalLayouts, 2800, 1000);
+    expect(arrival.mapProgress).toBe(1);
+    expect(arrival.progress).toBe(1);
+    expect(arrival.imageIndex).toBe(0);
+    expect(lastPhoto.mapProgress).toBe(1);
+    expect(lastPhoto.imageIndex).toBe(2);
+  });
+
+  it("supports empty and single-stop stories without division by zero", () => {
+    expect(getStoryScrollState([], [], 0, 1000).mapProgress).toBe(0);
+    expect(getStoryScrollState([threeStops[1]], [{ top: 0, height: 1000 }], 750, 1000))
+      .toEqual({ activeIndex: 0, imageIndex: 2, progress: 0.75, mapProgress: 0 });
+  });
+
+  it("rejects mismatched or invalid layout measurements", () => {
+    expect(() => getStoryScrollState(threeStops, [], 0, 1000)).toThrow("scroll layout");
+    expect(() => getStoryScrollState(threeStops, layouts, 0, 0)).toThrow("positive");
+    expect(() => getStoryScrollState([threeStops[0]], [{ top: 0, height: 0 }], 0, 1000))
+      .toThrow("positive, ordered spans");
   });
 });
 
@@ -336,17 +405,30 @@ describe("interpolateZoomSmooth", () => {
   });
 
   it("zooms out for long-distance flights", () => {
-    // Narita→Seattle flight: distance > 3000km, uses sigmoid zoom valley
     const flightStops: StoryStop[] = [
       { id: "a", title: "A", description: "", coordinates: [35.7647, 140.3864], zoom: 5 },
       { id: "b", title: "B", description: "", coordinates: [47.6097, -122.3425], zoom: 15, pathType: "flight" },
     ];
     const midZoom = interpolateZoomSmooth(flightStops, 0.5);
-    // At t=0.5 the sigmoid is in the valley — zoom should be below both endpoints
     expect(midZoom).toBeLessThan(15);
     // Departure zoom at t=0 and arrival zoom at t=1
     expect(interpolateZoomSmooth(flightStops, 0)).toBe(5);
     expect(interpolateZoomSmooth(flightStops, 1)).toBe(15);
+  });
+
+  it("spreads flight zoom over the journey instead of snapping near its midpoint", () => {
+    for (const flightStops of [[stopsJa[0], stopsJa[1]], stopsJa.slice(-2)]) {
+      let previous = interpolateZoomSmooth(flightStops, 0);
+      for (let i = 1; i <= 1000; i++) {
+        const zoom = interpolateZoomSmooth(flightStops, i / 1000);
+        expect(Math.abs(zoom - previous)).toBeLessThan(0.11);
+        previous = zoom;
+      }
+      const overview = interpolateZoomSmooth(flightStops, 0.5);
+      expect(interpolateZoomSmooth(flightStops, 0.4)).toBe(overview);
+      expect(interpolateZoomSmooth(flightStops, 0.6)).toBe(overview);
+      expect(interpolateZoomSmooth(flightStops, 0.75)).toBeLessThan(flightStops[1].zoom! - 0.5);
+    }
   });
 });
 

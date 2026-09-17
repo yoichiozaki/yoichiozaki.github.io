@@ -259,45 +259,59 @@ export function pathEndIndex(
   return { endIndex, tip: null };
 }
 
-// ── Map progress remapping (dwell) ───────────────────────────
+// ── Shared scroll timing ────────────────────────────────────
 
-export function remapProgressForMap(
-  rawP: number,
-  stops: StoryStop[]
-): number {
-  const n = stops.length;
-  if (n < 2 || rawP <= 0) return 0;
-  if (rawP >= 1) return 1;
+export type StoryStopLayout = {
+  top: number;
+  height: number;
+};
 
-  const segments = n - 1;
-  const raw = rawP * segments;
-  const segIdx = Math.min(Math.floor(raw), segments - 1);
-  const segT = raw - segIdx;
-
-  const imgCount = stops[segIdx].images?.length ?? 0;
-
-  let dwellFraction: number;
-  if (imgCount > 1) {
-    dwellFraction = (imgCount + 1) / (imgCount + 2);
-  } else {
-    dwellFraction = 0.15;
+export function getStoryScrollState(
+  stops: StoryStop[],
+  layouts: StoryStopLayout[],
+  readingTop: number,
+  viewportHeight: number
+) {
+  if (layouts.length !== stops.length) {
+    throw new Error("Each story stop needs a scroll layout.");
+  }
+  if (viewportHeight <= 0) {
+    throw new RangeError("The story viewport height must be positive.");
+  }
+  if (stops.length === 0) {
+    return { activeIndex: 0, imageIndex: 0, progress: 0, mapProgress: 0 };
   }
 
-  const nextStop = stops[Math.min(segIdx + 1, n - 1)];
-  const dist = haversineKm(stops[segIdx].coordinates, nextStop.coordinates);
-  if (dist > 500) {
-    const boost = Math.min(0.15, dist / 20000);
-    dwellFraction = Math.min(0.92, dwellFraction + boost);
+  // Use the unpinned wrappers, not the cards whose sticky tops stop moving.
+  let index = 0;
+  while (index < layouts.length - 1 && layouts[index + 1].top <= readingTop) {
+    index++;
   }
 
-  let mapT: number;
-  if (segT <= dwellFraction) {
-    mapT = 0;
-  } else {
-    mapT = (segT - dwellFraction) / (1 - dwellFraction);
+  const layout = layouts[index];
+  const isLast = index === stops.length - 1;
+  const span = isLast ? layout.height : layouts[index + 1].top - layout.top;
+  if (span <= 0) {
+    throw new RangeError("Story stop layouts must have positive, ordered spans.");
   }
+  const offset = Math.max(0, Math.min(span, readingTop - layout.top));
 
-  return (segIdx + mapT) / segments;
+  // Extra photos extend the reading time, never compress the next map move.
+  const travel = isLast ? 0 : Math.min(viewportHeight * 0.7, span * 0.5);
+  const dwell = span - travel;
+  const travelProgress = travel === 0 ? 0 : Math.max(0, (offset - dwell) / travel);
+  const activeIndex = index + (travelProgress >= 0.5 ? 1 : 0);
+  const imageCount = stops[index].images?.length ?? 0;
+  const imageIndex = activeIndex !== index || imageCount === 0
+    ? 0
+    : Math.min(imageCount - 1, Math.floor((offset / dwell) * imageCount));
+
+  return {
+    activeIndex,
+    imageIndex,
+    progress: Math.min(1, (index + offset / span) / Math.max(1, stops.length - 1)),
+    mapProgress: stops.length < 2 ? 0 : (index + travelProgress) / (stops.length - 1),
+  };
 }
 
 // ── Interpolation on pre-computed paths ──────────────────────
@@ -353,22 +367,10 @@ export function interpolateZoomSmooth(
   const overviewZ = Math.max(1, 17 - Math.log2(Math.max(1, dist)));
 
   if (dist > 3000) {
-    const lowZ = Math.max(3, Math.min(fromZ, overviewZ));
-    const dwellOut = 0.15;
-    const dwellIn = 0.25;
-    if (t <= dwellOut) return fromZ;
-    if (t >= 1 - dwellIn) return toZ;
-    const u = (t - dwellOut) / (1 - dwellOut - dwellIn);
-    const k = 40;
-    const sig = (x: number) => 1 / (1 + Math.exp(-k * (x - 0.5)));
-    const s0 = sig(0);
-    const s1 = sig(1);
-    const s = (sig(u) - s0) / (s1 - s0);
-    if (u < 0.5) {
-      return lerp(fromZ, lowZ, s * 2);
-    } else {
-      return lerp(lowZ, toZ, (s - 0.5) * 2);
-    }
+    const lowZ = Math.max(3, Math.min(fromZ, toZ, overviewZ));
+    if (t < 0.35) return lerp(fromZ, lowZ, easeInOutCubic(t / 0.35));
+    if (t <= 0.65) return lowZ;
+    return lerp(lowZ, toZ, easeInOutCubic((t - 0.65) / 0.35));
   }
 
   const lowZ = Math.min(fromZ, toZ, overviewZ);

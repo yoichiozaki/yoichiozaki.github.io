@@ -23,7 +23,29 @@ const skills = {
   Languages: ["TypeScript", "JavaScript", "Python", "Go", "Nim", "C", "Rust"],
   Frontend: ["React", "Next.js", "Tailwind CSS"],
   Cloud: ["Microsoft Azure", "GitHub Actions", "Docker"],
+  AI: [
+    "LLM",
+    "Azure OpenAI Service",
+    "Azure AI Search",
+    "RAG",
+    "AI Agents",
+    "Multi-Agent Systems",
+    "LLM / Agent Evaluation",
+  ],
+  "AI Engineering": [
+    "GitHub Copilot",
+    "Claude Code",
+    "Codex",
+    "Harness Engineering",
+    "Loop Engineering",
+    "MCP (Model Context Protocol)",
+    "Context Engineering",
+    "Microsoft Agent Framework",
+    "GitHub Copilot SDK",
+  ],
+  Algorithms: ["Graph Algorithms", "Network Science"],
   Tools: ["Git", "Node.js", "Linux"],
+  Communication: ["Technical Writing"],
 };
 
 export default async function AboutPage({

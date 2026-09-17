@@ -1,24 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
-  lerp,
-  easeInOutCubic,
   parseTitle,
-  haversineKm,
-  greatCircleArc,
-  catmullRomSegment,
   buildSegmentPaths,
   unwrapSegPaths,
   fullGuidePath,
   buildCumulativePath,
   pathEndIndex,
-  remapProgressForMap,
+  getStoryScrollState,
   interpolateCoordsOnPath,
   interpolateZoomSmooth,
-  SEG_PTS,
   type CumulativePath,
 } from "@/lib/storytelling-map-utils";
 
@@ -35,106 +29,50 @@ export type StoryStop = {
 
 // ── Scroll-driven image slideshow ────────────────────────────
 
-function ImageSlideshow({ images, alt }: { images: string[]; alt: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const imgRefsRef = useRef<(HTMLImageElement | null)[]>([]);
-  const dotRefsRef = useRef<(HTMLDivElement | null)[]>([]);
-  const lastIdxRef = useRef(0);
-
-  useEffect(() => {
-    if (images.length <= 1) return;
-    const el = containerRef.current;
-    if (!el) return;
-
-    // Find the outer scroll wrapper (the div with extra height for multi-image stops)
-    const wrapper = el.closest<HTMLElement>("[data-stop-wrapper]");
-    if (!wrapper) return;
-
-    const update = () => {
-      const rect = wrapper.getBoundingClientRect();
-      // Mobile: sync at card sticky position (top-12 = 48px). Desktop: header bottom (64px).
-      const syncY = window.innerWidth >= 1024 ? 64 : 48;
-      // 0 when wrapper top hits syncY, 1 when wrapper bottom hits it
-      const progress = (syncY - rect.top) / rect.height;
-      const clamped = Math.max(0, Math.min(0.999, progress));
-      // Give the last image a full dwell slot: cycle through images in
-      // the first imgCount/(imgCount+1) of the scroll, then hold the
-      // last image for the remaining 1/(imgCount+1).
-      const idx = Math.min(
-        Math.floor(clamped * (images.length + 1)),
-        images.length - 1
-      );
-
-      if (idx !== lastIdxRef.current) {
-        lastIdxRef.current = idx;
-        imgRefsRef.current.forEach((img, i) => {
-          if (img) img.style.opacity = i === idx ? "1" : "0";
-        });
-        dotRefsRef.current.forEach((dot, i) => {
-          if (!dot) return;
-          const active = i === idx;
-          dot.style.width = active ? "8px" : "6px";
-          dot.style.height = active ? "8px" : "6px";
-          dot.style.opacity = active ? "0.6" : "0.2";
-        });
-      }
-    };
-
-    window.addEventListener("scroll", update, { passive: true });
-    update();
-    return () => window.removeEventListener("scroll", update);
-  }, [images.length]);
-
+function ImageSlideshow({
+  images,
+  alt,
+  index,
+  visible,
+}: {
+  images: string[];
+  alt: string;
+  index: number;
+  visible: boolean;
+}) {
   if (images.length === 0) return null;
 
-  if (images.length === 1) {
-    return (
-      <div className="mt-3">
-        <div className="relative overflow-hidden rounded-lg">
-          <img
-            src={images[0]}
-            alt={`${alt} - 1`}
-            className="w-full h-auto"
-            loading="lazy"
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div ref={containerRef} className="mt-3">
-      <div className="relative overflow-hidden rounded-lg">
-        {images.map((src, i) => (
+    <div className="mt-3">
+      <div className="relative aspect-square max-h-[55svh] overflow-hidden rounded-lg bg-muted">
+        {visible && images.map((src, i) => (
           <img
-            key={i}
-            ref={(el) => { imgRefsRef.current[i] = el; }}
+            key={src}
             src={src}
             alt={`${alt} - ${i + 1}`}
-            className={`w-full transition-opacity duration-700 ease-in-out ${
-              i === 0 ? "relative h-auto" : "absolute top-0 left-0 h-full object-cover"
-            }`}
-            style={{ opacity: i === 0 ? 1 : 0 }}
-            loading={i === 0 ? "eager" : "lazy"}
+            aria-hidden={i !== index}
+            className="absolute inset-0 h-full w-full object-contain transition-opacity duration-500 ease-in-out motion-reduce:transition-none"
+            style={{ opacity: i === index ? 1 : 0 }}
+            loading={i === index ? "eager" : "lazy"}
           />
         ))}
       </div>
 
-      {/* Dot indicators */}
-      <div className="flex justify-center gap-1.5 mt-2.5">
-        {images.map((_, i) => (
-          <div
-            key={i}
-            ref={(el) => { dotRefsRef.current[i] = el; }}
-            className="rounded-full bg-foreground transition-all duration-300"
-            style={{
-              width: i === 0 ? 8 : 6,
-              height: i === 0 ? 8 : 6,
-              opacity: i === 0 ? 0.6 : 0.2,
-            }}
-          />
-        ))}
-      </div>
+      {images.length > 1 && (
+        <div className="flex h-2 items-center justify-center gap-1.5 mt-2.5" aria-hidden="true">
+          {images.map((src, i) => (
+            <div
+              key={src}
+              className="rounded-full bg-foreground transition-all duration-300 motion-reduce:transition-none"
+              style={{
+                width: i === index ? 8 : 6,
+                height: i === index ? 8 : 6,
+                opacity: i === index ? 0.6 : 0.2,
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -179,7 +117,7 @@ function tileUrl(template: string, z: number, x: number, y: number): string {
     .replace("{z}", String(z))
     .replace("{x}", String(x))
     .replace("{y}", String(y))
-    .replace("{r}", "");
+    .replace("{r}", L.Browser.retina ? "@2x" : "");
 }
 
 /**
@@ -285,20 +223,18 @@ export function StorytellingMap({
   const targetPRef = useRef(0);
   const currentPRef = useRef(0);
   const progressBarRef = useRef<HTMLDivElement>(null);
-  const activeIndexRef = useRef(0);
+  const wrapperRefsRef = useRef<(HTMLDivElement | null)[]>([]);
   const cardRefsRef = useRef<(HTMLDivElement | null)[]>([]);
-  // Ref for triggering tile loads at the TARGET position (not lerped)
-  const loadTilesAtTargetRef = useRef<((p: number) => void) | null>(null);
-  const dotRefsRef = useRef<(HTMLDivElement | null)[]>([]);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const requestTileUpdateRef = useRef<(() => void) | null>(null);
   // Scroll-dirty flag: set true on scroll, consumed in rAF tick
   const scrollDirtyRef = useRef(true);
   // Previous frame values for skipping redundant updates
   const prevCenterRef = useRef<[number, number]>([0, 0]);
   const prevZoomRef = useRef(0);
   const prevEndIdxRef = useRef(-1);
-  // Active stop index state for lazy image loading
-  const [visibleRange, setVisibleRange] = useState<[number, number]>([0, Math.min(2, stops.length - 1)]);
+  const [activeStep, setActiveStep] = useState({ index: 0, imageIndex: 0 });
+  const activeStepRef = useRef(activeStep);
+  const { index: activeIndex, imageIndex } = activeStep;
 
   // Pre-compute curved segment paths (globally unwrapped for antimeridian)
   if (segPathsRef.current.length === 0 && stops.length > 1) {
@@ -308,7 +244,7 @@ export function StorytellingMap({
 
   // Initialize Leaflet map
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    if (!mapContainerRef.current || mapRef.current || stops.length === 0) return;
 
     const map = L.map(mapContainerRef.current, {
       zoomControl: false,
@@ -328,16 +264,7 @@ export function StorytellingMap({
       keepBuffer: 10,
     }).addTo(map);
 
-    // ── Target-aware tile loading ─────────────────────────────
-    //
-    // Core idea: the animation loop (tick) drives the camera via CSS
-    // transforms only. Tile loading is completely decoupled and driven
-    // by the scroll TARGET — i.e. where the user is scrolling TO, not
-    // where the lerped camera currently is.
-    //
-    // This avoids flooding the network with intermediate zoom tiles
-    // during big transitions (e.g. zoom 5→15 Pacific flight).
-    //
+    // Animate transforms every frame, but refresh tiles at most every 100ms.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tl = tileLayer as any;
     const origSetView = tl._setView.bind(tl);
@@ -378,16 +305,10 @@ export function StorytellingMap({
       }
     };
 
-    // -- The single tile-load function --
-    // Called from onScroll (debounced) with the TARGET progress value.
-    // Computes the target center+zoom and loads tiles there.
-    const sp = segPathsRef.current;
-    function loadTilesAtTarget(targetP: number) {
+    function loadTilesForView() {
       if (!tl._map) return;
-      const center = interpolateCoordsOnPath(sp, stops, targetP);
-      const rawZoom = interpolateZoomSmooth(stops, targetP);
-      const nearestInt = Math.round(rawZoom);
-      const zoom = Math.abs(rawZoom - nearestInt) < 0.15 ? nearestInt : rawZoom;
+      const center = map.getCenter();
+      const zoom = map.getZoom();
 
       const zoomJump = Math.abs(zoom - lastLoadedZoom);
 
@@ -400,24 +321,18 @@ export function StorytellingMap({
 
       lastLoadedZoom = zoom;
 
-      // origSetView uses the center/zoom params directly to calculate
-      // which tiles to create — it doesn't read from map._zoom.
-      // We pass the TARGET center/zoom so only destination tiles load.
-      origSetView(L.latLng(center), zoom, false, false);
+      // GridLayer rejects tile loads more than one zoom level from map.getZoom().
+      // Read the actual camera when the timer fires, not its future scroll target.
+      origSetView(center, zoom, false, false);
     }
 
-    // Expose via ref so onScroll can call it
-    loadTilesAtTargetRef.current = (targetP: number) => {
-      if (tileLoadTimer) clearTimeout(tileLoadTimer);
-      // Debounce: 150ms. During rapid scrolling, only the final
-      // target gets tiles loaded. Short enough to feel responsive.
+    requestTileUpdateRef.current = () => {
+      if (tileLoadTimer) return;
       tileLoadTimer = setTimeout(() => {
         tileLoadTimer = null;
-        loadTilesAtTarget(targetP);
-      }, 150);
+        loadTilesForView();
+      }, 100);
     };
-
-    tileLayerRef.current = tileLayer;
 
     if (stops.length > 0) {
       // For the initial load, call the ORIGINAL _setView so tiles actually
@@ -471,7 +386,7 @@ export function StorytellingMap({
     });
 
     mapRef.current = map;
-    setTimeout(() => map.invalidateSize(), 200);
+    scrollDirtyRef.current = true;
 
     // Pre-cache tiles along the entire scroll path
     const cancelPrecache = precacheTiles(
@@ -482,81 +397,69 @@ export function StorytellingMap({
 
     return () => {
       cancelPrecache();
+      if (tileLoadTimer) clearTimeout(tileLoadTimer);
+      requestTileUpdateRef.current = null;
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Scroll-driven animation with inertia smoothing
-  useEffect(() => {
+  // One scroll timeline drives the camera, active card, and slideshow.
+  // Clean up before React detaches the DOM refs during navigation.
+  useLayoutEffect(() => {
     const scrollEl = scrollRef.current;
-    if (!scrollEl) return;
+    if (!scrollEl || stops.length === 0) return;
 
-    const LERP_FACTOR = 0.12;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     let running = true;
+    let viewportHeight = window.innerHeight;
+    let readingTop = 0;
+    let snapToTarget = true;
+    let lastTime = performance.now();
+    let renderedP = -1;
 
-    // Lightweight scroll listener: just flag dirty — no DOM reads here.
-    // All getBoundingClientRect calls happen once per rAF tick instead.
     const onScroll = () => { scrollDirtyRef.current = true; };
 
-    // ── Read scroll position (called once per rAF when dirty) ──
-    const readScrollPosition = () => {
-      const cards = cardRefsRef.current;
-      // Mobile: sync at card sticky position (top-12 = 48px).
-      // Desktop (lg:): map is beside cards, sync at header bottom (64px).
-      const syncY = window.innerWidth >= 1024 ? 64 : 48;
-      const n = stops.length;
-      if (n < 2) return;
-
-      // Narrow scan: only check cards near the current active index (±2)
-      // instead of all N cards. Falls back to full scan on first call.
-      const scanLo = Math.max(0, activeIndexRef.current - 2);
-      const scanHi = Math.min(n - 1, activeIndexRef.current + 2);
-
-      let bestIdx = scanLo;
-      let bestDist = Infinity;
-      const tops: number[] = [];
-      for (let i = scanLo; i <= scanHi; i++) {
-        const el = cards[i];
-        if (!el) { tops.push(0); continue; }
-        const top = el.getBoundingClientRect().top;
-        tops.push(top);
-        const d = Math.abs(top - syncY);
-        if (d < bestDist) { bestDist = d; bestIdx = i; }
+    const updateLayout = () => {
+      viewportHeight = window.innerHeight;
+      readingTop = Number.parseFloat(window.getComputedStyle(scrollEl).scrollMarginTop);
+      for (const card of cardRefsRef.current) {
+        if (!card) continue;
+        // Tall cards scroll their text before pinning the photo at the bottom.
+        const top = Math.min(readingTop, viewportHeight - card.offsetHeight - 16);
+        card.style.setProperty("--story-card-top", `${top}px`);
       }
-
-      let lo: number, hi: number;
-      const localIdx = bestIdx - scanLo;
-      if (tops[localIdx] <= syncY) {
-        lo = bestIdx;
-        hi = Math.min(bestIdx + 1, n - 1);
-      } else {
-        lo = Math.max(bestIdx - 1, 0);
-        hi = bestIdx;
-      }
-
-      let p: number;
-      if (lo === hi) {
-        p = lo / (n - 1);
-      } else {
-        const loLocal = lo - scanLo;
-        const hiLocal = hi - scanLo;
-        const loY = loLocal >= 0 && loLocal < tops.length ? tops[loLocal] : 0;
-        const hiY = hiLocal >= 0 && hiLocal < tops.length ? tops[hiLocal] : 0;
-        const t = hiY === loY ? 0 : (syncY - loY) / (hiY - loY);
-        p = (lo + Math.max(0, Math.min(1, t))) / (n - 1);
-      }
-
-      targetPRef.current = Math.max(0, Math.min(1, p));
-
-      loadTilesAtTargetRef.current?.(remapProgressForMap(targetPRef.current, stops));
+      mapRef.current?.invalidateSize({ pan: false });
+      snapToTarget = true;
+      scrollDirtyRef.current = true;
     };
 
-    const tick = () => {
-      if (!running) return;
+    const readScrollPosition = () => {
+      const layouts = wrapperRefsRef.current.flatMap(wrapper => (
+        wrapper ? [wrapper.getBoundingClientRect()] : []
+      ));
+      const state = getStoryScrollState(stops, layouts, readingTop, viewportHeight);
+      targetPRef.current = reducedMotion.matches
+        ? state.activeIndex / Math.max(1, stops.length - 1)
+        : state.mapProgress;
 
-      // Read scroll position only when dirty (avoids unnecessary layout)
+      const previousStep = activeStepRef.current;
+      if (previousStep.index !== state.activeIndex || previousStep.imageIndex !== state.imageIndex) {
+        const nextStep = { index: state.activeIndex, imageIndex: state.imageIndex };
+        activeStepRef.current = nextStep;
+        setActiveStep(nextStep);
+      }
+      if (progressBarRef.current) {
+        progressBarRef.current.style.width = `${state.progress * 100}%`;
+      }
+    };
+
+    const tick = (time: number) => {
+      if (!running) return;
+      const elapsed = Math.max(0, time - lastTime);
+      lastTime = time;
+
       if (scrollDirtyRef.current) {
         scrollDirtyRef.current = false;
         readScrollPosition();
@@ -567,91 +470,71 @@ export function StorytellingMap({
         const prev = currentPRef.current;
         const target = targetPRef.current;
         const diff = target - prev;
-        const p = Math.abs(diff) < 0.0005 ? target : prev + diff * LERP_FACTOR;
+        const skipAnimation = snapToTarget || reducedMotion.matches || Math.abs(diff) * (stops.length - 1) > 1;
+        const p = skipAnimation || Math.abs(diff) < 0.00001
+          ? target
+          : prev + diff * (1 - Math.exp(-elapsed / 70));
         currentPRef.current = p;
-        if (progressBarRef.current) {
-          progressBarRef.current.style.width = `${target * 100}%`;
-        }
 
-        // Active card highlighting (based on raw target, not lerped)
-        const totalSegments = stops.length - 1;
-        const rawTargetIndex = target * totalSegments;
-        const newIndex = Math.min(Math.round(rawTargetIndex), stops.length - 1);
-        if (newIndex !== activeIndexRef.current) {
-          activeIndexRef.current = newIndex;
-          // Update visible range for lazy image loading (current ± 1)
-          const lo = Math.max(0, newIndex - 1);
-          const hi = Math.min(stops.length - 1, newIndex + 1);
-          setVisibleRange([lo, hi]);
+        if (p !== renderedP || snapToTarget) {
+          renderedP = p;
+          const sp = segPathsRef.current;
+          const cumPath = cumPathRef.current;
+          const center = interpolateCoordsOnPath(sp, stops, p);
+          const zoom = interpolateZoomSmooth(stops, p);
 
-          for (let i = 0; i < stops.length; i++) {
-            const card = cardRefsRef.current[i];
-            if (card) {
-              card.style.opacity = i === newIndex ? '1' : i < newIndex ? '0.25' : '0.1';
-            }
-            const dot = dotRefsRef.current[i];
-            if (dot) {
-              const isActive = i === newIndex;
-              const sz = isActive ? '7px' : '4px';
-              dot.style.width = sz;
-              dot.style.height = sz;
-              dot.style.backgroundColor = i <= newIndex ? pathColor : 'rgba(148,163,184,0.4)';
-              dot.style.opacity = isActive ? '1' : i < newIndex ? '0.5' : '0.3';
+          const dLat = Math.abs(center[0] - prevCenterRef.current[0]);
+          const dLng = Math.abs(center[1] - prevCenterRef.current[1]);
+          const dZoom = Math.abs(zoom - prevZoomRef.current);
+          if (snapToTarget || dLat > 0.00001 || dLng > 0.00001 || dZoom > 0.001) {
+            map.setView(center, zoom, { animate: false });
+            requestTileUpdateRef.current?.();
+            prevCenterRef.current = center;
+            prevZoomRef.current = zoom;
+          }
+
+          if (cumPath) {
+            const { endIndex, tip } = pathEndIndex(cumPath, sp, stops, p);
+            if (endIndex !== prevEndIdxRef.current || tip) {
+              prevEndIdxRef.current = endIndex;
+              const pts = cumPath.points.slice(0, endIndex);
+              if (tip) pts.push(tip);
+              polylineRef.current?.setLatLngs(pts);
+              const markerPos = tip ?? pts[pts.length - 1] ?? stops[0].coordinates;
+              markerRef.current?.setLatLng(markerPos);
             }
           }
         }
-
-        // Map camera, path, and marker use the lerped value — remapped
-        const sp = segPathsRef.current;
-        const cumPath = cumPathRef.current;
-        const mapP = remapProgressForMap(p, stops);
-        const center = interpolateCoordsOnPath(sp, stops, mapP);
-        const rawZoom = interpolateZoomSmooth(stops, mapP);
-        const nearestInt = Math.round(rawZoom);
-        const zoom = Math.abs(rawZoom - nearestInt) < 0.15 ? nearestInt : rawZoom;
-
-        // Skip setView when camera hasn't moved meaningfully
-        const dLat = Math.abs(center[0] - prevCenterRef.current[0]);
-        const dLng = Math.abs(center[1] - prevCenterRef.current[1]);
-        const dZoom = Math.abs(zoom - prevZoomRef.current);
-        if (dLat > 0.00001 || dLng > 0.00001 || dZoom > 0.001) {
-          map.setView(center, zoom, { animate: false });
-          prevCenterRef.current = center;
-          prevZoomRef.current = zoom;
-        }
-
-        // Update polyline — use precomputed cumulative path
-        if (cumPath) {
-          const { endIndex, tip } = pathEndIndex(cumPath, sp, stops, mapP);
-          // Only rebuild polyline when endpoint changes
-          if (endIndex !== prevEndIdxRef.current || tip) {
-            prevEndIdxRef.current = endIndex;
-            const pts = cumPath.points.slice(0, endIndex);
-            if (tip) pts.push(tip);
-            polylineRef.current?.setLatLngs(pts);
-            const markerPos = tip ?? pts[pts.length - 1] ?? stops[0].coordinates;
-            markerRef.current?.setLatLng(markerPos);
-          }
-        }
+        snapToTarget = false;
       }
       animFrameRef.current = requestAnimationFrame(tick);
     };
 
     window.addEventListener("scroll", onScroll, { passive: true });
-    // Initial read
-    readScrollPosition();
+    window.addEventListener("resize", updateLayout);
+    reducedMotion.addEventListener("change", updateLayout);
+    const resizeObserver = new ResizeObserver(updateLayout);
+    resizeObserver.observe(scrollEl);
+    if (mapContainerRef.current) resizeObserver.observe(mapContainerRef.current);
+    for (const card of cardRefsRef.current) {
+      if (card) resizeObserver.observe(card);
+    }
+    updateLayout();
     animFrameRef.current = requestAnimationFrame(tick);
 
     return () => {
       running = false;
       window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", updateLayout);
+      reducedMotion.removeEventListener("change", updateLayout);
+      resizeObserver.disconnect();
       cancelAnimationFrame(animFrameRef.current);
     };
   }, [stops]);
 
   return (
     <div
-      className="storytelling-map not-prose relative"
+      className="storytelling-map not-prose relative [--story-map-height:28svh] [--story-reading-top:calc(4rem+var(--story-map-height))] lg:[--story-reading-top:4rem]"
       style={{
         marginLeft: "calc(-50vw + 50%)",
         marginRight: "calc(-50vw + 50%)",
@@ -662,18 +545,18 @@ export function StorytellingMap({
       <div className="fixed top-0 left-0 right-0 z-50 h-[2px]">
         <div
           ref={progressBarRef}
-          className="h-full transition-[width] duration-100 ease-linear"
+          className="h-full"
           style={{ width: '0%', backgroundColor: pathColor }}
         />
       </div>
 
       {/* Single map container — sticky on mobile, absolute-positioned on desktop */}
       <div
-        className="sticky top-0 h-[30vh] z-10
+        className="sticky top-16 h-[var(--story-map-height)] z-20
                    lg:absolute lg:right-0 lg:top-0 lg:w-[55%] xl:w-[58%] lg:h-full lg:z-0"
       >
-        <div className="h-full lg:sticky lg:top-0 lg:h-screen">
-        <div ref={mapContainerRef} className="h-full w-full" style={{ willChange: 'transform' }} />
+        <div className="h-full lg:sticky lg:top-16 lg:h-[calc(100svh-4rem)]">
+          <div ref={mapContainerRef} className="h-full w-full" style={{ willChange: 'transform' }} />
           {/* Soft edge between content and map (desktop) */}
           <div
             className="hidden lg:block absolute inset-y-0 left-0 w-16 pointer-events-none"
@@ -695,14 +578,13 @@ export function StorytellingMap({
             {stops.map((_, i) => (
               <div
                 key={i}
-                ref={el => { dotRefsRef.current[i] = el; }}
-                className="rounded-full transition-all duration-500"
+                className="rounded-full transition-all duration-500 motion-reduce:transition-none"
                 style={{
-                  width: i === 0 ? 7 : 4,
-                  height: i === 0 ? 7 : 4,
+                  width: i === activeIndex ? 7 : 4,
+                  height: i === activeIndex ? 7 : 4,
                   backgroundColor:
-                    i === 0 ? pathColor : "rgba(148,163,184,0.4)",
-                  opacity: i === 0 ? 1 : 0.3,
+                    i <= activeIndex ? pathColor : "rgba(148,163,184,0.4)",
+                  opacity: i === activeIndex ? 1 : i < activeIndex ? 0.5 : 0.3,
                 }}
               />
             ))}
@@ -713,43 +595,28 @@ export function StorytellingMap({
       {/* Scrolling content — full width on mobile, left column on desktop */}
       <div
         ref={scrollRef}
-        className="relative lg:z-10 lg:w-[45%] xl:w-[42%] lg:bg-[var(--background)]"
+        className="relative scroll-mt-[var(--story-reading-top)] lg:z-10 lg:w-[45%] xl:w-[42%] lg:bg-[var(--background)]"
       >
         {stops.map((stop, i) => {
           const { icon, place, subtitle } = parseTitle(stop.title);
           const imgCount = stop.images?.length ?? 0;
-          // Extra scroll height for multi-image stops so content stays pinned
-          // while images cycle. Each image gets one slot of 60vh, plus one
-          // extra slot so the last image dwells before transitioning.
-          const extraVh = imgCount > 1 ? imgCount * 60 : 0;
-          const minH = imgCount > 1
-            ? `calc(80vh + ${extraVh}vh)`
-            : undefined;
-          // Lazy image loading: only mount slideshow for stops near active
-          const showImages = i >= visibleRange[0] && i <= visibleRange[1];
+          const extraVh = Math.max(0, imgCount - 1) * 50;
+          const isActive = i === activeIndex;
+          const showImages = Math.abs(i - activeIndex) <= 1;
 
           return (
             <div
               key={stop.id}
-              data-stop-wrapper
-              className="min-h-[80vh] lg:min-h-screen"
-              style={{
-                ...(minH ? { minHeight: minH } : {}),
-                // Let browser skip layout/paint for far-away stops
-                contentVisibility: Math.abs(i - activeIndexRef.current) > 3 ? 'auto' : 'visible',
-                containIntrinsicSize: 'auto 80vh',
-              } as React.CSSProperties}
+              ref={el => { wrapperRefsRef.current[i] = el; }}
+              data-stop-wrapper={stop.id}
+              className="min-h-[100svh]"
+              style={{ minHeight: `calc(100svh + ${extraVh}svh)` }}
             >
               <div
                 ref={el => { cardRefsRef.current[i] = el; }}
-                className={`w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-all duration-500 ease-out ${
-                  imgCount > 0
-                    ? "sticky top-12 bottom-4 lg:top-16 lg:bottom-auto lg:max-h-[calc(100dvh-64px-16px)]"
-                    : ""
-                }`}
-                style={{
-                  opacity: i === 0 ? 1 : 0.1,
-                }}
+                aria-current={isActive ? "step" : undefined}
+                className="sticky top-[var(--story-card-top,var(--story-reading-top))] w-full px-5 sm:px-8 lg:px-10 xl:px-14 py-8 transition-opacity duration-300 ease-out motion-reduce:transition-none"
+                style={{ opacity: isActive ? 1 : i < activeIndex ? 0.25 : 0.15 }}
               >
                 {/* Text content */}
                 <div>
@@ -758,17 +625,17 @@ export function StorytellingMap({
                   <div
                     className="h-px transition-all duration-500"
                     style={{
-                      width: i === 0 ? 32 : 16,
-                      backgroundColor: i === 0
+                      width: isActive ? 32 : 16,
+                      backgroundColor: isActive
                         ? pathColor
                         : "var(--muted-foreground)",
-                      opacity: i === 0 ? 0.7 : 0.2,
+                      opacity: isActive ? 0.7 : 0.2,
                     }}
                   />
                   <span
                     className="text-[10px] font-mono uppercase tracking-[0.2em] transition-colors duration-500"
                     style={{
-                      color: i === 0
+                      color: isActive
                         ? pathColor
                         : "var(--muted-foreground)",
                     }}
@@ -795,7 +662,7 @@ export function StorytellingMap({
                   <p
                     className="text-sm font-medium tracking-wide mb-4 transition-colors duration-500"
                     style={{
-                      color: i === 0
+                      color: isActive
                         ? pathColor
                         : "var(--muted-foreground)",
                     }}
@@ -810,13 +677,13 @@ export function StorytellingMap({
                 </p>
                 </div>
 
-                {/* Images — lazy mounted for stops near active */}
-                {stop.images && stop.images.length > 0 && showImages && (
-                  <ImageSlideshow images={stop.images} alt={place} />
-                )}
-                {/* Placeholder to maintain layout when images are unmounted */}
-                {stop.images && stop.images.length > 0 && !showImages && (
-                  <div className="mt-3" />
+                {stop.images && stop.images.length > 0 && (
+                  <ImageSlideshow
+                    images={stop.images}
+                    alt={place}
+                    index={i < activeIndex ? imgCount - 1 : isActive ? imageIndex : 0}
+                    visible={showImages}
+                  />
                 )}
               </div>
             </div>

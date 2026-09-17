@@ -204,3 +204,16 @@ export {
   ADTBoundaryLab,
   ADTExtensionMatrix,
 } from "./ADTLabs";
+export { DPRecursionTreeVisualizer } from "./DPRecursionTreeVisualizer";
+export { DPTableFillVisualizer } from "./DPTableFillVisualizer";
+export { KnapsackDPVisualizer } from "./KnapsackDPVisualizer";
+export { LCSGridVisualizer } from "./LCSGridVisualizer";
+export { LISVisualizer } from "./LISVisualizer";
+export { BitmaskTSPVisualizer } from "./BitmaskTSPVisualizer";
+export {
+  DPDesignSteps,
+  DPPatternTable,
+  DPOptimizationTable,
+  MemoVsTabulation,
+  GreedyFailureDiagram,
+} from "./DPDiagrams";

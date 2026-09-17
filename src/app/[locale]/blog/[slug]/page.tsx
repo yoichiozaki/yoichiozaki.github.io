@@ -176,6 +176,17 @@ import {
   ADTExhaustivenessLab,
   ADTBoundaryLab,
   ADTExtensionMatrix,
+  DPRecursionTreeVisualizer,
+  DPTableFillVisualizer,
+  KnapsackDPVisualizer,
+  LCSGridVisualizer,
+  LISVisualizer,
+  BitmaskTSPVisualizer,
+  DPDesignSteps,
+  DPPatternTable,
+  DPOptimizationTable,
+  MemoVsTabulation,
+  GreedyFailureDiagram,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -362,6 +373,19 @@ function getMdxComponents(locale: string) {
     ADTExhaustivenessLab: () => <ADTExhaustivenessLab locale={locale} />,
     ADTBoundaryLab: () => <ADTBoundaryLab locale={locale} />,
     ADTExtensionMatrix: () => <ADTExtensionMatrix locale={locale} />,
+    DPRecursionTreeVisualizer: () => (
+      <DPRecursionTreeVisualizer locale={locale} />
+    ),
+    DPTableFillVisualizer: () => <DPTableFillVisualizer locale={locale} />,
+    KnapsackDPVisualizer: () => <KnapsackDPVisualizer locale={locale} />,
+    LCSGridVisualizer: () => <LCSGridVisualizer locale={locale} />,
+    LISVisualizer: () => <LISVisualizer locale={locale} />,
+    BitmaskTSPVisualizer: () => <BitmaskTSPVisualizer locale={locale} />,
+    DPDesignSteps: () => <DPDesignSteps locale={locale} />,
+    DPPatternTable: () => <DPPatternTable locale={locale} />,
+    DPOptimizationTable: () => <DPOptimizationTable locale={locale} />,
+    MemoVsTabulation: () => <MemoVsTabulation locale={locale} />,
+    GreedyFailureDiagram: () => <GreedyFailureDiagram locale={locale} />,
   };
 }
 

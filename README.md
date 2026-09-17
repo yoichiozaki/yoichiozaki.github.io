@@ -20,6 +20,20 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Storytelling Map
+
+The Seattle/Vancouver travel diary uses [StorytellingMap](src/components/StorytellingMap.tsx) in both languages.
+Scroll timing comes from the unpinned stop wrappers, with a reading line below the header (and below the map on mobile).
+Photos advance while the camera stays at their stop; the final 70% of a viewport, capped at half the stop's height, is reserved for travel to the next stop.
+Each additional photo adds half a viewport of reading space. The active card changes halfway through travel, and the progress bar reaches completion at the final destination.
+Tile updates are throttled against the actual camera position, including a trailing update when scrolling stops, so large zoom changes cannot leave the map blank.
+
+Timing and flight-zoom regression tests live alongside the shared [map utilities](src/lib/storytelling-map-utils.ts):
+
+```bash
+npm run test -- src/lib/storytelling-map-utils.test.ts
+```
+
 ## Algebraic data types article
 
 The practical ADT article is available in [Japanese](content/blog/ja/algebraic-data-types-in-practice.mdx)
