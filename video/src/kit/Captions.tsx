@@ -77,8 +77,22 @@ export function Captions({ segments, lang }: { segments: TimedSegment[]; lang: L
           textWrap: "balance" as never,
         }}
       >
-        {text}
+        {keepHyphenatedTogether(text)}
       </div>
     </div>
+  );
+}
+
+/** Hyphenated tokens such as "top-p" must not break at the hyphen. */
+function keepHyphenatedTogether(text: string) {
+  const parts = text.split(/([\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)+)/u);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <span key={i} style={{ whiteSpace: "nowrap" }}>
+        {part}
+      </span>
+    ) : (
+      part
+    ),
   );
 }

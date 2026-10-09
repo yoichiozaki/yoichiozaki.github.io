@@ -16,15 +16,20 @@ Usage (from ``video/``)::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
+import onnxruntime as ort
 import soundfile as sf
 from kokoro_onnx import Kokoro
 from misaki import ja
+
+from slots import cpu_threads, heavy_slot
 
 VIDEO_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = Path(__file__).resolve().parent / "models"
@@ -68,9 +73,13 @@ PEAK_TARGET = 0.89
 
 class Synthesizer:
     def __init__(self) -> None:
-        self.kokoro = Kokoro(
-            str(MODELS_DIR / "kokoro-v1.0.onnx"), str(MODELS_DIR / "voices-v1.0.bin")
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = cpu_threads()
+        options.inter_op_num_threads = 1
+        session = ort.InferenceSession(
+            str(MODELS_DIR / "kokoro-v1.0.onnx"), sess_options=options, providers=["CPUExecutionProvider"]
         )
+        self.kokoro = Kokoro.from_session(session, str(MODELS_DIR / "voices-v1.0.bin"))
         _patch_openjtalk_mora_sizes()
         self.ja_g2p = ja.JAG2P(version="pyopenjtalk")
 
@@ -137,7 +146,21 @@ def write_timings(path: Path, slug: str, lang: str, voice: str, segments: dict[s
     tmp.replace(path)
 
 
-def run(slug: str, langs: list[str], synth: Synthesizer | None) -> Synthesizer | None:
+class LazySynthesizer:
+    """Takes a machine-wide slot and loads the model only once a clip actually needs synthesis."""
+
+    def __init__(self, stack: contextlib.ExitStack) -> None:
+        self._stack = stack
+        self._synth: Synthesizer | None = None
+
+    def get(self) -> Synthesizer:
+        if self._synth is None:
+            self._stack.enter_context(heavy_slot("tts"))
+            self._synth = Synthesizer()
+        return self._synth
+
+
+def run(slug: str, langs: list[str], lazy: LazySynthesizer) -> None:
     narration = json.loads((NARRATION_DIR / f"{slug}.json").read_text(encoding="utf-8"))
 
     for lang in langs:
@@ -163,9 +186,7 @@ def run(slug: str, langs: list[str], synth: Synthesizer | None) -> Synthesizer |
                     segments[seg_id] = cached
                     continue
 
-                if synth is None:
-                    synth = Synthesizer()
-                samples, sample_rate = synth.synthesize(speech, lang, cfg["voice"], cfg["speed"])
+                samples, sample_rate = lazy.get().synthesize(speech, lang, cfg["voice"], cfg["speed"])
                 tmp_wav = wav_path.with_suffix(".tmp.wav")
                 sf.write(tmp_wav, samples, sample_rate, subtype="PCM_16")
                 tmp_wav.replace(wav_path)
@@ -189,10 +210,11 @@ def run(slug: str, langs: list[str], synth: Synthesizer | None) -> Synthesizer |
         total = sum(s["seconds"] for s in segments.values())
         write_timings(timings_path, slug, lang, cfg["voice"], segments)
         print(f"{slug} [{lang}]: {len(segments)} segments ({synthesized} new), {total:.1f}s of speech")
-    return synth
 
 
 def main() -> None:
+    # Windows consoles default to a legacy code page; narration text is Japanese.
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("slugs", nargs="*", help="narration file names (default: all)")
     parser.add_argument("--lang", choices=["ja", "en"], help="only synthesize one language")
@@ -200,9 +222,10 @@ def main() -> None:
 
     slugs = args.slugs or sorted(p.stem for p in NARRATION_DIR.glob("*.json"))
     langs = [args.lang] if args.lang else ["ja", "en"]
-    synth: Synthesizer | None = None
-    for slug in slugs:
-        synth = run(slug, langs, synth)
+    with contextlib.ExitStack() as stack:
+        lazy = LazySynthesizer(stack)
+        for slug in slugs:
+            run(slug, langs, lazy)
 
 
 if __name__ == "__main__":

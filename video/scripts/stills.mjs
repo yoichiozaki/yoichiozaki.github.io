@@ -1,19 +1,25 @@
-// Render several stills of one composition in a single browser session (for visual QA).
-// Usage: node scripts/stills.mjs <compositionId> <frame> [<frame> ...]
-import { bundle } from "@remotion/bundler";
+// Render stills of one composition for visual QA (half size, into out/stills/).
+// Usage: node scripts/stills.mjs <slug>-<ja|en> <frame> [<frame> ...]
 import { renderStill, selectComposition } from "@remotion/renderer";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { VIDEO_DIR } from "./lib.mjs";
+import { bundleVideo, splitId, VIDEO_DIR } from "./lib.mjs";
 
 const [id, ...frames] = process.argv.slice(2);
+const { slug, lang } = splitId(id);
+if (frames.length === 0) throw new Error("Pass at least one frame number (see `node scripts/scenes.mjs <slug> <lang>`).");
+
 const outDir = join(VIDEO_DIR, "out", "stills");
 mkdirSync(outDir, { recursive: true });
 
-const serveUrl = await bundle({ entryPoint: join(VIDEO_DIR, "src", "index.ts"), publicDir: join(VIDEO_DIR, "public") });
-const composition = await selectComposition({ serveUrl, id, inputProps: {} });
-for (const f of frames) {
-  const output = join(outDir, `${id}-${f}.png`);
-  await renderStill({ serveUrl, composition, frame: Number(f), output, inputProps: {}, scale: 0.5 });
-  console.log(output);
+const { serveUrl, cleanup } = await bundleVideo(slug);
+try {
+  const composition = await selectComposition({ serveUrl, id, inputProps: { lang } });
+  for (const frame of frames.map(Number)) {
+    const output = join(outDir, `${id}-${frame}.png`);
+    await renderStill({ serveUrl, composition, frame, output, inputProps: { lang }, scale: 0.5 });
+    console.log(output);
+  }
+} finally {
+  cleanup();
 }
