@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   InteractiveDemo,
   StepPlayerControls,
@@ -549,13 +548,10 @@ export function GCVisualizer({ locale = "ja" }: GCVisualizerProps) {
   const state = scenario[player.step];
   const highlightSet = new Set(state.highlight ?? []);
 
-  const getLabel = useCallback(
-    (step: number) => {
-      const s = scenario[step];
-      return isEn ? s.descriptionEn : s.description;
-    },
-    [scenario, isEn],
-  );
+  const getLabel = (step: number) => {
+    const s = scenario[step];
+    return isEn ? s.descriptionEn : s.description;
+  };
 
   // Build object map for arrow lookups
   const objMap = new Map(state.objects.map((o) => [o.id, o]));

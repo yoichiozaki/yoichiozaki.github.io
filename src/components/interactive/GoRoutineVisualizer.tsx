@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   InteractiveDemo,
   StepPlayerControls,
@@ -411,13 +410,10 @@ export function GoRoutineVisualizer({
 
   const state = scenario[player.step];
 
-  const getLabel = useCallback(
-    (step: number) => {
-      const s = scenario[step];
-      return isEn ? s.descriptionEn : s.description;
-    },
-    [scenario, isEn],
-  );
+  const getLabel = (step: number) => {
+    const s = scenario[step];
+    return isEn ? s.descriptionEn : s.description;
+  };
 
   return (
     <InteractiveDemo

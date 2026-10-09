@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   InteractiveDemo,
   StepPlayerControls,
@@ -293,10 +292,8 @@ export function BSPArchitectureDiagram({ locale = "ja" }: BSPArchitectureDiagram
   });
   const data = phases[player.step];
 
-  const getLabel = useCallback(
-    (s: number) => isJa ? phases[s].title : phases[s].titleEn,
-    [isJa, phases]
-  );
+  const getLabel = (s: number) =>
+    isJa ? phases[s].title : phases[s].titleEn;
 
   // Executor layout
   const exX = 270;

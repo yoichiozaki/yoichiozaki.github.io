@@ -71,14 +71,15 @@ function ClusterView({
   const cy = size / 2;
   const r = size / 2 - 40;
   const nodeR = Math.max(16, 28 - nodes.length * 1.5);
+  const nodeCount = nodes.length;
 
   const positions = useMemo(
     () =>
-      nodes.map((_, i) => {
-        const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+      Array.from({ length: nodeCount }, (_, i) => {
+        const angle = (2 * Math.PI * i) / nodeCount - Math.PI / 2;
         return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
       }),
-    [nodes.length, cx, cy, r],
+    [nodeCount, cx, cy, r],
   );
 
   return (

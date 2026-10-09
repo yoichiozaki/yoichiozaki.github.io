@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   InteractiveDemo,
   StepPlayerControls,
@@ -368,13 +367,10 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
 
   const nodeMap = new Map(current.nodes.map((n) => [n.id, n]));
 
-  const getLabel = useCallback(
-    (step: number) => {
-      const s = steps[step];
-      return isJa ? s.highlight : s.highlightEn;
-    },
-    [steps, isJa]
-  );
+  const getLabel = (step: number) => {
+    const s = steps[step];
+    return isJa ? s.highlight : s.highlightEn;
+  };
 
   const phaseColors: Record<string, string> = {
     init: "#6b7280",

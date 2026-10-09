@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   InteractiveDemo,
   StepPlayerControls,
@@ -387,30 +386,27 @@ export function MapReduceVisualizer({
   const state = scenario[player.step];
   const isJa = locale === "ja";
 
-  const phaseLabel = useCallback(
-    (step: number) => {
-      const s = scenario[step];
-      const labels: Record<string, string> = isJa
-        ? {
-            input: "入力",
-            split: "分割",
-            map: "Map",
-            shuffle: "Shuffle & Sort",
-            reduce: "Reduce",
-            output: "出力",
-          }
-        : {
-            input: "Input",
-            split: "Split",
-            map: "Map",
-            shuffle: "Shuffle & Sort",
-            reduce: "Reduce",
-            output: "Output",
-          };
-      return labels[s.phase] ?? s.phase;
-    },
-    [scenario, isJa],
-  );
+  const phaseLabel = (step: number) => {
+    const s = scenario[step];
+    const labels: Record<string, string> = isJa
+      ? {
+          input: "入力",
+          split: "分割",
+          map: "Map",
+          shuffle: "Shuffle & Sort",
+          reduce: "Reduce",
+          output: "出力",
+        }
+      : {
+          input: "Input",
+          split: "Split",
+          map: "Map",
+          shuffle: "Shuffle & Sort",
+          reduce: "Reduce",
+          output: "Output",
+        };
+    return labels[s.phase] ?? s.phase;
+  };
 
   return (
     <InteractiveDemo

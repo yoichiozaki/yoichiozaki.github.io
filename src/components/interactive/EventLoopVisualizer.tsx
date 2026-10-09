@@ -325,7 +325,7 @@ export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps)
       <div className="mt-3 rounded-lg bg-neutral-900 dark:bg-neutral-950 p-3 font-mono text-sm text-green-400">
         <div className="text-xs text-neutral-500 mb-1">Console:</div>
         {state.log.length === 0 ? (
-          <span className="text-neutral-600">// waiting...</span>
+          <span className="text-neutral-600">{"// waiting..."}</span>
         ) : (
           state.log.map((line, i) => (
             <div key={i}>
