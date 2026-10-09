@@ -1,0 +1,269 @@
+{
+  "slug": "llm-load-balancing",
+  "scenes": [
+    {
+      "id": "intro",
+      "segments": [
+        {
+          "ja": "LLM の負荷分散では、ラウンドロビンだけでは足りません。",
+          "jaSpeech": "エルエルエムの負荷分散では、ラウンドロビンだけでは足りません。",
+          "en": "For LLM serving, round robin is not enough.",
+          "enSpeech": "For L L M serving, round robin is not enough."
+        },
+        {
+          "ja": "仕事量の偏り、KV キャッシュ、ストリーミング、エージェントのセッション性が、判断を難しくします。",
+          "jaSpeech": "仕事量の偏り、ケーブイキャッシュ、ストリーミング、エージェントのセッション性が、判断を難しくします。",
+          "en": "Skewed work, KV cache locality, streaming, and agent sessions all make the decision harder.",
+          "enSpeech": "Skewed work, K V cache locality, streaming, and agent sessions all make the decision harder."
+        },
+        {
+          "ja": "核心は、局所性と均衡のどちらを取るかを、古い信号の上で、最初のトークンが出る前に決めることです。",
+          "en": "The core trade is choosing locality or balance, on stale signals, before the first token ships."
+        }
+      ]
+    },
+    {
+      "id": "why",
+      "segments": [
+        {
+          "ja": "普通の HTTP API では、リクエスト件数を揃えれば、だいたい資源も揃います。",
+          "jaSpeech": "普通のエイチティーティーピー エーピーアイでは、リクエスト件数を揃えれば、だいたい資源も揃います。",
+          "en": "For an ordinary HTTP API, equal request counts usually mean roughly equal resource use.",
+          "enSpeech": "For an ordinary H T T P A P I, equal request counts usually mean roughly equal resource use."
+        },
+        {
+          "ja": "でも LLM では、プロンプト長と出力長で、1 件の仕事量が 2 桁変わります。",
+          "jaSpeech": "でもエルエルエムでは、プロンプト長と出力長で、1件の仕事量がふたけた変わります。",
+          "en": "For LLMs, prompt length and output length can make one request one hundred times heavier than another.",
+          "enSpeech": "For L L M's, prompt length and output length can make one request one hundred times heavier than another."
+        },
+        {
+          "ja": "しかも出力長は投入時点では分からず、応答は秒から分の単位で流れ続けます。",
+          "en": "And the output length is unknown at dispatch time, while the response can stream for seconds or minutes."
+        }
+      ]
+    },
+    {
+      "id": "knee",
+      "segments": [
+        {
+          "ja": "待ち行列の式は、このばらつきがそのまま待ち時間に効くことを示します。",
+          "en": "Queueing theory shows that this variability directly becomes waiting time."
+        },
+        {
+          "ja": "長い裾の例として、サービス時間の変動係数の二乗を 4 と置きます。",
+          "jaSpeech": "長い裾の例として、サービス時間の変動係数の二乗を4と置きます。",
+          "en": "Take a heavy-tail example where service time's squared coefficient of variation is 4."
+        },
+        {
+          "ja": "同じ稼働率でも、待ちは指数分布の 2.5 倍です。",
+          "jaSpeech": "同じ稼働率でも、待ちは指数分布の2.5倍です。",
+          "en": "At the same utilization, waiting is 2.5 times the exponential case."
+        },
+        {
+          "ja": "許容待ち時間をサービス時間の 3 倍とします。",
+          "jaSpeech": "許容待ち時間をサービス時間の3倍とします。",
+          "en": "At a wait budget of three service times, the usable utilization changes sharply."
+        },
+        {
+          "ja": "使える稼働率は、決定的な場合 0.86、指数分布で 0.75、長い裾で 0.55 まで下がります。",
+          "jaSpeech": "使える稼働率は、決定的な場合0.86、指数分布で0.75、長い裾で0.55まで下がります。",
+          "en": "It is 0.86 for deterministic service, 0.75 for exponential, and only 0.55 for the heavy tail."
+        }
+      ]
+    },
+    {
+      "id": "metrics",
+      "segments": [
+        {
+          "ja": "まず指標を分けます。",
+          "en": "First, separate the metrics."
+        },
+        {
+          "ja": "最初のトークンまでの時間 TTFT、トークン間の遅延 ITL、全体の遅延は、それぞれ別の原因を指します。",
+          "jaSpeech": "最初のトークンまでの時間ティーティーエフティー、トークン間の遅延アイティーエル、全体の遅延は、それぞれ別の原因を指します。",
+          "en": "Time to first token (TTFT), inter-token latency (ITL), and end-to-end latency each point at a different cause.",
+          "enSpeech": "Time to first token, T T F T, inter-token latency, I T L, and end-to-end latency each point at a different cause."
+        },
+        {
+          "ja": "判断はクライアント、ゲートウェイ、エンドポイント選択、エンジン内スケジューラ、アクセラレータ配置の層で起きます。",
+          "en": "Decisions happen across clients, gateways, endpoint selection, the engine scheduler, and accelerator topology."
+        },
+        {
+          "ja": "ルーターが最善の 1 台を選んでも、エンジン内のバッチが詰まっていれば、最初のトークンは速くなりません。",
+          "en": "Even a perfect endpoint pick cannot improve first-token time if the engine's batch is already saturated."
+        }
+      ]
+    },
+    {
+      "id": "policies",
+      "segments": [
+        {
+          "ja": "同じ到着列で見ると、ラウンドロビンは件数を揃えても、裾の遅延では最小未完了数に負けます。",
+          "en": "On the same arrival trace, round robin equalizes counts, yet loses the tail to least outstanding."
+        },
+        {
+          "ja": "2 択のべき乗は、ランダムな 2 台の軽い方へ送るだけで、全ルーターが同じ台へ殺到する群れ現象を避けやすくします。",
+          "jaSpeech": "2択のべき乗は、ランダムな2台の軽い方へ送るだけで、全ルーターが同じ台へ殺到する群れ現象を避けやすくします。",
+          "en": "Power of two choices just takes the lighter of two random replicas, which helps keep routers from herding onto one."
+        },
+        {
+          "ja": "重要なのは、受付済みでまだ完了していない仕事を、キューの中まで数えることです。",
+          "en": "The key is to count all accepted-but-unfinished work, including work still waiting in the queue."
+        }
+      ]
+    },
+    {
+      "id": "prefix",
+      "segments": [
+        {
+          "ja": "LLM には、古典的な負荷分散にない信号があります。先頭部分をもう計算済みのレプリカがあるか、です。",
+          "jaSpeech": "エルエルエムには、古典的な負荷分散にない信号があります。先頭部分をもう計算済みのレプリカがあるか、です。",
+          "en": "LLM serving has a signal classical load balancing never had: which replica has already computed the prefix.",
+          "enSpeech": "L L M serving has a signal classical load balancing never had: which replica has already computed the prefix."
+        },
+        {
+          "ja": "会話型エージェントでは、システムプロンプト、ツール定義、過去のターンが毎回同じ先頭になります。",
+          "en": "In an agent conversation, the system prompt, tool definitions, and previous turns form the same prefix again and again."
+        },
+        {
+          "ja": "そのプレフィックスを持つレプリカへ送ればプレフィルを減らせますが、人気プレフィックスだけを追うと、1 台に負荷が寄ります。",
+          "en": "Routing to the replica holding that prefix cuts prefill, but chasing a popular prefix too hard overloads one replica."
+        }
+      ]
+    },
+    {
+      "id": "affinity",
+      "segments": [
+        {
+          "ja": "SGLang は、負荷の差が絶対値でも比率でも設定値を超えると、キャッシュ親和性を捨てて最も空いたワーカーを選びます。",
+          "jaSpeech": "エスジーラングは、負荷の差が絶対値でも比率でも設定値を超えると、キャッシュ親和性を捨てて最も空いたワーカーを選びます。",
+          "en": "SGLang drops cache affinity for the least-loaded worker once the load gap exceeds its limits in both absolute and relative terms.",
+          "enSpeech": "S G Lang drops cache affinity for the least-loaded worker once the load gap exceeds its limits in both absolute and relative terms."
+        },
+        {
+          "ja": "NVIDIA Dynamo は、プレフィル負荷、デコード負荷、キャッシュの重なりを、KV ブロック単位のコストにします。",
+          "jaSpeech": "エヌビディア ダイナモは、プレフィル負荷、デコード負荷、キャッシュの重なりを、ケーブイブロック単位のコストにします。",
+          "en": "NVIDIA Dynamo turns prefill load, decode load, and cache overlap into one cost measured in KV blocks.",
+          "enSpeech": "Nvidia Dynamo turns prefill load, decode load, and cache overlap into one cost measured in K V blocks."
+        },
+        {
+          "ja": "どちらも、キャッシュヒットで TTFT を下げるか、負荷を揃えて ITL を守るかのつまみです。",
+          "jaSpeech": "どちらも、キャッシュヒットでティーティーエフティーを下げるか、負荷を揃えてアイティーエルを守るかのつまみです。",
+          "en": "Both are dials between lowering TTFT with cache hits and protecting ITL with balanced load.",
+          "enSpeech": "Both are dials between lowering T T F T with cache hits and protecting I T L with balanced load."
+        }
+      ]
+    },
+    {
+      "id": "stale",
+      "segments": [
+        {
+          "ja": "でも、ルーターが見る負荷は必ず古くなります。判断はミリ秒、観測はもっと遅い周期だからです。",
+          "en": "But the load a router sees is always stale, because decisions happen in milliseconds and observations arrive slower."
+        },
+        {
+          "ja": "複数のルーターが同じ古い最小値を信じると、全員が同じレプリカへ殺到し、次の観測で一斉に逃げます。",
+          "en": "When many routers trust the same old minimum, they stampede to one replica, then all flee at the next scrape."
+        },
+        {
+          "ja": "対策は 4 つです。",
+          "jaSpeech": "対策は4つです。",
+          "en": "There are four fixes."
+        },
+        {
+          "ja": "取得のタイミングをずらす、ランダムな 2 択にする、自分が投げた分を足す、新しいレプリカにはゆっくり流す。",
+          "jaSpeech": "取得のタイミングをずらす、ランダムな2択にする、自分が投げた分を足す、新しいレプリカにはゆっくり流す。",
+          "en": "Stagger scrapes, sample two random choices, add your own recent dispatches, and slow-start new replicas."
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "segments": [
+        {
+          "ja": "レプリカの中では、連続バッチ処理が、完了したシーケンスを毎反復で外し、新しいものを入れます。",
+          "en": "Inside a replica, continuous batching removes finished sequences and admits new ones at every iteration."
+        },
+        {
+          "ja": "ただし長いプレフィルは、実行中のデコードを止めます。",
+          "en": "But a long prefill can stall ongoing decode."
+        },
+        {
+          "ja": "チャンク化プレフィルは、プレフィルを小さく分けて、同じ反復でデコードと同居させます。",
+          "en": "Chunked prefill splits it into small chunks that ride along with decode in the same iteration."
+        },
+        {
+          "ja": "さらに Splitwise や DistServe のように、プレフィルとデコードを別ワーカーへ分ける設計もあります。",
+          "jaSpeech": "さらにスプリットワイズやディストサーブのように、プレフィルとデコードを別ワーカーへ分ける設計もあります。",
+          "en": "Systems such as Splitwise and DistServe go further, separating prefill and decode onto different workers."
+        }
+      ]
+    },
+    {
+      "id": "overload",
+      "segments": [
+        {
+          "ja": "過負荷では、善意のリトライが掛け算になります。",
+          "en": "Under overload, well-meant retries multiply."
+        },
+        {
+          "ja": "4 つの層がそれぞれ 3、4、4、3 回試すと、上流への呼び出しは 14 回ではなく最大 144 回です。",
+          "jaSpeech": "4つの層がそれぞれ3、4、4、3回試すと、上流への呼び出しは14回ではなく最大144回です。",
+          "en": "Four layers making 3, 4, 4, and 3 attempts mean not 14 upstream calls but up to 144."
+        },
+        {
+          "ja": "ヘッジもリトライもフェイルオーバーも、最初のトークンがユーザーに見える前だけが安全な時間です。",
+          "en": "Hedging, retries, and failover are only safe before the first token becomes visible to the user."
+        },
+        {
+          "ja": "過負荷を広げないために、キュー上限、デッドライン、サーキットブレーカーも必要です。",
+          "en": "To keep overload from spreading, queue caps, deadlines, and circuit breakers are needed too."
+        },
+        {
+          "ja": "Retry-After の尊重も、負荷分散の一部です。",
+          "jaSpeech": "リトライアフターの尊重も、負荷分散の一部です。",
+          "en": "Honoring Retry-After is part of load balancing too.",
+          "enSpeech": "Honoring Retry After is part of load balancing too."
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "segments": [
+        {
+          "ja": "エージェントでは、単位が 1 リクエストから、数十から数百回の呼び出しを持つセッションへ変わります。",
+          "en": "For agents, the unit changes from one request to a session containing tens or hundreds of model calls."
+        },
+        {
+          "ja": "同じレプリカへ戻したいのは正しさのためではなく、そこにプレフィックスキャッシュがあるからです。",
+          "en": "You want to return to the same replica not for correctness, but because the prefix cache is there."
+        },
+        {
+          "ja": "ただしファンアウトは同じプレフィックスを一度に投げます。",
+          "en": "But fan-out sends many children with the same prefix at once."
+        },
+        {
+          "ja": "1 つの操作がプールを占有しないよう、セッション単位の同時実行上限が必要です。",
+          "jaSpeech": "1つの操作がプールを占有しないよう、セッション単位の同時実行上限が必要です。",
+          "en": "Cap concurrency per session so one user action can't monopolize the pool."
+        }
+      ]
+    },
+    {
+      "id": "outro",
+      "segments": [
+        {
+          "ja": "まとめると、LLM の負荷分散は、局所性と均衡の綱引き、信号の鮮度、最初のトークンまでの窓で考えます。",
+          "jaSpeech": "まとめると、エルエルエムの負荷分散は、局所性と均衡の綱引き、信号の鮮度、最初のトークンまでの窓で考えます。",
+          "en": "In short, LLM load balancing is about locality versus balance, signal freshness, and the window before the first token.",
+          "enSpeech": "In short, L L M load balancing is about locality versus balance, signal freshness, and the window before the first token."
+        },
+        {
+          "ja": "記事では、選択規則の比較、信号の古さ、プレフィックスルーティング、連続バッチ処理を、動くデモで試せます。",
+          "en": "The article lets you try the policy-comparison, stale-signal, prefix-routing, and continuous-batching demos interactively."
+        }
+      ]
+    }
+  ]
+}
