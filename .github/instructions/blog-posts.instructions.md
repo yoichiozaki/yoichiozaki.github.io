@@ -34,6 +34,10 @@ Step-based interactive visualizations can be embedded via components in `src/com
 
 To add a new interactive component, create it in `src/components/interactive/`, export from `index.ts`, and register in `getMdxComponents()`.
 
+### Explainer Videos
+
+`<ArticleVideo slug="<slug>" />` embeds the narrated explainer video rendered by the Remotion project in `video/` (see `video/README.md`). Place it after the article's introduction in both `ja/` and `en/`. The component reads `src/data/article-videos.json` and renders nothing until the video has been rendered.
+
 ## Code Blocks
 
 Use fenced code blocks with a language identifier for syntax highlighting:

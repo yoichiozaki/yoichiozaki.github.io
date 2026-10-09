@@ -10,6 +10,7 @@ import { getPostBySlug, getAllSlugs } from "@/lib/blog";
 import { notFound } from "next/navigation";
 import { CodeBlock } from "@/components/CodeBlock";
 import { Mermaid } from "@/components/Mermaid";
+import { ArticleVideo } from "@/components/ArticleVideo";
 import { remarkMermaid } from "@/lib/remark-mermaid";
 import { SeattleVancouverMap } from "@/components/StorytellingMapLazy";
 import {
@@ -187,6 +188,16 @@ import {
   DPOptimizationTable,
   MemoVsTabulation,
   GreedyFailureDiagram,
+  GaleShapleyVisualizer,
+  BlockingPairExplorer,
+  StableLatticeExplorer,
+  MatchingStrategyLab,
+  RandomMarketLab,
+  ResidencyMatchVisualizer,
+  MatchingTimeline,
+  SchoolChoiceTradeoff,
+  OntologyInterpretationMap,
+  SemanticViewWalkthrough,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -197,6 +208,7 @@ function getMdxComponents(locale: string) {
   return {
     pre: CodeBlock,
     Mermaid,
+    ArticleVideo: ({ slug }: { slug: string }) => <ArticleVideo slug={slug} locale={locale} />,
     SeattleVancouverMap: () => <SeattleVancouverMap locale={locale} />,
     InteractiveDemo,
     GoRoutineVisualizer: () => <GoRoutineVisualizer locale={locale} />,
@@ -386,6 +398,16 @@ function getMdxComponents(locale: string) {
     DPOptimizationTable: () => <DPOptimizationTable locale={locale} />,
     MemoVsTabulation: () => <MemoVsTabulation locale={locale} />,
     GreedyFailureDiagram: () => <GreedyFailureDiagram locale={locale} />,
+    GaleShapleyVisualizer: () => <GaleShapleyVisualizer locale={locale} />,
+    BlockingPairExplorer: () => <BlockingPairExplorer locale={locale} />,
+    StableLatticeExplorer: () => <StableLatticeExplorer locale={locale} />,
+    MatchingStrategyLab: () => <MatchingStrategyLab locale={locale} />,
+    RandomMarketLab: () => <RandomMarketLab locale={locale} />,
+    ResidencyMatchVisualizer: () => <ResidencyMatchVisualizer locale={locale} />,
+    MatchingTimeline: () => <MatchingTimeline locale={locale} />,
+    SchoolChoiceTradeoff: () => <SchoolChoiceTradeoff locale={locale} />,
+    OntologyInterpretationMap: () => <OntologyInterpretationMap locale={locale} />,
+    SemanticViewWalkthrough: () => <SemanticViewWalkthrough locale={locale} />,
   };
 }
 

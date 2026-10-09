@@ -217,3 +217,12 @@ export {
   MemoVsTabulation,
   GreedyFailureDiagram,
 } from "./DPDiagrams";
+export { GaleShapleyVisualizer } from "./GaleShapleyVisualizer";
+export { BlockingPairExplorer } from "./BlockingPairExplorer";
+export { StableLatticeExplorer } from "./StableLatticeExplorer";
+export { MatchingStrategyLab } from "./MatchingStrategyLab";
+export { RandomMarketLab } from "./RandomMarketLab";
+export { ResidencyMatchVisualizer } from "./ResidencyMatchVisualizer";
+export { MatchingTimeline } from "./MatchingTimeline";
+export { SchoolChoiceTradeoff } from "./SchoolChoiceTradeoff";
+export { OntologyInterpretationMap, SemanticViewWalkthrough } from "./OntologyLabs";

@@ -1,0 +1,1018 @@
+---
+title: "What Should an Agentic UI Runtime Abstract? — Reading the Boundaries Drawn by Blazor's AI Components and the AG-UI .NET SDK"
+date: "2026-09-30"
+description: "Blazor's new AI components and the AG-UI .NET SDK are more than new UI widgets: they are an answer to the question of what a UI runtime should abstract when AI agents and humans operate on the same application state. Reading the implementation of UIAgent, ContentBlock, IInteractiveBlock, and AgentState, this essay dissects the abstractions they introduce — identity and lifecycle, suspension points, where side effects run, how state is committed, and an update log with replay — what is not abstracted yet, and the design philosophy behind choosing interfaces versus classes."
+tags: ["Blazor", "AG-UI", ".NET", "Microsoft.Extensions.AI", "Agentic UI", "Architecture", "API Design"]
+---
+
+## Introduction
+
+In September 2026, the .NET blog published two announcements.
+
+- [Build Agentic UI with the new Blazor AI components](https://devblogs.microsoft.com/dotnet/build-agentic-ui-blazor/) — the experimental Blazor AI components (`Microsoft.AspNetCore.Components.AI`)
+- [AG-UI Protocol now has a first-class .NET SDK](https://devblogs.microsoft.com/dotnet/ag-ui-dotnet-sdk/) — a .NET SDK contributed to the AG-UI repository in collaboration with CopilotKit
+
+Judging by the headlines, the news is "you can now build AI chat UIs in Blazor" and "you can now speak AG-UI from .NET." And indeed, writing `<ChatPage Agent="_agent" />` gives you a chat page that streams responses.
+
+In this essay, though, I want to read the two releases as an answer to a larger question.
+
+> When AI agents and humans operate on the same application state, what should the UI runtime abstract?
+
+In a traditional GUI, there were non-human writers too: network responses and background work also change state. But their writes usually arrived as finished values and were committed on the spot. Agents are different. They send their output a little at a time, stop midway to ask a human for approval, cause side effects on either the server or the client, and write "proposals" into shared artifacts. Neither WPF nor Blazor originally had any vocabulary for writers like that.
+
+My claim is that what makes these two releases important is that they give this gap <strong>names and boundaries</strong>. What gets named is not a set of widgets. It is the identity of content that is still streaming, the suspension points where the conversation waits for a human decision, the place where a side effect runs, who commits a write to shared state, and where the conversation's source of truth lives. In short: <strong>who commits what, and when</strong>. Rendering, by contrast, is deliberately left out of the abstraction.
+
+Besides the two posts, this essay is based on reading the following source code:
+
+- `src/Components/AI` in [dotnet/aspnetcore](https://github.com/dotnet/aspnetcore/tree/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI) (commit `f043395`, 2026-09-29)
+- `sdks/dotnet` in [ag-ui-protocol/ag-ui](https://github.com/ag-ui-protocol/ag-ui/tree/36447b41b05df704404e8f3227eb42bde25fc9e7/sdks/dotnet) (commit `36447b4`, 2026-09-29)
+- Microsoft.Extensions.AI in [dotnet/extensions](https://github.com/dotnet/extensions/tree/044734ee0922038cd5a2b381ed7da3ad4d8fe0fe/src/Libraries)
+
+The Blazor AI components are an experimental preview (`0.1.0-preview.1` on NuGet at the time of writing, installed with the .NET 11 RC1 SDK and `--prerelease`), so the APIs may change. The AG-UI .NET SDK (`AGUI.*`), on the other hand, is published as a stable `1.0.0` (MAF's hosting integration, `Microsoft.Agents.AI.Hosting.AGUI.AspNetCore`, is still prerelease). The protocol pieces are stable, while the UI-side pieces are still experimental. The code quoted here is excerpted and simplified to what the discussion needs. Throughout the essay, I call the sample accompanying the post "the AgenticUI sample" and the test app in the aspnetcore repository (`testassets/DojoClient`) "the Dojo app."
+
+In what follows, sections 1–3 set up the problem and the layer boundaries, sections 4–7 read the five abstractions named above from the implementation, sections 8–9 cover the Blazor layer and the design philosophy of the types, sections 10–11 compare other answers and list what is not abstracted yet, and section 12 draws implications for app developers. First, here is the whole answer in a table.
+
+## The short version
+
+| Question | This stack's answer | Key types and APIs | Section |
+|---|---|---|---|
+| Where are differences in transport and model provider absorbed? | Below `IChatClient`. A remote agent becomes "just another `IChatClient`" (differences in where history lives cannot be fully hidden; section 3) | `IChatClient`, `AGUIChatClient` | 2, 3 |
+| How is content that is still changing during streaming represented? | As UI-facing semantic units with identity, role, lifecycle, and change notifications | `ContentBlock`, `BlockLifecycleState` | 4 |
+| How does the conversation wait for a human decision? | Suspension points become types, and decisions become values you can `await` (the wait is an in-memory continuation; section 5.1) | `IInteractiveBlock`, `AgentContext` | 5.1–5.3 |
+| Where, and on whose signal, do side effects run? | Server execution, automatic client execution, explicit execution in the UI, and approval-gated execution are distinguished by types and markers | `InformationalOnly`, `FunctionInvokingChatClient`, `RegisterUIAction` | 5.4 |
+| Who commits a write to shared state? | It provides the means to distinguish committed from proposed values (the app's `StateMapper` decides which to use), and `AgentContext` rejects unresolved proposals at conversation boundaries | `AgentState<T>`, `StateMapper` | 6 |
+| What is the source of truth, and how is the screen rebuilt? | The updates that come out of the `IChatClient` are stored as a log and replayed through the same handlers (replaying recorded human decisions, and recording proposal acceptance and human edits to state, are not finished yet) | `IConversationThread`, `RestoreAsync` | 7 |
+| How is it rendered? | Not abstracted. The app's templates are simply selected by type and predicate | `BlockRenderer<TBlock>` | 8 |
+| How are concurrent edits merged? | Not abstracted. Today: whole-value replacement (last writer wins) plus serialization of new requests | — | 6.4 |
+
+## 1. The problem: two writers
+
+### What UI runtimes have always abstracted
+
+Whether it is WPF, Windows Forms, or Blazor, the work a UI runtime takes on is broadly the same: delivering input events, rendering and diffing, synchronizing with the UI thread (the dispatcher), data binding and change notification, and form editing state and validation. In Blazor, these correspond to diff-based rendering with `RenderTreeBuilder`, the `Dispatcher`, `EventCallback`, and `EditForm` with `EditContext`.
+
+As the introduction noted, non-human writers existed — that is exactly what dispatchers and change notification are for — and concurrent multi-user editing has been handled by separate machinery such as OT and CRDTs. But most of those writers share one trait: their writes <strong>arrive as finished values and are committed on the spot</strong>. Operations that stop midway for a human decision (an overwrite prompt during a file copy) or that present a proposal for acceptance (a refactoring preview in an IDE) did exist, but each was built feature by feature and never became part of the UI runtime's vocabulary.
+
+### Agents are a different kind of writer in five ways
+
+Put an agent into the application and that assumption falls apart. The Blazor post itself summarizes the problem:
+
+> Agent output may arrive incrementally. Users need visibility into what an agent is doing and control over consequential actions. The user, agent, and application may all contribute to shared state.
+
+Broken down, the agent as a writer differs from earlier writers in at least five ways.
+
+1. <strong>Partiality</strong> — writes arrive a little at a time and stay on screen unfinished for a while (section 4)
+2. <strong>Suspension</strong> — writes stop midway because they need a human's approval or input (sections 5.1–5.3)
+3. <strong>Locality of side effects</strong> — a write in the form of a tool call may run on the server, or may need to run inside the user's application (section 5.4)
+4. <strong>Finality</strong> — a write may be a "proposal" rather than a commit (section 6)
+5. <strong>Reconstruction</strong> — a long conversation must be restored after a reload or reconnection (section 7)
+
+None of these is new on its own; what is new is one writer bringing all five at once, all the time. First-generation chat UIs squeezed all of this into "a text area you keep appending Markdown to." But once you show tool results as cards, put up approval buttons, and display the document the agent is editing as a diff, a text area is not enough. Some layer has to take on these five concerns, which every UI stack will need.
+
+## 2. The big picture: three layers and two boundaries
+
+.NET answers the problem by providing components per layer. Summarizing the conclusion of the Blazor post:
+
+- <strong>Microsoft.Extensions.AI and Microsoft Agent Framework (MAF)</strong> provide the AI abstraction layer and the agent framework
+- <strong>The AG-UI .NET SDK</strong> connects agents to user-facing applications
+- <strong>The Blazor AI components</strong> turn interactions with agents into responsive, application-specific UI
+
+At the center of the Blazor AI components (`Microsoft.AspNetCore.Components.AI`) are two classes, and this essay reads the stack around them.
+
+- <strong>`UIAgent`</strong>: a class that wraps a single `IChatClient` and turns its streaming response, as it arrives, into units the UI can render (`ContentBlock` values; section 4). As a comment in the source says, it depends only on `IChatClient`, so any Microsoft.Extensions.AI client can drive it. A derived class, `UIAgent<TState>`, adds typed shared state (section 6)
+- <strong>`AgentContext`</strong>: a class that takes a single `UIAgent` and carries one conversation forward on top of it. It accepts sending messages, canceling responses, and retrying, and notifies components as the conversation progresses
+
+In a Blazor app, your code usually creates only the `UIAgent`.
+
+```csharp
+// an AGUIChatClient, an OpenAI client, or any other IChatClient
+IChatClient chatClient = GetChatClient();
+_agent = new UIAgent(chatClient);
+```
+
+(Excerpted from [the Blazor post](https://devblogs.microsoft.com/dotnet/build-agentic-ui-blazor/); the comment is mine.)
+
+You then hand it to a Razor component, as in the `<ChatPage Agent="_agent" />` from the introduction. It is the components that create the `AgentContext`: `ChatPage` is a chat screen wrapped in an `AgentBoundary`, and that `AgentBoundary` creates an `AgentContext` from the `UIAgent` it receives and passes it down to the components beneath it (section 8.1).
+
+Laying out the [AgenticUI sample](https://github.com/danroth27/AgenticUI) that accompanies the post along the data flow gives this:
+
+```mermaid
+flowchart LR
+    subgraph Server["Agent server (ASP.NET Core)"]
+        M["Model (Microsoft Foundry)"] --> CC1["IChatClient"]
+        CC1 --> A["MAF AIAgent"]
+        A --> S["MAF hosting (MapAGUIServer) and AGUI.Server: updates to AG-UI events"]
+    end
+    S -->|"AG-UI events (HTTP + SSE)"| C
+    subgraph Client["Blazor app"]
+        C["AGUIChatClient: AG-UI events to updates (implements IChatClient)"] --> U["UIAgent and AgentContext"]
+        U --> B["ContentBlock and AgentState"]
+        B --> R["BlockRenderer and Razor components"]
+    end
+```
+
+What stands out is that the conversion is <strong>symmetric</strong>. On the server, `AGUI.Server` converts a stream of Microsoft.Extensions.AI `ChatResponseUpdate` values into AG-UI events; on the client, `AGUIChatClient` converts the AG-UI events back into `ChatResponseUpdate` values. Because `AGUIChatClient` implements `IChatClient`, the agent across the network looks, from Blazor's point of view, like "just another `IChatClient`." In the words of the post, `UIAgent` gives the Blazor AI components "the same abstraction whether the agent is remote, in process, or provider-specific."
+
+Two boundaries emerge from this picture.
+
+- <strong>Below</strong> `UIAgent` (`IChatClient`) is "how it was communicated." Differences in provider, protocol, and transport disappear here
+- <strong>Above</strong> `UIAgent` (Razor components) is "how it is rendered"
+- <strong>In between</strong>, "what state the interaction is in right now" is owned
+
+In this essay, I call this in-between layer — the one that turns the stream into units with identity (blocks) and owns the progress of the conversation and the shared state — the <strong>intermediate model</strong>. To be precise, the intermediate model is split between the two concrete classes introduced above, `UIAgent` and `AgentContext`. `UIAgent` owns the pipeline that turns the stream into blocks, the conversation history sent to the model, and the typed shared state. `AgentContext` owns the sequence of turns, the conversation status (`Idle` / `Streaming` / `AwaitingInput` / `Error`), and the loop that waits for human decisions and resumes the conversation. As we will see, neither of them depends on Blazor.
+
+## 3. Microsoft.Extensions.AI as the narrow waist
+
+The Internet's protocol suite is often likened to an hourglass with IP as its "narrow waist." However many applications sit above it and however many physical layers sit below, as long as both keep to the small shared vocabulary of IP in the middle, the top and the bottom need not know about each other. In this stack, the Microsoft.Extensions.AI vocabulary plays the role of that narrow waist. That vocabulary has two parts: the `IChatClient` interface, which fixes the shape of the call, and the data types passed through that call. We will look at them in that order.
+
+### IChatClient has only three members
+
+The lower boundary, `IChatClient`, is surprisingly small.
+
+```csharp
+public interface IChatClient : IDisposable
+{
+    Task<ChatResponse> GetResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default);
+
+    IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default);
+
+    object? GetService(Type serviceType, object? serviceKey = null);
+}
+```
+
+(Excerpted from [IChatClient.cs](https://github.com/dotnet/extensions/blob/044734ee0922038cd5a2b381ed7da3ad4d8fe0fe/src/Libraries/Microsoft.Extensions.AI.Abstractions/ChatCompletion/IChatClient.cs), comments removed.)
+
+All this interface promises is that if you pass in a list of messages, a response comes back. `GetResponseAsync` returns the response all at once, `GetStreamingResponseAsync` returns it piece by piece as it is generated, and `GetService` is the hook for querying additional services or metadata that an implementation provides. Whether what comes back is text, a tool call, or an approval request shows up in none of the signatures. <strong>The meaning is carried not by the methods but by the data types they pass around</strong>. We will come back in section 9.2 to why the work is divided this way — a small, frozen interface, with evolution absorbed outside it (in the data types, among other places).
+
+### Updates are envelopes; AIContent is the payload
+
+Of the methods on the `IChatClient` it holds, `UIAgent` calls only `GetStreamingResponseAsync` — a natural choice for a UI that wants to update the screen as each token arrives. Here are the `ChatMessage` that this method takes and the `ChatResponseUpdate` that it returns, trimmed to their main properties.
+
+```csharp
+// Input: a message that makes up the conversation history
+public class ChatMessage
+{
+    public ChatRole Role { get; set; }             // who is speaking
+    public IList<AIContent> Contents { get; set; } // the payload
+    public string? MessageId { get; set; }
+    // plus AuthorName, RawRepresentation, AdditionalProperties, and more
+}
+
+// Output: one fragment of a streaming response
+public class ChatResponseUpdate
+{
+    public ChatRole? Role { get; set; }
+    public IList<AIContent> Contents { get; set; } // payload of this fragment
+    public string? MessageId { get; set; }         // the message it is part of
+    public string? ConversationId { get; set; }    // set if service-managed
+    public object? RawRepresentation { get; set; } // the object it came from
+    public AdditionalPropertiesDictionary? AdditionalProperties { get; set; }
+    // plus ResponseId, FinishReason, CreatedAt, and more
+}
+```
+
+(Main properties excerpted and simplified from [ChatMessage.cs](https://github.com/dotnet/extensions/blob/044734ee0922038cd5a2b381ed7da3ad4d8fe0fe/src/Libraries/Microsoft.Extensions.AI.Abstractions/ChatCompletion/ChatMessage.cs) and [ChatResponseUpdate.cs](https://github.com/dotnet/extensions/blob/044734ee0922038cd5a2b381ed7da3ad4d8fe0fe/src/Libraries/Microsoft.Extensions.AI.Abstractions/ChatCompletion/ChatResponseUpdate.cs); the comments are mine.)
+
+The documentation for `ChatResponseUpdate` describes the type as "updates that layer on each other to form a single chat response." One response can consist of several messages, and one message can arrive split across several updates. Updates that belong to the same message share a `MessageId`, and the `ToChatResponse()` extension method reassembles a sequence of updates into the same `ChatResponse` type that `GetResponseAsync` returns (at its core, a list of `ChatMessage` values), starting a new message wherever `MessageId` (among other things) changes and joining contiguous text fragments. `UIAgent`, too, uses this method to turn the updates back into `ChatMessage` values once it has read the stream, and adds them to its local conversation history. By default, that entire history becomes the `messages` of the next request. This is how the fragments of an output flow back in as the next input.
+
+What deserves attention is that both `ChatMessage` and `ChatResponseUpdate` hold their payload as `Contents` — a list of `AIContent`. The two types are mere <strong>envelopes</strong> that say who is speaking and which message a piece belongs to; what is written inside is expressed by the `AIContent` subtypes they carry. In fact, `UIAgent` rewraps each user message it sends as a `ChatResponseUpdate`, copying over `Role` and `Contents`, and runs it through the same pipeline as the response updates to turn it into blocks. The envelopes differ, but the vocabulary inside is one and the same.
+
+What matters for UI is that this `AIContent` vocabulary can already express a good deal of human–agent collaboration.
+
+| `AIContent` subtype | Meaning |
+|---|---|
+| `TextContent` / `TextReasoningContent` | Fragments of body text and of reasoning text |
+| `FunctionCallContent` | A tool call. If `InformationalOnly` is true, it is "already processed, or purely informational" |
+| `FunctionResultContent` | A tool result, matched to its call by `CallId` |
+| `ToolApprovalRequestContent` / `ToolApprovalResponseContent` | An approval request before a tool runs, and the response to it. Subtypes of `InputRequestContent` / `InputResponseContent` |
+
+The idea of "asking a human for input and receiving a response" already exists in the abstraction layer as `InputRequestContent` and `InputResponseContent`. Tool approval is one kind of it. The approval request arrives from the `IChatClient` as the payload of a `ChatResponseUpdate`, and the human's response goes back to the `IChatClient` as the payload of a `ChatMessage` (with the `User` role) in the next request (sections 5.1 and 5.3). Because input and output are written in the same vocabulary, a human decision can travel as just another part of the conversation history.
+
+### Where the vocabulary reaches, and where it doesn't
+
+Reading `AGUIChatClient` shows clearly how the AG-UI .NET SDK treats this vocabulary. Text, reasoning, and tool calls and results are translated into the corresponding `AIContent`. An interrupt concerning a tool becomes a `ToolApprovalRequestContent`; any other interrupt becomes an `InterruptRequestContent` defined by the AG-UI SDK (itself a subtype of `InputRequestContent`).
+
+Events with no counterpart in Microsoft.Extensions.AI, on the other hand, are passed through untranslated. The comment in [`EventStreamConverter`](https://github.com/ag-ui-protocol/ag-ui/blob/36447b41b05df704404e8f3227eb42bde25fc9e7/sdks/dotnet/src/AGUI.Client/Internal/EventStreamConverter.cs) reads:
+
+> Pass-through events: state, reasoning lifecycle, activity, custom, raw, and the subagent lifecycle. The subagent events reach the caller as RawRepresentation because Microsoft.Extensions.AI has no concept of delegated work; a consumer that cares reads them off the update, ...
+
+`STATE_SNAPSHOT`, `STATE_DELTA`, `ACTIVITY_SNAPSHOT`, and similar events have no corresponding `AIContent`. So they are carried as the AG-UI event object itself in the `RawRepresentation` of a `ChatResponseUpdate` whose `Contents` is empty (`RawRepresentation` is the property for keeping the original object an update was converted from) — an empty envelope with the original event attached.
+
+```mermaid
+flowchart TB
+    subgraph Above["Above: how it is rendered"]
+        R1["Blazor Razor components"]
+        R2["WPF or MAUI (thought experiment)"]
+    end
+    W["Narrow waist: IChatClient and the AIContent vocabulary"]
+    subgraph Below["Below: how it was communicated"]
+        P1["AGUIChatClient (AG-UI)"]
+        P2["OpenAI, Foundry, Ollama, and other clients"]
+        P3["In-process agent wrapped as an IChatClient"]
+    end
+    Above --- W
+    W --- Below
+    P1 -.->|"state and activity pass through as RawRepresentation"| SM["App StateMapper and ActivityHandler"]
+    SM -.-> Above
+```
+
+What this means is that <strong>`UIAgent`'s protocol neutrality is exactly as wide as the Microsoft.Extensions.AI vocabulary</strong>. Text, tools, and approvals are inside the vocabulary, so `UIAgent` can handle them without knowing about AG-UI. In fact, `Microsoft.AspNetCore.Components.AI` does not reference the AG-UI SDK at all. Shared state and activities, which lie outside the vocabulary, are handled by the app's code. On the receiving side, a `StateMapper` and an `ActivityHandler<TBlock>` written by the app read `RawRepresentation` and give it meaning; on the sending side, the app builds AG-UI's `RunAgentInput` through `ChatOptions.RawRepresentationFactory` (section 6.3).
+
+This is a compromise forced by the vocabulary's limits, but an honest one. The library provides the container for state and the rules for committing it in a neutral form (section 6), but it does not pretend to be neutral about the mapping between the protocol's representation and the state. Making the app put its protocol dependency <strong>in a few well-defined places in its own code, explicitly</strong>, makes it easier to migrate later, once the vocabulary grows.
+
+### The cost of making a remote agent look like an IChatClient
+
+Abstractions that make something across the network look like a local object have a well-known pitfall. As Waldo et al. pointed out in "[A Note on Distributed Computing](https://doi.org/10.1007/3-540-62852-5_6)" (1994), differences in latency, memory access (the lack of a shared address space), partial failure, and concurrency do not go away just because the interfaces look the same. Conversations with agents add one more difference: where state lives — which side owns the conversation history.
+
+Of the differences that survive a uniform interface, `AGUIChatClient` deliberately handles at least one: where state lives (partial failure comes up in section 11). AG-UI servers are designed to be stateless and receive the entire conversation history on every request, so `AGUIChatClient` never lets `ChatResponseUpdate.ConversationId` out. According to a comment in the source, a non-null `ConversationId` makes agent wrappers built on Microsoft.Extensions.AI treat the conversation as service-managed and send only deltas on the next request, which truncates history against a stateless AG-UI server. The AG-UI thread ID is instead carried in `AdditionalProperties` and pinned onto the caller's `ChatOptions`.
+
+`UIAgent` makes the same distinction on its side. When `IConversationThread.IsStateful` is true and the thread has a `ConversationId`, `UIAgent` sends only the new messages and sets `ChatOptions.ConversationId`. Otherwise, it sends the entire local history. "Who owns the history" cannot be hidden by the shape of `IChatClient`, so both sides have a place to deal with the difference.
+
+## 4. ContentBlock: turning a stream into objects with identity
+
+`UIAgent`'s job is to turn a flat sequence of `ChatResponseUpdate` values into a sequence of `ContentBlock` values — UI-facing semantic units, hereafter "blocks." The public API boils down to two methods.
+
+```csharp
+public class UIAgent : IDisposable
+{
+    // Send a message and receive the resulting blocks in the order they are created
+    public async IAsyncEnumerable<ContentBlock> SendMessageAsync(
+        ChatMessage message,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    { /* omitted */ }
+
+    // Restore the committed conversation and typed state from the configured thread
+    public async Task<IReadOnlyList<ContentBlock>> RestoreAsync(
+        CancellationToken cancellationToken = default)
+    { /* omitted */ }
+}
+```
+
+(Signatures excerpted from [UIAgent.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Engine/UIAgent.cs).)
+
+### 4.1 Kinds of blocks
+
+| Type | What it represents | Source of identity (`Id`) | Pauses the conversation? |
+|---|---|---|---|
+| `RichContentBlock` | Conversational text. Holds both the accumulated fragments (`RawText`) and a structured node list (`Content`) | `MessageId` (a new GUID if absent) | No |
+| `FunctionInvocationContentBlock` | A function call executed, for example, on the server, and its eventual result | `CallId` | No |
+| `ActivityContentBlock` | Activity or progress that changes while streaming. The kind is a string, the payload a `JsonElement` | `MessageId` (a new GUID if absent) | No |
+| `FunctionApprovalBlock` | A function call that needs approval before it runs. Wraps the block representing the call | `CallId` (`RequestId` if absent) | Yes |
+| `UIActionBlock` | A function call that must run in the UI before the conversation can proceed | `CallId` (a new GUID if absent) | Yes |
+
+The last two implement `IInteractiveBlock` (hereafter, I call blocks that pause the conversation like these two <strong>interactive blocks</strong>). `IInteractiveBlock` is not a block class but an interface representing a <strong>capability</strong>: "pause the conversation until the user supplies a result." This distinction will matter when we discuss the choice of type kinds in section 9.
+
+### 4.2 Lifecycle and change notification
+
+The skeleton of `ContentBlock` is small.
+
+```csharp
+public abstract class ContentBlock
+{
+    public string Id { get; internal set; } = string.Empty;
+    public BlockLifecycleState LifecycleState { get; internal set; }
+    public ChatRole? Role { get; internal set; }
+    public string? AuthorName { get; internal set; }
+
+    public ContentBlockChangedSubscription OnChanged(Action callback) { /* omitted */ }
+
+    protected void NotifyChanged()
+    {
+        // Snapshot the callbacks to allow safe removal during iteration
+        var snapshot = _callbacks.ToArray();
+        for (var i = 0; i < snapshot.Length; i++)
+        {
+            snapshot[i]();
+        }
+    }
+}
+
+public enum BlockLifecycleState { Pending, Active, Inactive }
+```
+
+(Excerpted from [ContentBlock.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Blocks/ContentBlock.cs) and [BlockLifecycleState.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Blocks/BlockLifecycleState.cs).)
+
+`Pending` means "created but not yet emitted to the conversation," `Active` means "part of the conversation but may still receive updates from the stream," and `Inactive` means "will not receive any more updates from the stream." The pipeline sets a block to `Active` just before yielding it, and sets it to `Inactive` and notifies when it completes. The `Pending`-to-`Active` transition raises no notification, because a block that has not been yielded yet has no subscribers. Note that `Inactive` does not mean immutable: approval and UI action blocks can still change after the stream ends, as a result of a human decision.
+
+`OnChanged(Action)` is the subscription API; its return value, `ContentBlockChangedSubscription`, is a readonly struct that implements `IDisposable`. The registered callback runs whenever the block changes — on an update from the stream, on the transition to `Inactive`, when the result of an approval or UI action is settled, and so on. Because the callback list is copied just before notifying, unsubscribing in the middle of a notification is safe.
+
+One design choice shows up here. `OnChanged` is not a per-property `INotifyPropertyChanged`; it is a <strong>coarse-grained, per-block notification</strong>. Instead of reporting which property changed on every token, it just says "this block changed; re-read it," and leaves the diffing to the renderer (in Blazor, render tree diffing). Today's `MessageList` re-renders the whole conversation when it receives this notification. The team itself lists this as an issue. The design document that collects requirements for the built-in UI ([#68227](https://github.com/dotnet/aspnetcore/issues/68227); hereafter "the design document," with the later "Post-POC areas for improvement" comment on the same issue called "the post-POC list") says `MessageList` "re-renders the entire conversation on every streaming token," and the fix is tracked in [#68389](https://github.com/dotnet/aspnetcore/issues/68389). The coarse-grained contract leaves room to narrow the scope of rendering later.
+
+Another notable feature: the setters of `Id`, `LifecycleState`, `Role`, and `AuthorName` are all internal. Derived blocks can signal a change with `NotifyChanged()`, but only the framework's pipeline moves the lifecycle, and the framework also decides how identity is assigned (the exception is the setter of `FunctionInvocationContentBlock.Call`, covered in section 4.4, which also rewrites `Id`).
+
+### 4.3 Two-phase routing
+
+`BlockMappingPipeline` is what turns the flat sequence of updates into blocks with identity. The comment at the top of the source explains the design directly:
+
+> Routes model updates to handlers in two phases:
+> 1. Blocks that are still active get first refusal on the update, most recent first. This keeps a streaming block accumulating instead of emitting a new block per token.
+> 2. Whatever is left is offered to inactive handlers, which may emit new blocks.
+
+Simplified, the skeleton looks like this:
+
+```csharp
+// Phase 1: offer the update to blocks that are still open, newest first
+for (var i = _activeStack.Count - 1; i >= 0; i--)
+{
+    if (context.AllHandled) break;
+
+    var active = _activeStack[i];
+    switch (active.Invoke(context).Kind)
+    {
+        case HandleResult.ResultKind.Update:
+            active.Block.InvokeNotifyChanged();
+            break;
+        case HandleResult.ResultKind.Complete:
+            active.Block.LifecycleState = BlockLifecycleState.Inactive;
+            active.Block.InvokeNotifyChanged();
+            _activeStack.RemoveAt(i);
+            break;
+    }
+}
+
+// Phase 2: let handlers, in registration order, claim what is left as new blocks
+// Order: app-registered handlers → UI actions → approval → function invocation → rich text → plain text
+foreach (var handler in _handlers)
+{
+    while (!context.AllHandled && handler.TryHandle(context) is { } entry)
+    {
+        entry.Block.LifecycleState = BlockLifecycleState.Active;
+        _activeStack.Add(entry);
+        yield return entry.Block;
+    }
+}
+```
+
+(Simplified from [BlockMappingPipeline.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Pipeline/BlockMappingPipeline.cs); logging, ID checks, setting `Role` and `AuthorName`, infinite-loop protection, and immediate completion when a call and its result arrive in the same update are omitted.)
+
+`BlockMappingContext` tracks which `AIContent` items in an update have already been claimed, so several handlers can share the contents of a single update. In stream-processing terms, this resembles a parser building a syntax tree from a token stream — except the output is not a tree but a sequence of objects that have identity and keep changing for a while.
+
+The plain-text handler shows how block boundaries are decided.
+
+```csharp
+if (textContent is null)
+{
+    if (state.Id != string.Empty)
+    {
+        return BlockMappingResult<RichContentBlock>.Complete();
+    }
+
+    return BlockMappingResult<RichContentBlock>.Pass();
+}
+```
+
+(Excerpted from [TextBlockHandler.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Pipeline/TextBlockHandler.cs).)
+
+An open text block completes as soon as it receives an update that contains no text. When a tool call arrives in the middle of text, the text block closes in phase 1, and the function-invocation handler creates a new block in phase 2. That is why "text → tool → text" becomes three blocks. In other words, in the current implementation, <strong>block boundaries are inferred from the shape of the stream</strong>. The documentation of `ContentBlock.Id` — "Blocks produced by the same model message share the same identifier" — is a consequence of this, and preserving message boundaries and assigning stable identities are tracked as future work ([#68383](https://github.com/dotnet/aspnetcore/issues/68383)).
+
+### 4.4 Handlers are reducers, and the set of transitions is closed
+
+The extension point, `ContentBlockHandler<TState>`, is an abstract class with a single method.
+
+```csharp
+public abstract class ContentBlockHandler<TState> where TState : new()
+{
+    public abstract BlockMappingResult<TState> Handle(BlockMappingContext context, TState state);
+}
+```
+
+The handler itself is stateless. Each time the framework asks a handler to create a new block, it prepares a state with `new TState()`; once a block is emitted, the framework holds on to that state and passes it to the handler on every subsequent update. A function that takes `(context, state)` and returns "a result and the next state" is, in shape, a reducer. In the plain-text handler, `TState` is `RichContentBlock` itself — "the state is the block." In the approval handler, the state is a small internal class holding a single flag: "has it been emitted yet."
+
+The only results a handler can return are the four static methods of `BlockMappingResult<TState>` — `Pass()`, `Emit(block, state)`, `Update(state)`, and `Complete()` — and the enum that represents the kind is internal. Apps can add new kinds of blocks, but <strong>they cannot invent a fifth transition</strong>. Open the extension point, close the set of transitions: a small but effective choice that lets the framework keep owning the semantics of the stream.
+
+The framework also owns how identity is assigned. In the current preview, the setter of `Id` is internal, and the pipeline rejects, with an exception, any block emitted with an empty `Id` (`ThrowIfIdMissing`). So when an app creates a new kind of block, it goes through a path whose ID rules the framework owns. One is a subclass of `FunctionInvocationContentBlock`, whose `Call` setter uses `CallId` as the ID; the other is a subclass of `ActivityContentBlock`, which `ActivityHandler<TBlock>` handles using `MessageId` as the ID.
+
+For tool blocks, a source generator provides this path. Here is the example from the Blazor post again:
+
+```csharp
+[ToolBlock("get_weather")]
+public partial class WeatherToolBlock : FunctionInvocationContentBlock
+{
+    [ToolParameter(Name = "location")]
+    public string? Location { get; set; }
+
+    [ToolResult]
+    public WeatherInfo? Weather { get; set; }
+}
+```
+
+The generator produces an implementation of `ContentBlockHandler<WeatherToolBlock>` for this class. When it finds a `FunctionCallContent` named `get_weather`, it deserializes the arguments into `Location` and emits the block; when a `FunctionResultContent` with a matching `CallId` arrives, it puts the result into `Weather` and completes. It also generates an `AddGeneratedToolBlocks` extension method that registers all the generated handlers, and structural mistakes in the class (not being `partial`, the wrong base type, duplicate tool names, and so on) become compile-time diagnostics. It is a mechanism that keeps dictionary lookups by string key out of UI code, gathering the "string contract" of tool names and argument keys into attributes in one place. It does not check against the actual tool schema, though, so a misspelled key silently leaves the value null.
+
+### 4.5 Deltas and snapshots
+
+There are two ways into a `RichContentBlock`. When a `TextContent` fragment arrives, it is appended with `AppendText` and split into paragraphs on `\n\n`. When a `RichTextContent` — an `AIContent` subtype defined by this package — arrives, it is a <strong>complete snapshot</strong> of the structured node list that replaces the previous content. The documentation of `RichTextContent` explains that this replacement exists so that renderers are never exposed to a partially mutated tree.
+
+A Markdown parser is deliberately not chosen. In the AgenticUI sample (and the Dojo app), `FormattedChatClient`, which derives from `DelegatingChatClient`, converts the accumulated Markdown into a node tree with an app-side parser and inserts it into the update as `RichTextContent`. In other words, even preprocessing for display can be written as `IChatClient` middleware. The `IChatClient` pipeline is not just a mechanism for communication (see also "[Understanding the Middleware Chain as an Implementation Pattern](/en/blog/middleware-chain-pattern)" for the chain-of-middleware design).
+
+The choice between "accumulate deltas" and "replace with a snapshot" recurs at several layers of this stack. AG-UI has `STATE_SNAPSHOT` and `STATE_DELTA` (an RFC 6902 JSON Patch); text has fragments and snapshots. It is an unavoidable choice in any streaming system, and here it can be made explicitly at each layer.
+
+Note also that the default rendering treats the node tree as a safe intermediate representation (`HtmlNode` is rendered as a code string rather than as raw HTML, and absolute URLs with any scheme other than `http` or `https` — plus `mailto` for links — are not rendered as links or images; detailed rules are still being defined in [#68427](https://github.com/dotnet/aspnetcore/issues/68427)).
+
+## 5. Awaiting the human: IInteractiveBlock as a suspension point
+
+### 5.1 A conversation is a loop that can be suspended
+
+The abstraction I consider the most important in this essay is this single-method interface:
+
+```csharp
+public interface IInteractiveBlock
+{
+    Task<AIContent> GetResultAsync(CancellationToken cancellationToken = default);
+}
+```
+
+And what consumes it is this loop in `AgentContext`:
+
+```csharp
+IReadOnlyList<ChatMessage>? currentMessages = [message];
+while (currentMessages is not null)
+{
+    var interactiveBlocks = new List<IInteractiveBlock>();
+
+    await foreach (var block in _agent.SendMessagesAsync(currentMessages, cancellationToken))
+    {
+        // Add the block to the turn and notify subscribers (omitted)
+        if (block is IInteractiveBlock interactiveBlock)
+        {
+            interactiveBlocks.Add(interactiveBlock);
+        }
+    }
+
+    if (interactiveBlocks.Count == 0)
+    {
+        currentMessages = null;
+        continue;
+    }
+
+    Status = ConversationStatus.AwaitingInput;
+    NotifyStatusChanged();
+
+    var results = await Task.WhenAll(
+        interactiveBlocks.Select(block => block.GetResultAsync(cancellationToken)));
+
+    // FunctionResultContent becomes a Tool-role message; anything else (such as an approval response) a User-role message
+    currentMessages = CreateContinuationMessages(results);
+    Status = ConversationStatus.Streaming;
+    NotifyStatusChanged();
+}
+```
+
+(Excerpted from `StreamIntoTurnAsync` in [AgentContext.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Engine/AgentContext.cs).)
+
+Put differently, what happens here is that <strong>a human decision is treated as a `Task`, just like network I/O</strong>. Once the response stream has been read to the end, if the response contains any blocks that pause the conversation, the context enters `AwaitingInput` and waits with `Task.WhenAll` for all decisions to arrive. Once they have, it converts the decisions into Microsoft.Extensions.AI messages and sends the next request in the same loop.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Streaming: SendMessageAsync
+    Streaming --> AwaitingInput: has interactive blocks
+    AwaitingInput --> Streaming: all results in
+    Streaming --> Idle: response completes, or CancelAsync
+    AwaitingInput --> Idle: CancelAsync
+    Streaming --> Error: exception
+    AwaitingInput --> Error: exception
+    Error --> Streaming: RetryAsync or SendMessageAsync
+```
+
+When it arrived, `async`/`await` turned chains of callbacks waiting on I/O into sequential code you could read from top to bottom ("[Inside async/await](/en/blog/async-await-internals)"). `IInteractiveBlock` does the same thing for humans. The round trip of "the agent proposes, the human decides, the agent continues" is written not as ad hoc dialogs and callbacks, but as an `await` inside a single loop.
+
+As with async/await, though, the suspension is an in-memory continuation, not a persisted suspension point. If the circuit drops or the page reloads, the waiting loop is gone with it — unlike a durable human wait such as `WaitForExternalEvent` in Durable Functions, which survives process restarts. The restore gap in section 7.2 comes from here.
+
+The runtime's behavior as a UI runtime also follows from this state machine. `AgentContext.SendMessageAsync` throws if called while the status is `Streaming` or `AwaitingInput`, and the default `MessageInput` disables itself during those states. The conversation is serialized; you cannot slip a new request in while it is waiting on a human decision (the design document plans, while a response is streaming, to queue follow-up requests instead of disabling the input and to send them together once the response finishes; while an approval is pending, it requires that the composer not accept input at all. Either way, serialization is preserved).
+
+### 5.2 Human input gets duplicated: take only the first response
+
+Input involving humans has a property that network I/O does not: it gets duplicated. Buttons get double-clicked, the same block gets rendered in several places, and a re-created component sends the same action again. The `IInteractiveBlock` implementations absorb this duplication in the block itself instead of leaving it to the renderer.
+
+```csharp
+// FunctionApprovalBlock (excerpt)
+private void Respond(ApprovalStatus status, string? reason)
+{
+    lock (_responseLock)
+    {
+        if (Status != ApprovalStatus.Pending)
+        {
+            return; // only the first response is applied
+        }
+
+        Status = status;
+        var response = ApprovalRequest.CreateResponse(
+            approved: status == ApprovalStatus.Approved,
+            reason);
+        _resultSource.SetResult(response);
+    }
+
+    NotifyChanged();
+}
+
+// UIActionBlock (excerpt)
+public Task InvokeAsync(CancellationToken cancellationToken = default)
+{
+    lock (_invocationLock)
+    {
+        _invocation ??= InvokeCoreAsync(cancellationToken); // runs at most once
+        return _invocation;
+    }
+}
+```
+
+Only the first approval response is applied, and a UI action's function runs at most once no matter how many times `InvokeAsync` is called. The result reaches `AgentContext` through a `TaskCompletionSource<AIContent>` (created with `RunContinuationsAsynchronously`). Traditional forms protected the idempotency of decisions with ad hoc measures, screen by screen; here, the implementations of the built-in blocks guarantee it. It has two limits, though. One is that the `IInteractiveBlock` interface itself does not require it, so if you build your own interactive block, you need the same care. The other is that it only absorbs duplicates against the same instance; it does not extend to blocks recreated by `RestoreAsync` (section 7.2).
+
+### 5.3 Approval wraps the call
+
+`FunctionApprovalBlock` holds the block representing the call inside it, as `InnerBlock`. Moreover, the approval handler creates that inner block with `context.CreateInnerBlock(approvalRequest.ToolCall)`, which <strong>asks all handlers again</strong>. So if `get_weather` requires approval, the inside holds the `WeatherToolBlock` generated from `[ToolBlock]`. At the level of the model, the concern of approval and the concern of how each tool is presented are made orthogonal through composition. This composition only helps up to the point of the decision, however. The default approval UI does not render the inner block; it shows only the tool name and the arguments as JSON, so putting the composition to use on screen is the job of a `BlockRenderer` written by the app. And because the inner block is created as `Inactive` from the start, the result of the execution on the server after approval never reaches the inner block, and `FunctionApprovalBlock.HasResult` stays false by default.
+
+This structure is no accident. The design document calls it "the important structural claim" and says:
+
+> An approval renders even when the call itself is in the not-rendered mode, because not-rendered is a choice about narration and never about consent.
+
+Whether a tool call is shown on screen is a choice about <strong>narration</strong>; approval is a matter of <strong>consent</strong>. The app is free to decide the former, but the latter cannot be omitted. Today's defaults match this: `FunctionInvocationContentBlock` renders nothing by default, whereas `FunctionApprovalBlock` comes with a default approval UI. The design document itself, though, admits that the former is "accidentally the right default but not a designed one," and plans to redesign it as three display modes: not rendered, a collapsible view, and a custom renderer. The principle comes first, and the implementation is catching up with it.
+
+Note that consent here is <strong>a boundary on the UI</strong>, not authorization. A stateless AG-UI server rebuilds the pair of approval request and response from the tool call (name and arguments) and the approved flag that the client put into its resume input, and then executes it (`TryDecodeToolApprovalResume` in `AGUI.Server`). From the server's point of view, not only the decision but the call being approved — its name and arguments — is the client's claim; a stateless server has nothing to check it against. Moreover, the approval response (`ToolApprovalResponseContent`) has no field that says who made the decision. Authorization for tools with side effects has to be checked by the tool itself, on the server.
+
+The result of the decision is returned to the Microsoft.Extensions.AI vocabulary. The `ToolApprovalResponseContent` created by `ApprovalRequest.CreateResponse(...)` rides on the next request as a User-role message, and `AGUIChatClient` extracts it and repackages it into AG-UI's resume input. Because human decisions live inside the vocabulary, they also end up in the conversation log. As we will see in section 7, however, being logged and being replayed back into the state of the screen are two different problems.
+
+### 5.4 Where, and on whose signal, do side effects run?
+
+An agent's tool calls take different paths depending on where and when their side effects run. This stack distinguishes them not in UI code but by <strong>the tool's type and markers</strong>.
+
+| Path | Where it runs | What triggers it | Mechanism | Resulting block |
+|---|---|---|---|---|
+| Server tool | Agent server | The server's loop | `AGUIChatClient` sets `InformationalOnly = true` on calls not registered on the client | `FunctionInvocationContentBlock` |
+| Client tool run automatically | Blazor app | Automatically, after the response is received | The `FunctionInvokingChatClient` inside `AGUIChatClient` runs the `AIFunction` in `ChatOptions.Tools` | `FunctionInvocationContentBlock` |
+| UI action | Blazor app | The UI calling `InvokeAsync` | A function registered with `RegisterUIAction` is sent as a declaration only (`AsDeclarationOnly()`) | `UIActionBlock` (pauses) |
+| Tool requiring approval | Server (after approval) | Human approval | An `ApprovalRequiredAIFunction` becomes an approval request, delivered as an AG-UI interrupt | `FunctionApprovalBlock` (pauses) |
+
+The mechanism behind the third path, UI actions, is particularly instructive. `UIAgent` passes registered UI actions to the model not as executable functions but <strong>as declarations only</strong>.
+
+```csharp
+// UIAgent.BuildChatOptions (excerpt)
+foreach (var action in _options.UIActions.Values)
+{
+    tools.Add(action.AsDeclarationOnly());
+}
+```
+
+And Microsoft.Extensions.AI's `FunctionInvokingChatClient` already has this contract (from the documentation comment in [FunctionInvokingChatClient.cs](https://github.com/dotnet/extensions/blob/044734ee0922038cd5a2b381ed7da3ad4d8fe0fe/src/Libraries/Microsoft.Extensions.AI/ChatCompletion/FunctionInvokingChatClient.cs)):
+
+> If a requested function is an AIFunctionDeclaration but not an AIFunction, the FunctionInvokingChatClient will not attempt to invoke it, and instead allow that FunctionCallContent to pass back out to the caller. It is then that caller's responsibility to create the appropriate FunctionResultContent for that call and send it back as part of a subsequent request.
+
+"A call to a function that is declared but cannot be invoked is the caller's responsibility." UI actions simply sit on top of this existing contract. The caller at the very top of the `IChatClient` pipeline just happens to be the UI. Without inventing a new protocol, the stack can express "a side effect that should run on the human's side."
+
+```mermaid
+sequenceDiagram
+    participant M as Remote agent
+    participant C as AGUIChatClient
+    participant A as UIAgent
+    participant B as UIActionBlock
+    participant X as AgentContext
+    participant V as Razor UI
+    A->>C: Tools include propose_document as a declaration only
+    C->>M: RunAgentInput
+    M-->>C: call to propose_document
+    Note over C: A declaration cannot be invoked, so the call is returned to the caller
+    C-->>A: FunctionCallContent
+    A-->>X: yield UIActionBlock (IInteractiveBlock)
+    Note over X: after reading the stream to the end, enter AwaitingInput
+    X->>B: await GetResultAsync
+    V->>B: InvokeAsync after the user decides
+    B-->>X: FunctionResultContent
+    X->>A: continuation message with Tool role
+    A->>C: next request including the tool result
+```
+
+The Blazor post sums up this boundary as follows:
+
+> These controls establish an important boundary: the agent can request an action, while the application determines how the user sees it and when it can proceed.
+
+The agent can <strong>request</strong>. But it is the app that <strong>decides</strong> how that request looks to the user and when things can move on.
+
+## 6. Shared state: committed values and proposed values
+
+### 6.1 AgentState and StateMapper
+
+Separately from the conversation, `UIAgent<TState>` holds typed shared state, `AgentState<TState>`.
+
+```csharp
+public class AgentState<T> where T : class, new()
+{
+    public T Value
+    {
+        get => _value;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            _valueBeforePrediction = null; // a direct write discards the proposal's baseline
+            _value = value;
+            NotifyChanged();
+        }
+    }
+
+    public bool HasPendingPredictiveState => _valueBeforePrediction is not null;
+    public void AcceptPredictiveState() { /* drop the baseline and commit the proposal */ }
+    public void RejectPredictiveState() { /* restore the baseline */ }
+    public IDisposable OnChanged(Action callback) { /* omitted */ }
+
+    internal void SetPredictiveValue(T value)
+    {
+        _valueBeforePrediction ??= _value; // keep the value just before the first proposal as the baseline
+        _value = value;
+        NotifyChanged();
+    }
+}
+```
+
+(Excerpted from [AgentState.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Engine/AgentState.cs); the comments are mine.)
+
+What maps updates from the agent onto the state is a `StateMapper` written by the app. The `StateMapper` runs on every update <strong>before</strong> the block pipeline. If it marks part of an update as "consumed as state" with `MarkHandled`, that part does not become a block. To hand over a value, it calls `SetState` for a committed value or `SetPredictiveState` for a proposed one (the API says "predictive," but I call it a "proposal" after the role it plays). The Shared State example in the AgenticUI sample receives AG-UI's `STATE_SNAPSHOT`:
+
+```csharp
+options.StateMapper = context =>
+{
+    if (context.Update.RawRepresentation is StateSnapshotEvent snapshot &&
+        snapshot.Snapshot.Deserialize<RecipeState>(s_jsonOptions) is { } state)
+    {
+        context.SetState(state);
+    }
+};
+```
+
+"The app explicitly handles what lies outside the vocabulary, in a few well-defined places" — which we saw in section 3 — is exactly this code, on the receiving side (the sending side is `RawRepresentationFactory`, in section 6.3). What `UIAgent<TState>` provides is <strong>the container for the state and the rules for committing it</strong>; the mapping from the protocol's representation to the state belongs to the app. Whether an update is taken as a committed value or as a proposal is also decided, update by update, by the app's `StateMapper`.
+
+### 6.2 Unresolved proposals are rejected at conversation boundaries
+
+A proposal made with `SetPredictiveState` replaces `Value` while keeping the committed baseline. In the AgenticUI sample's Predictive State example, when the agent calls the UI action `propose_document`, the `StateMapper` sets its argument as the proposed value (it does not consume the call itself, so the call also becomes a `UIActionBlock`). The editor shows the proposal as a diff against the original document, and depending on the user's decision, the UI action's function calls `AcceptPredictiveState()` or `RejectPredictiveState()`. Note that `AgentState<T>` exposes only `HasPendingPredictiveState`, not the baseline value itself. The original document used to compute the diff is kept by the app (the Dojo app holds the document from the start of the run as `_runStartDocument`).
+
+What matters is how unresolved proposals are handled. When the conversation is driven through `AgentContext`, `RejectPendingPredictiveState` is called on every one of these paths:
+
+- when a turn finishes normally without a decision
+- when a turn fails with an exception
+- when a turn is canceled
+- when the `AgentContext` is disposed
+- after the conversation is restored with `RestoreAsync` (this one is called by `UIAgent` itself)
+
+That is, <strong>in a conversation driven by `AgentContext`, an unresolved proposal never survives past a conversation boundary as a committed value</strong>. This is the "roll back unless committed" part of a database transaction — close to a `TransactionScope` that rolls back unless `Complete()` is called — though without isolation: the proposal is visible to everyone through `Value` before it is committed. It applies to the agent's <strong>proposals</strong> (writes made with `SetPredictiveState`); writes made with `SetState` are committed on the spot. Conversely, if you use `UIAgent.SendMessageAsync` directly and consume the block sequence yourself, this guarantee does not come with it. The guarantee is provided not by `UIAgent`, which does the semantic translation, but by `AgentContext`, which drives the conversation.
+
+A direct assignment to `Value`, on the other hand, discards the baseline. This works the same way for human edits and for the agent's committed values. If the user edits the content while a proposal is on screen, it is committed at that moment as "the proposal, accepted and then edited"; if the agent sends a committed value with `SetState`, the proposal is overwritten by that value and ends. The rule is not "the human wins" but <strong>"a committed write ends the proposal."</strong>
+
+### 6.3 The state round trip, and "data, not instructions"
+
+State flows in both directions. From the app to the agent, the current value is packed into AG-UI's `RunAgentInput.State` via `ChatOptions.RawRepresentationFactory`. From the agent to the app, the server declares, for example with `AGUIStreamOptions.MapResultAsStateSnapshot("generate_recipe")`, that "the result of this tool is a state snapshot," and sends it as an AG-UI event.
+
+```mermaid
+sequenceDiagram
+    participant App as Blazor app
+    participant C as AGUIChatClient
+    participant S as Agent server
+    App->>C: put the current value in RunAgentInput.State via RawRepresentationFactory
+    C->>S: POST RunAgentInput
+    S->>S: insert the state into context as data, not instructions
+    S-->>C: STATE_SNAPSHOT (a tool result mapped by AGUIStreamOptions)
+    C-->>App: an update whose RawRepresentation is a StateSnapshotEvent
+    App->>App: StateMapper calls SetState, and AgentState notifies subscribers
+```
+
+The AgenticUI sample's server inserts the received state just before the latest user request, prefixed with `The current recipe state is JSON data, not instructions:`. Shared state that a human can edit is, from the agent's point of view, also <strong>untrusted input</strong>. The AG-UI .NET SDK itself warns about this in the documentation of `TryGetRunAgentState<T>` in `AGUI.Server`, which extracts client state from `RunAgentInput`: "Client state is untrusted. The application must validate it before using it in tools or model context." Passing state as "data, not instructions" is basic hygiene against prompt injection, and it is an issue that always comes with designing for shared state.
+
+### 6.4 What is not abstracted: merging
+
+All this also makes clear what this stack does not abstract: <strong>merging concurrent edits</strong>.
+
+`AgentState<T>` only replaces a single value wholesale; there is no field-level diffing, no conflict detection, and no convergence guarantee like a CRDT's. The Dojo app treats the recipe as an immutable record, creating a new value with `Recipe with { Title = ... }` and replacing the old one.
+
+Concurrency control is limited as well. In the Dojo app's Shared State scenario, the only things disabled while the status is `Streaming` or `AwaitingInput` are the controls that send new requests (the "Improve with AI" button, the suggestion buttons, and the message input); the recipe's edit fields stay open. Edits replace `State.Value` unconditionally, so an edit the user makes while the response is streaming can be silently overwritten by a `STATE_SNAPSHOT` that arrives later. In other words, today it is <strong>last writer wins</strong>. What the runtime guarantees is that new requests are serialized per turn — not that human and agent writes alternate. If you want to avoid this, the app has to protect itself, and indeed the Dojo app's Predictive State scenario makes the editor read-only while a run is active.
+
+Whether that is a flaw or a sound trade-off depends on the use case. Relatedly, the post-POC list includes extending the JSON Patch used in the Dojo app's Agentic Generative UI scenario beyond `replace` (to `add` and `remove`). In that scenario, the app-side `StateMapper` applies the patches and throws on unsupported operations to avoid silent state divergence. The library itself does not interpret `STATE_DELTA`; it just passes it through. Merge semantics depend heavily on the app's domain. Not rushing to a generic answer, and first making divergence detectable, seems like the right order to me.
+
+## 7. Where does the source of truth live? The update log and replay
+
+### 7.1 What is stored is updates, not blocks
+
+Persisting the conversation is delegated to an implementation of `IConversationThread`. What is notable is that <strong>what gets stored is `ChatResponseUpdate`, not `ContentBlock`</strong>.
+
+```csharp
+// End of UIAgent.SendMessagesAsync (excerpt)
+thread.AppendUserMessage(messages[0]);
+// ...
+foreach (var update in responseUpdates) // the raw updates, before StateMapper
+{
+    thread.AppendUpdate(update);
+}
+thread.CompleteTurn();
+```
+
+`RestoreAsync` then runs the stored updates back through the same sequence of handlers and the same `StateMapper` used live, rebuilding the blocks and the state (shown simplified):
+
+```csharp
+foreach (var update in _options.Thread.GetUpdates())
+{
+    // a User-role update recreates the pipeline before it is processed (omitted)
+    var processUpdate = ApplyStateMapper(update);   // state sent by the agent is restored by replay
+    await foreach (var block in pipeline.Process(processUpdate, cancellationToken))
+    {
+        blocks.Add(block);                           // mapped by the same handlers as live
+    }
+}
+// ...
+RejectPendingPredictiveState();                      // every restored proposal is rejected (acceptance is not recorded)
+```
+
+This is the idea of event sourcing (see also "[Building an Event-Driven Workflow Engine from Scratch](/en/blog/event-driven-workflow-engine)"). The source of truth is a log of the updates that came out of the `IChatClient`; the blocks, and the typed state <strong>as sent by the agent</strong>, are <strong>projections</strong> derived from it. And because the log holds raw updates, if you add a `[ToolBlock]` type later, past conversations can be replayed with the new presentation.
+
+This source of truth comes with three caveats, though.
+
+- <strong>Human writes to state do not enter the log.</strong> Neither direct assignments to `AgentState<T>.Value` nor the initial value are recorded, and the `RunAgentInput.State` that carries state to the agent is outside the log too. And because restore rejects every proposal at the end, proposals accepted live are rolled back as well. What restore rebuilds is the initial value plus whatever the agent sent as committed state — not the state the human last saw. The post-POC list also names persisting accepted predictive state and "app-owned state that predates the stored thread" as open work
+- <strong>What the log contains depends on the pipeline and on serialization.</strong> What gets recorded are updates before `StateMapper`, but also after the `IChatClient` pipeline. If middleware inserts UI-facing `RichTextContent`, as `FormattedChatClient` from section 4.5 does, that goes into the log too — and into the history sent to the model (whether to keep it out of the history is still open in the post-POC list). Conversely, things outside the vocabulary are easily dropped when saved. Microsoft.Extensions.AI's `ChatResponseUpdate.RawRepresentation` is marked `[JsonIgnore]`, so if you save the thread with standard JSON, events carried only in `RawRepresentation`, such as `STATE_SNAPSHOT`, disappear along with their payloads, and the typed state can no longer be replayed. Custom `AIContent` types such as `RichTextContent` also cannot be serialized unless, at a minimum, the type is registered with `AIJsonUtilities.AddAIContentType`. The Dojo app's thread keeps the objects in memory as they are, which is the only reason this does not surface there
+- <strong>The log's unit matches neither turns nor the way live processing is segmented.</strong> The unit of recording is not an `AgentContext` turn but one send to `UIAgent` (a segment) — the `IConversationThread` API itself calls this segment a "turn": `AppendUserMessage` begins it and `CompleteTurn` commits it. A turn that includes approvals or UI actions spans several segments; a segment that ends in failure or cancellation is not written, but earlier segments of the same turn (including the one carrying the approval request) remain. On replay, too, the pipeline is recreated only when a User-role update arrives, which differs from live, where it is recreated each time continuation messages are sent
+
+The package does not include an implementation of `IConversationThread` (the tests and the Dojo app each have their own). Where to store it is left entirely to the app.
+
+### 7.2 Decisions that are recorded but not replayed
+
+The most interesting gap in this design lies in how human decisions are handled.
+
+Approval decisions enter the conversation in the Microsoft.Extensions.AI vocabulary as `ToolApprovalResponseContent`, and UI action results as `FunctionResultContent`, so they do end up in the log. But the current `RestoreAsync` does not tie them back to the restored blocks. There is no handler that receives `ToolApprovalResponseContent`, and no path that returns a UI action's result to its `UIActionBlock`, so approval blocks are restored as `Pending` and UI action blocks as incomplete. The default approval UI shows the Approve and Reject buttons again, but there is no longer a loop waiting for the answer (`AgentContext.RestoreAsync` only rebuilds the turns; it does not wait for the results of interactive blocks). The design document's user journeys list exactly this as an edge case to avoid — "Reloading a finished conversation must never render a still-actionable approval." — and say the decision should be kept as part of the record: "who was asked, what was asked, what was decided."
+
+From the standpoint of side effects, UI actions are the more serious case. A restored `UIActionBlock` is a new instance, and the internal marker that guarantees "at most once" is back to not-yet-run. If it is rendered and clicked, the function runs again. The idempotency in section 5.2 does not reach across block instances.
+
+The acceptance of a proposal is lost even earlier. Whether a proposal was accepted happens only on `AgentState` and is not recorded as state anywhere. The value returned by the UI action's function (for the Dojo app's `confirm_changes`, "The user confirmed the changes.") survives as a `FunctionResultContent`, but there is no rule to read it back as "the proposal was committed." The post-POC list puts it this way:
+
+> Restore currently rejects persisted predictive snapshots because the thread does not record whether the user accepted them
+
+A general lesson follows. Making human–agent collaboration replayable takes two things. One is a <strong>vocabulary</strong> that can record human <strong>writes</strong> — decisions, and direct edits to shared state — as events. The other is <strong>replay rules</strong> that say which state a recorded decision should be restored to. Microsoft.Extensions.AI already has part of the former (approval responses, tool results), but it has no vocabulary for human edits to shared state, and the replay rules do not exist anywhere yet. What today's log records is the agent's writes and the <strong>messages</strong> the human sent — not what the human <strong>committed</strong>. "Recording human writes as events and replaying them" belongs on the list of things a UI runtime should abstract.
+
+### 7.3 Store the projection, or store the events?
+
+As a different answer to the same problem, consider the TypeScript [Vercel AI SDK](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence). The AI SDK stores an array of `UIMessage` — its UI-facing message representation — and converts it to the model-facing representation with `convertToModelMessages` when sending to the model. It is an approach that <strong>stores the projection and derives the model-side representation</strong>.
+
+| | What is stored | Advantage | Cost |
+|---|---|---|---|
+| Blazor AI components | Raw updates that came out of the `IChatClient` (`ChatResponseUpdate`) | Replay keeps up when rendering rules change; the storage format is less bound to UI types (as long as middleware does not insert UI-facing content) | Recorded decisions are not currently restored into block state; neither accepting a proposal nor direct human edits to state are stored |
+| Vercel AI SDK | UI-side messages (`UIMessage`) | UI state can be restored as is; approval states and the like are stored too | The storage format is bound to the UI schema, which then needs versioning |
+
+Neither is simply right. What matters is that both treat "the UI-facing intermediate model" and "the model-facing vocabulary" as different things, and make the conversion between them explicit code.
+
+## 8. The Blazor layer: mapping onto existing vocabulary
+
+### 8.1 AgentBoundary reprises EditForm
+
+Reading the Blazor-side components reveals that existing Blazor designs underlie them. The source of `AgentBoundary` contains this comment:
+
+```csharp
+protected override void BuildRenderTree(RenderTreeBuilder builder)
+{
+    // If Agent changes, the region key changes, causing Blazor to tear down
+    // and recreate all descendants. This is the same trick EditForm uses with
+    // EditContext. It lets us safely use IsFixed=true on the CascadingValue.
+    builder.OpenRegion(_context.GetHashCode());
+    builder.OpenComponent<CascadingValue<AgentContext>>(0);
+    builder.AddComponentParameter(1, "Value", _context);
+    builder.AddComponentParameter(2, "IsFixed", true);
+    // ...
+}
+```
+
+(Excerpted from [AgentBoundary.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Components/AgentBoundary.cs).)
+
+`EditContext` is a non-visual object that holds, for the interaction of editing a form, the model being edited (`Model`) along with "which fields have been modified" and "what the current validation messages are," and notifies about changes. `EditForm` creates it and hands it to its children, and input components read and write the model through it. `AgentContext` holds and notifies about "the sequence of turns" and "the current status" for an interaction with an agent, and `AgentBoundary` hands it to its children.
+
+Blazor already had a design in which <strong>a non-visual context owns the state of an interaction and hands it to the children that render</strong>. `EditContext` did it for form editing; `AgentContext` does it for interactions with an agent. A new problem is being answered in existing vocabulary.
+
+The correspondence is not complete, though. At the center of `EditContext` is the `Model` being edited, and `AgentContext` has no counterpart to it: the shared state, `AgentState<T>`, lives on `UIAgent<TState>`, and `AgentBoundary` does not cascade it. In the Dojo app's Shared State scenario, too, the recipe is handed down from the page as a parameter, and edits travel back through `RecipeChanged` before being written to `State.Value`. What `AgentBoundary` hands its children is the <strong>conversation</strong>, not the <strong>state</strong> that humans and the agent share.
+
+### 8.2 BlockRenderer is a data template
+
+`BlockRenderer<TBlock>` renders nothing by itself. All it does is register, into the `MessageListContext` received from `MessageList`, that "blocks of this type that satisfy this predicate are rendered with this Razor fragment."
+
+```csharp
+for (var i = _registrations.Count - 1; i >= 0; i--) // later registrations win
+{
+    var reg = _registrations[i];
+    if (reg.BlockType.IsAssignableFrom(block.GetType())
+        && (reg.When is null || reg.When(block)))
+    {
+        return reg.Render(block);
+    }
+}
+// Otherwise, default rendering: RichContentBlock as a bubble, FunctionApprovalBlock as the approval UI,
+// FunctionInvocationContentBlock as nothing (unknown blocks show their type name)
+```
+
+(Excerpted from `RenderBlock` in [MessageListContext.cs](https://github.com/dotnet/aspnetcore/blob/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI/src/Components/MessageListContext.cs).)
+
+Select by type, narrow by predicate, later registrations win. Anyone with WPF experience will be reminded of implicit `DataTemplate` resources keyed by `DataType`, and of `DataTemplateSelector`. The choice of rendering is left to the app's declarations; the `ContentBlock` knows nothing about how it will be drawn.
+
+The selection rules differ, though. WPF prefers the template for the most specific type, whereas `BlockRenderer` ignores type specificity and picks the last matching registration: a base-type renderer registered later hides a derived-type renderer registered earlier. And `When` is re-evaluated on every render, so the chosen template follows the block's state as it changes (WPF's `DataTemplateSelector` does not re-select when a property of the item changes).
+
+### 8.3 The intermediate model does not depend on Blazor
+
+The package's source is mainly split into four folders: `Engine` (`UIAgent`, `AgentContext`, `AgentState<T>`), `Blocks` (blocks and rich-text nodes), `Pipeline` (handlers and mapping), and `Components` (Razor components) (there is also `Attributes`, which holds attributes such as `[ToolBlock]`). In the code of the first three folders, the only `using` directives are `System.*`, `Microsoft.Extensions.AI`, and `Microsoft.Extensions.Logging`, and Blazor types such as `RenderFragment`, `ComponentBase`, `RenderHandle`, or `Dispatcher` are never used (except in examples inside documentation comments). Because the namespace is `Microsoft.AspNetCore.Components.AI`, types from the parent namespaces are implicitly in scope, but they are not actually referenced. The dependency on Blazor is confined to the `Components` folder. The tests reflect this: the engine layer is verified without any rendering. They plug in a test `IChatClient` that replays responses recorded once from a real provider, and run the engine against the shapes of real updates — "the first update is empty," "text arrives token by token," "usage arrives at the end."
+
+So in code, the intermediate model is neutral with respect to UI stacks. The package's affiliation is another matter, though. The namespace is `Microsoft.AspNetCore.Components.AI`, the package depends on `Microsoft.AspNetCore.Components.Web`, and the project declares `browser` as a supported platform.
+
+### 8.4 A thought experiment: rendering with WPF, MAUI, or Windows Forms
+
+Since the code is neutral, in principle the same intermediate model could be rendered by UI stacks other than Blazor. The correspondence looks like this:
+
+| Blazor AI components | WPF | .NET MAUI | Windows Forms |
+|---|---|---|---|
+| `BlockRenderer<TBlock>` (selected by type and `When`, later wins) | Implicit `DataTemplate` keyed by `DataType`, plus `DataTemplateSelector` (selection rules differ; see 8.2) | `DataTemplateSelector` | A factory creating a `UserControl` per type |
+| `ContentBlock.OnChanged` | A wrapper implementing `INotifyPropertyChanged` | Same | Same (`BindingList<T>` turns item changes into `ListChanged`) |
+| `AgentContext.RegisterOnBlockAdded` | Adding to an `ObservableCollection<T>` | Same | Adding to a `BindingList<T>` |
+| `InvokeAsync(StateHasChanged)` | `Dispatcher.InvokeAsync` | `MainThread.BeginInvokeOnMainThread` | `Control.BeginInvoke` |
+
+The last row is easy to overlook but important. Neither `ContentBlock` nor `AgentState<T>` knows about a dispatcher. Notifications are invoked synchronously on the thread that caused the change. That is why the AgenticUI sample writes `_agent.State.OnChanged(() => InvokeAsync(StateHasChanged))`: marshaling to the UI thread is the responsibility not of the intermediate model but of each UI stack. Thread affinity is something UI runtimes have always abstracted, and it is the right line for the intermediate model not to cross into it.
+
+This is also what Adaptive Cards has demonstrated. Adaptive Cards turn platform-agnostic snippets of UI written in JSON into native UI through the renderers the official documentation lists — Android, iOS, JavaScript, ASP.NET, WPF, Windows, and React Native. The pattern of one platform-agnostic description rendered naturally by several stacks has precedent (the difference in the level of what is described is covered in section 10).
+
+### 8.5 Could it move to Microsoft.Extensions.*?
+
+If the intermediate model is neutral with respect to UI stacks, it would not be surprising if it eventually moved to the `Microsoft.Extensions.*` side. This is my speculation, but there is material to go on.
+
+<strong>Reasons it could move.</strong> The code's dependencies are already confined to Microsoft.Extensions.AI's abstractions package (the project references `Microsoft.Extensions.AI.Abstractions`) and logging. And the design document limits its scope as follows:
+
+> Not in scope: Blocks, RichText AST, Pipeline, Engine internals and the `[ToolBlock]` source generator — the low-level layers are in good shape and are not revisited here.
+
+The team itself considers the lower layers "in good shape" and is concentrating the discussion on the UI layer.
+
+<strong>Reasons it is too early.</strong> That said, the post-POC list assigns homework to the lower layers too. Shared state and activities lie outside the Microsoft.Extensions.AI vocabulary (section 3), and neither block identity nor the recording of human writes is settled yet (section 11). The package is experimental, and the work to restore Components.AI references for .NET 12 Preview 1 is being tracked ([#69309](https://github.com/dotnet/aspnetcore/issues/69309)). If it does move, a shared-state vocabulary would probably have to enter the abstraction layer first.
+
+## 9. Why IChatClient is an interface and UIAgent is a class
+
+Once a boundary becomes public API, it has to be able to grow without breaking. Choosing between an interface and a class is choosing how it will grow. There is a clear consistency in how this stack makes that choice. Interfaces are used for only a subset of the boundaries that need polymorphism; from the point where the intermediate model is owned upward, it goes back to classes, abstract or concrete. I have not found a document in which the team states its reasons for this split, so what follows is my reading.
+
+### 9.1 The principles of the Framework Design Guidelines
+
+The .NET [Framework Design Guidelines](https://learn.microsoft.com/dotnet/standard/design-guidelines/interface) contain these guidelines:
+
+> Except for the situations described in these guidelines, you should, in general, choose classes rather than interfaces in designing managed code reusable libraries.
+
+> ❌ DO NOT add members to an interface that has previously shipped.
+
+> ✔️ CONSIDER defining an interface if you need to support its functionality on types that already inherit from some other type.
+
+The same page gives `IDisposable` as a typical case where an interface is needed, explaining that it "allows types to support disposability independent of any other inheritance hierarchy in which they want to participate."
+
+For reusable libraries, choose classes as a rule: adding a member to a shipped interface breaks existing implementations, so interfaces are for a common contract that includes value types, or for a capability independent of other inheritance hierarchies (an effect similar to multiple inheritance). (What is reprinted on Learn is the content of the 2nd edition from 2008; the book has since been revised into a 3rd edition.)
+
+### 9.2 Why IChatClient is an interface
+
+`IChatClient` is a textbook case of that exception. Chat clients are sometimes implemented directly on types that vendor SDKs already have. For example, OllamaSharp's `OllamaApiClient` is a class with its own API (`IOllamaApiClient`), yet it also implements `IChatClient` and `IEmbeddingGenerator<string, Embedding<float>>`. A single type satisfies several contracts at once: its own API, chat, and embedding generation. Since a type can inherit from only one base class, if `IChatClient` and `IEmbeddingGenerator` were both abstract classes, a single type could not serve as both a chat client and an embedding generator (the same holds when an SDK type already has a base class of its own).
+
+In exchange, `IChatClient` is frozen at three members. Microsoft.Extensions.AI's abstractions package also targets `netstandard2.0`, so the escape hatch of adding members later with C# 8 default interface methods is not available there. All evolution happens outside the interface.
+
+- New capabilities are discovered with `GetService`
+- New parameters are added to `ChatOptions`, which is a class (and there are `AdditionalProperties` and `RawRepresentationFactory`)
+- New kinds of content are added as subtypes in the `AIContent` class hierarchy (`ToolApprovalRequestContent` and `InputRequestContent` are examples)
+- Convenience APIs are added as extension methods (such as the `GetResponseAsync` overload that takes a single string)
+- New behaviors are added as middleware deriving from `DelegatingChatClient` (`FunctionInvokingChatClient`, or the AgenticUI sample's `FormattedChatClient`. `AGUIChatClient` also derives from `DelegatingChatClient`, but it does not take an inner client; it is a terminal client that assembles a `FunctionInvokingChatClient` and an AG-UI handler by itself)
+
+The interface is frozen as a small polymorphic seam, and everything that needs to evolve is represented as classes. It is the Framework Design Guidelines put straight into practice.
+
+Another difference lies in how state is held. The documentation of `IChatClient` expects implementations to be thread-safe for concurrent use. The conversation history is either passed as an argument on every call or kept on the service side via `ChatOptions.ConversationId`. Either way, an `IChatClient` instance itself holds no per-conversation state.
+
+### 9.3 Why UIAgent is a class
+
+`UIAgent` is the opposite: it is <strong>the owner of state and invariants</strong> — one conversation's history, the handler pipeline, the typed shared state. There is no need to swap in many implementations; if anything, the framework must guarantee its behavior consistently.
+
+Indeed, `UIAgent` has not a single public virtual member. The internal loop (`SendMessagesAsync`) is internal, and state mapping (`ApplyStateMapper`) and rejecting unresolved proposals (`RejectPendingPredictiveState`) are internal virtual, overridden by `UIAgent<TState>` only within the same assembly. The only way for an app to change behavior is not inheritance but composition through `UIAgentOptions`.
+
+- Add interpretations of blocks: `AddBlockHandler` (the generated `AddGeneratedToolBlocks` uses it too)
+- Register functions to run in the UI: `RegisterUIAction`
+- Provide the mapping to shared state: `StateMapper`
+- Provide a persistence target: `Thread`
+
+Because `UIAgentOptions` is a class, adding settings in future versions will not break existing code. Open the entry points for extension, close the inner loop: choosing a class makes it possible to keep this balance across versions.
+
+### 9.4 What was made an interface anyway
+
+So what is a public interface in this package? Only two things (there are a few more for internal implementation).
+
+- <strong>`IInteractiveBlock`</strong> — `FunctionApprovalBlock` and `UIActionBlock` are separate types that both derive from `ContentBlock`. The capability "pause the conversation" cuts across the block hierarchy, so it is represented by an interface rather than a base type. It is a capability interface of the same kind as `IDisposable`. Moreover, as we saw in section 4.4, an app that wants its own block has to derive from `FunctionInvocationContentBlock` or `ActivityContentBlock`, which carry the ID rules. The only way to make a custom block interactive is to layer the capability onto the existing hierarchy with an interface. Here the guideline about supporting functionality on types that already inherit from another type applies exactly
+- <strong>`IConversationThread`</strong> — the seam for swapping the persistence target. There is no implementation at all in the package; whether in memory or in a database, the implementation belongs to the app. But because it is an interface with seven members, adding a member later to "record human writes," as section 7.2 calls for, is hard. The package targets only .NET 11, so a member could technically be added with a default interface method — but a default implementation cannot store anything, so existing implementations would silently drop the new records (and a throwing default instead breaks at run time). If one is to be added, the cheapest time is before the package ships as stable. This is where the homework of section 7 and the principle of section 9 meet
+
+The AG-UI SDK follows the same rule. `IAGUITransport`, the seam for swapping transports, is a single-method interface, while `AGUIChatClient` itself is a sealed class.
+
+For comparison: MAF's `AIAgent` is a polymorphic boundary whose implementation varies by kind of agent, yet it is defined as an abstract class. With an abstract class, adding virtual members with default implementations later does not break existing derived types. So the principle here is not "if you need polymorphism, use an interface." In my reading, interfaces are used in only two cases:
+
+1. When <strong>a contract must be layered on independently of other inheritance hierarchies</strong> (`IChatClient`, `IInteractiveBlock`)
+2. When it is <strong>a small replaceable seam whose implementation is supplied by the app or the infrastructure</strong> (`IConversationThread`, `IAGUITransport` — close to the Microsoft.Extensions.* convention of taking seams as interfaces)
+
+Everything else — <strong>boundaries where the framework owns the default behavior and grows it over versions</strong> — is a class (`UIAgent`, `AgentContext`, `ContentBlock`, MAF's `AIAgent`). `IChatClient` meets the first condition; `UIAgent` meets neither.
+
+### 9.5 Choosing the type kind per boundary
+
+| Type | Kind | Condition | This essay's interpretation |
+|---|---|---|---|
+| `IChatClient` | interface | 1 | Must be layered onto SDK types that have other inheritance hierarchies and contracts. Frozen at three members; evolution happens outside |
+| `IAGUITransport` | interface | 2 | Seam for swapping transports; the infrastructure supplies the implementation |
+| `IConversationThread` | interface | 2 | Seam for swapping the persistence target; the app owns the implementation (add members before it ships as stable) |
+| `IInteractiveBlock` | interface | 1 | A capability cutting across the block hierarchy |
+| `AIAgent` (MAF) | abstract class | — | A polymorphic boundary, but evolves by adding default implementations |
+| `ContentBlock` | abstract class | — | Keeps identity and lifecycle settings inside the framework |
+| `ContentBlockHandler<TState>` | abstract class | — | An extension point; the set of transitions is closed by `BlockMappingResult<TState>` |
+| `UIAgent`, `UIAgent<TState>` | class (no public virtuals) | — | Owner of state and invariants; extended by composition through `UIAgentOptions` |
+| `AgentContext`, `AgentState<T>` | class | — | Owners of conversation progress and shared state |
+| `AGUIChatClient`, `ChatPage` | sealed class | — | Finished products; extended by composition (`DelegatingChatClient`, `AgentBoundary`, and so on) |
+
+Why is `IChatClient` an interface, and why is `UIAgent` a class? Laid out like this, neither choice is a matter of taste; both can be explained consistently from the nature of each boundary.
+
+## 10. Comparing other answers
+
+### 10.1 How much of the UI does the agent decide?
+
+As section 8.4 noted, `ContentBlock` is close in spirit to Adaptive Cards in that it hands the renderer a UI-stack-neutral description and leaves the final rendering to the host app.
+
+The <strong>level</strong> of what is passed differs, however. What Adaptive Cards pass is a tree of <strong>presentation elements</strong> such as `TextBlock`, `Image`, `Input.Text`, and `Action.Submit`. What `ContentBlock` passes is <strong>interaction semantics</strong> — "a call that needs approval," "a function that must run in the UI," "text that is still changing" — and it says essentially nothing about presentation (the exception is the content of text blocks, where the Markdown the model writes decides presentation structure such as paragraphs and tables; even then, it is app-side middleware that turns it into a node tree, and rendering goes through the default safety rules). What the rendering side needs to understand is not the details of the protocol but this meaning, which each technology stack can then render as natural UI.
+
+AG-UI's documentation classifies A2UI (Google), Open-JSON-UI (OpenAI), and MCP-UI (Microsoft and Shopify) as generative UI specifications, and states explicitly that AG-UI itself is not a generative UI specification but a user interaction protocol providing the bidirectional runtime connection between the agent and the application. Arranging these by how much of the UI the agent side decides gives this:
+
+| Approach | What the agent side decides | What the app side decides | Examples |
+|---|---|---|---|
+| Pass the screen itself | The whole screen, such as HTML | Where to embed it | MCP-UI (mainly iframe-based) |
+| Pass the presentation structure | A tree of elements | The look (theme, native components) | Adaptive Cards, A2UI, Open-JSON-UI |
+| Pass the interaction semantics | What is happening | Both structure and look | Blazor AI's `ContentBlock`, the Vercel AI SDK's typed tool parts |
+
+The more what the agent operates on is <strong>the app's own domain state</strong> (a recipe, a document, a plan), the more the way it is edited, validated, and constrained should belong to the app. You do not want the agent designing the input form for your business objects. That is why, for this essay's question — humans and agents operating on the same app state — passing semantics is the natural choice.
+
+Conversely, when you want to deliver UI across apps onto a chat platform like Teams, passing presentation structure is strong. The two are not mutually exclusive and can coexist on the `IChatClient` seam. In fact, the AG-UI .NET SDK repository also contains `AGUI.A2UI`, which adds A2UI surface generation as an `IChatClient` decorator (it is not among the five packages in the announcement). It is a server-side component that depends on `AGUI.Server`, though; there is currently no mechanism for rendering A2UI on the Blazor side.
+
+### 10.2 Convergence on a similar taxonomy
+
+The documentation of the TypeScript Vercel AI SDK classifies tool execution in chat into three patterns:
+
+1. Automatically executed server-side tools
+2. Automatically executed client-side tools
+3. Tools that require user interaction, such as confirmation dialogs
+
+It also has `approval-requested`, `approval-responded`, and `output-denied` as tool states, and with `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` it automatically sends the next request once all tool results are available. The UI-facing `UIMessage` is a type separate from model-facing messages, and tools become typed parts named `tool-${toolName}`.
+
+Compare that with the table in section 5.4, `AgentContext`'s continuation via `Task.WhenAll`, and typed blocks via `[ToolBlock]`, and a similar taxonomy lines up. Of course, this is not a fully independent discovery. The .NET side deliberately aligned itself with the scenarios of AG-UI's Dojo ([#68781](https://github.com/dotnet/aspnetcore/issues/68781), which I mention in the conclusion), and these ecosystems evolve while watching one another. Still, the fact that implementations in different languages and protocols have settled on similar divisions for where tools run and how humans decide suggests that the division is rooted in the structure of the problem rather than in the taste of a particular framework.
+
+## 11. What is not abstracted yet
+
+To be fair, here is what does not have an answer yet (or is deliberately deferred). The team itself tracks most of these in issues.
+
+- <strong>Merging concurrent edits</strong> — as in section 6.4, limited to whole-value replacement (last writer wins) and serialization of new requests
+- <strong>Stable identity</strong> — blocks from the same message share an ID, and `ConversationTurn.Id` is not assigned yet. This is also a prerequisite for virtualization ([#68383](https://github.com/dotnet/aspnetcore/issues/68383))
+- <strong>Rendering scope</strong> — the whole conversation is re-rendered on every token, and paragraph splitting is also rebuilt on every token ([#68389](https://github.com/dotnet/aspnetcore/issues/68389), [#68458](https://github.com/dotnet/aspnetcore/issues/68458))
+- <strong>Cancellation semantics</strong> — currently, a canceled turn has its response blocks cleared from the turn model (`ConversationTurn.ResponseBlocks`). The default `MessageList`, however, keeps its own list of blocks and does not subscribe to this clearing. If you cancel while an approval is pending, the loop ends but the approval block stays `Pending` (`ApprovalStatus` has no "cancelled" value). The design document says "stopped looks stopped rather than finished" and asks that stopping while an approval is pending resolve it as cancelled; a review that includes consistency with retry and history is being tracked ([#68385](https://github.com/dotnet/aspnetcore/issues/68385))
+- <strong>Replaying decisions, and persisting human writes to state</strong> — as in section 7, recorded approvals and UI action results are not restored into block state (and UI actions can be re-run). Neither accepting a proposal nor editing state directly is recorded, so both are lost on restore
+- <strong>Who decides, and with what authority</strong> — as in section 5.3, from the server's point of view an approval is the client's claim, and the approval response has no field identifying who decided. Nor is there any mechanism in this stack to restrict who may approve, so in apps where several people work on the same state, auditing and authorization have to be designed on the app and tool side
+- <strong>Partial failure and duplicated side effects</strong> — what `RetryAsync` resends is the request that started the turn, so a failure in a segment after an approval restarts from the original question. The runtime knows nothing about side effects the server may already have executed before the failure; the idempotency of tools lies outside the runtime. Moreover, because `UIAgent` does not remove a failed send from its history, the retried request contains the same question twice (retry and history are being reviewed in [#68385](https://github.com/dotnet/aspnetcore/issues/68385))
+- <strong>Notifying assistive technologies</strong> — how finely to announce the agent's writes (streaming responses, arriving approval requests) to screen readers is not implemented yet (the design document lists announcing streaming responses as a P0 item)
+- <strong>Mixed continuations</strong> — ordering and grouping when a single response needs both Tool-role and User-role continuations ([#68383](https://github.com/dotnet/aspnetcore/issues/68383))
+- <strong>Approval requests that do not require confirmation</strong> — support for `ToolApprovalRequestContent.RequiresConfirmation` ([#68765](https://github.com/dotnet/aspnetcore/issues/68765))
+- <strong>AG-UI's generic interrupts</strong> — there is no built-in block yet for non-tool interrupts (`InterruptRequestContent`). Since `Microsoft.AspNetCore.Components.AI` does not reference AG-UI, this will likely need a design at the level of Microsoft.Extensions.AI's `InputRequestContent`
+
+Put the other way around, most of these are refinements <strong>above</strong> or <strong>inside</strong> the intermediate model; they do not move the boundaries themselves (some, like shared state and recording human writes, wait for the vocabulary below to grow).
+
+## 12. Implications for app developers
+
+Finally, here are practical guidelines that follow from this design.
+
+1. <strong>Collect protocol dependencies in a few well-defined places.</strong> Confine AG-UI-specific code to the `StateMapper` and `ActivityHandler<TBlock>` on the receiving side and `ChatOptions.RawRepresentationFactory` on the sending side (`AGUIStreamOptions` on the server), and have components look only at `ContentBlock` and `AgentState<T>`
+2. <strong>Represent human decisions as blocks that pause the conversation, not as dialogs.</strong> Use `ApprovalRequiredAIFunction` for approvals and `RegisterUIAction` for execution in the UI. That way decisions are built into the conversation loop and are logged
+3. <strong>Decide where side effects run by the tool's type.</strong> Use server-side functions, automatically executed client-side `AIFunction`s, and declaration-only UI actions deliberately
+4. <strong>Receive the agent's writes as proposals.</strong> Treat shared state as immutable values, make the agent's changes proposals with `SetPredictiveState`, and let humans commit them. Pair each proposal with a block that pauses the conversation, such as a UI action registered with `RegisterUIAction`: `AgentContext` rejects unresolved proposals when the turn ends, so an unpaired proposal disappears before the human can act on it. Also assume that anything a human can edit while a response is streaming may be overwritten by a committed value that arrives later; make it read-only, or reconcile in the app
+5. <strong>Put the conversation's source of truth in the update log, and store committed shared state separately.</strong> If you implement `IConversationThread` to store raw updates, replay can keep up when rendering rules change. Given the limits in sections 7.1–7.2, though, store committed shared state yourself in the app (while a proposal is pending, `Value` returns the proposed value and the baseline is not exposed, so check `HasPendingPredictiveState` before saving), and render restored interactive blocks as non-actionable
+6. <strong>Do not rely on block ID uniqueness yet.</strong> Blocks from the same message can share an ID
+
+## Conclusion
+
+Componentization is one of the signs that a technology is maturing. Code that has been written over and over is, at some point, given names and boundaries and shaped into public API. Only then does it become possible to say what is essential and what varies from situation to situation.
+
+That is why it matters that the .NET team has taken the interaction patterns the AG-UI community distilled from practice and, on top of the existing Microsoft.Extensions.AI vocabulary, worked them out down to the level of public API in the AG-UI .NET SDK and Blazor. Below `IChatClient`, "how it was communicated"; in the Razor components, "how it is rendered"; and in between, `ContentBlock`'s lifecycle, `IInteractiveBlock`'s suspension points, the locality of side effects determined by tool types, `AgentState<T>`'s commits and proposals, and `IConversationThread`'s update log. The parts that can be reused for a long time have been given names and boundaries.
+
+Not everything inside is finished, of course (section 11). Above all, human edits to state and the acceptance of proposals do not yet enter the log. In the skeleton of "who commits what, and when," <strong>one bone is still missing: a record of what the human side commits</strong>. The package is `0.1.0-preview.1` and explicitly experimental. Even so, the <strong>skeleton</strong> — which layer is responsible for what — is already shown in the form of public API.
+
+So I think these announcements are better taken not as "AI chat UI has become a product" but as <strong>"the skeleton of the intermediate model that agentic applications need has now been designed, at least in outline."</strong>
+
+There are two pieces of support for that. One is that the team itself considers the lower layers "in good shape" and has moved the center of the discussion to the UI layer. The later post-POC list does assign homework to the lower layers, but its items — how identities are assigned, retry and history, persisting proposals — refine what is inside the layers rather than move the boundaries between them (section 11).
+
+The other is that the Dojo app reproduces the seven scenarios familiar from AG-UI's Dojo (the demo collection CopilotKit publishes, from Agentic Chat to Predictive State Updates), and there is even an issue to "make our scenarios look like existing dojo app" ([#68781](https://github.com/dotnet/aspnetcore/issues/68781)). These scenarios are a list of representative patterns that the community has distilled from practice for human–agent collaboration, and the Blazor post itself says the components are "informed by the AG-UI interaction model." Rather than independent validation, this is evidence that a catalog distilled from practice can be expressed in a single intermediate model. You could also say that what to abstract became visible through practice, and has finally been given names.
+
+What the UI runtime of an app where agents and humans touch the same state should abstract is not pixels. It is <strong>who writes, who decides, and when it becomes final</strong>. The Blazor AI components and the AG-UI .NET SDK are, I think, an answer to that question that shows where the boundaries go, all the way down to public API.
+
+## References
+
+- [Build Agentic UI with the new Blazor AI components](https://devblogs.microsoft.com/dotnet/build-agentic-ui-blazor/) — the announcement of the Blazor AI components
+- [AG-UI Protocol now has a first-class .NET SDK](https://devblogs.microsoft.com/dotnet/ag-ui-dotnet-sdk/) — the announcement of the AG-UI .NET SDK
+- [danroth27/AgenticUI](https://github.com/danroth27/AgenticUI) — the sample accompanying the post
+- [src/Components/AI in dotnet/aspnetcore](https://github.com/dotnet/aspnetcore/tree/f0433957fb5acd830e26ca86e53c59650d7611cb/src/Components/AI) — source of the Blazor AI components (`Engine`, `Blocks`, `Pipeline`, `Components`, the source generator, and the Dojo test apps)
+- [dotnet/aspnetcore#68227 Components.AI built-in UIs](https://github.com/dotnet/aspnetcore/issues/68227) — what this essay calls the design document and the post-POC list (requirements, design decisions, user journeys, requirements backlog, and post-POC areas for improvement for the built-in UI)
+- [sdks/dotnet in ag-ui-protocol/ag-ui](https://github.com/ag-ui-protocol/ag-ui/tree/36447b41b05df704404e8f3227eb42bde25fc9e7/sdks/dotnet) — source of the AG-UI .NET SDK (`AGUIChatClient`, `EventStreamConverter`, `AGUIStreamOptions`, and more)
+- [AG-UI: Generative UI](https://docs.ag-ui.com/concepts/generative-ui-specs) — the relationship between AG-UI and generative UI specifications
+- [Microsoft.Extensions.AI source](https://github.com/dotnet/extensions/tree/044734ee0922038cd5a2b381ed7da3ad4d8fe0fe/src/Libraries) — `IChatClient`, the `AIContent` subtypes, `FunctionInvokingChatClient`
+- [AIAgent in Microsoft Agent Framework](https://github.com/microsoft/agent-framework/blob/3a837e3272268217fcc8d588700cf6e78fc413ef/dotnet/src/Microsoft.Agents.AI.Abstractions/AIAgent.cs) — MAF's abstract base class
+- [Framework Design Guidelines: Interface Design](https://learn.microsoft.com/dotnet/standard/design-guidelines/interface) — guidelines on choosing between classes and interfaces
+- [Adaptive Cards Overview](https://learn.microsoft.com/adaptive-cards/) — platform-agnostic snippets of UI and native renderers
+- [AI SDK: Chatbot Tool Usage](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage) and [Chatbot Message Persistence](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence) — the Vercel AI SDK's taxonomy of tool execution and its persistence
+- Jim Waldo, Geoff Wyant, Ann Wollrath, Sam Kendall. *A Note on Distributed Computing*. Sun Microsystems Laboratories, SMLI TR-94-29, 1994 (reprinted in LNCS 1222, 1997, [doi:10.1007/3-540-62852-5_6](https://doi.org/10.1007/3-540-62852-5_6))
+- Related posts on this blog: [AG-UI Protocol Deep Dive](/en/blog/ag-ui-protocol), [Microsoft Agent Framework Deep Dive](/en/blog/agent-framework), [Understanding the Middleware Chain as an Implementation Pattern](/en/blog/middleware-chain-pattern)
