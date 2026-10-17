@@ -226,3 +226,4 @@ export { ResidencyMatchVisualizer } from "./ResidencyMatchVisualizer";
 export { MatchingTimeline } from "./MatchingTimeline";
 export { SchoolChoiceTradeoff } from "./SchoolChoiceTradeoff";
 export { OntologyInterpretationMap, SemanticViewWalkthrough } from "./OntologyLabs";
+export { JudgeGateSimulator } from "./JudgeGateSimulator";

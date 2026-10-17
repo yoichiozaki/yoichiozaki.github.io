@@ -198,6 +198,7 @@ import {
   SchoolChoiceTradeoff,
   OntologyInterpretationMap,
   SemanticViewWalkthrough,
+  JudgeGateSimulator,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -408,6 +409,7 @@ function getMdxComponents(locale: string) {
     SchoolChoiceTradeoff: () => <SchoolChoiceTradeoff locale={locale} />,
     OntologyInterpretationMap: () => <OntologyInterpretationMap locale={locale} />,
     SemanticViewWalkthrough: () => <SemanticViewWalkthrough locale={locale} />,
+    JudgeGateSimulator: () => <JudgeGateSimulator locale={locale} />,
   };
 }
 
