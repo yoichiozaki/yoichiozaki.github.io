@@ -41,6 +41,11 @@ export const SECTIONS: Record<string, SectionDef> = {
         "けん引役はコーディングエージェントの Claude Code と、その仕組みを知識労働に広げた Claude Cowork だ。",
         "The drivers are the coding agent Claude Code and Claude Cowork, which extends the same mechanism to knowledge work.",
       ),
+      vendor: t("計算資源の売り手が、買い手の資金繰りまで面倒を見る", "The seller of compute is also arranging the buyer's financing."),
+      rd: t(
+        "S-1 の機能別費用の内訳では、2026 年上期の研究開発費は 97 億ドルで、売上の 60% にあたる。",
+        "In the S-1's functional breakdown of expenses, research and development in the first half of 2026 was USD 9.7 billion, or 60% of revenue.",
+      ),
     },
   },
   "2.3": {
@@ -54,6 +59,12 @@ export const SECTIONS: Record<string, SectionDef> = {
         "WSJ が報じた OpenAI の調達難は、この連鎖の入口に負担が表れた例と読める。",
         "OpenAI's fundraising difficulty reported by the WSJ can be read as strain showing up at the entrance of the chain.",
       ),
+    },
+  },
+  "2.4": {
+    title: t("Anthropic と OpenAI は、チェーンのどこが違うのか", "Where in the chain do Anthropic and OpenAI differ?"),
+    points: {
+      links: t("違いは 3 つの環に集約できる。", "The differences come down to three links."),
     },
   },
   "3.1": {
@@ -98,6 +109,19 @@ export const SECTIONS: Record<string, SectionDef> = {
         "AI の計算資源を供給する側も、自社の営業キャッシュフローだけでは投資を賄いきれなくなりつつある。",
         "Even the suppliers of AI compute are finding it increasingly hard to fund their investment from operating cash flow alone.",
       ),
+      depreciation: t(
+        "AI 向けの計算資源の世代交代が 1〜2 年で進むなかで、6 年という前提がどこまで持つかは、ハイパースケーラーの利益の質を左右する。",
+        "With AI compute turning over a generation every one to two years, how long a six-year assumption holds will shape the quality of the hyperscalers' earnings.",
+      ),
+    },
+  },
+  "3.6": {
+    title: t("供給網と政治", "Supply chains and politics"),
+    points: {
+      copyright: t(
+        "Anthropic は書籍の著者らとの集団訴訟（Bartz 訴訟）で 15 億ドルの和解金を 2025 年 7〜9 月期に計上した。",
+        "Anthropic recorded a USD 1.5 billion settlement in the class action brought by book authors (the Bartz case) in July–September 2025.",
+      ),
     },
   },
   "4.1": {
@@ -110,6 +134,14 @@ export const SECTIONS: Record<string, SectionDef> = {
       cooling: t(
         "この水準では、ラック内の配電を 800 V の直流に切り替え、液冷を標準にするしかない。",
         "At these levels, power distribution in the rack has to move to 800 V DC and liquid cooling has to become standard.",
+      ),
+      distributed: t(
+        "複数のサイトにまたがる分散学習: Microsoft の AI WAN、Google の Decoupled DiLoCo のように、離れたサイトを 1 つの学習に使う",
+        "Distributed training across sites: using distant sites for a single training run, as with Microsoft's AI WAN and Google's Decoupled DiLoCo",
+      ),
+      flex: t(
+        "需要側の柔軟性は早く効くが、使えるのは学習のように後回しにできる負荷に限られ、顧客を待たせられない推論には向かない。",
+        "Demand flexibility works quickly, but it applies only to loads that can be deferred, such as training, and suits inference poorly, since customers cannot be kept waiting.",
       ),
     },
   },
@@ -154,6 +186,7 @@ export const SECTIONS: Record<string, SectionDef> = {
         "第 5 章で扱う推論時計算や、エージェントの長い文脈は、KV キャッシュ（過去のトークンの中間状態）を膨らませ、この壁をさらに高くする。",
         "Inference-time compute (discussed in Chapter 5) and long agent contexts swell the KV cache (the intermediate state for past tokens), raising the wall further.",
       ),
+      responses: t("業界の対応は 4 つに分かれる。", "The industry has responded in four ways."),
     },
   },
   "4.5": {
@@ -266,8 +299,8 @@ export const SECTIONS: Record<string, SectionDef> = {
         "One set raises the model's capability (pretraining, reinforcement learning, algorithmic efficiency), and its cost is paid up front, as training and research cost.",
       ),
       perUse: t(
-        "もう 1 つはモデルを仕事に使う側のレバー（推論時計算とハーネス）で、費用は主に、使うたびに推論費として出る。",
-        "The other set puts the model to work (inference-time compute and the harness), and its cost arrives mainly with each use, as inference cost.",
+        "もう 1 つはモデルを仕事に使う側のレバー（推論時計算とハーネス）で、費用は前払いの学習費ではなく、主に推論費として出る。",
+        "The other set puts the model to work (inference-time compute and the harness), and its cost shows up not as up-front training cost but mainly as inference cost.",
       ),
       perToken: t(
         "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",
@@ -322,6 +355,10 @@ export const SECTIONS: Record<string, SectionDef> = {
         "事前学習の費用は、モデルが売れる期間をかけて後から回収しなければならない。",
         "the cost of pretraining has to be recovered afterwards, over the period in which the model sells.",
       ),
+      inferenceRecovery: t(
+        "回収が先送りにならない推論時計算のほうが、チェーンの後半を予測しやすくする",
+        "Because its recovery is not deferred, inference-time compute makes the back half of the chain more predictable",
+      ),
     },
   },
   "6.2": {
@@ -351,6 +388,16 @@ export const SECTIONS: Record<string, SectionDef> = {
       training: t("(5) 学習への投資が回収できていること。", "(5) Investment in training is being recovered."),
     },
   },
+  "6.4": {
+    title: t("OpenAI と Anthropic を、この 5 項目で比べる", "Comparing OpenAI and Anthropic on these five points"),
+    points: {
+      openai: t("OpenAI が示す必要があるのは、主に (1)(2)(4) である。", "What OpenAI needs to show is mainly (1), (2) and (4)."),
+      anthropic: t(
+        "Anthropic が示す必要があるのは、主に (2)(3) が続くことと、リースへ移っても (4) の釣り合いを保てることである。",
+        "What Anthropic needs to show is mainly that (2) and (3) persist, and that (4) stays in balance as it shifts toward leases.",
+      ),
+    },
+  },
   "7.1": {
     title: t("Microsoft のチェーン", "Microsoft's chain"),
     points: {
@@ -358,6 +405,34 @@ export const SECTIONS: Record<string, SectionDef> = {
       leases: t(
         "リースという形で、将来の営業キャッシュフローを当てにして資本を先に使っている",
         "through leases, it is spending capital in advance, counting on future operating cash flow.",
+      ),
+    },
+  },
+  "7.2": {
+    title: t("OpenAI との違い", "How it differs from OpenAI"),
+    points: {
+      coupled: t(
+        "OpenAI の環 1（資本調達）は、Microsoft の環 6〜7（需要と売上）に直結している",
+        "OpenAI's link 1 (capital raising) feeds directly into Microsoft's links 6–7 (demand and revenue).",
+      ),
+    },
+  },
+  "7.3": {
+    title: t("Microsoft は何に賭けているのか", "What Microsoft is betting on"),
+    points: {
+      weakness: t(
+        "Microsoft の弱点は、OpenAI のような存続にかかわるリスクではなく、この余力が少しずつ削られていくことにある。",
+        "Microsoft's weakness is not an existential risk like OpenAI's, but the gradual erosion of this headroom.",
+      ),
+    },
+  },
+  "8": {
+    title: t("2030 年までに何を見ればよいか", "What to watch through 2030"),
+    points: {
+      growth: t("能力の向上が売上に変わる速さ", "How fast capability gains turn into revenue"),
+      knowledge: t(
+        "エージェントが知識労働の多くの仕事に広がり、推論の需要が供給を上回り続ける。",
+        "Agents spread to much of knowledge work, and inference demand keeps exceeding supply.",
       ),
     },
   },

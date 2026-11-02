@@ -280,7 +280,7 @@ function detailCounts(detail: Detail | undefined, locale: Locale): string {
   const sources = detail.links?.length ?? 0;
   const passages = groupRefs(detail.refs).reduce((n, g) => n + g.items.length, 0);
   const parts = [
-    sources > 0 && (isJa ? `出典 ${sources} 件` : `${sources} source${sources > 1 ? "s" : ""}`),
+    sources > 0 && (isJa ? `資料 ${sources} 件` : `${sources} reference${sources > 1 ? "s" : ""}`),
     passages > 0 && (isJa ? `本文 ${passages} か所` : `${passages} passage${passages > 1 ? "s" : ""} in the article`),
   ].filter(Boolean);
   return parts.join(isJa ? "・" : " · ");

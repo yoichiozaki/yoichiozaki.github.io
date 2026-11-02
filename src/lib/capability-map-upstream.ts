@@ -12,7 +12,11 @@ export const RESOURCES: GroupDef = {
       "計算資源のもとになるもの。資金、チップ、電力と用地、それらを動かす運用からなる。",
       "What compute is built from: money, chips, power and sites, and the operations that keep them running.",
     ),
-    refs: ["2.2:finance", "4.7:outside"],
+    note: t(
+      "2023 年の制約は GPU と CoWoS だったが、2026 年には電力、HBM、データセンター、資本に移った。どれも増強に年単位の時間がかかり、確保するための支払い義務は売上より何年も先行する。",
+      "The binding constraints moved from GPUs and CoWoS in 2023 to power, HBM, data centres and capital in 2026. All take years to expand, and the obligations taken on to secure them run years ahead of revenue.",
+    ),
+    refs: ["4.7:outside", "2.3", "2.2:finance"],
     links: [S.epochDataCenters, S.iea, S.s1],
   },
   children: [
@@ -21,7 +25,11 @@ export const RESOURCES: GroupDef = {
       t("資金", "Funding"),
       {
         summary: t("計算資源を買ったり借りたりするためのお金。", "Money to buy or rent compute."),
-        refs: ["3.5"],
+        note: t(
+          "次の巨額の資本を集める条件は、能力への期待からユニットエコノミクスの証明に移った。1 回の調達額は数百億ドルを超え、それを出せる相手は限られる。計算資源を売るハイパースケーラー自身も、外部資本に頼り始めた。",
+          "The condition for raising the next round has shifted from expectations about capability to proof of unit economics. Single raises now run to tens of billions of dollars, few parties can supply that much, and the hyperscalers selling the compute have begun to rely on outside capital themselves.",
+        ),
+        refs: ["3.5", "6.2:market", "6.3:revenuePerCompute"],
         links: [S.wsj, S.s1, S.goog10q],
       },
       [
@@ -31,10 +39,10 @@ export const RESOURCES: GroupDef = {
           "Cash from the core business; it decides whether investment can continue without outside money.",
         ),
         note: t(
-          "Microsoft の 2026 会計年度の営業キャッシュフローは 1,829 億ドル。設備投資 1,159 億ドルを払っても FCF が残る。",
-          "Microsoft's operating cash flow in fiscal 2026 was USD 182.9 billion, leaving FCF even after USD 115.9 billion of capex.",
+          "Microsoft の 2026 会計年度の営業キャッシュフローは 1,829 億ドル。設備投資 1,159 億ドルを払っても FCF が残る。ただし、営業キャッシュフローのうち FCF として残る割合は 2023 会計年度の 68% から 37% に下がり、Amazon（過去 12 か月）と Alphabet（2026 年 1〜9 月）では設備投資が営業キャッシュフローを上回った。",
+          "Microsoft's operating cash flow in fiscal 2026 was USD 182.9 billion, leaving FCF even after USD 115.9 billion of capex. But the share of operating cash flow left as FCF fell from 68% in fiscal 2023 to 37%, and at Amazon (trailing twelve months) and Alphabet (January–September 2026) capex exceeded operating cash flow.",
         ),
-        refs: ["7.1:selfFunded"],
+        refs: ["7.1:selfFunded", "3.5", "7.3:weakness"],
         links: [S.msft10k, S.msft10q],
       }),
       item("external-capital", t("出資・上場・借入", "Equity, IPOs and debt"), {
@@ -43,7 +51,7 @@ export const RESOURCES: GroupDef = {
           "Anthropic は 2026 年上期に 1,100 億ドル超を調達した。OpenAI の 10 月の調達は目標に届かず（報道）、Alphabet は株式と借入に、Amazon は借入に頼り始めた。",
           "Anthropic raised more than USD 110 billion in H1 2026. OpenAI's October round fell short of its target (reported), while Alphabet has turned to equity and debt, and Amazon to debt.",
         ),
-        refs: ["3.5", "6.2:lenders"],
+        refs: ["3.5", "6.2:lenders", "2.2:vendor"],
         links: [S.wsj, S.decoderOpenAI, S.cnbcRound, S.s1, S.goog10q, S.amzn10q],
       }),
       item("contracts", t("長期契約・リース", "Contracts and leases"), {
@@ -107,8 +115,8 @@ export const RESOURCES: GroupDef = {
             "Using fewer bits per number to compute more with the same circuits and power.",
           ),
           note: t(
-            "学習は BF16 から FP8 へ、推論は FP4 へ移った。4 ビットより下げる余地は小さい。",
-            "Training moved from BF16 to FP8 and inference to FP4; little room is left below 4 bits.",
+            "学習の手順を公開している開発元では、学習は BF16 から FP8 へ、推論は FP4 へ移った。4 ビットより下げる余地は小さい。",
+            "Among developers that publish their recipes, training moved from BF16 to FP8 and inference to FP4; little room is left below 4 bits.",
           ),
           refs: ["4.2:returns"],
           links: [S.deepseekV3, S.nvfp4, S.precisionLaws, S.gptOss],
@@ -139,10 +147,10 @@ export const RESOURCES: GroupDef = {
         item("grid", t("電力（発電・系統接続）", "Power and grid"), {
           summary: t("発電所と、系統への接続。2026 年の最大の制約の 1 つ。", "Generation and grid connections — one of the biggest constraints in 2026."),
           note: t(
-            "1 つのサイトの規模が GW 単位になった。GE Vernova のガスタービンは 2031 年まで受注で埋まっていると報じられている。",
-            "Single sites are now measured in gigawatts; GE Vernova's gas turbines are reportedly booked through 2031.",
+            "1 つのサイトの規模が GW 単位になった。GE Vernova のガスタービンは 2031 年まで受注で埋まっていると報じられている。すぐに効く手は需要側の柔軟性で、新しい大口需要が年間の電力使用の 0.25〜1% にあたる抑制を受け入れれば、米国の既存の系統に 76〜126 GW をつなげるという試算がある（Duke 大学）。",
+            "Single sites are now measured in gigawatts; GE Vernova's gas turbines are reportedly booked through 2031. The quick lever is demand flexibility: if new large loads accept curtailment of 0.25–1% of their annual use, the existing U.S. grid could take on 76–126 GW more (Duke University).",
           ),
-          refs: ["4.1"],
+          refs: ["4.1", "4.1:flex"],
           links: [S.epochDataCenters, S.iea, S.lbnl, S.duke, S.googleFlexible],
         }),
         item("cooling", t("冷却・水", "Cooling and water"), {
@@ -192,11 +200,11 @@ export const RESOURCES: GroupDef = {
         item("mfu", t("FLOP 利用率（MFU）", "MFU (FLOP utilization)"), {
           summary: t("チップの理論性能のうち、学習で実際に引き出せた割合。", "The share of a chip's peak performance actually used in training."),
           note: t(
-            "Meta は Llama 4 の最大のモデルを FP8 で事前学習し、GPU 1 基あたり 390 TFLOPS を出したと公表した。",
-            "Meta reported 390 TFLOPS per GPU when pretraining its largest Llama 4 model in FP8.",
+            "Meta は Llama 3 の事前学習（最大 1.6 万基の H100、BF16）で、GPU 1 基あたり 380〜430 TFLOPS、MFU にして 38〜43% を報告した。精度を下げると理論性能が上がるので、同じ TFLOPS でも MFU は低く出る。",
+            "Meta reported 380–430 TFLOPS per GPU — 38–43% MFU — for Llama 3 pretraining on up to 16,000 H100s in BF16. Lower precision raises the peak, so the same TFLOPS means a lower MFU.",
           ),
           refs: ["4.2:llama4"],
-          links: [S.metaLlama4, S.palm],
+          links: [S.llama3, S.metaLlama4, S.palm],
         }),
         item("recovery", t("故障からの再開", "Recovery from failures"), {
           summary: t(
@@ -204,9 +212,10 @@ export const RESOURCES: GroupDef = {
             "In runs on tens of thousands of chips, failures are routine; saving state and restarting quickly decides how much compute is actually usable.",
           ),
           note: t(
-            "Meta は、最大 1.6 万基の H100 を使った Llama 3 の事前学習で、54 日間に 466 回の中断があり、そのうち 419 回は予期しないものだったと報告した。",
-            "Meta reported 466 job interruptions in a 54-day stretch of Llama 3 pretraining on up to 16,000 H100s, 419 of them unexpected.",
+            "Meta は、最大 1.6 万基の H100 を使った Llama 3 の事前学習で、54 日間に 466 回の中断があり、そのうち 419 回は予期しないものだったと報告した。Google DeepMind の Decoupled DiLoCo は、学習を独立した計算の「島」に分けて非同期に進め、1 つの島が止まってもほかの島が学習を続けられるようにした。",
+            "Meta reported 466 job interruptions in a 54-day stretch of Llama 3 pretraining on up to 16,000 H100s, 419 of them unexpected. Google DeepMind's Decoupled DiLoCo splits a run into asynchronous islands of compute, so the other islands keep training when one goes down.",
           ),
+          refs: ["4.1:distributed"],
           links: [S.llama3, S.diloco],
         }),
       ],
@@ -248,7 +257,10 @@ export const SIZE: GroupDef = {
   children: [
     item("params", t("パラメータ数（総数）", "Total parameters"), {
       summary: t("モデルが持つパラメータの総数。知識を蓄える容量に近い。", "All of a model's parameters — roughly its capacity to store knowledge."),
-      note: t("Kimi K2 の総パラメータは 1 兆。", "Kimi K2 has 1 trillion parameters in total."),
+      note: t(
+        "Kimi K2 の総パラメータは 1 兆（1 トークンあたりの稼働は 320 億）。OpenAI、Anthropic、xAI の非公開モデルはパラメータ数も構造も公表しておらず、Google も疎の MoE であることしか明かしていない。",
+        "Kimi K2 has 1 trillion parameters in total (32 billion active per token). OpenAI's, Anthropic's and xAI's closed models disclose neither parameter counts nor architecture; Google says only that its models are sparse MoEs.",
+      ),
       refs: ["4.6:moe"],
       links: [S.kimiK2, S.kaplan],
     }),
@@ -309,10 +321,10 @@ export const STAGES: GroupDef = {
             "Predicting the next token over vast amounts of text to build the base of knowledge and language.",
           ),
           note: t(
-            "損失の下がり方はべき乗則で予測しやすいが、それがどの能力として現れるかは読みにくい。制約は電力と、人間が書いた公開テキストの枯渇。",
-            "How loss falls is predictable from power laws, but which capabilities emerge is hard to read; the limits are power and running out of public human-written text.",
+            "損失の下がり方はべき乗則で予測しやすいが、それがどの能力として現れるかは読みにくい。制約は電力と、人間が書いた公開テキストの枯渇。費用は前払いで、モデルがフロンティアにいる短い期間のうちに回収するしかない。",
+            "How loss falls is predictable from power laws, but which capabilities emerge is hard to read; the limits are power and running out of public human-written text. The cost is paid up front and has to be recovered in the short time a model stays at the frontier.",
           ),
-          refs: ["5.2:loss", "5.2:slowing", "5.2:data"],
+          refs: ["5.2:loss", "5.2:slowing", "5.2:data", "5.3:recover"],
           links: [S.kaplan, S.chinchilla, S.epochScaling, S.villalobos],
         }),
         item("sft", t("教師あり微調整・蒸留", "Fine-tuning and distillation"), {
@@ -357,11 +369,11 @@ export const STAGES: GroupDef = {
             "Learning multi-step, tool-using work by trial and error inside environments — which also teaches the model how to work inside a harness.",
           ),
           note: t(
-            "伸ばし続けられるかどうかは、採点できる課題と環境の数で決まる。",
-            "How far it can keep growing depends on how many gradable tasks and environments exist.",
+            "伸ばし続けられるかどうかは、採点できる課題と環境の数で決まる。xAI は Grok 4 を、道具を使うように強化学習で学ばせ、検証できる学習データを数学とコード中心から多くの分野へ広げたとしている。",
+            "How far it can keep growing depends on how many gradable tasks and environments exist. xAI says it trained Grok 4 with RL to use tools and widened its verifiable training data from mostly math and code to many more domains.",
           ),
           refs: ["5.2:rl"],
-          links: [S.sweRl, S.sweGym, S.kimiK2],
+          links: [S.sweRl, S.sweGym, S.kimiK2, S.grok4],
         }),
       ],
     ),
@@ -370,30 +382,30 @@ export const STAGES: GroupDef = {
       t("推論（モデルを動かす）", "Inference (runs the model)"),
       {
         summary: t(
-          "1 件の仕事に使う計算を増やし、その場で出来を上げる。費用は使うたびにかかるが、使った分はトークン単位の売上にもなる。",
-          "Spending more compute on each job to raise quality on the spot; the cost arrives with each use, but that use also earns per-token revenue.",
+          "1 件の仕事に使う計算を増やし、その場で出来を上げる。動かす計算資源は前もって契約した固定費だが、使った分はその場でトークン単位の売上になるので、学習費のように回収が先送りにならない。",
+          "Spending more compute on each job to raise quality on the spot. The capacity it runs on is a pre-committed fixed cost, but what is used turns into per-token revenue at once, so recovery is not deferred as it is for training.",
         ),
-        refs: ["5.2:perUse", "5.2:perToken", "5.3:answer"],
+        refs: ["5.2:perUse", "5.2:perToken", "5.3:inferenceRecovery", "5.3:answer"],
         links: [S.o1, S.testTimeCompute, S.priceOfProgress],
       },
       [
         item("depth", t("深さ：長く考える", "Depth: think longer"), {
           summary: t("回答の前に長く考えさせる。", "Letting the model think longer before answering."),
           note: t(
-            "課題ごとに、考える量の対数に比例して正答率が伸びる。AIME 2024 での o1 の正答率は、1 回の回答で 74% だった。",
-            "Accuracy rises with the logarithm of thinking compute, task by task; o1 solved 74% of AIME 2024 with a single answer.",
+            "課題ごとに、考える量の対数に比例して正答率が伸びる。考える過程が言葉として外に出ていることは、モデルの意図を監視する手段にもなっている。トークンを出さずに内部で考える再帰的な深さに移ると、それが損なわれるおそれがある。",
+            "Accuracy rises with the logarithm of thinking compute, task by task. Reasoning written out in words also lets people monitor a model's intent; recurrent depth, which thinks internally without emitting tokens, could undermine that.",
           ),
-          refs: ["4.6:tts", "4.6:o1", "5.2:ord"],
+          refs: ["4.6:tts", "4.6:o1", "5.2:ord", "4.6:monitor"],
           links: [S.o1, S.recurrentDepth, S.cotMonitorability],
         }),
         item("width", t("幅：並列に考えて選ぶ", "Width: sample and select"), {
           summary: t("答えを並列に複数出し、多数決や採点で選ぶ。", "Producing several answers in parallel and picking one by vote or grader."),
           note: t(
-            "o1 の正答率は、64 回の多数決で 83%、1,000 個の候補を学習済みの採点関数で選ぶと 93% になった。",
-            "o1 reached 83% with a 64-sample majority vote and 93% when a learned scorer picked from 1,000 samples.",
+            "xAI は、並列に考えさせる計算で複数の仮説を同時に検討させる Grok 4 Heavy を、上位のプランで売っている。考える幅も、考える深さと同じく製品の価格差になる。",
+            "xAI sells Grok 4 Heavy, which uses parallel test-time compute to weigh several hypotheses at once, in a premium tier: breadth of thinking, like depth, becomes a price tier.",
           ),
           refs: ["4.6:o1", "4.6:tts"],
-          links: [S.o1, S.selfConsistency, S.verifiers, S.testTimeCompute],
+          links: [S.o1, S.selfConsistency, S.verifiers, S.testTimeCompute, S.grok4],
         }),
         item("ttt", t("テスト時学習", "Test-time training"), {
           summary: t(

@@ -18,10 +18,10 @@ export const EDGES: EdgeDef[] = [
         "Compute per dollar and per watt, set by chip generation, lower precision, memory, packaging and how well the fleet is run.",
       ),
       note: t(
-        "長期的には指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。ただし、電力を増やして得た分は、1 チップあたりの性能を上げても 1 ワットあたりの効率は上げない。",
-        "It improves exponentially over the long run, but in steps with each generation. Most of the per-chip performance gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory — and the added power raises performance per chip, not per watt.",
+        "長期的には指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。ただし、電力を増やして得た分は、1 チップあたりの性能を上げても 1 ワットあたりの効率は上げない。世代交代が 1〜2 年で進むと、古いチップは減価償却が終わる前に経済的に古くなる。",
+        "It improves exponentially over the long run, but in steps with each generation. Most of the per-chip performance gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory — and the added power raises performance per chip, not per watt. With a new generation every one to two years, older chips become economically obsolete before they are fully depreciated.",
       ),
-      refs: ["4.3:gains", "4.7:tokens"],
+      refs: ["4.3:gains", "4.7:tokens", "3.5:depreciation"],
       links: [S.epochScaling, S.nvidiaRubin],
     },
   },
@@ -39,11 +39,11 @@ export const EDGES: EdgeDef[] = [
         "How compute is split among pretraining, RL, inference and research experiments; the same compute buys different capability depending on the split.",
       ),
       note: t(
-        "Toby Ord の分析では、AIME の正答率を 20% から 80% に上げるのに、推論時の計算なら約 100 倍の増加で済むが、強化学習の計算では約 1 万倍が必要になる（推定の幅は大きい）。",
-        "Toby Ord estimates that raising AIME accuracy from 20% to 80% takes about 100x more inference compute but about 10,000x more RL compute (with wide uncertainty).",
+        "Toby Ord の分析では、AIME の正答率を 20% から 80% に上げるのに、推論時の計算なら約 100 倍の増加で済むが、強化学習の計算では約 1 万倍が必要になる（推定の幅は大きい）。2026 年上期の Anthropic は、研究開発費（大半はモデル開発、研究、社内利用のための計算資源費）が 97 億ドルで売上の 60%、顧客向けの推論が大半を占める売上原価が 23.8 億ドルで売上の 15% だった。",
+        "Toby Ord estimates that raising AIME accuracy from 20% to 80% takes about 100x more inference compute but about 10,000x more RL compute (with wide uncertainty). In Anthropic's H1 2026, R&D — mostly compute for model development, research and internal use — was USD 9.7 billion, or 60% of revenue, while cost of revenue, mostly inference for customers, was USD 2.38 billion, or 15%.",
       ),
-      refs: ["5.2:ord", "5.3:allocate"],
-      links: [S.tobyOrd, S.testTimeCompute],
+      refs: ["5.2:ord", "5.3:allocate", "2.2:rd"],
+      links: [S.tobyOrd, S.testTimeCompute, S.s1],
     },
   },
   {
@@ -124,11 +124,11 @@ export const EDGES: EdgeDef[] = [
         "How much work the same model can be made to finish, set by its tools, context management and checks.",
       ),
       note: t(
-        "SWE-agent の論文では、同じ GPT-4 Turbo でも、エージェント向けのインターフェースを与えると SWE-bench Lite の解決率が 11% から 18% に上がった。改善は学習し直さなくてもすでにあるモデルに効くが、伸び方を予測する法則はまだない。",
-        "In the SWE-agent paper, giving the same GPT-4 Turbo an interface designed for agents raised its SWE-bench Lite score from 11% to 18%. Improvements apply to existing models without retraining, but no law yet predicts how far they go.",
+        "Anthropic の調査用のマルチエージェントシステムでは、Claude Opus 4 が指揮して Claude Sonnet 4 のサブエージェントに分担させる構成が、Opus 4 単体より社内の評価で 90.2% 高い成績を出した。改善は学習し直さなくてもすでにあるモデルに効くが、伸び方を予測する法則はまだない。",
+        "In Anthropic's multi-agent research system, a Claude Opus 4 lead agent directing Claude Sonnet 4 subagents outperformed a single Claude Opus 4 agent by 90.2% on its internal research evaluation. Improvements apply to existing models without retraining, but no law yet predicts how far they go.",
       ),
       refs: ["5.2:harness"],
-      links: [S.sweAgent, S.anthropicHarness],
+      links: [S.anthropicMultiAgent, S.sweAgent, S.anthropicHarness],
     },
   },
   {
@@ -145,10 +145,10 @@ export const EDGES: EdgeDef[] = [
         "Inference cost per token — equivalently, tokens per watt and per dollar — lowered by KV-cache compression, lower precision and MoE.",
       ),
       note: t(
-        "長く考えさせ、サブエージェントで分担するほど、1 件あたりのトークンは増える。電力と HBM が上限を決めるなかでは、1 ワットあたりのトークンが、推論時計算を伸ばせる上限を決める。",
-        "Longer thinking and more subagents mean more tokens per job. With power and HBM setting the ceiling, tokens per watt decide how far inference compute can grow.",
+        "長く考えさせ、サブエージェントで分担するほど、1 件あたりのトークンは増える。電力と HBM が上限を決めるなかでは、1 ワットあたりのトークンが、推論時計算を伸ばせる上限を決める。業界の対応は、KV キャッシュを小さくするモデル側の工夫（GQA、MLA）、プリフィルとデコードを別の GPU に割り当てる処理の分離（NVIDIA Dynamo）、KV キャッシュを GPU の外の階層に逃がすメモリ階層の拡張、SRAM を大量に積んだ推論専用チップ（Groq、Cerebras）の 4 つに分かれる。",
+        "Longer thinking and more subagents mean more tokens per job. With power and HBM setting the ceiling, tokens per watt decide how far inference compute can grow. The industry has responded in four ways: model-side designs that shrink the KV cache (GQA, MLA), splitting prefill and decode onto different GPUs (NVIDIA Dynamo), offloading the KV cache to memory tiers outside the GPU, and inference chips packed with SRAM (Groq, Cerebras).",
       ),
-      refs: ["4.4:kvCache", "5.3:hbm"],
+      refs: ["4.4:kvCache", "4.4:responses", "5.3:hbm"],
       links: [S.memoryWall, S.deepseekV2, S.anthropicMultiAgent],
     },
   },
@@ -178,10 +178,10 @@ export const LOOPS: LoopDef[] = [
         "Revenue and profit from the uses pay for the next round of compute.",
       ),
       note: t(
-        "次の巨額の資本を集めるには、このループが回ることを示す必要がある。",
-        "To raise the next round of capital, a lab has to show that this loop turns.",
+        "次の巨額の資本を集めるには、このループが回ることを示す必要がある。Anthropic の計算資源 1 ドルあたりの売上は 2026 年上期に 1.82 になった。OpenAI は、報道されている社内の見通しでは 2028 年に手元資金が尽き、FCF が黒字に転じるのは 2030 年前後である。",
+        "To raise the next round of capital, a lab has to show that this loop turns. Anthropic's revenue per dollar of compute reached 1.82 in H1 2026; OpenAI, by its reported internal projections, runs out of cash in 2028 and turns FCF-positive around 2030.",
       ),
-      refs: ["6.3:revenuePerCompute", "2.3"],
+      refs: ["6.3:revenuePerCompute", "2.3", "6.4:openai"],
       links: [S.s1, S.wsj, S.msft10q],
     },
   },
@@ -194,7 +194,10 @@ export const LOOPS: LoopDef[] = [
         "AI が次の AI の研究開発を手伝い、アルゴリズムの効率の伸びを速める可能性がある。Anthropic の S-1 はこれを「ループを閉じる」と呼ぶ。",
         "AI helps develop the next AI and may speed up algorithmic progress — what Anthropic's S-1 calls “closing the loop”.",
       ),
-      note: t("効果は大きくなりうるが、予測できる軸とは言えない。", "The effect could be large, but it is not a predictable axis."),
+      note: t(
+        "Anthropic によれば、2026 年 9 月には、エンジニア 1 人が 1 日に書き加えるコードの量が 2024 年平均の 45 倍を超えた。ただ、それが能力の伸びをどれだけ速めるかは測れないので、予測できる軸とは言えない。",
+        "Anthropic says that by September 2026 the daily volume of code contributed per engineer was over 45 times the 2024 average. How much that speeds up capability gains cannot be measured, though, so it is not a predictable axis.",
+      ),
       refs: ["2.2:loop", "5.3:loop"],
       links: [S.s1, S.aiScientist, S.alphaEvolve],
     },
@@ -238,7 +241,7 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-openai",
     name: t("OpenAI", "OpenAI"),
     focus: ["external-capital", "contracts", "compute", "depth", "width", "adoption"],
-    refs: ["2.3:openai", "6.2:market"],
+    refs: ["2.4", "6.4:openai", "2.3:openai", "6.2:market"],
     links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1],
     points: [
       t(
@@ -258,8 +261,8 @@ export const COMPANIES: CompanyDef[] = [
   {
     id: "co-anthropic",
     name: t("Anthropic", "Anthropic"),
-    focus: ["rlvr", "agentic-rl", "harness", "software", "knowledge-work", "ai-research", "contracts", "external-capital"],
-    refs: ["2.2:agents"],
+    focus: ["harness", "software", "knowledge-work", "ai-research", "contracts", "external-capital"],
+    refs: ["2.2:agents", "6.4:anthropic", "2.2:loop"],
     links: [S.s1, S.decoderAnthropic, S.menlo],
     points: [
       t(
@@ -280,12 +283,12 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-google",
     name: t("Google", "Google"),
     focus: ["chips", "interconnect", "depth", "width", "grid", "external-capital"],
-    refs: ["3.5"],
-    links: [S.goog10q, S.ironwood, S.anthropicTpu, S.cnbcCodeRed],
+    refs: ["3.5", "4.1:flex"],
+    links: [S.goog10q, S.ironwood, S.anthropicTpu, S.googleFlexible, S.cnbcCodeRed],
     points: [
       t(
-        "自社の TPU を持ち、v7 では 9,216 チップを 1 つのポッドにまとめる。Anthropic には最大 100 万基の TPU を供給する。",
-        "Has its own TPUs — a v7 pod joins 9,216 chips — and supplies up to a million TPUs to Anthropic.",
+        "自社の TPU を持ち、v7 では 9,216 チップを 1 つのポッドにまとめる。Anthropic には最大 100 万基の TPU を供給する。2025 年 8 月には、機械学習の負荷を対象にした需要応答の契約を 2 つの電力会社と結んだ。",
+        "Has its own TPUs — a v7 pod joins 9,216 chips — and supplies up to a million TPUs to Anthropic. In August 2025 it signed demand-response agreements covering machine-learning workloads with two utilities.",
       ),
       t(
         "2025 年 11 月に Gemini 3 を出すと、OpenAI は 12 月に社内で「コードレッド」を宣言したと報じられた。Google は Deep Think で考える量を売る。",
@@ -301,7 +304,7 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-microsoft",
     name: t("Microsoft", "Microsoft"),
     focus: ["ocf", "contracts", "grid", "software", "knowledge-work"],
-    refs: ["7.1:selfFunded"],
+    refs: ["7.1:selfFunded", "7.2:coupled", "7.3"],
     links: [S.msft10k, S.msft10q, S.openaiMicrosoft],
     points: [
       t(
@@ -309,12 +312,12 @@ export const COMPANIES: CompanyDef[] = [
         "Operating cash flow of USD 182.9 billion in fiscal 2026 covered USD 115.9 billion of capex and still left USD 67 billion of FCF.",
       ),
       t(
-        "開始前のリースは 3,646 億ドル。自社で建てるだけでなく、借りて計算資源を確保している。",
-        "USD 364.6 billion of leases not yet commenced: it rents compute as well as building it.",
+        "開始前のリースは 3 年で 826 億ドルから 3,646 億ドルに増え、建てるだけでなく借りても計算資源を確保している。ウィスコンシン州とアトランタの Fairwater は専用の広域網でつなぎ、1 つの計算機として使う。",
+        "Leases not yet commenced grew from USD 82.6 billion to USD 364.6 billion in three years: it rents compute as well as building it. Its Fairwater sites in Wisconsin and Atlanta are linked by a dedicated wide-area network and run as one computer.",
       ),
       t(
-        "ウィスコンシン州とアトランタの Fairwater を専用の広域網でつなぎ、1 つの計算機として使い始めた。Microsoft Cloud の粗利率は 3 年で 73% から 66% に下がった（いずれも 7〜9 月期）。",
-        "Its Fairwater sites in Wisconsin and Atlanta are linked by a dedicated wide-area network and run as one computer; Microsoft Cloud's gross margin fell from 73% to 66% over three years (July–September 2023 vs 2026).",
+        "OpenAI から計上した売上は 2026 年 7〜9 月期に 100 億ドル（全社売上の約 11%）で、商用 RPO の少なくとも約 3 分の 1 が OpenAI 関連である（2026 年 6 月末）。Microsoft Cloud の粗利率は 3 年で 73% から 66% に下がった。",
+        "OpenAI accounted for USD 10.0 billion of revenue in July–September 2026 (about 11% of the total) and at least about a third of commercial RPO (end of June 2026). Microsoft Cloud's gross margin fell from 73% to 66% over three years.",
       ),
     ],
   },
@@ -330,8 +333,8 @@ export const COMPANIES: CompanyDef[] = [
         "Runs about 500,000 Trainium2 chips for Anthropic at Project Rainier in Indiana.",
       ),
       t(
-        "AWS と OpenAI の契約は 1,380 億ドルに拡大した。AWS の受注残は約 5,780 億ドルある。",
-        "The AWS–OpenAI agreement has grown to USD 138 billion; AWS's backlog is about USD 578 billion.",
+        "AWS と OpenAI の契約は 1,380 億ドルに拡大した。Amazon の受注残（主に AWS）は約 5,780 億ドルある。",
+        "The AWS–OpenAI agreement has grown to USD 138 billion; Amazon's backlog (mainly AWS) is about USD 578 billion.",
       ),
       t(
         "長期借入の額面は、2025 年末の 688 億ドルから 2026 年 9 月末の 1,809 億ドルに増えた。",
@@ -372,8 +375,8 @@ export const COMPANIES: CompanyDef[] = [
         "Colossus 2 in Memphis, at about 1.11 million H100 equivalents, is the largest compute site as of November 2026 (Epoch AI).",
       ),
       t(
-        "Grok 4 で、強化学習を事前学習と同じ規模で行ったと発表した（2025 年 7 月）。",
-        "Said it ran RL for Grok 4 at pretraining scale (July 2025).",
+        "Grok 4 で、強化学習を事前学習と同じ規模で行ったと発表した（2025 年 7 月）。複数の仮説を並列に検討させる Grok 4 Heavy も売る。",
+        "Said it ran RL for Grok 4 at pretraining scale (July 2025); it also sells Grok 4 Heavy, which weighs several hypotheses in parallel.",
       ),
       t(
         "2026 年 2 月に SpaceX に買収され、自社の GPU の計算資源を Anthropic に売る側にも回っている。",
@@ -429,11 +432,11 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-pretraining",
     title: t("事前学習の費用は早く回収する必要がある", "Pretraining has to pay back fast"),
     body: t(
-      "事前学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。米国の各社が数か月単位で首位を入れ替え、中国で最も強いオープンウェイトモデルも約 8 か月遅れで追いかけてくる（NIST の評価）なかで、その期間は長くない。",
-      "Pretraining is paid for up front and must be recovered while the model sells — a short window when U.S. labs trade the lead every few months and even the strongest Chinese open-weight model trails by only about eight months (per NIST).",
+      "事前学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。米国の各社が数か月単位で首位を入れ替え、中国で最も強いオープンウェイトモデルも約 8 か月遅れで追いかけてくる（NIST の評価）なかで、その期間は長くない。強化学習の費用も前払いなので、同じ制約を受ける。",
+      "Pretraining is paid for up front and must be recovered while the model sells — a short window when U.S. labs trade the lead every few months and even the strongest Chinese open-weight model trails by only about eight months (per NIST). RL is paid for up front too, so it faces the same constraint.",
     ),
     ids: ["pretraining", "human-data", "compute", "external-capital"],
-    refs: ["3.1", "5.3:recover", "6.3:training"],
+    refs: ["3.1", "5.3:recover", "6.3:training", "5.2:upfront"],
   },
   {
     id: "kp-ceiling",

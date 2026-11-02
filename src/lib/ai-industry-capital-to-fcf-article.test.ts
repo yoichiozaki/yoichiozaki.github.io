@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EDGES, ELEMENTS } from "./capability-map";
+import { ELEMENTS } from "./capability-map";
 
 const root = resolve(__dirname, "..", "..");
 const slug = "ai-industry-capital-to-fcf";
@@ -57,8 +57,6 @@ describe("ai-industry-capital-to-fcf: capability lever map", () => {
     expect(paragraph).toMatch(/15 (倍|times)/);
     expect(subagentsNote).toMatch(/\b4 ?(倍|×|x\b)/);
     expect(subagentsNote).toMatch(/\b15 ?(倍|×|x\b)/);
-    const effEdge = EDGES.find((e) => e.id === "e-harness")!;
-    expect(effEdge.detail!.note![locale]).toContain("18%");
   });
 
   it.each(articles)("quotes the same RLI figures as the map ($locale)", ({ locale, source }) => {

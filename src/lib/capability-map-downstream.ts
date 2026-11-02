@@ -70,10 +70,10 @@ export const HARNESS: GroupDef = {
         "Deciding what goes into a limited context and what is dropped: summarizing old turns (compaction) and retrieving what is needed.",
       ),
       note: t(
-        "Anthropic は 2025 年 11 月、Opus 4.5 でも、大まかな指示だけを与えて何セッションにもわたって Web アプリを開発させると、コンパクションを使っても本番に使える水準まで仕上げられないと報告した。文脈が長いと、真ん中にある情報ほど使われにくいという研究もある（Liu ら、2023 年）。",
-        "In November 2025, Anthropic reported that even Opus 4.5, given only a high-level prompt and many sessions, fell short of a production-quality web app despite compaction. Research also finds that models use information in the middle of a long context less well than at its start or end (Liu et al., 2023).",
+        "長い文脈は KV キャッシュを膨らませて HBM の負担を増やすので、何を残すかの判断は推論費にも響く。文脈が長いと、真ん中にある情報ほど使われにくいという研究もある（Liu ら、2023 年）。",
+        "Long contexts swell the KV cache and load HBM, so deciding what to keep also shows up in inference cost. Research also finds that models use information in the middle of a long context less well than at its start or end (Liu et al., 2023).",
       ),
-      refs: ["5.2:longRun"],
+      refs: ["5.2:longRun", "4.4:kvCache"],
       links: [S.anthropicHarness, S.lostInTheMiddle],
     }),
     item("memory", t("記憶と引き継ぎ", "Memory and handoff"), {
@@ -142,11 +142,11 @@ export const SYSTEM: NodeDef = {
       "The ability to see a delegated job through to the end. It depends on the model, the harness and how much inference compute each job gets — and it is this ability, not the model alone, that revenue tracks.",
     ),
     note: t(
-      "METR のタイムホライズンも、道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測っている。測っているのはモデル単体ではなく、システムの能力である。",
-      "METR's time horizons are measured with the model inside a scaffold that provides tools and runs the loop — they measure the system, not the model alone.",
+      "売上をけん引しているのもこの能力である。Anthropic の売上を押し上げた Claude Code はモデルとハーネスを組み合わせた製品で、Claude Enterprise の利用者では、Claude Code を使う上位 5% が、使わない利用者の平均の約 20 倍を支払う（2026 年 7〜9 月期）。",
+      "This is what drives revenue: Claude Code, which powered Anthropic's growth, combines a model with a harness, and the top 5% of Claude Enterprise users who use it pay about 20 times the average of Enterprise users who don't (July–September 2026).",
     ),
-    refs: ["5.3:target", "5.2:twoKinds", "5.2:metrSystem"],
-    links: [S.metrTimeHorizons, S.rliLeaderboard, S.postOutcome],
+    refs: ["5.3:target", "5.2:twoKinds", "5.2:metrSystem", "2.2:agents"],
+    links: [S.metrTimeHorizons, S.rliLeaderboard, S.s1, S.postOutcome],
   },
 };
 
@@ -168,8 +168,8 @@ export const USES: GroupDef = {
         "AI helping to build the next models — what Anthropic's S-1 calls “closing the loop”.",
       ),
       note: t(
-        "アルゴリズムの効率の伸びを速める可能性があるが、予測できる軸とは言えない。Google DeepMind の AlphaEvolve は、Gemini のアーキテクチャの重要なカーネルを 23% 速くし、Gemini の学習時間を 1% 縮めた。Lu ら（2024 年）の The AI Scientist は、アイデアの立案から実験、論文の執筆までを 1 本あたり 15 ドル未満で行った。",
-        "It may speed up algorithmic progress, but it is not a predictable axis. Google DeepMind's AlphaEvolve sped up a key kernel in Gemini's architecture by 23%, cutting Gemini's training time by 1%; Lu et al.'s The AI Scientist (2024) went from idea to experiments to a written paper for under USD 15 per paper.",
+        "Anthropic の S-1 によれば、2026 年 9 月にコードベースへ加えられた変更の 90% 超は Claude が書いた。Google DeepMind の AlphaEvolve は、Gemini のアーキテクチャの重要なカーネルを 23% 速くし、Gemini の学習時間を 1% 縮めた。Lu ら（2024 年）の The AI Scientist は、アイデアの立案から実験、論文の執筆までを 1 本あたり 15 ドル未満で行った。",
+        "According to Anthropic's S-1, Claude wrote over 90% of the contributions to its codebase in September 2026. Google DeepMind's AlphaEvolve sped up a key kernel in Gemini's architecture by 23%, cutting Gemini's training time by 1%; Lu et al.'s The AI Scientist (2024) went from idea to experiments to a written paper for under USD 15 per paper.",
       ),
       refs: ["2.2:loop", "5.3:loop"],
       links: [S.s1, S.aiScientist, S.alphaEvolve],
@@ -192,10 +192,10 @@ export const USES: GroupDef = {
         "Research, writing and analysis — much of it hard to grade, so RL is hard to apply as is.",
       ),
       note: t(
-        "Anthropic は Claude Code の仕組みを知識労働に広げた Claude Cowork を出している。",
-        "Anthropic extended the Claude Code approach to knowledge work with Claude Cowork.",
+        "コーディングの次に、エージェントの売上がどこまで広がるかを決める分野である。第 8 章の 1 つ目の道筋は、エージェントが知識労働の多くの仕事に広がり、推論の需要が供給を上回り続ける場合である。",
+        "This is where agent revenue has to spread next after coding. Chapter 8's first scenario is the one in which agents spread to much of knowledge work and inference demand keeps exceeding supply.",
       ),
-      refs: ["2.2:cowork", "5.3:hardToJudge"],
+      refs: ["2.2:cowork", "5.3:hardToJudge", "8:knowledge"],
       links: [S.gdpval, S.genAiAtWork, S.s1],
     }),
     item("science", t("科学", "Science"), {
