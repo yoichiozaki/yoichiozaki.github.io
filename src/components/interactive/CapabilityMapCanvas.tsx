@@ -37,7 +37,9 @@ export const CapabilityMapCanvas = memo(function CapabilityMapCanvas({ layout, l
   const handlers = (id: string) => ({
     onClick: (e: MouseEvent) => {
       e.stopPropagation();
-      onSelect(id);
+      // A keyboard "click" (Enter or Space, detail 0) on the selected item opens it, standing in for a double-click.
+      if (e.detail === 0 && selected === id) onOpen(id);
+      else onSelect(id);
     },
     onDoubleClick: (e: MouseEvent) => {
       e.stopPropagation();

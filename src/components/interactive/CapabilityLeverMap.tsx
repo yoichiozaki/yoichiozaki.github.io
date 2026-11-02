@@ -188,7 +188,9 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   }, []);
   const closePanel = useCallback(() => {
     setPanelId(null);
-    viewport?.focus({ preventScroll: true });
+    // Back to the item the panel was about, so keyboard users keep their place on the map.
+    const current = viewport?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    (current ?? viewport)?.focus({ preventScroll: true });
   }, [viewport]);
   /** Choosing a key point or a company replaces the selection and closes the panel. */
   const pick = useCallback((id: string) => {
@@ -410,7 +412,11 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
               ref={viewportRef}
               tabIndex={0}
               role="region"
-              aria-label={isJa ? "マップ（矢印キーで移動、+ と − で拡大・縮小、0 で全体を表示）" : "Map (arrow keys to pan, + and − to zoom, 0 to fit)"}
+              aria-label={
+                isJa
+                  ? "マップ（矢印キーで移動、+ と − で拡大・縮小、0 で全体を表示。選んだ項目でもう一度 Enter を押すと説明を開く）"
+                  : "Map (arrow keys to pan, + and − to zoom, 0 to fit; press Enter again on a selected item to open its details)"
+              }
               className={`absolute inset-0 overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${
                 dragging ? "cursor-grabbing" : "cursor-grab"
               }`}
