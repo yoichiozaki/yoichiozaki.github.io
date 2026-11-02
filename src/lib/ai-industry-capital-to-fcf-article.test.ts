@@ -45,7 +45,7 @@ describe("ai-industry-capital-to-fcf: capability lever map", () => {
     const context = s52.indexOf(CONTEXT_LEAD[locale]);
     expect(context).toBeGreaterThan(s52.indexOf(HARNESS_LEAD[locale]));
     expect(context).toBeLessThan(s52.indexOf("<CapabilityLeverMap />"));
-    expect(s52).toMatch(/^\| (推論時の文脈（IQ 層）|Inference-time context \(IQ layer\)) \|/m);
+    expect(s52).toMatch(/^\| (推論時の文脈（情報源、検索、権限）|Inference-time context \(sources, retrieval, permissions\)) \|/m);
     const s73 = section(source, "\n### 7.3 ", "\n## 8. ");
     const terms = locale === "ja" ? ["Microsoft IQ", "Work IQ", "6 万近く", "company knowledge"] : ["Microsoft IQ", "Work IQ", "nearly 60,000", "company knowledge"];
     for (const term of terms) expect(s73).toContain(term);

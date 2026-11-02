@@ -163,12 +163,12 @@ export const EDGES: EdgeDef[] = [
     kicker: t("精度", "Precision"),
     detail: {
       summary: t(
-        "必要な情報を漏らさず、余計な情報を入れずに持ち込めているか。持ち込みすぎると文脈が長くなって精度が落ち、推論費も増える。",
-        "Whether what is needed is brought in, without gaps and without clutter. Bringing in too much makes the context longer, which lowers accuracy and raises inference cost.",
+        "必要な情報を漏らさず、余計な情報を入れずに持ち込めているか。持ち込みすぎると文脈が長くなって、モデルが必要な情報を取り出しにくくなり、推論費も増える。",
+        "Whether what is needed is brought in, without gaps and without clutter. Bringing in too much makes the context longer, so the model has a harder time pulling out what it needs, and inference cost rises.",
       ),
       note: t(
-        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めている。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
-        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model's performance less reliable and lower.",
+        "Anthropic は 2025 年 9 月に、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めた。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
+        "In September 2025, Anthropic noted that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advised choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model's performance less reliable and lower.",
       ),
       refs: ["5.2:contextRot", "5.2:context"],
       links: [S.contextEngineering, S.contextRot, S.lostInTheMiddle],
@@ -263,7 +263,7 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-openai",
     name: t("OpenAI", "OpenAI"),
     focus: ["external-capital", "contracts", "compute", "depth", "width", "adoption"],
-    refs: ["2.4", "6.4:openai", "2.3:openai", "6.2:market"],
+    refs: ["2.4", "6.4:openai", "2.3:openai", "6.2:market", "7.3:routing"],
     links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1],
     points: [
       t(
@@ -338,8 +338,8 @@ export const COMPANIES: CompanyDef[] = [
         "OpenAI accounted for USD 10.0 billion of revenue in July–September 2026 (about 11% of the total) and at least about a third of commercial RPO (end of June 2026). Microsoft Cloud's gross margin fell from 73% to 66% over three years.",
       ),
       t(
-        "モデルの外側では、Microsoft 365 と Fabric の上にある企業の文脈を Microsoft IQ にまとめ、他社のモデルで動くエージェントにも提供する。Microsoft IQ で文脈を利用する顧客は 6 万近く、前四半期から 25% 増えた（2026 年 10 月の決算説明）。",
-        "Beyond the model, it bundles the enterprise context held in Microsoft 365 and Fabric into Microsoft IQ and offers it to agents running on other companies' models too; nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter (October 2026 earnings call).",
+        "モデルの外側では、Microsoft 365 と Fabric の上にある企業の文脈に、組織の文書と Web の情報を加えて Microsoft IQ にまとめ、他社のモデルで動くエージェントにも提供する。Microsoft IQ で文脈を利用する顧客は 6 万近く、前四半期から 25% 増えた（2026 年 10 月の決算説明）。",
+        "Beyond the model, it bundles the enterprise context held in Microsoft 365 and Fabric, plus organizational documents and the web, into Microsoft IQ and offers it to agents running on other companies' models too; nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter (October 2026 earnings call).",
       ),
     ],
   },
@@ -434,8 +434,8 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-two-capabilities",
     title: t("能力には 2 種類ある", "There are two kinds of capability"),
     body: t(
-      "モデル単体の能力と、モデルにハーネスと推論計算を組み合わせたシステムが仕事を完了する能力は別のものである。売上につながるのは後者で、METR のタイムホライズンや RLI も後者を測っている。ECI のような総合指数には両方が混ざる。",
-      "What the model can do alone differs from what the model, harness and inference compute get done together. Revenue follows the latter, which is what METR's time horizon and RLI measure; composite indices such as ECI mix the two.",
+      "モデル単体の能力と、モデルにハーネス、推論計算、推論時の文脈を組み合わせたシステムが仕事を完了する能力は別のものである。売上につながるのは後者で、METR のタイムホライズンや RLI も後者を測っている（ただし、必要な情報は課題と一緒に渡される）。ECI のような総合指数には両方が混ざる。",
+      "What the model can do alone differs from what the model, harness, inference compute and the context brought in at inference time get done together. Revenue follows the latter, which is what METR's time horizon and RLI measure (though they hand the agent the information it needs along with the task); composite indices such as ECI mix the two.",
     ),
     ids: ["model", "harness", "system", "e-model-harness", "e-harness", "measure-model", "measure-system", "m-model", "m-system", "eci"],
     refs: ["5.2:twoKinds", "5.3:target"],

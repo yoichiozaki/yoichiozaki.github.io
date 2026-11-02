@@ -173,7 +173,9 @@ describe("capability map: data", () => {
 
   it("feeds getting work done from the context layer (IQ), apart from the harness", () => {
     expect(ELEMENTS.get("context-layer")).toMatchObject({ kind: "group", category: "context" });
-    expect(ELEMENTS.get("context-layer")?.children).toEqual(["work-iq", "fabric-iq", "foundry-iq", "web-iq", "search-ranking", "permissions"]);
+    expect(ELEMENTS.get("context-layer")?.children).toEqual(["context-sources", "context-delivery"]);
+    expect(ELEMENTS.get("context-sources")?.children).toEqual(["work-iq", "fabric-iq", "foundry-iq", "web-iq"]);
+    expect(ELEMENTS.get("context-delivery")?.children).toEqual(["search-ranking", "permissions"]);
     expect(EDGES.find((e) => e.id === "e-context")).toMatchObject({ from: "context-layer", to: "system", kind: "flow" });
     // "Context length" is a property of the model; the context layer is what gets brought in.
     expect(ELEMENTS.get("context")?.parent).toBe("size");

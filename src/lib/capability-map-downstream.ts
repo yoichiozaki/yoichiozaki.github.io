@@ -1,5 +1,5 @@
 import { SOURCES as S } from "./capability-map-sources";
-import { item, t, type GroupDef, type NodeDef } from "./capability-map-types";
+import { item, sub, t, type GroupDef, type NodeDef } from "./capability-map-types";
 
 export const MODEL: NodeDef = {
   kind: "node",
@@ -66,8 +66,8 @@ export const HARNESS: GroupDef = {
     }),
     item("context-mgmt", t("文脈の管理", "Context management"), {
       summary: t(
-        "限られた文脈に、何を入れて何を捨てるかを決める。古いやり取りの要約（コンパクション）や、必要になった時点で情報を読み込む工夫。",
-        "Deciding what goes into a limited context and what is dropped: summarizing old turns (compaction) and loading information only when it is needed.",
+        "作業の途中で、限られた文脈に何を残し、何を捨て、いつ外へ情報を取りに行くかを決める。古いやり取りの要約（コンパクション）や、必要になった時点で道具を使って読み込む工夫。取りに行った先から何が返ってくるかは、推論時の文脈（IQ 層）の側で決まる。",
+        "Deciding, as a job goes on, what to keep in a limited context, what to drop and when to go out for more: summarizing old turns (compaction) and loading information through tools only when it is needed. What comes back from a fetch is decided on the context-layer (IQ) side.",
       ),
       note: t(
         "長い文脈は KV キャッシュを膨らませて HBM の負担を増やすので、何を残すかの判断は推論費にも響く。文脈が長いと、真ん中にある情報ほど使われにくいという研究もある（Liu ら、2023 年）。",
@@ -134,89 +134,117 @@ export const CONTEXT: GroupDef = {
   label: t("推論時の文脈（IQ 層）", "Context (IQ layer)"),
   detail: {
     summary: t(
-      "モデルが学習していない社内の情報や最新の情報を、推論のたびに外から持ち込む層。何を、どこから、誰の権限で、どれだけ持ち込むかで、同じモデルとハーネスでも完了できる仕事が変わる。Microsoft はこの層を Microsoft IQ と呼ぶ。",
-      "The layer that brings in, at every inference, what the model never learned: company information and anything recent. What is brought in, from where, under whose permissions and how much changes how much work the same model and harness can finish. Microsoft calls this layer Microsoft IQ.",
+      "モデルが学習していない社内の情報や最新の情報を、推論のたびに探して渡す層。どこを、誰の権限で探し、何を渡すかで、同じモデルとハーネスでも完了できる仕事が変わる。文脈は実際にはハーネスの道具を通じてモデルに届くが、どのハーネスからも呼べる別のレバーなので、地図では仕事を完了する能力に直接つないだ。Microsoft はこの層を Microsoft IQ と呼ぶ。",
+      "The layer that finds and hands over, at every inference, what the model never learned: company information and anything recent. Where it looks, under whose permissions, and what it hands over change how much work the same model and harness can finish. At run time context reaches the model through the harness's tools, but any harness can call it, so it is a separate lever, and the map connects it straight to getting work done. Microsoft calls this layer Microsoft IQ.",
     ),
     note: t(
       "Microsoft の Satya Nadella CEO は 2026 年 10 月の決算説明で、Microsoft 365 の下にある人、人どうしの関係、文書、メール、会議、チャット、プロジェクトなどの知識を「企業にとって最も重要なデータベースの 1 つ」と呼んだ。Microsoft IQ を通じて文脈を利用している顧客は 6 万近くで、前四半期から 25% 増えた。どの IQ も MCP で呼べるので、他社のモデルで動くエージェントからも使える。",
       "On Microsoft's October 2026 earnings call, CEO Satya Nadella called the knowledge underneath Microsoft 365 — people, their relationships, documents, emails, meetings, chats, projects and other artifacts — one of the most important databases for any enterprise. Nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter. Each IQ can be called over MCP, so agents running on other companies' models can use it too.",
     ),
-    refs: ["5.2:iq", "5.2:context", "5.3:notCounted", "7.3:iq", "8:context"],
+    refs: ["5.2:iq", "5.2:contextMoney", "5.2:context", "5.3:notCounted", "7.3:iq", "8:context"],
     links: [S.microsoftIq, S.msftEarningsCall, S.contextEngineering, S.postMcp],
   },
   children: [
-    item("work-iq", t("働き方の文脈（Work IQ）", "Work context (Work IQ)"), {
-      summary: t(
-        "メール、会議、チャット、文書と、誰と誰が一緒に働いているか。Microsoft 365 の上で、利用者が見てよい範囲から組み立てる。",
-        "Emails, meetings, chats and documents, and who works with whom — assembled on Microsoft 365 from what the user is allowed to see.",
-      ),
-      note: t(
-        "2026 年 9 月時点のドキュメントによれば、Work IQ は Microsoft 365 Copilot のライセンスとは別に、他社のエージェントからも MCP、A2A、REST で使え、利用量に応じて課金される。要求はすべて利用者の権限で実行し、MCP サーバーでは数百ある操作を 10 個の汎用的な道具にまとめている。Copilot が使う索引を外のアプリから引ける Retrieval API は、2025 年に先に出ていた。",
-        "According to its September 2026 documentation, Work IQ can also be used by other companies' agents, over MCP, A2A or REST, billed by usage and independent of Microsoft 365 Copilot licensing. Every request runs under the user's own permissions, and its MCP server collapses hundreds of operations into 10 generic tools. The Retrieval API, which lets outside apps query the index behind Copilot, came first, in 2025.",
-      ),
-      refs: ["7.3:iq"],
-      links: [S.workIq, S.retrievalApi, S.msftEarningsCall],
-    }),
-    item("fabric-iq", t("データの意味（Fabric IQ）", "Business data (Fabric IQ)"), {
-      summary: t(
-        "顧客、注文、出荷といった業務の概念と、その関係、指標、規則。テーブルの列だけを見せても、エージェントは数字の意味を取り違える。",
-        "Business concepts such as customers, orders and shipments, with their relationships, metrics and rules. Shown only table columns, an agent misreads what the numbers mean.",
-      ),
-      note: t(
-        "Fabric IQ のオントロジーは、こうした概念を OneLake のデータに結び付け、人とエージェントが同じ言葉で業務を扱えるようにする。概念を 1 度定義すれば、レポートにもエージェントにも使い回せる。",
-        "The Fabric IQ ontology binds these concepts to data in OneLake so that people and agents work with the business in the same vocabulary; a concept defined once can be reused across reports and agents.",
-      ),
-      refs: ["5.2:iq"],
-      links: [S.fabricIq, S.postOntology],
-    }),
-    item("foundry-iq", t("組織の知識（Foundry IQ）", "Knowledge (Foundry IQ)"), {
-      summary: t(
-        "規程、手順書、契約書など、根拠になる文書。複数の情報源を 1 つの知識ベースにまとめ、質問に合う部分を引用付きで返す。",
-        "Policies, manuals, contracts and other authoritative documents. Several sources are combined into one knowledge base, which returns the passages that fit a question, with citations.",
-      ),
-      note: t(
-        "Microsoft の測定では、質問を分解して情報源を選ばせ、足りなければ探し直させると、5 つのデータセットでの回答の評価が平均 59 点から 80 点に上がった（2025 年 11 月）。",
-        "In Microsoft's measurements, having the knowledge base break a question down, choose its sources and search again when results fall short raised answer scores across five datasets from 59 to 80 on average (November 2025).",
-      ),
-      refs: ["5.2:retrievalEffort"],
-      links: [S.foundryIq, S.foundryIqRelevance],
-    }),
-    item("web-iq", t("Web の情報（Web IQ）", "The web (Web IQ)"), {
-      summary: t(
-        "学習の締め切りより後の出来事や、社外の最新の情報。",
-        "Events after the training cutoff, and current information from outside the company.",
-      ),
-      note: t(
-        "見つけにくい情報を Web から探し出す力を測る OpenAI の BrowseComp では、2025 年 4 月の時点で、ブラウズ機能を付けた GPT-4o の正答率は 1.9%、この種の課題に向けて学習した Deep Research は 51.5% だった。2026 年 9 月の GPT-6 Astra は 91.5% である。Web を見られるだけでは足りず、探し方を学習させると成績が大きく伸びる。",
-        "On OpenAI's BrowseComp, which measures the ability to dig hard-to-find information out of the web, GPT-4o with browsing scored 1.9% in April 2025 and Deep Research, trained for this kind of task, 51.5%; GPT-6 Astra scored 91.5% in September 2026. Access to the web is not enough; training a model in how to search raises the score sharply.",
-      ),
-      refs: ["5.2:iq"],
-      links: [S.webIq, S.browseComp, S.gpt6Astra],
-    }),
-    item("search-ranking", t("検索と並べ替え", "Search and ranking"), {
-      summary: t(
-        "キーワードとベクトルを組み合わせて探し、結果を並べ替えて、上位だけを文脈に入れる。文書をどこで断片に切り、何を添えて索引にするかでも、見つかるものが変わる。",
-        "Searching by keywords and vectors together, reranking the results and putting only the top ones into the context. Where documents are split, and what is attached to each piece, also changes what can be found.",
-      ),
-      note: t(
-        "Anthropic の Contextual Retrieval（2024 年）は、文書の断片ごとに前後の文脈の説明を付けてから索引を作ることで、検索の失敗を 49%、並べ替え（リランキング）と組み合わせると 67% 減らした。検索先のデータを 1.4 兆トークンまで増やすと、言語モデリングといくつかの課題の成績が目立った飽和なく上がり続けたという研究もある（Shao ら、2024 年）。",
-        "Anthropic's Contextual Retrieval (2024) cut failed retrievals by 49%, and by 67% with reranking, by attaching a short explanation of its context to each chunk before indexing. Another study found that language modelling and several downstream tasks kept improving without obvious saturation as the datastore grew to 1.4 trillion tokens (Shao et al., 2024).",
-      ),
-      refs: ["5.2:retrievalEffort"],
-      links: [S.contextualRetrieval, S.massiveDs, S.rag, S.postGraphRag, S.postSearch],
-    }),
-    item("permissions", t("権限と鮮度", "Permissions, freshness"), {
-      summary: t(
-        "利用者が見てよいものだけを、最新の状態で持ち込む。見てはいけない情報を持ち込めば、答えが正しくても事故になる。",
-        "Bringing in only what the user may see, in its current state. Pulling in something they must not see is an incident even if the answer is right.",
-      ),
-      note: t(
-        "Foundry IQ は、対応する情報源ではアクセス制御リストを同期し、Microsoft Purview の秘密度ラベルとともに検索の時点で適用して、呼び出した人の Microsoft Entra の ID で検索する。OpenAI が 2025 年 10 月に ChatGPT に加えた company knowledge も、既存の権限に従い、利用者が見てよいものだけを読む。",
-        "For supported sources, Foundry IQ syncs access control lists and enforces them at query time together with Microsoft Purview sensitivity labels, searching under the caller's Microsoft Entra identity. The company knowledge feature OpenAI added to ChatGPT in October 2025 likewise respects existing permissions, reading only what each user may see.",
-      ),
-      refs: ["5.2:iq"],
-      links: [S.foundryIq, S.companyKnowledge],
-    }),
+    sub(
+      "context-sources",
+      t("情報源", "Sources"),
+      {
+        summary: t(
+          "モデルの重みにない情報の出どころ。Microsoft はこれを 4 つに分けて提供している。",
+          "Where the information missing from the weights comes from. Microsoft offers it in four parts.",
+        ),
+        refs: ["5.2:iq"],
+        links: [S.microsoftIq],
+      },
+      [
+        item("work-iq", t("働き方の文脈（Work IQ）", "Work context (Work IQ)"), {
+          summary: t(
+            "メール、会議、チャット、文書と、誰と誰が一緒に働いているか。Microsoft 365 の上で、利用者が見てよい範囲から組み立てる。",
+            "Emails, meetings, chats and documents, and who works with whom — assembled on Microsoft 365 from what the user is allowed to see.",
+          ),
+          note: t(
+            "2026 年 9 月時点のドキュメントによれば、Work IQ は Microsoft 365 Copilot のライセンスとは別に、他社のエージェントからも MCP、A2A、REST で使え、利用量に応じて課金される。要求はすべて利用者の権限で実行し、MCP サーバーでは数百ある操作を 10 個の汎用的な道具にまとめている。Copilot が使う索引を外のアプリから引ける Retrieval API は、2025 年に先に出ていた。",
+            "According to its September 2026 documentation, Work IQ can also be used by other companies' agents, over MCP, A2A or REST, billed by usage and independent of Microsoft 365 Copilot licensing. Every request runs under the user's own permissions, and its MCP server collapses hundreds of operations into 10 generic tools. The Retrieval API, which lets outside apps query the index behind Copilot, came first, in 2025.",
+          ),
+          refs: ["7.3:iq"],
+          links: [S.workIq, S.retrievalApi, S.msftEarningsCall],
+        }),
+        item("fabric-iq", t("データの意味（Fabric IQ）", "Semantics (Fabric IQ)"), {
+          summary: t(
+            "顧客、注文、出荷といった業務の概念と、その関係、指標、規則。テーブルの列だけを見せても、エージェントは数字の意味を取り違える。",
+            "Business concepts such as customers, orders and shipments, with their relationships, metrics and rules. Shown only table columns, an agent misreads what the numbers mean.",
+          ),
+          note: t(
+            "Fabric IQ のオントロジーは、こうした概念を OneLake のデータに結び付け、人とエージェントが同じ言葉で業務を扱えるようにする。概念を 1 度定義すれば、レポートにもエージェントにも使い回せる。",
+            "The Fabric IQ ontology binds these concepts to data in OneLake so that people and agents work with the business in the same vocabulary; a concept defined once can be reused across reports and agents.",
+          ),
+          refs: ["5.2:iq"],
+          links: [S.fabricIq, S.postOntology],
+        }),
+        item("foundry-iq", t("組織の知識（Foundry IQ）", "Knowledge (Foundry IQ)"), {
+          summary: t(
+            "規程、手順書、契約書など、根拠になる文書。複数の情報源を 1 つの知識ベースにまとめ、質問に合う部分を引用付きで返す。",
+            "Policies, manuals, contracts and other authoritative documents. Several sources are combined into one knowledge base, which returns the passages that fit a question, with citations.",
+          ),
+          note: t(
+            "Microsoft の測定では、質問を分解して情報源を選ばせ、足りなければ探し直させると、5 つのデータセットでの回答の評価が平均 59 点から 80 点に上がった（2025 年 11 月）。",
+            "In Microsoft's measurements, having the knowledge base break a question down, choose its sources and search again when results fall short raised answer scores across five datasets from 59 to 80 on average (November 2025).",
+          ),
+          refs: ["5.2:retrievalEffort"],
+          links: [S.foundryIq, S.foundryIqRelevance],
+        }),
+        item("web-iq", t("Web の情報（Web IQ）", "The web (Web IQ)"), {
+          summary: t(
+            "学習の締め切りより後の出来事や、社外の最新の情報。",
+            "Events after the training cutoff, and current information from outside the company.",
+          ),
+          note: t(
+            "見つけにくい情報を Web から探し出す力を測る OpenAI の BrowseComp では、2025 年 4 月の時点で、ブラウズ機能を付けた GPT-4o の正答率は 1.9%、この種の課題に向けて学習した Deep Research は 51.5% だった。2026 年 9 月の GPT-6 Astra は 91.5% である。Web を見られるだけでは足りず、探し方を学習させると成績が大きく伸びる。",
+            "On OpenAI's BrowseComp, which measures the ability to dig hard-to-find information out of the web, GPT-4o with browsing scored 1.9% in April 2025 and Deep Research, trained for this kind of task, 51.5%; GPT-6 Astra scored 91.5% in September 2026. Access to the web is not enough; training a model in how to search raises the score sharply.",
+          ),
+          refs: ["5.2:iq"],
+          links: [S.webIq, S.browseComp, S.gpt6Astra],
+        }),
+      ],
+    ),
+    sub(
+      "context-delivery",
+      t("探し方と渡し方", "Finding and handing over"),
+      {
+        summary: t(
+          "どの情報源にも共通する、探し方と渡し方。ここを外すと、情報源がそろっていても正しい文脈は届かない。",
+          "How context is found and handed over, whatever the source. Get this wrong and the right context does not arrive even when every source is in place.",
+        ),
+        refs: ["5.2:retrievalEffort"],
+        links: [S.contextEngineering, S.foundryIqRelevance],
+      },
+      [
+        item("search-ranking", t("検索と並べ替え", "Search and ranking"), {
+          summary: t(
+            "キーワードとベクトルを組み合わせて探し、結果を並べ替えて、上位だけを返す。文書をどこで断片に切り、何を添えて索引にするかでも、見つかるものが変わる。",
+            "Searching by keywords and vectors together, reranking the results and returning only the top ones. Where documents are split, and what is attached to each piece, also changes what can be found.",
+          ),
+          note: t(
+            "Anthropic の Contextual Retrieval（2024 年）は、文書の断片ごとに前後の文脈の説明を付けてから索引を作ることで、検索の失敗を 49%、並べ替え（リランキング）と組み合わせると 67% 減らした。検索先のデータを 1.4 兆トークンまで増やすと、言語モデリングといくつかの課題の成績が目立った飽和なく上がり続けたという研究もある（Shao ら、2024 年）。",
+            "Anthropic's Contextual Retrieval (2024) cut failed retrievals by 49%, and by 67% with reranking, by attaching a short explanation of its context to each chunk before indexing. Another study found that language modelling and several downstream tasks kept improving without obvious saturation as the datastore grew to 1.4 trillion tokens (Shao et al., 2024).",
+          ),
+          refs: ["5.2:retrievalEffort"],
+          links: [S.contextualRetrieval, S.massiveDs, S.rag, S.postGraphRag, S.postSearch],
+        }),
+        item("permissions", t("権限と鮮度", "Permissions, freshness"), {
+          summary: t(
+            "利用者が見てよいものだけを、最新の状態で持ち込む。見てはいけない情報を持ち込めば、答えが正しくても事故になる。",
+            "Bringing in only what the user may see, in its current state. Pulling in something they must not see is an incident even if the answer is right.",
+          ),
+          note: t(
+            "Foundry IQ は、対応する情報源ではアクセス制御リストを同期し、Microsoft Purview の秘密度ラベルとともに検索の時点で適用して、呼び出した人の Microsoft Entra の ID で検索する。OpenAI が 2025 年 10 月に ChatGPT に加えた company knowledge も、既存の権限に従い、利用者が見てよいものだけを読む。",
+            "For supported sources, Foundry IQ syncs access control lists and enforces them at query time together with Microsoft Purview sensitivity labels, searching under the caller's Microsoft Entra identity. The company knowledge feature OpenAI added to ChatGPT in October 2025 likewise respects existing permissions, reading only what each user may see.",
+          ),
+          refs: ["5.2:iq"],
+          links: [S.foundryIq, S.companyKnowledge],
+        }),
+      ],
+    ),
   ],
 };
 
@@ -227,8 +255,8 @@ export const SYSTEM: NodeDef = {
   emphasis: true,
   label: t("仕事を完了する能力", "Getting work done"),
   sublabel: t(
-    "モデル、ハーネス、推論計算を合わせたシステム全体の力",
-    "What the model, harness and inference compute achieve together",
+    "モデル、ハーネス、推論計算、文脈を合わせたシステム全体の力",
+    "What the model, harness, inference compute and context achieve together",
   ),
   detail: {
     summary: t(

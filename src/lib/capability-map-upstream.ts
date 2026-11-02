@@ -275,8 +275,8 @@ export const SIZE: GroupDef = {
     }),
     item("context", t("文脈の長さ", "Context length"), {
       summary: t(
-        "1 回の呼び出しで参照できる情報の量。長いほど KV キャッシュと HBM の負担が増える。",
-        "How much a single call can attend to; longer contexts weigh on the KV cache and HBM.",
+        "1 回の呼び出しで参照できる情報の量。長いほど KV キャッシュと HBM の負担が増える。何を入れるかは、ハーネスの文脈の管理と、推論時の文脈（IQ 層）で決まる。",
+        "How much a single call can attend to; longer contexts weigh on the KV cache and HBM. What fills it is decided by the harness's context management and by the context layer (IQ).",
       ),
       note: t(
         "2023 年 11 月には GPT-4 Turbo が 12 万 8,000 トークン、Claude 2.1 が 20 万トークンだった。100 万トークンは 2024 年に Gemini 1.5 Pro が初めて提供し、2026 年 3 月には Claude Opus 4.6 で通常の価格になった。長い文脈から指定された情報を取り出す力も上がり、OpenAI によれば GPT-6 Astra（2026 年 9 月）は約 50 万〜100 万トークンの MRCR v2 で 96.3% を出した。DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んでアテンションを計算する。",

@@ -323,16 +323,20 @@ export const SECTIONS: Record<string, SectionDef> = {
         "Even so, filling the context is not the answer. Every token put in adds to inference cost, and a company's information is far too large to fit in a million tokens.",
       ),
       contextRot: t(
-        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めている。",
-        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome.",
+        "Anthropic は 2025 年 9 月に、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めた。",
+        "In September 2025, Anthropic noted that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advised choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome.",
       ),
       iq: t(
-        "何を、どこから、誰の権限で、どれだけ持ち込むかを担う層を、Microsoft は Microsoft IQ と呼び",
-        "The layer that decides what to bring in, from where, under whose permissions and how much is what Microsoft calls Microsoft IQ",
+        "推論のたびに、どこを、誰の権限で探し、何を渡すかを担う層を、Microsoft は Microsoft IQ と呼び",
+        "The layer that decides, at each inference, where to look, under whose permissions, and what to hand over is what Microsoft calls Microsoft IQ",
       ),
       retrievalEffort: t(
         "探すことに推論の計算を使うのも、推論時計算の 1 つの形である。",
         "Spending inference compute on searching is another form of inference-time compute.",
+      ),
+      contextMoney: t(
+        "一方、データを整え、索引と権限を最新に保つ費用は、主にラボのチェーンの外、つまり顧客自身か文脈の層を持つ事業者の側に出て、その対価も文脈の層を持つ事業者に入る。",
+        "The cost of preparing the data and keeping indexes and permissions current, on the other hand, falls mostly outside the lab's chain, on customers themselves or on whoever runs the context layer, and what is paid for it goes to the operator of that layer.",
       ),
       context: t(
         "同じモデルとハーネスでも、推論時に正しい文脈を持ち込めるかどうかで、完了できる仕事は変わる。",
@@ -449,8 +453,12 @@ export const SECTIONS: Record<string, SectionDef> = {
         "Microsoft's weakness is not an existential risk like OpenAI's, but the gradual erosion of this headroom.",
       ),
       iq: t(
-        "Microsoft にとって、モデルは選んで使う部品になりつつあり、差をつける場所はモデルの外側の文脈に移りつつある",
-        "for Microsoft, models are becoming components to choose among, and the place to differentiate is moving to the context outside the model",
+        "Microsoft にとって、モデルは選んで使う部品になりつつあり、押さえるべき場所はモデルの外側の文脈に移りつつある",
+        "for Microsoft, models are becoming components to choose among, and the position worth holding is moving to the context outside the model",
+      ),
+      routing: t(
+        "利用者ではなく文脈の層を持つ側がモデルを振り分けるほど、フロンティアのモデルが「最も賢い」ことに付く上乗せ（第 6.3 節の (2)）は、その振り分けの中で決まるようになる。",
+        "the more it is the owner of the context layer rather than the user who decides which model runs, the more the premium paid for a frontier model being \"the smartest\" (point (2) of Section 6.3) is set inside that routing.",
       ),
     },
   },

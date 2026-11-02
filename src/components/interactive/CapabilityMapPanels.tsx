@@ -180,7 +180,7 @@ export function Legend({ locale }: { locale: Locale }) {
       ))}
       <li className="flex items-center gap-1.5">
         <span className="rounded-full border px-1.5 text-[10px] text-foreground" style={{ borderColor: EFFICIENCY_COLOR, background: tint(EFFICIENCY_COLOR, 16) }}>
-          {isJa ? "効率" : "Efficiency"}
+          {isJa ? "効率・精度" : "Efficiency, precision"}
         </span>
         {isJa ? "矢印のラベル" : "Arrow labels"}
       </li>
