@@ -8,7 +8,10 @@ import {
   ELEMENTS,
   KEY_POINTS,
   LAYOUT,
+  LINK_KIND_LABEL,
   LOOPS,
+  SECTIONS,
+  SOURCES,
   SUB_IDS,
   ancestors,
   descendants,
@@ -16,9 +19,12 @@ import {
   kindOf,
   labelOf,
   layoutMap,
+  parseRef,
   refLabel,
   relatedIds,
+  resolveRef,
   type Detail,
+  type Link,
   type MapLayout,
   type Rect,
   type Text,
@@ -29,6 +35,35 @@ const slug = "ai-industry-capital-to-fcf";
 const sources = Object.fromEntries(
   (["ja", "en"] as const).map((locale) => [locale, readFileSync(resolve(root, "content", "blog", locale, `${slug}.mdx`), "utf8")]),
 ) as Record<"ja" | "en", string>;
+
+/** Body text of each numbered section, with bold tags and link targets removed. */
+function sectionBodies(source: string): Map<string, { title: string; body: string }> {
+  const plain = source.replace(/<\/?strong>/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  const out = new Map<string, { title: string; body: string }>();
+  let current: { title: string; lines: string[] } | null = null;
+  const flush = (id: string | null) => {
+    if (id && current) out.set(id, { title: current.title, body: current.lines.join("\n") });
+  };
+  let currentId: string | null = null;
+  for (const line of plain.split("\n")) {
+    const heading = line.match(/^#{2,3} (\d+(?:\.\d+)?)\.? (.*)$/);
+    if (heading) {
+      flush(currentId);
+      currentId = heading[1];
+      current = { title: heading[2], lines: [] };
+      continue;
+    }
+    if (/^## /.test(line)) {
+      flush(currentId);
+      currentId = null;
+      current = null;
+      continue;
+    }
+    current?.lines.push(line);
+  }
+  flush(currentId);
+  return out;
+}
 
 const allIds = [
   ...ELEMENTS.keys(),
@@ -44,6 +79,17 @@ const details: [string, Detail][] = [
   ...LOOPS.map((l) => [l.id, l.detail] as [string, Detail]),
 ];
 
+/** Every list of refs and links in the map, keyed by where it appears. */
+const allRefs: [string, string[]][] = [
+  ...details.map(([id, d]) => [id, d.refs ?? []] as [string, string[]]),
+  ...COMPANIES.map((c) => [c.id, c.refs ?? []] as [string, string[]]),
+  ...KEY_POINTS.map((k) => [k.id, k.refs ?? []] as [string, string[]]),
+];
+const allLinks: [string, Link[]][] = [
+  ...details.map(([id, d]) => [id, d.links ?? []] as [string, Link[]]),
+  ...COMPANIES.map((c) => [c.id, c.links ?? []] as [string, Link[]]),
+];
+
 function texts(): [string, Text][] {
   const out: [string, Text][] = [];
   for (const e of ELEMENTS.values()) {
@@ -53,7 +99,6 @@ function texts(): [string, Text][] {
   for (const [id, d] of details) {
     out.push([`${id}.summary`, d.summary]);
     if (d.note) out.push([`${id}.note`, d.note]);
-    for (const l of d.links ?? []) out.push([`${id}.link`, l]);
   }
   for (const e of EDGES) if (e.label) out.push([`${e.id}.label`, e.label]);
   for (const l of LOOPS) out.push([`${l.id}.label`, l.label]);
@@ -136,31 +181,93 @@ describe("capability map: data", () => {
   });
 
   it.each(["ja", "en"] as const)("only cites sections that exist in the article (%s)", (locale) => {
-    const headings = new Set(
-      [...sources[locale].matchAll(/^#{2,3} (\d+(?:\.\d+)?)\.?\s/gm)].map((m) => m[1]),
-    );
-    for (const [id, d] of details) for (const ref of d.refs ?? []) expect(headings.has(ref), `${id} → ${ref}`).toBe(true);
+    const bodies = sectionBodies(sources[locale]);
+    for (const [id, refs] of allRefs) {
+      for (const ref of refs) {
+        const { section, point } = parseRef(ref);
+        expect(bodies.has(section), `${id} → ${ref}`).toBe(true);
+        expect(SECTIONS[section], `${id} → ${ref} has no SECTIONS entry`).toBeDefined();
+        if (point) expect(SECTIONS[section].points[point], `${id} → ${ref}`).toBeDefined();
+        expect(resolveRef(ref), `${id} → ${ref}`).toBeDefined();
+      }
+    }
+  });
+
+  it.each(["ja", "en"] as const)("quotes the article verbatim, under the right heading (%s)", (locale) => {
+    const bodies = sectionBodies(sources[locale]);
+    for (const [section, def] of Object.entries(SECTIONS)) {
+      const found = bodies.get(section);
+      expect(found, section).toBeDefined();
+      expect(found!.title, section).toBe(def.title[locale]);
+      for (const [key, quote] of Object.entries(def.points)) expect(found!.body, `${section}:${key}`).toContain(quote[locale]);
+    }
+  });
+
+  it("gives every panel, company and key point something to read next", () => {
+    for (const [id, d] of details) expect(d.links?.length ?? 0, `${id} has no sources`).toBeGreaterThan(0);
+    for (const c of COMPANIES) {
+      expect(c.links?.length ?? 0, c.id).toBeGreaterThan(0);
+      expect(c.refs?.length ?? 0, c.id).toBeGreaterThan(0);
+    }
+    for (const k of KEY_POINTS) expect(k.refs?.length ?? 0, k.id).toBeGreaterThan(0);
+    const cited = Object.keys(SECTIONS).filter((s) => allRefs.some(([, refs]) => refs.some((r) => parseRef(r).section === s)));
+    expect(cited.sort()).toEqual(Object.keys(SECTIONS).sort());
+  });
+
+  it("uses well-formed links, each listed once per panel", () => {
+    for (const [id, links] of allLinks) {
+      const keys = links.map((l) => l.href ?? l.slug);
+      expect(new Set(keys).size, `${id} lists a source twice`).toBe(keys.length);
+      for (const l of links) {
+        expect(LINK_KIND_LABEL[l.kind], `${id} → ${l.ja}`).toBeDefined();
+        expect(Boolean(l.href) !== Boolean(l.slug), id).toBe(true);
+        expect(l.ja.trim() && l.en.trim(), id).toBeTruthy();
+        if (l.href) {
+          expect(l.href, id).toMatch(/^https:\/\//);
+          expect(l.meta?.ja.trim() && l.meta?.en.trim(), `${id} → ${l.href} needs an author or publisher`).toBeTruthy();
+        }
+        expect(l.kind === "post", `${id} → ${l.ja}`).toBe(Boolean(l.slug));
+      }
+    }
+  });
+
+  it("uses every registered source somewhere", () => {
+    const used = new Set(allLinks.flatMap(([, links]) => links));
+    const unused = Object.entries(SOURCES)
+      .filter(([, l]) => !used.has(l))
+      .map(([key]) => key);
+    expect(unused).toEqual([]);
+  });
+
+  it("titles every source distinctly, since inline lists show titles without the publisher", () => {
+    for (const locale of ["ja", "en"] as const) {
+      const titles = Object.values(SOURCES).map((l) => l[locale]);
+      const repeated = titles.filter((title, i) => titles.indexOf(title) !== i);
+      expect(repeated, locale).toEqual([]);
+    }
   });
 
   it("links only to posts that exist in both languages", () => {
-    for (const [id, d] of details) {
-      for (const l of d.links ?? []) {
-        expect(Boolean(l.href) !== Boolean(l.slug), id).toBe(true);
-        if (l.href) expect(l.href, id).toMatch(/^https:\/\//);
-        if (l.slug) {
-          for (const locale of ["ja", "en"]) {
-            expect(existsSync(resolve(root, "content", "blog", locale, `${l.slug}.mdx`)), `${id} → ${locale}/${l.slug}`).toBe(true);
-          }
+    for (const [id, links] of allLinks) {
+      for (const l of links) {
+        if (!l.slug) continue;
+        for (const locale of ["ja", "en"]) {
+          expect(existsSync(resolve(root, "content", "blog", locale, `${l.slug}.mdx`)), `${id} → ${locale}/${l.slug}`).toBe(true);
         }
       }
     }
   });
 
-  it("formats section references", () => {
+  it("formats and resolves section references", () => {
     expect(refLabel("4.4", "ja")).toBe("第 4.4 節");
+    expect(refLabel("4.6:tts", "ja")).toBe("第 4.6 節");
     expect(refLabel("2", "ja")).toBe("第 2 章");
     expect(refLabel("4.4", "en")).toBe("Section 4.4");
     expect(refLabel("2", "en")).toBe("Chapter 2");
+    expect(resolveRef("4.6")?.quote).toBe(Object.values(SECTIONS["4.6"].points)[0]);
+    expect(resolveRef("4.6:tts")?.quote).toBe(SECTIONS["4.6"].points.tts);
+    expect(resolveRef("4.6:nope")).toBeUndefined();
+    expect(resolveRef("9.9")).toBeUndefined();
   });
 });
 

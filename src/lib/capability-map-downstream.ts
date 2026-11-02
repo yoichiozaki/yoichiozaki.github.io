@@ -1,17 +1,5 @@
+import { SOURCES as S } from "./capability-map-sources";
 import { item, t, type GroupDef, type NodeDef } from "./capability-map-types";
-
-const METR = { ja: "METR: Time Horizons", en: "METR: Time Horizons", href: "https://metr.org/time-horizons/" };
-const SWE_AGENT = { ja: "SWE-agent（論文）", en: "SWE-agent (paper)", href: "https://arxiv.org/abs/2405.15793" };
-const HARNESS_ARTICLE = {
-  ja: "Anthropic: Effective harnesses for long-running agents",
-  en: "Anthropic: Effective harnesses for long-running agents",
-  href: "https://www.anthropic.com/research/effective-harnesses-for-long-running-agents",
-};
-const MULTI_AGENT_ARTICLE = {
-  ja: "Anthropic: How we built our multi-agent research system",
-  en: "Anthropic: How we built our multi-agent research system",
-  href: "https://www.anthropic.com/research/multi-agent-research-system",
-};
 
 export const MODEL: NodeDef = {
   kind: "node",
@@ -28,7 +16,8 @@ export const MODEL: NodeDef = {
       "学習の段階で伸びる。ただしベンチマークは次々に飽和して入れ替わり、損失の低下がどの能力として現れるかも読みにくい。",
       "It grows through training, but benchmarks keep saturating and being replaced, and which capabilities a lower loss turns into is hard to read.",
     ),
-    refs: ["2.1", "5.2"],
+    refs: ["2.1:link4", "5.2:twoKinds"],
+    links: [S.kaplan, S.schaeffer, S.epochEci],
   },
 };
 
@@ -47,17 +36,8 @@ export const HARNESS: GroupDef = {
       "SWE-agent の論文（2024 年）では、同じ GPT-4 Turbo でも、シェルを直接操作させたときの SWE-bench Lite の解決率 11% が、エージェント向けに設計したインターフェースを与えると 18% に上がった。エージェント向けの強化学習はモデルをハーネスの中で動かして学ばせるので、モデルとハーネスは一緒に改良されていく。",
       "In the SWE-agent paper (2024), the same GPT-4 Turbo solved 11% of SWE-bench Lite when driving a raw shell and 18% with an interface designed for agents. Agentic RL trains the model while it runs inside a harness, so the two are improved as a pair.",
     ),
-    refs: ["5.2"],
-    links: [
-      {
-        ja: "拙稿: 本番 AI エージェントの設計空間を読む（Claude Code の解剖）",
-        en: "Related post: the design space of a production AI agent (Claude Code)",
-        slug: "claude-code-design-space",
-      },
-      { ja: "拙稿: Agentic Workflow 完全解説", en: "Related post: Agentic Workflow deep dive", slug: "agentic-workflow" },
-      SWE_AGENT,
-      HARNESS_ARTICLE,
-    ],
+    refs: ["5.2:harness", "5.2:twoKinds"],
+    links: [S.sweAgent, S.anthropicHarness, S.postClaudeCode, S.postAgenticWorkflow],
   },
   children: [
     item("agent-loop", t("エージェントループ", "Agent loop"), {
@@ -65,15 +45,24 @@ export const HARNESS: GroupDef = {
         "モデルを呼び、その出力に従って道具を使い、結果を返してまた呼ぶ。この繰り返しで、何手もかかる仕事を進める。",
         "Call the model, turn its output into tool calls, feed the results back and call it again — the loop that carries multi-step work.",
       ),
+      note: t(
+        "考えることと道具を使うことを交互に行わせる ReAct（2022 年）は、対話型の課題 ALFWorld と WebShop で、模倣学習や強化学習の手法を成功率で 34 ポイントと 10 ポイント上回った。",
+        "ReAct (2022), which interleaves reasoning with actions, beat imitation- and reinforcement-learning methods on the interactive ALFWorld and WebShop benchmarks by 34 and 10 points of success rate.",
+      ),
+      refs: ["5.2:harness"],
+      links: [S.react, S.sweAgent],
     }),
     item("tools", t("道具の利用", "Tool use"), {
       summary: t(
         "コードの実行、ファイルの編集、検索、ブラウザの操作など。道具の設計しだいで、同じモデルの成績が変わる。",
         "Running code, editing files, searching, driving a browser. How the tools are designed changes how well the same model does.",
       ),
-      links: [
-        { ja: "拙稿: Model Context Protocol (MCP) 超詳細解説", en: "Related post: Model Context Protocol deep dive", slug: "model-context-protocol" },
-      ],
+      note: t(
+        "Toolformer（2023 年）は、計算機、検索、翻訳、カレンダーなどの API をいつ、どう呼ぶかを、モデルが少数の例から自分で学べることを示した。",
+        "Toolformer (2023) showed that a model can teach itself, from a handful of examples, when and how to call APIs such as a calculator, search, translation and a calendar.",
+      ),
+      refs: ["5.2:harness"],
+      links: [S.toolformer, S.sweAgent, S.postMcp],
     }),
     item("context-mgmt", t("文脈の管理", "Context management"), {
       summary: t(
@@ -81,11 +70,11 @@ export const HARNESS: GroupDef = {
         "Deciding what goes into a limited context and what is dropped: summarising old turns (compaction) and retrieving what is needed.",
       ),
       note: t(
-        "Anthropic は 2025 年 11 月、Opus 4.5 でも、大まかな指示だけを与えて何セッションにもわたって Web アプリを開発させると、コンパクションを使っても本番に使える水準まで仕上げられないと報告した。",
-        "In November 2025, Anthropic reported that even Opus 4.5, given only a high-level prompt and many sessions, fell short of a production-quality web app despite compaction.",
+        "Anthropic は 2025 年 11 月、Opus 4.5 でも、大まかな指示だけを与えて何セッションにもわたって Web アプリを開発させると、コンパクションを使っても本番に使える水準まで仕上げられないと報告した。文脈が長いと、真ん中にある情報ほど使われにくいという研究もある（Liu ら、2023 年）。",
+        "In November 2025, Anthropic reported that even Opus 4.5, given only a high-level prompt and many sessions, fell short of a production-quality web app despite compaction. Research also finds that models use information in the middle of a long context less well than at its start or end (Liu et al., 2023).",
       ),
-      refs: ["5.2"],
-      links: [HARNESS_ARTICLE],
+      refs: ["5.2:longRun"],
+      links: [S.anthropicHarness, S.lostInTheMiddle],
     }),
     item("memory", t("記憶と引き継ぎ", "Memory and handoff"), {
       summary: t(
@@ -96,17 +85,20 @@ export const HARNESS: GroupDef = {
         "Anthropic は、最初のセッションで環境を整えるエージェントと、少しずつ進めるエージェントを分け、進捗ファイルと git の履歴で引き継ぐ方式を紹介した。",
         "Anthropic described splitting the work between an agent that sets up the environment in the first session and one that makes incremental progress, handing over through a progress file and the git history.",
       ),
-      refs: ["5.2"],
-      links: [HARNESS_ARTICLE],
+      refs: ["5.2:longRun"],
+      links: [S.anthropicHarness, S.memGpt],
     }),
     item("verify", t("検証（テスト・採点）", "Checks (tests, graders)"), {
       summary: t(
         "テストや採点で出力を確かめ、通らなければやり直す。同じ仕組みは、強化学習の報酬にもなる。",
         "Checking the output with tests or graders and retrying on failure; the same checks can serve as RL rewards.",
       ),
-      links: [
-        { ja: "拙稿: LLM-as-a-Judge を「育てて運用する」", en: "Related post: raising an LLM judge", slug: "llm-as-a-judge-lifecycle" },
-      ],
+      note: t(
+        "途中の各ステップを採点する報酬モデル（プロセス監督）は、最終的な答えだけを採点するものより成績が良く、MATH の代表的な問題の 78% を解いた（Lightman ら、2023 年）。",
+        "A reward model that grades each intermediate step (process supervision) outperformed one that grades only the final answer, solving 78% of a representative subset of MATH (Lightman et al., 2023).",
+      ),
+      refs: ["5.3:answer"],
+      links: [S.verifyStepByStep, S.verifiers, S.postJudge],
     }),
     item("subagents", t("分担（サブエージェント）", "Subagents"), {
       summary: t(
@@ -117,14 +109,19 @@ export const HARNESS: GroupDef = {
         "Anthropic の分析では、エージェントは会話の約 4 倍、複数のエージェントで分担するシステムは約 15 倍のトークンを使う。調査のように並列に進めやすい仕事では成績が上がるが、推論費も増える。",
         "Anthropic found that agents use about 4× the tokens of a chat and multi-agent systems about 15× — better results on parallelizable work such as research, but higher inference cost.",
       ),
-      refs: ["5.2"],
-      links: [MULTI_AGENT_ARTICLE],
+      refs: ["5.2:tokens"],
+      links: [S.anthropicMultiAgent],
     }),
     item("guardrails", t("権限と安全装置", "Permissions, safeguards"), {
       summary: t(
         "実行できる操作を絞り、危険な操作の前には人の確認を挟む。どこまで任せられるかを決める。",
         "Limiting what the agent may do and asking a person before risky actions — this decides how much can be delegated.",
       ),
+      note: t(
+        "Anthropic は、Claude Code に作業できる範囲を限るサンドボックスを入れたことで、社内の利用で権限の確認を求める回数が 84% 減ったと報告した。",
+        "Anthropic reported that adding a sandbox that limits where Claude Code can act cut permission prompts by 84% in its internal use.",
+      ),
+      links: [S.anthropicSandbox, S.postClaudeCode],
     }),
   ],
 };
@@ -148,11 +145,8 @@ export const SYSTEM: NodeDef = {
       "METR のタイムホライズンも、道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測っている。測っているのはモデル単体ではなく、システムの能力である。",
       "METR's time horizons are measured with the model inside a scaffold that provides tools and runs the loop — they measure the system, not the model alone.",
     ),
-    refs: ["5.2", "5.3"],
-    links: [
-      METR,
-      { ja: "拙稿: フロンティアはモデルからシステムへ", en: "Related post: the frontier moves from models to systems", slug: "outcome-per-dollar-frontier" },
-    ],
+    refs: ["5.3:target", "5.2:twoKinds"],
+    links: [S.metrTimeHorizons, S.rliLeaderboard, S.postOutcome],
   },
 };
 
@@ -165,6 +159,7 @@ export const USES: GroupDef = {
   detail: {
     summary: t("仕事を完了する能力が、売上や研究の成果に変わる場所。", "Where getting work done turns into revenue and results."),
     refs: ["3.3"],
+    links: [S.menlo, S.gdpval],
   },
   children: [
     item("ai-research", t("AI の研究開発", "AI research"), {
@@ -173,10 +168,11 @@ export const USES: GroupDef = {
         "AI helping to build the next models — what Anthropic's S-1 calls “closing the loop”.",
       ),
       note: t(
-        "アルゴリズムの効率の伸びを速める可能性があるが、予測できる軸とは言えない。",
-        "It may speed up algorithmic progress, but it is not a predictable axis.",
+        "アルゴリズムの効率の伸びを速める可能性があるが、予測できる軸とは言えない。Lu ら（2024 年）の The AI Scientist は、アイデアの立案から実験、論文の執筆までを 1 本あたり 15 ドル未満で行った。",
+        "It may speed up algorithmic progress, but it is not a predictable axis. Lu et al.'s The AI Scientist (2024) went from idea to experiments to a written paper for under USD 15 per paper.",
       ),
-      refs: ["2.2", "5.3"],
+      refs: ["2.2:loop", "5.3:loop"],
+      links: [S.s1, S.aiScientist, S.alphaEvolve],
     }),
     item("software", t("ソフトウェア開発", "Software development"), {
       summary: t(
@@ -187,7 +183,8 @@ export const USES: GroupDef = {
         "コーディング用途の企業の LLM API 支出では、Anthropic のシェアが 54% に達した（Menlo Ventures、2025 年）。",
         "Anthropic took 54% of enterprise LLM API spending on coding (Menlo Ventures, 2025).",
       ),
-      refs: ["3.3", "5.3"],
+      refs: ["3.3", "5.3:coding"],
+      links: [S.menlo, S.sweBench, S.sweAgent],
     }),
     item("knowledge-work", t("知識労働", "Knowledge work"), {
       summary: t(
@@ -198,19 +195,30 @@ export const USES: GroupDef = {
         "Anthropic は Claude Code の仕組みを知識労働に広げた Claude Cowork を出している。",
         "Anthropic extended the Claude Code approach to knowledge work with Claude Cowork.",
       ),
-      refs: ["2.2", "5.3"],
+      refs: ["2.2:agents", "5.3:hardToJudge"],
+      links: [S.gdpval, S.genAiAtWork, S.s1],
     }),
     item("science", t("科学", "Science"), {
       summary: t(
         "仮説を立て、計算や実験で確かめる。結果を確かめる手段がある分野ほど、AI を使いやすい。",
         "Forming hypotheses and testing them by computation or experiment; the easier results are to check, the easier AI is to apply.",
       ),
+      note: t(
+        "Google DeepMind の AlphaEvolve は、4×4 の複素行列の積を 48 回のスカラー乗算で計算する方法を見つけ、1969 年の Strassen の方法を改良した。",
+        "Google DeepMind's AlphaEvolve found a way to multiply 4×4 complex-valued matrices with 48 scalar multiplications, improving on Strassen's 1969 algorithm.",
+      ),
+      links: [S.alphaEvolve, S.coscientist, S.aiScientist],
     }),
     item("robotics", t("ロボット", "Robotics"), {
       summary: t(
         "物理的な世界での作業。データが少なく、試行錯誤に時間がかかる。",
         "Work in the physical world, where data is scarce and trial and error is slow.",
       ),
+      note: t(
+        "Open X-Embodiment は、21 の研究機関が 22 種類のロボットで集めたデータ（527 のスキル）を 1 つにまとめた。",
+        "Open X-Embodiment pooled data from 22 kinds of robots collected by 21 institutions, covering 527 skills.",
+      ),
+      links: [S.rt2, S.openX, S.genie3],
     }),
   ],
 };

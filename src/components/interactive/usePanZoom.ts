@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 
 export type View = { x: number; y: number; k: number };
+type Box = { x: number; y: number; w: number; h: number };
 
 const MIN_K = 0.15;
 const MAX_K = 2.5;
 const DRAG_THRESHOLD = 4;
+const EDGE_MARGIN = 16;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 type Drag = { id: number; startX: number; startY: number; lastX: number; lastY: number; active: boolean };
 
@@ -22,6 +25,8 @@ export function usePanZoom({ width, height, wheelZoom }: { width: number; height
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const [view, setViewState] = useState<View>({ x: 0, y: 0, k: 1 });
   const [dragging, setDragging] = useState(false);
+  // True while a programmatic pan should be animated; any direct manipulation cancels it.
+  const [gliding, setGliding] = useState(false);
   const viewRef = useRef(view);
   const sizeRef = useRef({ w: 0, h: 0 });
   const contentRef = useRef({ width, height });
@@ -68,6 +73,29 @@ export function usePanZoom({ width, height, wheelZoom }: { width: number; height
     [setView],
   );
 
+  /** Pan just enough to bring `box` (canvas coordinates) into view, keeping `insetRight` px on the right free. */
+  const ensureVisible = useCallback(
+    (box: Box, insetRight = 0) => {
+      const v = viewRef.current;
+      const { w, h } = sizeRef.current;
+      const right = w - insetRight - EDGE_MARGIN;
+      // When an overlay covers nearly the whole viewport there is nowhere useful to pan to.
+      if (!w || !h || right - EDGE_MARGIN < 160) return;
+      const sx = v.x + box.x * v.k;
+      const sy = v.y + box.y * v.k;
+      let dx = 0;
+      let dy = 0;
+      if (sx + box.w * v.k > right) dx = right - (sx + box.w * v.k);
+      if (sx + dx < EDGE_MARGIN) dx = EDGE_MARGIN - sx;
+      if (sy + box.h * v.k > h - EDGE_MARGIN) dy = h - EDGE_MARGIN - (sy + box.h * v.k);
+      if (sy + dy < EDGE_MARGIN) dy = EDGE_MARGIN - sy;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      setGliding(!prefersReducedMotion());
+      setView({ ...v, x: v.x + dx, y: v.y + dy });
+    },
+    [setView],
+  );
+
   // Fit on first layout and whenever the viewport changes size (e.g. fullscreen).
   useEffect(() => {
     if (!viewport) return;
@@ -88,6 +116,7 @@ export function usePanZoom({ width, height, wheelZoom }: { width: number; height
     const onWheel = (e: WheelEvent) => {
       if (!(wheelZoom || e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
+      setGliding(false);
       const rect = viewport.getBoundingClientRect();
       const step = e.deltaMode === 1 ? 0.05 : 0.0015;
       zoomAt(Math.exp(-e.deltaY * step), e.clientX - rect.left, e.clientY - rect.top);
@@ -98,6 +127,7 @@ export function usePanZoom({ width, height, wheelZoom }: { width: number; height
 
   const onPointerDown = useCallback((e: PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    setGliding(false);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 1) {
       drag.current = { id: e.pointerId, startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY, active: false };
@@ -173,6 +203,7 @@ export function usePanZoom({ width, height, wheelZoom }: { width: number; height
       const action = actions[e.key];
       if (!action) return;
       e.preventDefault();
+      setGliding(false);
       action();
     },
     [fit, panBy, zoomAt],
@@ -180,8 +211,12 @@ export function usePanZoom({ width, height, wheelZoom }: { width: number; height
 
   return {
     viewportRef: setViewport,
+    viewport,
     view,
     dragging,
+    gliding,
+    endGlide: useCallback(() => setGliding(false), []),
+    ensureVisible,
     fit,
     zoomIn: useCallback(() => zoomAt(1.25), [zoomAt]),
     zoomOut: useCallback(() => zoomAt(1 / 1.25), [zoomAt]),

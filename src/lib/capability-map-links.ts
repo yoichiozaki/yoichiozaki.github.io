@@ -1,3 +1,4 @@
+import { SOURCES as S } from "./capability-map-sources";
 import { t, type CompanyDef, type EdgeDef, type KeyPointDef, type LoopDef } from "./capability-map-types";
 
 const MEASURE = t("測る", "Measure");
@@ -20,7 +21,8 @@ export const EDGES: EdgeDef[] = [
         "長期では指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。",
         "It improves exponentially over the long run, but in steps with each generation. Most of the gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory.",
       ),
-      refs: ["4.3", "5.2"],
+      refs: ["4.3:gains", "4.7:tokens"],
+      links: [S.epochScaling, S.nvidiaRubin],
     },
   },
   {
@@ -40,7 +42,8 @@ export const EDGES: EdgeDef[] = [
         "Toby Ord の分析では、AIME の正答率を 20% から 80% に上げるのに、推論時の計算なら約 100 倍の増加で済むが、強化学習の計算では約 1 万倍が必要になる（推定の幅は大きい）。",
         "Toby Ord estimates that raising AIME accuracy from 20% to 80% takes about 100x more inference compute but about 10,000x more RL compute (with wide uncertainty).",
       ),
-      refs: ["5.2"],
+      refs: ["5.2:ord"],
+      links: [S.tobyOrd, S.testTimeCompute],
     },
   },
   {
@@ -60,7 +63,8 @@ export const EDGES: EdgeDef[] = [
         "エキスパートを細かくするほど計算量あたりの性能が上がるという Krajewski らのスケーリング則（2024 年）が、MoE の流れを裏づけている。",
         "Krajewski et al.'s scaling law (2024), in which finer-grained experts give more performance per unit of compute, backs the move to MoE.",
       ),
-      refs: ["4.6"],
+      refs: ["4.6:moe"],
+      links: [S.fineGrainedMoe, S.mixtral],
     },
   },
   {
@@ -76,7 +80,12 @@ export const EDGES: EdgeDef[] = [
         "同じデータの量から、どれだけ学べるか。人間が書いた公開テキストが尽きていくほど重要になる。",
         "How much a model learns from a given amount of data — more important as public human-written text runs out.",
       ),
-      refs: ["5.2"],
+      note: t(
+        "データが限られる場合、同じデータを 4 回まで繰り返して学習しても、新しいデータを使うのと損失はほとんど変わらない。ただし、それ以上繰り返すと、計算を足す効果は消えていく（Muennighoff ら、2023 年）。",
+        "When data is limited, repeating it for up to 4 epochs gives almost the same loss as fresh data; with more repetition, though, the value of extra compute fades to zero (Muennighoff et al., 2023).",
+      ),
+      refs: ["5.2:data"],
+      links: [S.dataConstrained, S.villalobos],
     },
   },
   {
@@ -96,8 +105,8 @@ export const EDGES: EdgeDef[] = [
         "同じ性能に必要な計算量は、約 8 か月で半分になってきた（Epoch AI。95% 信頼区間は 5〜14 か月）。",
         "The compute needed for a given level of performance has halved about every eight months (Epoch AI; 95% CI 5–14 months).",
       ),
-      refs: ["5.2"],
-      links: [{ ja: "Ho ら（arXiv）", en: "Ho et al. (arXiv)", href: "https://arxiv.org/abs/2403.05812" }],
+      refs: ["5.3:loop"],
+      links: [S.ho],
     },
   },
   { id: "e-model-harness", from: "model", to: "harness", fromSide: "bottom", toSide: "top", kind: "flow" },
@@ -118,8 +127,8 @@ export const EDGES: EdgeDef[] = [
         "SWE-agent の論文では、同じ GPT-4 Turbo でも、エージェント向けのインターフェースを与えると SWE-bench Lite の解決率が 11% から 18% に上がった。改善は学習し直さなくてもすでにあるモデルに効くが、伸び方を予測する法則はまだない。",
         "In the SWE-agent paper, giving the same GPT-4 Turbo an interface designed for agents raised its SWE-bench Lite score from 11% to 18%. Improvements apply to existing models without retraining, but no law yet predicts how far they go.",
       ),
-      refs: ["5.2"],
-      links: [{ ja: "SWE-agent（論文）", en: "SWE-agent (paper)", href: "https://arxiv.org/abs/2405.15793" }],
+      refs: ["5.2:harness"],
+      links: [S.sweAgent, S.anthropicHarness],
     },
   },
   {
@@ -139,7 +148,8 @@ export const EDGES: EdgeDef[] = [
         "長く考えさせ、サブエージェントで分担するほど、1 件あたりのトークンは増える。電力と HBM が上限を決めるなかでは、1 ワットあたりのトークンが、推論時計算を伸ばせる上限を決める。",
         "Longer thinking and more subagents mean more tokens per job. With power and HBM setting the ceiling, tokens per watt decide how far inference compute can grow.",
       ),
-      refs: ["4.4", "5.3"],
+      refs: ["4.4:kvCache", "5.3:hbm"],
+      links: [S.memoryWall, S.deepseekV2, S.anthropicMultiAgent],
     },
   },
   { id: "e-system-uses", from: "system", to: "uses", fromSide: "right", toSide: "left", kind: "flow" },
@@ -171,7 +181,8 @@ export const LOOPS: LoopDef[] = [
         "このループが回ると示せるかどうかが、次の巨額の資本を集める条件になる。",
         "Showing that this loop turns is the condition for raising the next round of capital.",
       ),
-      refs: ["2", "6.3"],
+      refs: ["6.3:revenuePerCompute", "2.3"],
+      links: [S.s1, S.wsj, S.msft10q],
     },
   },
   {
@@ -184,7 +195,8 @@ export const LOOPS: LoopDef[] = [
         "AI helps develop the next AI and may speed up algorithmic progress — what Anthropic's S-1 calls “closing the loop”.",
       ),
       note: t("効果は大きくなりうるが、予測できる軸とは言えない。", "The effect could be large, but it is not a predictable axis."),
-      refs: ["2.2", "5.3"],
+      refs: ["2.2:loop", "5.3:loop"],
+      links: [S.s1, S.aiScientist, S.alphaEvolve],
     },
   },
   {
@@ -196,6 +208,11 @@ export const LOOPS: LoopDef[] = [
         "配備したモデルやエージェントの利用の記録から、どこで失敗したかを学び、次の学習に生かす。",
         "Usage records from deployed models and agents show where they fail and feed the next round of training.",
       ),
+      note: t(
+        "Cursor は、新しいモデルを 1.5〜2 時間ごとに利用者に配り、集まった利用のデータで次の学習を行っている。",
+        "Cursor rolls a new checkpoint out to users and collects the data for the next training step every 1.5 to 2 hours.",
+      ),
+      links: [S.cursorRl],
     },
   },
   {
@@ -207,6 +224,11 @@ export const LOOPS: LoopDef[] = [
         "システムが課題を解いた記録や、モデルがつくった問題と答えを、次の学習の材料にする。採点できる課題なら、正しいものだけを選べる。",
         "Records of the system solving tasks, and problems and answers the models write, become material for the next round; for gradable tasks only the correct ones are kept.",
       ),
+      note: t(
+        "DeepSeek-R1 の論文は、大きなモデルが強化学習で身につけた推論のやり方を、小さなモデルの強化にも使えることを示した。",
+        "The DeepSeek-R1 paper showed that the reasoning patterns a large model learns through RL can also be used to strengthen smaller models.",
+      ),
+      links: [S.deepseekR1, S.phi1],
     },
   },
 ];
@@ -216,6 +238,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-openai",
     name: t("OpenAI", "OpenAI"),
     focus: ["external-capital", "contracts", "compute", "depth", "width", "adoption"],
+    refs: ["6.2:market"],
+    links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.o1],
     points: [
       t(
         "ChatGPT の週間利用者は 10 億人に達したが（報道）、1 人あたりの収益は小さい。2026 年 2 月に広告を試験導入した。",
@@ -235,6 +259,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-anthropic",
     name: t("Anthropic", "Anthropic"),
     focus: ["rlvr", "agentic-rl", "harness", "software", "knowledge-work", "ai-research", "contracts", "external-capital"],
+    refs: ["2.2:agents"],
+    links: [S.s1, S.decoderAnthropic, S.menlo],
     points: [
       t(
         "Claude Code と Claude Cowork で、企業のエージェント利用に集中した。Claude Code を使う上位 5% の利用者は、使わない利用者の平均の約 20 倍を支払う。",
@@ -254,6 +280,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-google",
     name: t("Google", "Google"),
     focus: ["chips", "interconnect", "depth", "width", "grid", "external-capital"],
+    refs: ["3.5"],
+    links: [S.goog10q, S.ironwood],
     points: [
       t(
         "自社の TPU を持ち、v7 では 9,216 チップを 1 つのポッドにまとめる。Anthropic には最大 100 万基の TPU を供給する。",
@@ -273,6 +301,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-microsoft",
     name: t("Microsoft", "Microsoft"),
     focus: ["ocf", "contracts", "grid", "software", "knowledge-work"],
+    refs: ["7.1:selfFunded"],
+    links: [S.msft10k, S.msft10q, S.openaiMicrosoft],
     points: [
       t(
         "2026 会計年度の営業キャッシュフローは 1,829 億ドル。設備投資 1,159 億ドルを自己資金で賄い、FCF も 670 億ドル残った。",
@@ -292,6 +322,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-amazon",
     name: t("Amazon", "Amazon"),
     focus: ["chips", "contracts", "external-capital", "grid"],
+    refs: ["3.5"],
+    links: [S.amzn10q, S.epochDataCenters],
     points: [
       t(
         "Anthropic 向けに、インディアナ州の Project Rainier で約 50 万基の Trainium2 を稼働させた。",
@@ -311,6 +343,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-meta",
     name: t("Meta", "Meta"),
     focus: ["precision", "mfu", "grid", "external-capital"],
+    refs: ["4.2:fp8"],
+    links: [S.metaLlama4, S.llama3, S.epochDataCenters],
     points: [
       t(
         "Llama 4 の最大のモデルを FP8 で事前学習し、GPU 1 基あたり 390 TFLOPS を出した。",
@@ -330,6 +364,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-xai",
     name: t("xAI（SpaceXAI）", "xAI (SpaceXAI)"),
     focus: ["compute", "grid", "rlvr", "width"],
+    refs: ["4.1"],
+    links: [S.epochDataCenters, S.grok4],
     points: [
       t(
         "メンフィスの Colossus 2 は H100 換算で約 111 万基に相当し、2026 年 11 月時点で最大の計算資源を持つサイトである（Epoch AI）。",
@@ -349,6 +385,8 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-deepseek",
     name: t("DeepSeek", "DeepSeek"),
     focus: ["precision", "active", "context", "rlvr", "e-algorithmic"],
+    refs: ["4.6:moe"],
+    links: [S.deepseekV3, S.deepseekR1, S.deepseekV32, S.nistCaisi],
     points: [
       t(
         "DeepSeek-V3（2024 年 12 月）を FP8 で学習し、低精度の学習を広めるきっかけをつくった。",
@@ -375,6 +413,7 @@ export const KEY_POINTS: KeyPointDef[] = [
       "What the model can do alone differs from what the model, harness and inference compute get done together. Revenue follows the latter, which is what METR's time horizon and RLI measure; composite indices such as ECI mix the two.",
     ),
     ids: ["model", "harness", "system", "e-model-harness", "e-harness", "measure-model", "measure-system", "m-model", "m-system", "eci"],
+    refs: ["5.2:twoKinds", "5.3:target"],
   },
   {
     id: "kp-predictable",
@@ -384,6 +423,7 @@ export const KEY_POINTS: KeyPointDef[] = [
       "Within a fixed range of tasks, RL follows an S-curve towards a ceiling and inference compute grows with the logarithm of compute. How far that range can keep widening depends on how many gradable tasks and environments exist.",
     ),
     ids: ["rlvr", "agentic-rl", "inference", "gradable", "e-allocation"],
+    refs: ["5.3:answer"],
   },
   {
     id: "kp-pretraining",
@@ -393,6 +433,7 @@ export const KEY_POINTS: KeyPointDef[] = [
       "Pretraining is paid for up front and must be recovered while the model sells — not long when followers trail by only about eight months.",
     ),
     ids: ["pretraining", "human-data", "compute", "external-capital"],
+    refs: ["3.1", "6.3:training"],
   },
   {
     id: "kp-ceiling",
@@ -402,6 +443,7 @@ export const KEY_POINTS: KeyPointDef[] = [
       "The ceiling on compute is set by power and grid connections, HBM supply and advanced packaging — none of which money can expand quickly.",
     ),
     ids: ["grid", "permits", "hbm", "packaging", "e-hardware"],
+    refs: ["4.1", "4.4:soldOut"],
   },
   {
     id: "kp-efficiency",
@@ -411,6 +453,7 @@ export const KEY_POINTS: KeyPointDef[] = [
       "Raising the efficiencies on the arrows gets more work done from the same power — the room left to grow when power cannot be added.",
     ),
     ids: ["e-hardware", "e-allocation", "e-parameter", "e-data", "e-algorithmic", "e-inference", "e-harness"],
+    refs: ["4.7:tokens"],
   },
   {
     id: "kp-revenue-loop",
@@ -420,5 +463,6 @@ export const KEY_POINTS: KeyPointDef[] = [
       "Getting work done turns into revenue and margin, which fund the next compute. Showing that this loop turns is the condition for raising the next round.",
     ),
     ids: ["loop-revenue", "system", "uses", "revenue", "funding"],
+    refs: ["6.3:revenuePerCompute"],
   },
 ];

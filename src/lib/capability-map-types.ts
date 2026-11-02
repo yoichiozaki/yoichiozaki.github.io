@@ -21,13 +21,22 @@ export type Category =
   | "capability"
   | "measure";
 
-/** `slug` links to another post on this blog; `href` to an external source. */
-export type Link = { ja: string; en: string; href?: string; slug?: string };
+/** What a source is, shown as a small badge next to the link. */
+export type LinkKind = "paper" | "news" | "filing" | "official" | "data" | "post";
+
+/**
+ * A source or related reading. `slug` links to another post on this blog;
+ * `href` to an external source. `meta` carries the author or publisher and date.
+ */
+export type Link = { kind: LinkKind; ja: string; en: string; meta?: Text; href?: string; slug?: string };
 
 export type Detail = {
   summary: Text;
   note?: Text;
-  /** Article sections ("4.4") or chapters ("2") this element draws on. */
+  /**
+   * Article sections this element draws on: "4.4" quotes the section's main
+   * point, "4.6:tts" a specific one (see capability-map-sections.ts).
+   */
   refs?: string[];
   links?: Link[];
 };
@@ -70,8 +79,8 @@ export type EdgeDef = {
 };
 
 export type LoopDef = { id: string; label: Text; detail: Detail; cycle: string[] };
-export type CompanyDef = { id: string; name: Text; focus: string[]; points: Text[] };
-export type KeyPointDef = { id: string; title: Text; body: Text; ids: string[] };
+export type CompanyDef = { id: string; name: Text; focus: string[]; points: Text[]; refs?: string[]; links?: Link[] };
+export type KeyPointDef = { id: string; title: Text; body: Text; ids: string[]; refs?: string[] };
 
 export const t = (ja: string, en: string): Text => ({ ja, en });
 
@@ -112,3 +121,12 @@ export const CATEGORY_COLOR: Record<Category, string> = {
 
 export const EFFICIENCY_COLOR = "#cc785c";
 export const LOOP_COLOR = "#e07a95";
+
+export const LINK_KIND_LABEL: Record<LinkKind, Text> = {
+  paper: t("研究", "Research"),
+  news: t("報道", "News"),
+  filing: t("開示資料", "Filing"),
+  official: t("発表", "Announcement"),
+  data: t("データ", "Data"),
+  post: t("拙稿", "Related post"),
+};

@@ -9,15 +9,20 @@ import {
   EFFICIENCY_COLOR,
   ELEMENTS,
   KEY_POINTS,
+  LINK_KIND_LABEL,
+  LOOP_BY_ID,
   LOOP_COLOR,
   LOOPS,
   detailOf,
   kindOf,
   labelOf,
   refLabel,
+  resolveRef,
   type Category,
   type Detail,
+  type Link,
   type Locale,
+  type Text,
 } from "@/lib/capability-map";
 import { MEASURE_COLOR, categoryColor, tint } from "./CapabilityMapCanvas";
 
@@ -40,6 +45,122 @@ function edgeEnds(id: string, locale: Locale): string | undefined {
   const e = EDGE_BY_ID.get(id);
   if (!e) return undefined;
   return `${labelOf(e.from)?.[locale]} → ${labelOf(e.to)?.[locale]}`;
+}
+
+/** Elements worth jumping to from a panel: a group's contents, an arrow's ends, a loop's stops. */
+function relatedElements(id: string): string[] {
+  const edge = EDGE_BY_ID.get(id);
+  if (edge) return [edge.from, edge.to];
+  const loop = LOOP_BY_ID.get(id);
+  if (loop) return loop.cycle.filter((c) => kindOf(c) === "element");
+  return ELEMENTS.get(id)?.children ?? [];
+}
+
+type RefGroup = { section: string; title: Text; items: { ref: string; quote: Text }[] };
+
+/** Article refs grouped by section, so one section shows once with all its quotes. */
+function groupRefs(refs: string[] | undefined): RefGroup[] {
+  const out: RefGroup[] = [];
+  for (const ref of refs ?? []) {
+    const r = resolveRef(ref);
+    if (!r) continue;
+    const group = out.find((g) => g.section === r.section);
+    if (!group) out.push({ section: r.section, title: r.title, items: [{ ref, quote: r.quote }] });
+    else if (!group.items.some((i) => i.quote === r.quote)) group.items.push({ ref, quote: r.quote });
+  }
+  return out;
+}
+
+/** Quotes taken from mid-sentence start in lower case (possibly after a quotation mark); mark them as excerpts. */
+const excerpt = (s: string) => (/^["“'‘]?[a-z]/.test(s) ? `…${s}` : s);
+
+function SourceLink({ link, locale }: { link: Link; locale: Locale }) {
+  const external = Boolean(link.href);
+  return (
+    <a
+      className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+      href={external ? link.href : `/${locale}/blog/${link.slug}`}
+      {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      {link[locale]}
+      {/* The no-break space keeps the arrow on the same line as the last word. */}
+      {external && <span aria-hidden>{"\u00a0↗"}</span>}
+    </a>
+  );
+}
+
+function SourceList({ links, locale }: { links: Link[]; locale: Locale }) {
+  return (
+    <ul className="space-y-2">
+      {links.map((l) => (
+        <li key={l.href ?? l.slug} className="flex gap-2 text-[13px] leading-snug">
+          <span className="mt-0.5 h-fit shrink-0 rounded border border-border px-1 text-[10px] leading-4 text-muted-foreground">
+            {LINK_KIND_LABEL[l.kind][locale]}
+          </span>
+          <span className="min-w-0 break-words">
+            <SourceLink link={l} locale={locale} />
+            {l.meta && <span className="mt-0.5 block text-[11px] text-muted-foreground">{l.meta[locale]}</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+type JumpProps = { locale: Locale; onJump: (ref: string) => void };
+
+function ArticleRefs({ refs, locale, onJump }: JumpProps & { refs?: string[] }) {
+  const isJa = locale === "ja";
+  const groups = groupRefs(refs);
+  if (groups.length === 0) return null;
+  return (
+    <ul className="space-y-2.5">
+      {groups.map((g) => (
+        <li key={g.section} className="rounded-md border-l-2 border-accent bg-muted/60 px-3 py-2">
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            <span className="font-semibold">{refLabel(g.section, locale)}</span>
+            {isJa ? "　" : " · "}
+            {g.title[locale]}
+          </p>
+          {g.items.map((it) => (
+            <div key={it.ref} className="mt-1.5">
+              <p className="text-[13px] leading-relaxed text-foreground">{excerpt(it.quote[locale])}</p>
+              <button
+                type="button"
+                onClick={() => onJump(it.ref)}
+                className="mt-0.5 text-xs font-medium text-accent underline-offset-2 hover:underline"
+              >
+                {isJa ? "本文で読む" : "Read it in the article"}
+              </button>
+            </div>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Small "read in the article" buttons for the strips and the list view. */
+function RefButtons({ refs, locale, onJump }: JumpProps & { refs?: string[] }) {
+  const isJa = locale === "ja";
+  const groups = groupRefs(refs);
+  if (groups.length === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] text-muted-foreground">{isJa ? "本文:" : "In the article:"}</span>
+      {groups.map((g) => (
+        <button
+          key={g.section}
+          type="button"
+          onClick={() => onJump(g.items[0].ref)}
+          title={g.title[locale]}
+          className="rounded-full border border-accent/60 px-2 py-0.5 text-[11px] text-foreground hover:bg-muted"
+        >
+          {refLabel(g.section, locale)}
+        </button>
+      ))}
+    </span>
+  );
 }
 
 export function Legend({ locale }: { locale: Locale }) {
@@ -81,7 +202,9 @@ const chip = (on: boolean) =>
     on ? "border-accent bg-accent/15 font-semibold" : "border-border hover:bg-muted"
   }`;
 
-export function KeyPointsStrip({ locale, selected, onSelect }: { locale: Locale; selected: string | null; onSelect: (id: string) => void }) {
+type StripProps = JumpProps & { selected: string | null; onSelect: (id: string) => void };
+
+export function KeyPointsStrip({ locale, selected, onSelect, onJump }: StripProps) {
   const isJa = locale === "ja";
   const point = KEY_POINTS.find((k) => k.id === selected);
   return (
@@ -94,18 +217,21 @@ export function KeyPointsStrip({ locale, selected, onSelect }: { locale: Locale;
           </button>
         ))}
       </div>
-      <p className="mt-1.5 text-[12px] leading-snug text-foreground">
-        {point
-          ? point.body[locale]
-          : isJa
-            ? "番号を選ぶと、その要点に関わる部分が強調される。"
-            : "Pick a point to highlight the parts of the map it concerns."}
-      </p>
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <p className="text-[12px] leading-snug text-foreground">
+          {point
+            ? point.body[locale]
+            : isJa
+              ? "番号を選ぶと、その要点に関わる部分が強調される。"
+              : "Pick a point to highlight the parts of the map it concerns."}
+        </p>
+        {point && <RefButtons refs={point.refs} locale={locale} onJump={onJump} />}
+      </div>
     </div>
   );
 }
 
-export function CompanyStrip({ locale, selected, onSelect }: { locale: Locale; selected: string | null; onSelect: (id: string) => void }) {
+export function CompanyStrip({ locale, selected, onSelect, onJump }: StripProps) {
   const isJa = locale === "ja";
   const company = COMPANIES.find((c) => c.id === selected);
   return (
@@ -119,13 +245,26 @@ export function CompanyStrip({ locale, selected, onSelect }: { locale: Locale; s
         ))}
       </div>
       {company ? (
-        <ul className="mt-1.5 grid gap-x-5 gap-y-1 text-[12px] leading-snug text-foreground md:grid-cols-3">
-          {company.points.map((p, i) => (
-            <li key={i} className="relative pl-3 before:absolute before:left-0 before:top-[0.5em] before:h-1.5 before:w-1.5 before:rounded-full before:bg-accent">
-              {p[locale]}
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="mt-1.5 grid gap-x-5 gap-y-1 text-[12px] leading-snug text-foreground md:grid-cols-3">
+            {company.points.map((p, i) => (
+              <li key={i} className="relative pl-3 before:absolute before:left-0 before:top-[0.5em] before:h-1.5 before:w-1.5 before:rounded-full before:bg-accent">
+                {p[locale]}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+            <RefButtons refs={company.refs} locale={locale} onJump={onJump} />
+            {company.links && company.links.length > 0 && (
+              <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-muted-foreground">{isJa ? "出典:" : "Sources:"}</span>
+                {company.links.map((l) => (
+                  <SourceLink key={l.href ?? l.slug} link={l} locale={locale} />
+                ))}
+              </span>
+            )}
+          </div>
+        </>
       ) : (
         <p className="mt-1.5 text-[12px] leading-snug text-muted-foreground">
           {isJa ? "会社を選ぶと、その会社が力を入れているレバーが強調される。" : "Pick a company to highlight the levers it leans on."}
@@ -135,11 +274,24 @@ export function CompanyStrip({ locale, selected, onSelect }: { locale: Locale; s
   );
 }
 
+function detailCounts(detail: Detail | undefined, locale: Locale): string {
+  if (!detail) return "";
+  const isJa = locale === "ja";
+  const sources = detail.links?.length ?? 0;
+  const sections = groupRefs(detail.refs).length;
+  const parts = [
+    sources > 0 && (isJa ? `出典 ${sources} 件` : `${sources} source${sources > 1 ? "s" : ""}`),
+    sections > 0 && (isJa ? `本文 ${sections} か所` : `${sections} article section${sections > 1 ? "s" : ""}`),
+  ].filter(Boolean);
+  return parts.join(isJa ? "・" : " · ");
+}
+
 export function InfoBar({ id, locale, onOpen, onClear }: { id: string; locale: Locale; onOpen: () => void; onClear: () => void }) {
   const isJa = locale === "ja";
   const detail = detailOf(id);
   const ends = edgeEnds(id, locale);
   const lead = kicker(id, locale);
+  const counts = detailCounts(detail, locale);
   return (
     <div className={`${panel} pointer-events-auto flex items-start gap-3 p-3`} role="status">
       <div className="min-w-0 flex-1">
@@ -152,120 +304,178 @@ export function InfoBar({ id, locale, onOpen, onClear }: { id: string; locale: L
         <p className="text-sm font-semibold text-foreground">{labelOf(id)?.[locale]}</p>
         {detail && <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground">{detail.summary[locale]}</p>}
       </div>
-      <div className="flex shrink-0 gap-1.5">
-        {detail && (
-          <button type="button" onClick={onOpen} className="rounded-md border border-accent px-2.5 py-1 text-xs text-foreground hover:bg-muted">
-            {isJa ? "詳しく" : "Details"}
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex gap-1.5">
+          {detail && (
+            <button type="button" onClick={onOpen} className="rounded-md border border-accent px-2.5 py-1 text-xs text-foreground hover:bg-muted">
+              {isJa ? "詳しく" : "Details"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label={isJa ? "選択を解除" : "Clear selection"}
+            className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+          >
+            ×
           </button>
-        )}
-        <button
-          type="button"
-          onClick={onClear}
-          aria-label={isJa ? "選択を解除" : "Clear selection"}
-          className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-        >
-          ×
-        </button>
+        </div>
+        {counts && <span className="text-[10.5px] text-muted-foreground">{counts}</span>}
       </div>
     </div>
   );
 }
 
-function DetailBody({ detail, locale }: { detail: Detail; locale: Locale }) {
-  const isJa = locale === "ja";
-  return (
-    <>
-      <p className="text-sm leading-relaxed text-foreground">{detail.summary[locale]}</p>
-      {detail.note && <p className="mt-3 rounded-md bg-muted px-3 py-2 text-[13px] leading-relaxed text-foreground">{detail.note[locale]}</p>}
-      {detail.refs && detail.refs.length > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {isJa ? "本文の該当箇所: " : "In the article: "}
-          {detail.refs.map((r) => refLabel(r, locale)).join(isJa ? "、" : ", ")}
-        </p>
-      )}
-      {detail.links && detail.links.length > 0 && (
-        <ul className="mt-2 space-y-1 text-xs">
-          {detail.links.map((l) => (
-            <li key={l.href ?? l.slug}>
-              {l.slug ? (
-                <a className="text-accent underline underline-offset-2" href={`/${locale}/blog/${l.slug}`}>
-                  {l[locale]}
-                </a>
-              ) : (
-                <a className="text-accent underline underline-offset-2" href={l.href} target="_blank" rel="noopener noreferrer">
-                  {l[locale]} ↗
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
-  );
-}
+type DetailPanelProps = {
+  id: string;
+  locale: Locale;
+  onClose: () => void;
+  onShow: (id: string) => void;
+  onJump: (ref: string) => void;
+};
 
-export function DetailDialog({ id, locale, onClose }: { id: string; locale: Locale; onClose: () => void }) {
+/** Docked panel with the full explanation, the article's take and the sources. */
+export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanelProps) {
   const isJa = locale === "ja";
   const closeRef = useRef<HTMLButtonElement>(null);
-  const titleId = `capability-map-detail-${id}`;
+  const scrollRef = useRef<HTMLDivElement>(null);
   const detail = detailOf(id);
   const el = ELEMENTS.get(id);
   const ends = edgeEnds(id, locale);
   const lead = kicker(id, locale);
+  const related = relatedElements(id);
+  const titleId = `capability-map-panel-${id}`;
 
   useEffect(() => {
-    closeRef.current?.focus();
+    closeRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
   }, [id]);
 
   if (!detail) return null;
+  const sectionHeading = "mt-4 mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-background p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            {(lead || ends) && (
-              <p className="text-xs text-muted-foreground">
-                {lead}
-                {ends && <span className={lead ? "ml-2" : undefined}>{ends}</span>}
-              </p>
-            )}
-            <h4 id={titleId} className="mt-0.5 text-lg font-bold text-foreground">
-              {labelOf(id)?.[locale]}
-            </h4>
-            {el?.sublabel && <p className="text-sm text-muted-foreground">{el.sublabel[locale]}</p>}
-          </div>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
-          >
-            {isJa ? "閉じる" : "Close"}
-          </button>
+    <aside
+      aria-labelledby={titleId}
+      className="pointer-events-auto flex max-h-full w-full max-w-[400px] flex-col overflow-hidden rounded-xl border border-border bg-background/[0.97] shadow-2xl backdrop-blur-sm"
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0 flex-1">
+          {(lead || ends) && (
+            <p className="text-[11px] text-muted-foreground">
+              {lead}
+              {ends && <span className={lead ? "ml-2" : undefined}>{ends}</span>}
+            </p>
+          )}
+          <h4 id={titleId} className="text-base font-bold leading-snug text-foreground">
+            {labelOf(id)?.[locale]}
+          </h4>
+          {el?.sublabel && <p className="text-xs text-muted-foreground">{el.sublabel[locale]}</p>}
         </div>
-        <div className="mt-3">
-          <DetailBody detail={detail} locale={locale} />
-        </div>
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          aria-label={isJa ? "説明を閉じる" : "Close details"}
+          className="rounded-md border border-border px-2 py-0.5 text-sm text-muted-foreground hover:bg-muted"
+        >
+          ×
+        </button>
       </div>
-    </div>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-3">
+        <p className="text-sm leading-relaxed text-foreground">{detail.summary[locale]}</p>
+        {detail.note && <p className="mt-3 rounded-md bg-muted px-3 py-2 text-[13px] leading-relaxed text-foreground">{detail.note[locale]}</p>}
+
+        {detail.refs && detail.refs.length > 0 && (
+          <>
+            <h5 className={sectionHeading}>{isJa ? "本文の該当箇所" : "In the article"}</h5>
+            <ArticleRefs refs={detail.refs} locale={locale} onJump={onJump} />
+          </>
+        )}
+
+        {detail.links && detail.links.length > 0 && (
+          <>
+            <h5 className={sectionHeading}>{isJa ? "出典・関連資料" : "Sources and further reading"}</h5>
+            <SourceList links={detail.links} locale={locale} />
+          </>
+        )}
+
+        {related.length > 0 && (
+          <>
+            <h5 className={sectionHeading}>
+              {EDGE_BY_ID.has(id)
+                ? isJa
+                  ? "矢印の両端"
+                  : "Ends of the arrow"
+                : LOOP_BY_ID.has(id)
+                  ? isJa
+                    ? "ループが通る項目"
+                    : "Passes through"
+                  : isJa
+                    ? "含まれる項目"
+                    : "Contains"}
+            </h5>
+            <div className="flex flex-wrap gap-1.5">
+              {related.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => onShow(r)}
+                  className="rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground hover:bg-muted"
+                >
+                  {labelOf(r)?.[locale]}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        <p className="mt-5 border-t border-border pt-2 text-[11px] leading-snug text-muted-foreground">
+          {isJa
+            ? "開いたまま地図の別の項目を選ぶと、説明が切り替わる。Esc で閉じる。"
+            : "Select another part of the map to switch the explanation. Esc closes the panel."}
+        </p>
+      </div>
+    </aside>
   );
 }
 
 const LIST_ORDER = ["resources", "compute", "size", "stages", "materials", "model", "harness", "system", "uses", "measures"];
 
-function ListEntry({ id, locale }: { id: string; locale: Locale }) {
+function Extras({ detail, locale, onJump }: JumpProps & { detail: Detail }) {
+  const isJa = locale === "ja";
+  const hasLinks = detail.links && detail.links.length > 0;
+  if (!hasLinks && !detail.refs?.length) return null;
+  return (
+    <div className="mt-1 space-y-1 text-[11px]">
+      <RefButtons refs={detail.refs} locale={locale} onJump={onJump} />
+      {hasLinks && (
+        <p className="leading-relaxed">
+          <span className="text-muted-foreground">{isJa ? "出典: " : "Sources: "}</span>
+          {detail.links!.map((l, i) => (
+            <span key={l.href ?? l.slug}>
+              {i > 0 && <span className="text-muted-foreground">{isJa ? "、" : ", "}</span>}
+              <SourceLink link={l} locale={locale} />
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ListEntry({ id, locale, onJump }: JumpProps & { id: string }) {
   const el = ELEMENTS.get(id)!;
   return (
     <li className="py-1.5">
       <p className="text-[13px] font-semibold text-foreground">{el.label[locale]}</p>
       <p className="text-[12px] leading-snug text-muted-foreground">{el.detail.summary[locale]}</p>
       {el.detail.note && <p className="mt-0.5 text-[12px] leading-snug text-foreground/80">{el.detail.note[locale]}</p>}
+      <Extras detail={el.detail} locale={locale} onJump={onJump} />
     </li>
   );
 }
@@ -279,7 +489,7 @@ function Chevron() {
 }
 
 /** Text version of the map, for small screens and screen readers. */
-export function ListView({ locale }: { locale: Locale }) {
+export function ListView({ locale, onJump }: JumpProps) {
   const isJa = locale === "ja";
   return (
     <div className="space-y-2 p-3 text-left sm:p-4">
@@ -298,19 +508,22 @@ export function ListView({ locale }: { locale: Locale }) {
               <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{el.detail.summary[locale]}</span>
             </summary>
             <div className="border-t border-border px-3 pb-2">
-              {el.kind === "node" ? (
-                el.detail.note && <p className="py-2 text-[12px] leading-snug text-foreground/80">{el.detail.note[locale]}</p>
-              ) : (
+              {el.detail.note && <p className="pt-2 text-[12px] leading-snug text-foreground/80">{el.detail.note[locale]}</p>}
+              <div className="pt-1">
+                <Extras detail={el.detail} locale={locale} onJump={onJump} />
+              </div>
+              {el.kind !== "node" && (
                 <ul className="divide-y divide-border">
                   {el.children.map((childId) => {
                     const child = ELEMENTS.get(childId)!;
-                    if (child.kind !== "sub") return <ListEntry key={childId} id={childId} locale={locale} />;
+                    if (child.kind !== "sub") return <ListEntry key={childId} id={childId} locale={locale} onJump={onJump} />;
                     return (
                       <li key={childId} className="py-2">
                         <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">{child.label[locale]}</p>
+                        <Extras detail={child.detail} locale={locale} onJump={onJump} />
                         <ul className="ml-3 divide-y divide-border">
                           {child.children.map((itemId) => (
-                            <ListEntry key={itemId} id={itemId} locale={locale} />
+                            <ListEntry key={itemId} id={itemId} locale={locale} onJump={onJump} />
                           ))}
                         </ul>
                       </li>
@@ -338,6 +551,7 @@ export function ListView({ locale }: { locale: Locale }) {
               </p>
               <p className="text-[12px] leading-snug text-muted-foreground">{e.detail!.summary[locale]}</p>
               {e.detail!.note && <p className="mt-0.5 text-[12px] leading-snug text-foreground/80">{e.detail!.note[locale]}</p>}
+              <Extras detail={e.detail!} locale={locale} onJump={onJump} />
             </li>
           ))}
         </ul>
@@ -354,6 +568,7 @@ export function ListView({ locale }: { locale: Locale }) {
               <p className="text-[13px] font-semibold text-foreground">↺ {l.label[locale]}</p>
               <p className="text-[12px] leading-snug text-muted-foreground">{l.detail.summary[locale]}</p>
               {l.detail.note && <p className="mt-0.5 text-[12px] leading-snug text-foreground/80">{l.detail.note[locale]}</p>}
+              <Extras detail={l.detail} locale={locale} onJump={onJump} />
             </li>
           ))}
         </ul>

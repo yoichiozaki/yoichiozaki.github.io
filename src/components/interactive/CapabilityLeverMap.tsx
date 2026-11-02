@@ -1,13 +1,106 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
-import { COMPANIES, DEFAULT_COLLAPSED, KEY_POINTS, SUB_IDS, detailOf, kindOf, layoutMap, relatedIds, type Locale } from "@/lib/capability-map";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import {
+  COMPANIES,
+  DEFAULT_COLLAPSED,
+  KEY_POINTS,
+  SUB_IDS,
+  ancestors,
+  detailOf,
+  kindOf,
+  layoutMap,
+  parseRef,
+  relatedIds,
+  resolveRef,
+  type Locale,
+  type MapLayout,
+  type Rect,
+} from "@/lib/capability-map";
 import { CapabilityMapCanvas } from "./CapabilityMapCanvas";
-import { CompanyStrip, DetailDialog, InfoBar, KeyPointsStrip, Legend, ListView } from "./CapabilityMapPanels";
+import { CompanyStrip, DetailPanel, InfoBar, KeyPointsStrip, Legend, ListView } from "./CapabilityMapPanels";
 import { usePanZoom } from "./usePanZoom";
 
 type Props = { locale?: string };
 type Mode = "map" | "companies" | "list";
+
+/** Room the side panel takes on the right of the map: its width plus the gap around it. */
+const PANEL_INSET = 424;
+/** Clearance for the sticky site header when scrolling the page. */
+const HEADER_OFFSET = 80;
+const GLIDE = "280ms cubic-bezier(0.22, 1, 0.36, 1)";
+
+const smoothOrInstant = (): ScrollBehavior =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+
+/** Where an id sits on the canvas; items hidden in a collapsed group fall back to the nearest visible ancestor. */
+function anchorOf(layout: MapLayout, id: string): Rect | undefined {
+  for (const a of [id, ...ancestors(id)]) {
+    const box = layout.boxes.get(a);
+    if (box) return box;
+  }
+  const label = layout.edges.find((e) => e.id === id) ?? layout.loops.find((l) => l.id === id);
+  return label && { x: label.labelX - 60, y: label.labelY - 14, w: 120, h: 28 };
+}
+
+/** The article heading for a section number such as "4.4" (the headings carry no ids). */
+function findHeading(section: string): HTMLElement | undefined {
+  const headings = document.querySelectorAll<HTMLElement>("article .prose h2, article .prose h3");
+  return [...headings].find((h) => {
+    const text = h.textContent?.trim() ?? "";
+    return text.startsWith(`${section} `) || text.startsWith(`${section}. `);
+  });
+}
+
+const squash = (s: string | null) => (s ?? "").replace(/\s+/g, " ").trim();
+
+/** The quoted sentence inside the section that starts at `heading`: the bold sentence itself when it is one, else its paragraph. */
+function findQuote(heading: HTMLElement, quote: string): HTMLElement | undefined {
+  const q = squash(quote);
+  const level = Number(heading.tagName[1]);
+  for (let el = heading.nextElementSibling; el; el = el.nextElementSibling) {
+    if (/^H[1-6]$/.test(el.tagName) && Number(el.tagName[1]) <= level) return undefined;
+    if (!squash(el.textContent).includes(q)) continue;
+    const inner = [...el.querySelectorAll<HTMLElement>("strong, p, li, td")].filter((c) => squash(c.textContent).includes(q));
+    return inner.find((c) => c.tagName === "STRONG") ?? inner.at(-1) ?? (el as HTMLElement);
+  }
+  return undefined;
+}
+
+/** The DOM range of `quote` inside `root`, which may span links and other inline elements. */
+function quoteRange(root: HTMLElement, quote: string): Range | undefined {
+  const nodes: Text[] = [];
+  const starts: number[] = [];
+  let text = "";
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    starts.push(text.length);
+    nodes.push(n);
+    text += n.data;
+  }
+  const pattern = squash(quote)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/ /g, "\\s+");
+  const match = new RegExp(pattern).exec(text);
+  if (!match) return undefined;
+  const locate = (offset: number, isEnd: boolean): [Text, number] => {
+    let i = nodes.length - 1;
+    while (i > 0 && (isEnd ? starts[i] >= offset : starts[i] > offset)) i--;
+    return [nodes[i], offset - starts[i]];
+  };
+  const range = document.createRange();
+  range.setStart(...locate(match.index, false));
+  range.setEnd(...locate(match.index + match[0].length, true));
+  return range;
+}
+
+const HIGHLIGHT = "capability-map-quote";
+// Kept out of globals.css because the CSS optimizer does not know ::highlight() yet.
+const HIGHLIGHT_CSS = `::highlight(${HIGHLIGHT}){background-color:rgb(204 120 92/.28)}.dark ::highlight(${HIGHLIGHT}){background-color:rgb(224 144 111/.32)}`;
+const canHighlight = () => typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight !== "undefined";
+const clearHighlight = () => {
+  if (canHighlight()) CSS.highlights.delete(HIGHLIGHT);
+};
 
 const NARROW_QUERY = "(max-width: 639px)";
 const subscribeNarrow = (onChange: () => void) => {
@@ -49,11 +142,14 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const [showKeyPoints, setShowKeyPoints] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set(DEFAULT_COLLAPSED));
   const [selected, setSelected] = useState<string | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  // What the side panel shows. While it is open, selecting anything else on the map shows that instead.
+  const [panelId, setPanelId] = useState<string | null>(null);
+  const [showReturn, setShowReturn] = useState(false);
+  const figureRef = useRef<HTMLElement>(null);
 
   const layout = useMemo(() => layoutMap(collapsed), [collapsed]);
   const related = useMemo(() => (selected ? relatedIds(selected) : null), [selected]);
-  const { viewportRef, view, dragging, fit, zoomIn, zoomOut, handlers } = usePanZoom({
+  const { viewportRef, viewport, view, dragging, gliding, endGlide, ensureVisible, fit, zoomIn, zoomOut, handlers } = usePanZoom({
     width: layout.width,
     height: layout.height,
     wheelZoom: fullscreen,
@@ -61,12 +157,41 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
 
   const allCollapsed = SUB_IDS.every((id) => collapsed.has(id));
   const selectedKind = selected ? kindOf(selected) : undefined;
-  const showInfo = selected !== null && (selectedKind === "element" || selectedKind === "edge" || selectedKind === "loop");
+  const showInfo = selected !== null && panelId === null && (selectedKind === "element" || selectedKind === "edge" || selectedKind === "loop");
 
-  const select = useCallback((id: string) => setSelected((cur) => (cur === id ? null : id)), []);
-  const open = useCallback((id: string) => {
+  const select = useCallback(
+    (id: string) => {
+      if (panelId === null) {
+        setSelected((cur) => (cur === id ? null : id));
+        return;
+      }
+      setSelected(id);
+      if (detailOf(id)) setPanelId(id);
+    },
+    [panelId],
+  );
+  const open = useCallback(
+    (id: string) => {
+      setSelected(id);
+      if (!detailOf(id)) return;
+      setPanelId(id);
+      const rect = anchorOf(layout, id);
+      if (rect) ensureVisible(rect, PANEL_INSET);
+    },
+    [layout, ensureVisible],
+  );
+  const clear = useCallback(() => {
+    setSelected(null);
+    setPanelId(null);
+  }, []);
+  const closePanel = useCallback(() => {
+    setPanelId(null);
+    viewport?.focus({ preventScroll: true });
+  }, [viewport]);
+  /** Choosing a key point or a company replaces the selection and closes the panel. */
+  const pick = useCallback((id: string) => {
     setSelected(id);
-    if (detailOf(id)) setDetailId(id);
+    setPanelId(null);
   }, []);
   const toggle = useCallback(
     (id: string) =>
@@ -82,29 +207,101 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const changeMode = (m: Mode) => {
     setModeChoice(m);
     setSelected(m === "companies" ? COMPANIES[0].id : null);
+    setPanelId(null);
   };
 
   const toggleKeyPoints = () => {
     if (showKeyPoints) {
       if (selectedKind === "keypoint") setSelected(mode === "companies" ? COMPANIES[0].id : null);
     } else {
-      setSelected(KEY_POINTS[0].id);
+      pick(KEY_POINTS[0].id);
     }
     setShowKeyPoints(!showKeyPoints);
   };
 
-  // Esc closes the dialog first, then clears the selection, then leaves full screen.
+  /**
+   * Scroll the article to the passage a ref quotes and highlight it, leaving the map (and its panel)
+   * as it is so the reader can come back. Falls back to the section heading.
+   */
+  const jumpTo = useCallback(
+    (ref: string) => {
+      const resolved = resolveRef(ref);
+      const heading = findHeading(resolved?.section ?? parseRef(ref).section);
+      if (!heading) return;
+      const target = (resolved && findQuote(heading, resolved.quote[loc])) ?? heading;
+      const range = resolved && target !== heading ? quoteRange(target, resolved.quote[loc]) : undefined;
+      const go = () => {
+        // Leave some of the preceding text in view when landing mid-section.
+        const offset = target === heading ? HEADER_OFFSET : Math.max(HEADER_OFFSET + 24, window.innerHeight * 0.3);
+        window.scrollTo({ top: target.getBoundingClientRect().top + window.scrollY - offset, behavior: smoothOrInstant() });
+        // Mark the quoted sentence until the reader goes back to the map; flash the block where that is unsupported.
+        if (range && canHighlight()) {
+          CSS.highlights.set(HIGHLIGHT, new Highlight(range));
+        } else {
+          clearHighlight();
+          target.animate([{ backgroundColor: "rgba(204, 120, 92, 0.35)" }, { backgroundColor: "rgba(204, 120, 92, 0)" }], {
+            duration: 2400,
+            delay: 300,
+            easing: "ease-out",
+          });
+        }
+        if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+        setShowReturn(true);
+      };
+      if (fullscreen) {
+        setFullscreen(false);
+        // Wait for the page to get its scrollbar back before measuring.
+        requestAnimationFrame(() => requestAnimationFrame(go));
+      } else {
+        go();
+      }
+    },
+    [fullscreen, loc],
+  );
+
+  const backToMap = () => {
+    setShowReturn(false);
+    clearHighlight();
+    const fig = figureRef.current;
+    if (!fig) return;
+    window.scrollTo({ top: fig.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET, behavior: smoothOrInstant() });
+    viewport?.focus({ preventScroll: true });
+  };
+
+  useEffect(() => clearHighlight, []);
+
+  // The "back to the map" button (and the highlight) go away once the reader scrolls back to the map by themselves.
   useEffect(() => {
-    if (!fullscreen && !selected && !detailId) return;
+    const fig = figureRef.current;
+    if (!showReturn || !fig) return;
+    let left = false;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.intersectionRatio === 0) left = true;
+        else if (left && entry.intersectionRatio >= 0.3) {
+          setShowReturn(false);
+          clearHighlight();
+        }
+      },
+      { threshold: [0, 0.3] },
+    );
+    io.observe(fig);
+    return () => io.disconnect();
+  }, [showReturn]);
+
+  // Esc closes the panel first, then clears the selection, then leaves full screen.
+  useEffect(() => {
+    if (!fullscreen && !selected && !panelId) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (detailId) setDetailId(null);
+      if (panelId) closePanel();
       else if (selected) setSelected(null);
       else setFullscreen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [fullscreen, selected, detailId]);
+  }, [fullscreen, selected, panelId, closePanel]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -119,15 +316,15 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const hint =
     mode === "list"
       ? isJa
-        ? "項目を開くと、説明が表示される。"
-        : "Open an entry to read about it."
+        ? "項目を開くと、説明と出典、本文の該当箇所が表示される。"
+        : "Open an entry to read about it, with its sources and the sections of the article that discuss it."
       : fullscreen
         ? isJa
-          ? "クリックで関係を強調、ダブルクリックで詳しい説明。ドラッグで移動、ホイールで拡大・縮小。Esc で戻る。"
-          : "Click to highlight connections; double-click for details. Drag to pan, scroll to zoom, Esc to exit."
+          ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、ホイールで拡大・縮小。Esc で戻る。"
+          : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan, scroll to zoom, Esc to exit."
         : isJa
-          ? "クリックで関係を強調、ダブルクリックで詳しい説明。ドラッグで移動、Ctrl（⌘）+ ホイールかピンチで拡大・縮小。"
-          : "Click to highlight connections; double-click for details. Drag to pan; Ctrl (⌘) + scroll or pinch to zoom.";
+          ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、Ctrl（⌘）+ ホイールかピンチで拡大・縮小。"
+          : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan; Ctrl (⌘) + scroll or pinch to zoom.";
   const modes: [Mode, string][] = [
     ["map", isJa ? "マップ" : "Map"],
     ["companies", isJa ? "各社" : "Companies"],
@@ -136,7 +333,7 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const gridSize = 24 * view.k;
 
   return (
-    <figure className="not-prose my-10" style={fullscreen ? undefined : BREAKOUT} aria-label={title}>
+    <figure ref={figureRef} className="not-prose my-10" style={fullscreen ? undefined : BREAKOUT} aria-label={title}>
       <div
         className={
           fullscreen
@@ -194,12 +391,12 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
           </div>
         </div>
 
-        {mode !== "list" && showKeyPoints && <KeyPointsStrip locale={loc} selected={selected} onSelect={setSelected} />}
-        {mode === "companies" && <CompanyStrip locale={loc} selected={selected} onSelect={setSelected} />}
+        {mode !== "list" && showKeyPoints && <KeyPointsStrip locale={loc} selected={selected} onSelect={pick} onJump={jumpTo} />}
+        {mode === "companies" && <CompanyStrip locale={loc} selected={selected} onSelect={pick} onJump={jumpTo} />}
 
         {mode === "list" ? (
           <div className={fullscreen ? "flex-1 overflow-y-auto" : "max-h-[min(78vh,760px)] overflow-y-auto"}>
-            <ListView locale={loc} />
+            <ListView locale={loc} onJump={jumpTo} />
           </div>
         ) : (
           <div className={`relative ${fullscreen ? "min-h-0 flex-1" : "h-[min(60vh,560px)] sm:h-[min(78vh,760px)]"}`}>
@@ -216,11 +413,18 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
                 backgroundImage: "radial-gradient(circle, var(--border) 1px, transparent 1.2px)",
                 backgroundSize: `${gridSize}px ${gridSize}px`,
                 backgroundPosition: `${view.x}px ${view.y}px`,
+                transition: gliding ? `background-position ${GLIDE}` : undefined,
               }}
               {...handlers}
-              onClick={() => setSelected(null)}
+              onClick={clear}
             >
-              <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+              <div
+                className="absolute left-0 top-0 origin-top-left"
+                style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, transition: gliding ? `transform ${GLIDE}` : undefined }}
+                onTransitionEnd={(e) => {
+                  if (e.target === e.currentTarget) endGlide();
+                }}
+              >
                 <CapabilityMapCanvas
                   layout={layout}
                   locale={loc}
@@ -236,8 +440,14 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
             {showInfo && selected && (
               <div className="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center">
                 <div className="w-full max-w-2xl">
-                  <InfoBar id={selected} locale={loc} onOpen={() => setDetailId(selected)} onClear={() => setSelected(null)} />
+                  <InfoBar id={selected} locale={loc} onOpen={() => open(selected)} onClear={clear} />
                 </div>
+              </div>
+            )}
+
+            {panelId && (
+              <div className="pointer-events-none absolute inset-3 flex items-start justify-end">
+                <DetailPanel id={panelId} locale={loc} onClose={closePanel} onShow={open} onJump={jumpTo} />
               </div>
             )}
           </div>
@@ -247,7 +457,18 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
           <Legend locale={loc} />
         </div>
       </div>
-      {detailId && <DetailDialog id={detailId} locale={loc} onClose={() => setDetailId(null)} />}
+      {showReturn && !fullscreen && (
+        <button
+          type="button"
+          onClick={backToMap}
+          className="fixed bottom-5 right-5 z-[55] rounded-full border border-accent bg-background/95 px-4 py-2 text-sm font-medium text-foreground shadow-lg backdrop-blur-sm hover:bg-muted"
+        >
+          {isJa ? "↑ 地図に戻る" : "↑ Back to the map"}
+        </button>
+      )}
+      <style href="capability-map-highlight" precedence="default">
+        {HIGHLIGHT_CSS}
+      </style>
     </figure>
   );
 }

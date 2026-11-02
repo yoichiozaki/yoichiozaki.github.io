@@ -1,10 +1,13 @@
 /**
  * The "levers of AI capability" map: element index, layout and relations.
- * Content lives in capability-map-{upstream,downstream,measures,links}.ts.
+ * Content lives in capability-map-{upstream,downstream,measures,links}.ts,
+ * sources in capability-map-sources.ts and article quotes in
+ * capability-map-sections.ts.
  */
 import { HARNESS, MODEL, SYSTEM, USES } from "./capability-map-downstream";
 import { COMPANIES, EDGES, KEY_POINTS, LOOPS } from "./capability-map-links";
 import { MATERIALS, MEASURES } from "./capability-map-measures";
+import { SECTIONS } from "./capability-map-sections";
 import {
   isSub,
   type Category,
@@ -18,7 +21,8 @@ import {
 import { COMPUTE, RESOURCES, SIZE, STAGES } from "./capability-map-upstream";
 
 export * from "./capability-map-types";
-export { COMPANIES, EDGES, KEY_POINTS, LOOPS };
+export { SOURCES } from "./capability-map-sources";
+export { COMPANIES, EDGES, KEY_POINTS, LOOPS, SECTIONS };
 
 export const GROUPS: GroupDef[] = [RESOURCES, SIZE, STAGES, HARNESS, MEASURES, USES, MATERIALS];
 export const NODES: NodeDef[] = [COMPUTE, MODEL, SYSTEM];
@@ -131,11 +135,29 @@ export function detailOf(id: string): Detail | undefined {
   return ELEMENTS.get(id)?.detail ?? EDGE_BY_ID.get(id)?.detail ?? LOOP_BY_ID.get(id)?.detail;
 }
 
+/** "4.6:tts" → { section: "4.6", point: "tts" }. */
+export function parseRef(ref: string): { section: string; point?: string } {
+  const [section, point] = ref.split(":");
+  return { section, point };
+}
+
 /** "4.4" → 第 4.4 節 / Section 4.4; "2" → 第 2 章 / Chapter 2. */
 export function refLabel(ref: string, locale: Locale): string {
-  const chapter = !ref.includes(".");
-  if (locale === "ja") return chapter ? `第 ${ref} 章` : `第 ${ref} 節`;
-  return chapter ? `Chapter ${ref}` : `Section ${ref}`;
+  const { section } = parseRef(ref);
+  const chapter = !section.includes(".");
+  if (locale === "ja") return chapter ? `第 ${section} 章` : `第 ${section} 節`;
+  return chapter ? `Chapter ${section}` : `Section ${section}`;
+}
+
+export type ResolvedRef = { ref: string; section: string; title: Text; quote: Text };
+
+/** The section title and the quoted point a ref stands for (the section's first point by default). */
+export function resolveRef(ref: string): ResolvedRef | undefined {
+  const { section, point } = parseRef(ref);
+  const def = SECTIONS[section];
+  if (!def) return undefined;
+  const quote = point ? def.points[point] : Object.values(def.points)[0];
+  return quote ? { ref, section, title: def.title, quote } : undefined;
 }
 
 /**
