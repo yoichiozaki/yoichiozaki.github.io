@@ -100,7 +100,10 @@ function texts(): [string, Text][] {
     out.push([`${id}.summary`, d.summary]);
     if (d.note) out.push([`${id}.note`, d.note]);
   }
-  for (const e of EDGES) if (e.label) out.push([`${e.id}.label`, e.label]);
+  for (const e of EDGES) {
+    if (e.label) out.push([`${e.id}.label`, e.label]);
+    if (e.kicker) out.push([`${e.id}.kicker`, e.kicker]);
+  }
   for (const l of LOOPS) out.push([`${l.id}.label`, l.label]);
   for (const c of COMPANIES) {
     out.push([`${c.id}.name`, c.name]);
@@ -113,6 +116,17 @@ function texts(): [string, Text][] {
 const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 const inside = (inner: Rect, outer: Rect) =>
   inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+
+type Point = [number, number];
+/** The corner points of a path made of M, L and Q commands, in order. */
+function pathPoints(d: string): Point[] {
+  const nums = d.match(/-?\d+(\.\d+)?/g)!.map(Number);
+  const out: Point[] = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) out.push([nums[i], nums[i + 1]]);
+  return out;
+}
+const strictlyIn = (p: Point, r: Rect) => p[0] > r.x && p[0] < r.x + r.w && p[1] > r.y && p[1] < r.y + r.h;
+const onOrIn = (p: Point, r: Rect) => p[0] >= r.x && p[0] <= r.x + r.w && p[1] >= r.y && p[1] <= r.y + r.h;
 
 const states: [string, Set<string>][] = [
   ["default", new Set(DEFAULT_COLLAPSED)],
@@ -340,6 +354,25 @@ describe("capability map: layout", () => {
     const context = boxes.get("context-layer")!;
     expect(context.x).toBe(system.x);
     expect(context.y).toBeGreaterThan(system.y + system.h);
+  });
+
+  it.each(states)("routes loops around the boxes they do not start or end in (%s)", (_, collapsed) => {
+    const layout = layoutMap(collapsed);
+    const boxes = top(layout);
+    for (const loop of layout.loops) {
+      const points = pathPoints(loop.path);
+      const ends = [points[0], points[points.length - 1]];
+      const others = boxes.filter((b) => !ends.some((p) => onOrIn(p, b)));
+      for (let i = 1; i < points.length; i++) {
+        const [a, b] = [points[i - 1], points[i]];
+        for (let s = 0; s <= 24; s++) {
+          const p: Point = [a[0] + ((b[0] - a[0]) * s) / 24, a[1] + ((b[1] - a[1]) * s) / 24];
+          for (const box of others) expect(strictlyIn(p, box), `${loop.id} runs through ${box.id}`).toBe(false);
+        }
+      }
+    }
+    // The synthetic-data loop leaves the system sideways, so it must not cut through the context layer below it.
+    expect(pathPoints(layout.loops.find((l) => l.id === "loop-synthetic")!.path)[0][0]).toBe(layout.boxes.get("system")!.x);
   });
 
   it("hides the items of collapsed subgroups", () => {
