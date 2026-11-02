@@ -199,7 +199,7 @@ import {
   OntologyInterpretationMap,
   SemanticViewWalkthrough,
   JudgeGateSimulator,
-  CapabilityLeversLab,
+  CapabilityLeverMap,
 } from "@/components/interactive";
 
 const rehypePrettyCodeOptions = {
@@ -411,7 +411,7 @@ function getMdxComponents(locale: string) {
     OntologyInterpretationMap: () => <OntologyInterpretationMap locale={locale} />,
     SemanticViewWalkthrough: () => <SemanticViewWalkthrough locale={locale} />,
     JudgeGateSimulator: () => <JudgeGateSimulator locale={locale} />,
-    CapabilityLeversLab: () => <CapabilityLeversLab locale={locale} />,
+    CapabilityLeverMap: () => <CapabilityLeverMap locale={locale} />,
   };
 }
 
