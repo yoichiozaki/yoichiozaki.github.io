@@ -64,7 +64,7 @@ export const SECTIONS: Record<string, SectionDef> = {
         "The shorter the time a model stays at the frontier, the shorter the window for recovering its training cost.",
       ),
       caisi: t(
-        "米国立標準技術研究所（NIST）の CAISI が 2026 年 5 月に公表した評価によれば、中国で最も強いオープンウェイトモデルの DeepSeek V4 Pro でも、米国のフロンティアから約 8 か月遅れている。",
+        "米国立標準技術研究所（NIST）の AI 標準・イノベーションセンター（CAISI）が 2026 年 5 月に公表した評価によれば、中国で最も強いオープンウェイトモデルの DeepSeek V4 Pro でも、米国のフロンティアから約 8 か月遅れている。",
         "Even the strongest Chinese open-weight model, DeepSeek V4 Pro, sits about eight months behind the U.S. frontier, according to an assessment published in May 2026 by NIST's Center for AI Standards and Innovation (CAISI).",
       ),
     },
@@ -320,7 +320,7 @@ export const SECTIONS: Record<string, SectionDef> = {
       ),
       recover: t(
         "事前学習の費用は、モデルが売れる期間をかけて後から回収しなければならない。",
-        "pretraining has to be recovered afterwards, over the period in which the model sells.",
+        "the cost of pretraining has to be recovered afterwards, over the period in which the model sells.",
       ),
     },
   },

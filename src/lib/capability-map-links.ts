@@ -18,7 +18,7 @@ export const EDGES: EdgeDef[] = [
         "Compute per dollar and per watt, set by chip generation, lower precision, memory, packaging and how well the fleet is run.",
       ),
       note: t(
-        "長期では指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。ただし、電力を増やした分は 1 ワットあたりの効率を上げない。",
+        "長期的には指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。ただし、電力を増やして得た分は、1 チップあたりの性能を上げても 1 ワットあたりの効率は上げない。",
         "It improves exponentially over the long run, but in steps with each generation. Most of the per-chip performance gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory — and the added power raises performance per chip, not per watt.",
       ),
       refs: ["4.3:gains", "4.7:tokens"],
@@ -32,7 +32,7 @@ export const EDGES: EdgeDef[] = [
     fromSide: "right",
     toSide: "left",
     kind: "flow",
-    label: t("配分の効率", "Allocation efficiency"),
+    label: t("配分効率", "Allocation efficiency"),
     detail: {
       summary: t(
         "計算量を、事前学習、強化学習、推論、研究のための実験にどう振り分けるか。同じ計算量でも、配分によって得られる能力が変わる。",
@@ -178,8 +178,8 @@ export const LOOPS: LoopDef[] = [
         "Revenue and profit from the uses pay for the next round of compute.",
       ),
       note: t(
-        "このループが回ると示せるかどうかが、次の巨額の資本を集める条件になる。",
-        "Showing that this loop turns is the condition for raising the next round of capital.",
+        "次の巨額の資本を集めるには、このループが回ることを示す必要がある。",
+        "To raise the next round of capital, a lab has to show that this loop turns.",
       ),
       refs: ["6.3:revenuePerCompute", "2.3"],
       links: [S.s1, S.wsj, S.msft10q],
@@ -210,14 +210,14 @@ export const LOOPS: LoopDef[] = [
       ),
       note: t(
         "Cursor は、新しいモデルを利用者に配り、次の学習のためのデータを集めるまでを 1.5〜2 時間で回している。",
-        "Cursor takes 1.5 to 2 hours to roll a new checkpoint out to users and collect the data for the next training step.",
+        "Cursor takes 1.5–2 hours to roll a new checkpoint out to users and collect the data for the next training step.",
       ),
       links: [S.cursorRl],
     },
   },
   {
     id: "loop-synthetic",
-    label: t("AI が自分でつくるデータ", "Data AI makes itself"),
+    label: t("AI が自分でつくるデータ", "Data the AI makes itself"),
     cycle: ["system", "synthetic", "gradable", "e-data"],
     detail: {
       summary: t(
@@ -225,8 +225,8 @@ export const LOOPS: LoopDef[] = [
         "Records of the system solving tasks, and problems and answers the models write, become material for the next round; for gradable tasks only the correct ones are kept.",
       ),
       note: t(
-        "DeepSeek-R1 は、強化学習の途中のモデルに 1 問あたり複数の答えを出させて正しいものだけを残し（約 60 万件）、次の学習に使った。こうして集めた約 80 万件のデータで小さなモデルを学習させるだけでも、その推論の力は大きく上がった。",
-        "DeepSeek-R1 sampled several answers per prompt from an RL checkpoint and kept only the correct ones (about 600,000) for the next round of training; fine-tuning smaller models on the resulting 800,000 samples alone substantially improved their reasoning.",
+        "DeepSeek-R1 は、強化学習の途中のモデルに 1 問あたり複数の答えを出させて正しいものだけを残し（約 60 万件）、次の学習に使った。これを含む約 80 万件のデータで小さなモデルを学習させるだけでも、その推論の力は大きく上がった。",
+        "DeepSeek-R1 sampled several answers per prompt from an RL checkpoint and kept only the correct ones (about 600,000) for the next round of training; simply fine-tuning smaller models on about 800,000 samples that include these substantially improved their reasoning.",
       ),
       links: [S.deepseekR1, S.phi1],
     },
@@ -242,7 +242,7 @@ export const COMPANIES: CompanyDef[] = [
     links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1],
     points: [
       t(
-        "ChatGPT の週間利用者は 10 億人に達したが（報道）、1 人あたりの収益は小さい。2026 年 2 月に広告を試験導入した。",
+        "ChatGPT の週間利用者は 10 億人に達した（報道）が、1 人あたりの収益は小さい。2026 年 2 月に広告を試験導入した。",
         "ChatGPT has reportedly reached a billion weekly users, but revenue per user is small; ads were trialled from February 2026.",
       ),
       t(
@@ -271,7 +271,7 @@ export const COMPANIES: CompanyDef[] = [
         "40% of enterprise LLM API spending, and 54% for coding (Menlo Ventures, 2025).",
       ),
       t(
-        "2026 年上期に 1,100 億ドル超を調達した。名前の挙がった計算資源の契約だけで、上限値を含めて 6,000 億ドルを超える。",
+        "2026 年上期に 1,100 億ドル超を調達した。S-1 で名前の挙がった計算資源の契約だけで、上限値を含めて 6,000 億ドルを超える。",
         "Raised more than USD 110 billion in H1 2026; the compute agreements named in its S-1 alone exceed USD 600 billion, including upper-bound amounts.",
       ),
     ],
@@ -288,8 +288,8 @@ export const COMPANIES: CompanyDef[] = [
         "Has its own TPUs — a v7 pod joins 9,216 chips — and supplies up to a million TPUs to Anthropic.",
       ),
       t(
-        "2025 年 11 月に Gemini 3 を出すと、OpenAI は 12 月に社内で「コードレッド」を宣言したと報じられた。Deep Think で考える量を売る。",
-        "After Gemini 3 (November 2025), OpenAI reportedly declared a “code red” internally in December; Deep Think sells extra thinking.",
+        "2025 年 11 月に Gemini 3 を出すと、OpenAI は 12 月に社内で「コードレッド」を宣言したと報じられた。Google は Deep Think で考える量を売る。",
+        "After Gemini 3 (November 2025), OpenAI reportedly declared a “code red” internally in December. Google sells extra thinking through Deep Think.",
       ),
       t(
         "Alphabet は 2026 年 1〜9 月に自社株買いをやめ、6 月に株式で 495 億ドルを調達し、社債などで 852 億ドルを借り入れた。",
@@ -330,8 +330,8 @@ export const COMPANIES: CompanyDef[] = [
         "Runs about 500,000 Trainium2 chips for Anthropic at Project Rainier in Indiana.",
       ),
       t(
-        "AWS と OpenAI の契約は 1,380 億ドルに拡大した。受注残は約 5,780 億ドルある。",
-        "The AWS–OpenAI agreement has grown to USD 138 billion; the backlog is about USD 578 billion.",
+        "AWS と OpenAI の契約は 1,380 億ドルに拡大した。AWS の受注残は約 5,780 億ドルある。",
+        "The AWS–OpenAI agreement has grown to USD 138 billion; AWS's backlog is about USD 578 billion.",
       ),
       t(
         "長期借入の額面は、2025 年末の 688 億ドルから 2026 年 9 月末の 1,809 億ドルに増えた。",
@@ -355,7 +355,7 @@ export const COMPANIES: CompanyDef[] = [
         "Brought the first phase of Prometheus in Ohio (planned at over 1 GW) online and aims for 5 GW at Hyperion in Louisiana.",
       ),
       t(
-        "ルイジアナのデータセンターを、Blue Owl との特別目的会社が負う約 270 億ドルの負債で賄った（報道）。",
+        "ルイジアナ州のデータセンターを、Blue Owl との特別目的会社が負う約 270 億ドルの負債で賄った（報道）。",
         "Financed the Louisiana data centre with about USD 27 billion of debt carried by a special-purpose vehicle with Blue Owl (reported).",
       ),
     ],
@@ -368,8 +368,8 @@ export const COMPANIES: CompanyDef[] = [
     links: [S.epochDataCenters, S.grok4, S.s1],
     points: [
       t(
-        "メンフィスの Colossus 2 は H100 換算で約 111 万基に相当し、2026 年 11 月時点で最大の計算資源を持つサイトである（Epoch AI）。",
-        "Colossus 2 in Memphis, at about 1.11 million H100 equivalents, was the largest compute site as of November 2026 (Epoch AI).",
+        "メンフィスの Colossus 2 は H100 換算で約 111 万基の規模で、2026 年 11 月時点で最大の計算資源を持つサイトである（Epoch AI）。",
+        "Colossus 2 in Memphis, at about 1.11 million H100 equivalents, is the largest compute site as of November 2026 (Epoch AI).",
       ),
       t(
         "Grok 4 で、強化学習を事前学習と同じ規模で行ったと発表した（2025 年 7 月）。",
@@ -398,7 +398,7 @@ export const COMPANIES: CompanyDef[] = [
       ),
       t(
         "DeepSeek-R1 で、o1 の成果を RLVR によって安く再現した。NIST の CAISI によれば、DeepSeek V4 Pro の能力は米国のフロンティアから約 8 か月遅れている。",
-        "DeepSeek-R1 used RLVR to reproduce o1's results cheaply. According to NIST's CAISI, DeepSeek V4 Pro trails the US frontier by about eight months.",
+        "DeepSeek-R1 used RLVR to reproduce o1's results cheaply. According to NIST's CAISI, DeepSeek V4 Pro trails the U.S. frontier by about eight months.",
       ),
     ],
   },
@@ -419,18 +419,18 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-predictable",
     title: t("予測しやすいレバー", "The predictable levers"),
     body: t(
-      "課題の範囲を決めれば、強化学習は上限に向かう S 字で、推論時計算は計算量の対数に比例して伸びる。範囲を広げ続けられるかどうかは、採点できる課題と環境の数で決まる。",
-      "Within a fixed range of tasks, RL follows an S-curve towards a ceiling and inference compute grows with the logarithm of compute. How far that range can keep widening depends on how many gradable tasks and environments exist.",
+      "課題の範囲を決めれば、強化学習による伸びは上限に向かう S 字を描き、推論時計算による伸びは使う計算量の対数に比例する。範囲を広げ続けられるかどうかは、採点できる課題と環境の数で決まる。",
+      "Within a fixed range of tasks, gains from RL follow an S-curve towards a ceiling, and gains from inference compute grow with the logarithm of the compute spent. How far that range can keep widening depends on how many gradable tasks and environments exist.",
     ),
     ids: ["rlvr", "agentic-rl", "inference", "gradable", "e-allocation"],
     refs: ["5.3:answer"],
   },
   {
     id: "kp-pretraining",
-    title: t("事前学習は早く回収する必要がある", "Pretraining has to pay back fast"),
+    title: t("事前学習の費用は早く回収する必要がある", "Pretraining has to pay back fast"),
     body: t(
-      "事前学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。米国の各社は数か月単位で首位を入れ替え、中国で最も強いオープンウェイトモデルも約 8 か月遅れで追いかけてくる（NIST の評価）なかで、その期間は長くない。",
-      "Pretraining is paid for up front and must be recovered while the model sells — not long when US labs trade the lead every few months and even the strongest Chinese open-weight model trails by only about eight months (per NIST).",
+      "事前学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。米国の各社が数か月単位で首位を入れ替え、中国で最も強いオープンウェイトモデルも約 8 か月遅れで追いかけてくる（NIST の評価）なかで、その期間は長くない。",
+      "Pretraining is paid for up front and must be recovered while the model sells — a short window when U.S. labs trade the lead every few months and even the strongest Chinese open-weight model trails by only about eight months (per NIST).",
     ),
     ids: ["pretraining", "human-data", "compute", "external-capital"],
     refs: ["3.1", "5.3:recover", "6.3:training"],
@@ -457,10 +457,10 @@ export const KEY_POINTS: KeyPointDef[] = [
   },
   {
     id: "kp-revenue-loop",
-    title: t("売上のループが次の資本を決める", "The revenue loop decides the next round"),
+    title: t("売上のループが次の調達を決める", "The revenue loop decides the next round"),
     body: t(
-      "仕事を完了する能力が売上と粗利に変わり、それが次の計算資源の資金になる。このループが回ると示せるかどうかが、次の巨額の資本を集める条件になる。",
-      "Getting work done turns into revenue and margin, which fund the next compute. Showing that this loop turns is the condition for raising the next round.",
+      "仕事を完了する能力が売上と粗利に変わり、それが次の計算資源の資金になる。次の巨額の資本を集めるには、このループが回ることを示す必要がある。",
+      "Getting work done turns into revenue and margin, which fund the next compute. To raise the next round, a lab has to show that this loop turns.",
     ),
     ids: ["loop-revenue", "system", "uses", "revenue", "funding"],
     refs: ["6.3:revenuePerCompute"],

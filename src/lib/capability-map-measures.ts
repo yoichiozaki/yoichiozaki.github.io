@@ -30,7 +30,7 @@ export const MEASURES: GroupDef = {
       [
         item("loss", t("事前学習の損失", "Pretraining loss"), {
           summary: t(
-            "学習に使っていない文章で、次の単語をどれだけ当てられるか。事前学習の進み具合を最も直接に表す。",
+            "学習に使っていない文章で、次のトークンをどれだけ当てられるか。事前学習の進み具合を最も直接的に表す。",
             "How well the model predicts the next token on text it was not trained on — the most direct gauge of pretraining progress.",
           ),
           note: t(
@@ -46,7 +46,7 @@ export const MEASURES: GroupDef = {
             "Scoring the model on fixed problems without tools (GPQA Diamond, AIME and the like).",
           ),
           note: t(
-            "点数は考える量の設定でも変わるので、モデルどうしを比べるときは設定をそろえる必要がある。しかも次々に飽和しては、新しいものに置き換えられている。",
+            "点数は考える量の設定でも変わるので、モデルどうしを比べるときは設定をそろえる必要がある。しかもベンチマークは次々に飽和しては、新しいものに置き換えられている。",
             "Scores also move with the thinking-effort setting, so comparisons need matched settings; and benchmarks keep saturating and being replaced.",
           ),
           refs: ["5.2:benchmarks"],
@@ -56,7 +56,7 @@ export const MEASURES: GroupDef = {
     ),
     sub(
       "measure-system",
-      t("仕事の完了", "Getting work done"),
+      t("仕事の完了", "Work completion"),
       {
         summary: t(
           "モデルとハーネスを組み合わせたシステムが、任された仕事を完了できるか。",
@@ -72,7 +72,7 @@ export const MEASURES: GroupDef = {
             "The length of tasks, in skilled-human time, that AI completes with 50% probability; since 2023 it has doubled about every four months.",
           ),
           note: t(
-            "道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測り、仕組みはモデルごとに選ぶ。16 時間を超える値は今の課題セットでは信頼できない。METR が測定値を追加したのは 2026 年 5 月が最後で、9 月には公開ページをもう更新しないと明記した。",
+            "道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測り、仕組みはモデルごとに選ぶ。16 時間を超える値は今の課題セットでは信頼できない。METR が測定値を追加したのは 2026 年 5 月が最後で、9 月には公開ページをもう積極的には更新しないと明記した。",
             "Measured with the model inside a scaffold that provides tools and runs the loop, chosen for each model. Values above 16 hours are unreliable on the current task set; METR's last new measurement was in May 2026, and in September it stated that its time-horizons page is no longer actively updated.",
           ),
           refs: ["5.2:metrSystem", "5.2:outrun"],
@@ -80,8 +80,8 @@ export const MEASURES: GroupDef = {
         }),
         item("gdpval", t("実務の評価（GDPval）", "Real work (GDPval)"), {
           summary: t(
-            "OpenAI の評価。米国の GDP への寄与が大きい 9 業種の 44 職種について、実際の仕事の成果物をもとにした課題で、専門家の成果物と比べる。",
-            "OpenAI's evaluation: tasks built from real work products in 44 occupations across the nine industries that contribute most to US GDP, compared with experts' work.",
+            "OpenAI の評価。米国の GDP への寄与が大きい 9 業種の 44 職種について、実際の仕事の成果物をもとにした課題で、AI の成果物を専門家の成果物と比べる。",
+            "OpenAI's evaluation: tasks built from real work products in 44 occupations across the nine industries that contribute most to U.S. GDP, with model outputs compared against experts' work.",
           ),
           note: t(
             "初版は 1 回の指示で成果物を出させる評価で、やり取りを重ねて文脈を集めたり、何度も手直ししたりして仕上げる仕事は含まない。",
@@ -114,10 +114,10 @@ export const MEASURES: GroupDef = {
         }),
       ],
     ),
-    item("eci", t("総合指数（ECI）", "Capabilities index (ECI)"), {
+    item("eci", t("総合指数（ECI）", "Composite index (ECI)"), {
       summary: t(
         "Epoch AI の Epoch Capabilities Index。50 を超えるベンチマークの結果を 1 つの尺度にまとめ、難しいベンチマークでよい成績を出したモデルほど高くなる。",
-        "Epoch AI's Epoch Capabilities Index combines more than 50 benchmarks into one scale; doing well on harder benchmarks scores higher.",
+        "Epoch AI's Epoch Capabilities Index combines more than 50 benchmarks into one scale; models that do well on harder benchmarks score higher.",
       ),
       note: t(
         "道具を使わない問題集だけでなく、Terminal-Bench 2.0 や OSWorld のようなエージェント型の評価、METR のタイムホライズン、GDPval、RLI も取り込み、考える量などの設定のうち最も高い点数を採る。モデル単体と仕事の完了の両方が混ざった指標である。",
@@ -131,8 +131,8 @@ export const MEASURES: GroupDef = {
         "Evaluations by someone other than the developer, which check the developer's own numbers.",
       ),
       note: t(
-        "NIST の CAISI は 2026 年 5 月、DeepSeek V4 Pro について、開発元の公表値では約 2 か月前に出た米国のモデルと同等に見えるが、非公開のベンチマークを含む自らの評価では約 8 か月前のモデル（GPT-5）並みだと報告した。",
-        "In May 2026, NIST's CAISI reported that DeepSeek V4 Pro looks on a par with US models released about two months earlier on DeepSeek's own numbers, but performs like GPT-5, released about eight months earlier, on CAISI's evaluations, which include non-public benchmarks.",
+        "NIST の CAISI は 2026 年 5 月、DeepSeek V4 Pro について、開発元の公表値ではその約 2 か月前に出た米国のモデルと同等に見えるが、非公開のベンチマークを含む CAISI 自身の評価では、約 8 か月前に出た GPT-5 並みだと報告した。",
+        "In May 2026, NIST's CAISI reported that, on DeepSeek's own numbers, DeepSeek V4 Pro looks on a par with U.S. models released about two months before it, but that on CAISI's own evaluations, which include non-public benchmarks, it performs like GPT-5, released about eight months before it.",
       ),
       refs: ["3.1:caisi"],
       links: [S.nistCaisi, S.metrTimeHorizons],
@@ -239,7 +239,7 @@ export const MEASURES: GroupDef = {
             "Evaluations of capabilities that could be misused, for example for cyberattacks or biological weapons.",
           ),
           note: t(
-            "Shevlane ら（2023 年）は、危険な能力そのものを測る評価と、その能力を害に使う傾向を測る評価を、学習や配備の判断に使うよう提案した。",
+            "Shevlane ら（2023 年）は、危険な能力そのものを測る評価と、その能力を使って害をなす傾向を測る評価を、学習や配備の判断に使うよう提案した。",
             "Shevlane et al. (2023) propose using evaluations of dangerous capabilities, and of a model's propensity to use them for harm, to decide on training and deployment.",
           ),
           links: [S.extremeRisks, S.anthropicRsp],
@@ -265,17 +265,17 @@ export const MATERIALS: GroupDef = {
     links: [S.villalobos, S.dataConstrained],
   },
   children: [
-    item("human-data", t("人が書いたデータ", "Human-written data"), {
+    item("human-data", t("人間が書いたデータ", "Human-written data"), {
       summary: t("インターネットの文章、書籍、コード。", "Web text, books and code."),
       note: t(
-        "Villalobos らは、学習に使える人間が書いた公開テキストを約 300 兆トークンと見積もり、今の傾向が続けば 2026〜2032 年に使い切ると予測した。",
+        "Villalobos らは、人間が書いた公開テキストのうち学習に使える量を約 300 兆トークンと見積もり、今の傾向が続けば 2026〜2032 年に使い切ると予測した。",
         "Villalobos et al. estimate the usable stock of public human-written text at about 300 trillion tokens and, if current trends continue, expect it to be used up between 2026 and 2032.",
       ),
       refs: ["5.2:data"],
       links: [S.villalobos, S.dataConstrained],
     }),
     item("physical-data", t("実世界のデータ", "Real-world data"), {
-      summary: t("動画、センサー、ロボットの操作の記録。", "Video, sensor readings and robot operation logs."),
+      summary: t("動画、センサーの測定値、ロボットの操作の記録。", "Video, sensor readings and robot operation logs."),
       note: t(
         "Open X-Embodiment の研究では、22 種類のロボットのデータをまとめて学習したモデルが、ほかのロボットの経験を生かして性能を上げた。",
         "In the Open X-Embodiment work, a model trained on pooled data from 22 kinds of robots improved by drawing on other robots' experience.",
@@ -283,17 +283,17 @@ export const MATERIALS: GroupDef = {
       links: [S.openX, S.rt2],
     }),
     item("experiment-data", t("実験データ", "Experimental data"), {
-      summary: t("科学の実験や計算の結果。答えを確かめる手段にもなる。", "Results of experiments and simulations, which can also check answers."),
+      summary: t("科学の実験や計算の結果。答えを確かめる手段にもなる。", "Results of experiments and simulations, which can also be used to check answers."),
       note: t(
         "Coscientist（2023 年）は、GPT-4 に検索、コードの実行、実験装置の自動制御を組み合わせ、化学の実験を自律的に計画して実行した。実験の結果が、AI の立てた計画が正しいかを確かめる手段になる。",
         "Coscientist (2023) combined GPT-4 with search, code execution and lab automation to plan and run chemistry experiments on its own; the experimental results become a way to check the AI's plans.",
       ),
       links: [S.coscientist],
     }),
-    item("world-model", t("世界モデル・シミュレーション", "World models, simulation"), {
+    item("world-model", t("世界モデル・シミュレーション", "World models and simulation"), {
       summary: t("現実を模した環境で、安く何度も試行錯誤させる。", "Environments that imitate reality, where trial and error is cheap."),
       note: t(
-        "Google DeepMind の Genie 3 は、文章の指示から、720p・毎秒 24 コマでリアルタイムに動き回れる世界を生成し、数分間は一貫性を保つ。Google DeepMind は、世界モデルを使えば、多様なシミュレーション環境でエージェントを際限なく訓練できるとしている。",
+        "Google DeepMind の Genie 3 は、文章の指示から、720p・毎秒 24 コマでリアルタイムに動き回れる世界を生成し、数分間は一貫性を保つ。Google DeepMind は、世界モデルを使えば、多様なシミュレーション環境でエージェントを際限なく学習させられるとしている。",
         "Google DeepMind's Genie 3 turns a text prompt into a world you can move through in real time at 720p and 24 frames per second, staying consistent for a few minutes; Google DeepMind argues that world models make it possible to train agents in an unlimited curriculum of rich simulated environments.",
       ),
       links: [S.genie3, S.cosmos],
@@ -309,7 +309,7 @@ export const MATERIALS: GroupDef = {
     item("synthetic", t("合成データ", "Synthetic data"), {
       summary: t(
         "モデル自身がつくる問題と答え。採点できる課題なら、正しいものだけを選んで学習に使える。",
-        "Problems and answers the models produce themselves; for gradable tasks, only the correct ones need be kept.",
+        "Problems and answers the models produce themselves; for gradable tasks, only the correct ones can be kept.",
       ),
       note: t(
         "Gunasekar ら（2023 年）の phi-1 は、Web から選んだ教科書のような文章 60 億トークンと、GPT-3.5 でつくった教科書と練習問題 10 億トークンで学習し、13 億パラメータで HumanEval の 50.6% を解いた。",

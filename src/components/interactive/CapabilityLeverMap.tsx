@@ -324,12 +324,12 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const hint =
     mode === "list"
       ? isJa
-        ? "項目を開くと、説明と出典、本文の該当箇所が表示される。"
+        ? "項目を開くと、説明、出典、本文の該当箇所が表示される。"
         : "Open an entry to read about it, with its sources and the sections of the article that discuss it."
       : fullscreen
         ? isJa
-          ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、ホイールで拡大・縮小。Esc で戻る。"
-          : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan, scroll to zoom, Esc to exit."
+          ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、ホイールで拡大・縮小。Esc で全画面を閉じる。"
+          : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan, scroll to zoom, Esc to exit full screen."
         : isJa
           ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、Ctrl（⌘）+ ホイールかピンチで拡大・縮小。"
           : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan; Ctrl (⌘) + scroll or pinch to zoom.";

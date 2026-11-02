@@ -55,8 +55,8 @@ describe("ai-industry-capital-to-fcf: capability lever map", () => {
     }
     expect(paragraph).toMatch(/4 (倍|times)/);
     expect(paragraph).toMatch(/15 (倍|times)/);
-    expect(subagentsNote).toMatch(/4 ?(倍|×)/);
-    expect(subagentsNote).toMatch(/15 ?(倍|×)/);
+    expect(subagentsNote).toMatch(/\b4 ?(倍|×|x\b)/);
+    expect(subagentsNote).toMatch(/\b15 ?(倍|×|x\b)/);
     const effEdge = EDGES.find((e) => e.id === "e-harness")!;
     expect(effEdge.detail!.note![locale]).toContain("18%");
   });

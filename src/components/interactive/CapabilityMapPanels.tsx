@@ -35,7 +35,7 @@ function kicker(id: string, locale: Locale): string {
     const category = CATEGORY_LABEL[ELEMENTS.get(id)!.category][locale];
     return category === labelOf(id)?.[locale] ? "" : category;
   }
-  if (kind === "edge") return EDGE_BY_ID.get(id)!.kind === "measure" ? (isJa ? "測る" : "Measurement") : isJa ? "効率" : "Efficiency";
+  if (kind === "edge") return EDGE_BY_ID.get(id)!.kind === "measure" ? (isJa ? "成果の測り方" : "Measuring results") : isJa ? "効率" : "Efficiency";
   if (kind === "loop") return isJa ? "成果が戻るループ" : "Feedback loop";
   return "";
 }
@@ -147,7 +147,7 @@ function RefButtons({ refs, locale, onJump }: JumpProps & { refs?: string[] }) {
   if (groups.length === 0) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-muted-foreground">{isJa ? "本文:" : "In the article:"}</span>
+      <span className="text-[11px] text-muted-foreground">{isJa ? "本文：" : "In the article:"}</span>
       {groups.map((g) => (
         <button
           key={g.section}
@@ -178,7 +178,7 @@ export function Legend({ locale }: { locale: Locale }) {
         <span className="rounded-full border px-1.5 text-[10px] text-foreground" style={{ borderColor: EFFICIENCY_COLOR, background: tint(EFFICIENCY_COLOR, 16) }}>
           {isJa ? "効率" : "Efficiency"}
         </span>
-        {isJa ? "矢印のラベル" : "arrow labels"}
+        {isJa ? "矢印のラベル" : "Arrow labels"}
       </li>
       <li className="flex items-center gap-1.5">
         <svg width="28" height="8" aria-hidden>
@@ -257,7 +257,7 @@ export function CompanyStrip({ locale, selected, onSelect, onJump }: StripProps)
             <RefButtons refs={company.refs} locale={locale} onJump={onJump} />
             {company.links && company.links.length > 0 && (
               <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="text-muted-foreground">{isJa ? "出典:" : "Sources:"}</span>
+                <span className="text-muted-foreground">{isJa ? "出典：" : "Sources:"}</span>
                 {company.links.map((l) => (
                   <SourceLink key={l.href ?? l.slug} link={l} locale={locale} />
                 ))}
@@ -410,7 +410,7 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
               {EDGE_BY_ID.has(id)
                 ? isJa
                   ? "矢印の両端"
-                  : "Ends of the arrow"
+                  : "Connects"
                 : LOOP_BY_ID.has(id)
                   ? isJa
                     ? "ループが通る項目"
@@ -455,7 +455,7 @@ function Extras({ detail, locale, onJump }: JumpProps & { detail: Detail }) {
       <RefButtons refs={detail.refs} locale={locale} onJump={onJump} />
       {hasLinks && (
         <p className="leading-relaxed">
-          <span className="text-muted-foreground">{isJa ? "出典: " : "Sources: "}</span>
+          <span className="text-muted-foreground">{isJa ? "出典：" : "Sources: "}</span>
           {detail.links!.map((l, i) => (
             <span key={l.href ?? l.slug}>
               {i > 0 && <span className="text-muted-foreground">{isJa ? "、" : ", "}</span>}
@@ -546,8 +546,7 @@ export function ListView({ locale, onJump }: JumpProps) {
             <li key={e.id} className="py-1.5">
               <p className="text-[13px] font-semibold text-foreground">
                 {e.label![locale]}
-                {isJa ? "" : " "}
-                <span className="font-normal text-muted-foreground">{isJa ? `（${edgeEnds(e.id, locale)}）` : `(${edgeEnds(e.id, locale)})`}</span>
+                <span className="font-normal text-muted-foreground"> — {edgeEnds(e.id, locale)}</span>
               </p>
               <p className="text-[12px] leading-snug text-muted-foreground">{e.detail!.summary[locale]}</p>
               {e.detail!.note && <p className="mt-0.5 text-[12px] leading-snug text-foreground/80">{e.detail!.note[locale]}</p>}

@@ -58,7 +58,7 @@ export const HARNESS: GroupDef = {
         "Running code, editing files, searching, driving a browser. How the tools are designed changes how well the same model does.",
       ),
       note: t(
-        "Toolformer（2023 年）は、計算機、検索、翻訳、カレンダーなどの API をいつ、どう呼ぶかを、モデルが少数の例から自分で学べることを示した。",
+        "Toolformer（2023 年）は、電卓、検索、翻訳、カレンダーなどの API をいつ、どう呼ぶかを、モデルが少数の例から自分で学べることを示した。",
         "Toolformer (2023) showed that a model can teach itself, from a handful of examples, when and how to call APIs such as a calculator, search, translation and a calendar.",
       ),
       refs: ["5.2:harness"],
@@ -67,7 +67,7 @@ export const HARNESS: GroupDef = {
     item("context-mgmt", t("文脈の管理", "Context management"), {
       summary: t(
         "限られた文脈に、何を入れて何を捨てるかを決める。古いやり取りの要約（コンパクション）や、必要な情報の検索。",
-        "Deciding what goes into a limited context and what is dropped: summarising old turns (compaction) and retrieving what is needed.",
+        "Deciding what goes into a limited context and what is dropped: summarizing old turns (compaction) and retrieving what is needed.",
       ),
       note: t(
         "Anthropic は 2025 年 11 月、Opus 4.5 でも、大まかな指示だけを与えて何セッションにもわたって Web アプリを開発させると、コンパクションを使っても本番に使える水準まで仕上げられないと報告した。文脈が長いと、真ん中にある情報ほど使われにくいという研究もある（Liu ら、2023 年）。",
@@ -94,8 +94,8 @@ export const HARNESS: GroupDef = {
         "Checking the output with tests or graders and retrying on failure; the same checks can serve as RL rewards.",
       ),
       note: t(
-        "途中の各ステップを採点する報酬モデル（プロセス監督）は、最終的な答えだけを採点するものより成績が良く、多数の解答から 1 つを選ばせると、MATH の代表的な問題の 78% を解けた（Lightman ら、2023 年）。",
-        "A reward model that grades each intermediate step (process supervision) outperformed one that grades only the final answer; picking from many sampled solutions, it solved 78% of a representative subset of MATH (Lightman et al., 2023).",
+        "途中の各ステップを採点する報酬モデル（プロセス監督）は、最終的な答えだけを採点するものより成績が良かった。この報酬モデルで多数の解答から 1 つを選ぶと、MATH の代表的な問題の 78% を解けた（Lightman ら、2023 年）。",
+        "A reward model that grades each intermediate step (process supervision) outperformed one that grades only the final answer; using it to pick from many sampled solutions solved 78% of a representative subset of MATH (Lightman et al., 2023).",
       ),
       refs: ["5.3:answer"],
       links: [S.verifyStepByStep, S.verifiers, S.postJudge],
@@ -107,12 +107,12 @@ export const HARNESS: GroupDef = {
       ),
       note: t(
         "Anthropic の分析では、エージェントは会話の約 4 倍、複数のエージェントで分担するシステムは約 15 倍のトークンを使う。調査のように並列に進めやすい仕事では成績が上がるが、推論費も増える。",
-        "Anthropic found that agents use about 4× the tokens of a chat and multi-agent systems about 15× — better results on parallelizable work such as research, but higher inference cost.",
+        "Anthropic found that agents use about 4x the tokens of a chat and multi-agent systems about 15x — better results on parallelizable work such as research, but higher inference cost.",
       ),
       refs: ["5.2:tokens"],
       links: [S.anthropicMultiAgent],
     }),
-    item("guardrails", t("権限と安全装置", "Permissions, safeguards"), {
+    item("guardrails", t("権限と安全装置", "Permissions and safeguards"), {
       summary: t(
         "実行できる操作を絞り、危険な操作の前には人の確認を挟む。どこまで任せられるかを決める。",
         "Limiting what the agent may do and asking a person before risky actions — this decides how much can be delegated.",
@@ -139,7 +139,7 @@ export const SYSTEM: NodeDef = {
   detail: {
     summary: t(
       "任された仕事を最後までやり遂げる力。モデルの能力に、ハーネスと、1 件の仕事に使える推論計算が組み合わさって決まる。売上に直接つながるのは、モデル単体の能力ではなくこの能力である。",
-      "The ability to see a delegated job through to the end. It depends on the model, the harness and how much inference compute each job gets — and it, not the model alone, is what revenue tracks.",
+      "The ability to see a delegated job through to the end. It depends on the model, the harness and how much inference compute each job gets — and it is this ability, not the model alone, that revenue tracks.",
     ),
     note: t(
       "METR のタイムホライズンも、道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測っている。測っているのはモデル単体ではなく、システムの能力である。",
@@ -157,7 +157,7 @@ export const USES: GroupDef = {
   layout: "column",
   label: t("使い道", "Uses"),
   detail: {
-    summary: t("仕事を完了する能力が、売上や研究の成果に変わる場所。", "Where getting work done turns into revenue and results."),
+    summary: t("仕事を完了する能力が、売上や研究の成果に変わる場所。", "Where getting work done turns into revenue and research results."),
     refs: ["3.3"],
     links: [S.menlo, S.gdpval],
   },
@@ -189,7 +189,7 @@ export const USES: GroupDef = {
     item("knowledge-work", t("知識労働", "Knowledge work"), {
       summary: t(
         "調査、文書の作成、分析。正誤を判定しにくい部分が多く、強化学習をそのまま当てはめにくい。",
-        "Research, writing and analysis — much of it hard to grade, so RL does not transfer directly.",
+        "Research, writing and analysis — much of it hard to grade, so RL is hard to apply as is.",
       ),
       note: t(
         "Anthropic は Claude Code の仕組みを知識労働に広げた Claude Cowork を出している。",

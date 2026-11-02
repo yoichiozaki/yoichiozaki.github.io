@@ -126,7 +126,7 @@ export const LINK_KIND_LABEL: Record<LinkKind, Text> = {
   paper: t("研究", "Research"),
   news: t("報道", "News"),
   filing: t("開示資料", "Filing"),
-  official: t("発表", "Announcement"),
+  official: t("公式", "Official"),
   data: t("データ", "Data"),
   post: t("拙稿", "Related post"),
 };

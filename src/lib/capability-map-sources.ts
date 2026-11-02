@@ -355,7 +355,7 @@ export const SOURCES = {
     "https://arxiv.org/abs/2304.15004",
   ),
   palm: paper("PaLM: Scaling Language Modeling with Pathways", ["Chowdhery ら", "Chowdhery et al."], 2022, "https://arxiv.org/abs/2204.02311"),
-  llama3: paper("The Llama 3 Herd of Models", ["Llama Team（Meta）", "Llama Team, Meta"], 2024, "https://arxiv.org/abs/2407.21783"),
+  llama3: paper("The Llama 3 Herd of Models", ["Llama Team、Meta", "Llama Team, Meta"], 2024, "https://arxiv.org/abs/2407.21783"),
   deepseekV2: paper(
     "DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model",
     ["DeepSeek-AI", "DeepSeek-AI"],
@@ -475,7 +475,7 @@ export const SOURCES = {
   metrPaper: paper("Measuring AI Ability to Complete Long Software Tasks", ["Kwa ら", "Kwa et al."], 2025, "https://arxiv.org/abs/2503.14499"),
   metrProductivity: paper(
     "Measuring the Impact of Early-2025 AI on Experienced Open-Source Developer Productivity",
-    ["Becker ら（METR）", "Becker et al., METR"],
+    ["Becker ら、METR", "Becker et al., METR"],
     2025,
     "https://arxiv.org/abs/2507.09089",
   ),
@@ -494,7 +494,7 @@ export const SOURCES = {
   ),
   coscientist: paper(
     "Autonomous chemical research with large language models",
-    ["Boiko ら（Nature）", "Boiko et al., Nature"],
+    ["Boiko ら、Nature", "Boiko et al., Nature"],
     2023,
     "https://www.nature.com/articles/s41586-023-06792-0",
   ),
@@ -530,7 +530,7 @@ export const SOURCES = {
   ),
   googleEnergy: paper(
     "Measuring the environmental impact of delivering AI at Google Scale",
-    ["Elsworth ら（Google）", "Elsworth et al., Google"],
+    ["Elsworth ら、Google", "Elsworth et al., Google"],
     2025,
     "https://arxiv.org/abs/2508.15734",
   ),

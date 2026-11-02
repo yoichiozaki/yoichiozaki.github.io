@@ -9,7 +9,7 @@ export const RESOURCES: GroupDef = {
   label: t("上流の資源", "Upstream resources"),
   detail: {
     summary: t(
-      "計算資源をつくるための元手。資金、チップ、電力と用地、それを動かす運用からなる。",
+      "計算資源のもとになるもの。資金、チップ、電力と用地、それらを動かす運用からなる。",
       "What compute is built from: money, chips, power and sites, and the operations that keep them running.",
     ),
     refs: ["2.2:finance", "4.7:outside"],
@@ -40,8 +40,8 @@ export const RESOURCES: GroupDef = {
       item("external-capital", t("出資・上場・借入", "Equity, IPOs and debt"), {
         summary: t("外から集める資金。", "Money raised from outside."),
         note: t(
-          "Anthropic は 2026 年上期に 1,100 億ドル超を調達した。OpenAI の 10 月のラウンドは目標を下回り（報道）、Alphabet は株式と借入に、Amazon は借入に頼り始めた。",
-          "Anthropic raised more than USD 110 billion in H1 2026; OpenAI's October round fell short of its target (reported); Alphabet has turned to equity and debt, and Amazon to debt.",
+          "Anthropic は 2026 年上期に 1,100 億ドル超を調達した。OpenAI の 10 月の調達は目標に届かず（報道）、Alphabet は株式と借入に、Amazon は借入に頼り始めた。",
+          "Anthropic raised more than USD 110 billion in H1 2026. OpenAI's October round fell short of its target (reported), while Alphabet has turned to equity and debt, and Amazon to debt.",
         ),
         refs: ["3.5", "6.2:lenders"],
         links: [S.wsj, S.decoderOpenAI, S.cnbcRound, S.s1, S.goog10q, S.amzn10q],
@@ -74,7 +74,7 @@ export const RESOURCES: GroupDef = {
         item("process", t("プロセス（微細化）", "Process nodes"), {
           summary: t("同じ面積により多くのトランジスタを載せる。", "Fitting more transistors into the same area."),
           note: t(
-            "H100 から Rubin までの性能の伸びに対して、プロセスの寄与は意外に小さい。TSMC の次の A16 も、N2P と比べた速度の改善は同じ電圧で 8〜10% にとどまる。",
+            "H100 から Rubin までの性能の伸びのうち、プロセスの寄与は意外に小さい。TSMC の次の A16 でも、同じ電圧での速度の向上は N2P 比で 8〜10% にとどまる。",
             "Process contributed surprisingly little to the gains from H100 to Rubin; TSMC's next node, A16, is only 8–10% faster than N2P at the same voltage.",
           ),
           refs: ["4.3:gains", "4.3:next"],
@@ -107,7 +107,7 @@ export const RESOURCES: GroupDef = {
             "Using fewer bits per number to compute more with the same circuits and power.",
           ),
           note: t(
-            "学習は BF16 から FP8 へ、推論は FP4 へ移った。4 ビットより下に残る余地は小さい。",
+            "学習は BF16 から FP8 へ、推論は FP4 へ移った。4 ビットより下げる余地は小さい。",
             "Training moved from BF16 to FP8 and inference to FP4; little room is left below 4 bits.",
           ),
           refs: ["4.2:returns"],
@@ -137,10 +137,10 @@ export const RESOURCES: GroupDef = {
       },
       [
         item("grid", t("電力（発電・系統接続）", "Power and grid"), {
-          summary: t("発電所と系統への接続。2026 年の最大の制約の 1 つ。", "Generation and grid connections — one of the biggest constraints in 2026."),
+          summary: t("発電所と、系統への接続。2026 年の最大の制約の 1 つ。", "Generation and grid connections — one of the biggest constraints in 2026."),
           note: t(
-            "単一のサイトが GW 単位になった。GE Vernova のガスタービンの受注残は 2031 年まで埋まっていると報じられている。",
-            "Single sites are now measured in gigawatts; GE Vernova's gas-turbine backlog is reported to be booked through 2031.",
+            "1 つのサイトの規模が GW 単位になった。GE Vernova のガスタービンは 2031 年まで受注で埋まっていると報じられている。",
+            "Single sites are now measured in gigawatts; GE Vernova's gas turbines are reportedly booked through 2031.",
           ),
           refs: ["4.1"],
           links: [S.epochDataCenters, S.iea, S.lbnl, S.duke, S.googleFlexible],
@@ -148,17 +148,17 @@ export const RESOURCES: GroupDef = {
         item("cooling", t("冷却・水", "Cooling and water"), {
           summary: t(
             "ラックの電力が増えるほど、液冷が欠かせなくなる。熱を水の蒸発で捨てる方式では、水も大量に使う。",
-            "The more power per rack, the more liquid cooling becomes essential; where heat is rejected by evaporating water, cooling also uses a lot of water.",
+            "The more power per rack, the more essential liquid cooling becomes; where heat is rejected by evaporating water, cooling also uses a lot of water.",
           ),
           note: t(
             "1 ラックの電力は、GB200 NVL72 の約 120〜130 kW から Vera Rubin NVL72 の約 190〜230 kW（TrendForce の推計）に増えた。水については、GPT-3 の学習で Microsoft の米国のデータセンターが約 70 万リットルの淡水を直接蒸発させたという推計がある（Li ら）。",
-            "Rack power rose from about 120–130 kW (GB200 NVL72) to about 190–230 kW (Vera Rubin NVL72, TrendForce estimate). On water, Li et al. estimate that training GPT-3 in Microsoft's US data centres could directly evaporate about 700,000 litres of fresh water.",
+            "Rack power rose from about 120–130 kW (GB200 NVL72) to about 190–230 kW (Vera Rubin NVL72, TrendForce estimate). On water, Li et al. estimate that training GPT-3 in Microsoft's U.S. data centres could directly evaporate about 700,000 litres of fresh water.",
           ),
           refs: ["4.1:cooling"],
           links: [S.nvidia800v, S.thirsty, S.lbnl],
         }),
-        item("permits", t("建設・許認可", "Construction, permits"), {
-          summary: t("建屋、変圧器、許認可。お金を積んでもすぐには増やせない。", "Buildings, transformers and permits — money cannot speed them up much."),
+        item("permits", t("建設・許認可", "Construction and permits"), {
+          summary: t("建屋、変圧器、許認可。お金を積んでもあまり早められない。", "Buildings, transformers and permits — money cannot speed them up much."),
           note: t(
             "大型変圧器の納期は 30〜36 か月に延びたと報じられている。地元の反対や、電気料金を巡る政治も制約になる。",
             "Lead times for large transformers have reportedly stretched to 30–36 months; local opposition and electricity-price politics also constrain building.",
@@ -180,7 +180,7 @@ export const RESOURCES: GroupDef = {
         item("utilization", t("稼働率", "Utilization"), {
           summary: t(
             "契約した計算資源を遊ばせずに使えている割合。固定費の回収を左右する。",
-            "How much of the contracted compute is kept busy; it decides how fixed costs are recovered.",
+            "How much of the contracted compute is kept busy; it decides how much of the fixed cost is recovered.",
           ),
           note: t(
             "Anthropic の粗利率 85%（2026 年上期）は、需要が供給を上回り、稼働率が高かった時期の数字である。",
@@ -189,7 +189,7 @@ export const RESOURCES: GroupDef = {
           refs: ["2.2:margin"],
           links: [S.s1, S.decoderAnthropic],
         }),
-        item("mfu", t("計算効率（MFU）", "MFU (FLOP utilization)"), {
+        item("mfu", t("FLOP 利用率（MFU）", "MFU (FLOP utilization)"), {
           summary: t("チップの理論性能のうち、学習で実際に引き出せた割合。", "The share of a chip's peak performance actually used in training."),
           note: t(
             "Meta は Llama 4 の最大のモデルを FP8 で事前学習し、GPU 1 基あたり 390 TFLOPS を出したと公表した。",
@@ -239,7 +239,7 @@ export const SIZE: GroupDef = {
   label: t("モデルの大きさ", "Model size"),
   detail: {
     summary: t(
-      "モデルが蓄えられる知識と、1 回に扱える情報の量。",
+      "モデルが蓄えられる知識の量と、1 回に扱える情報の量。",
       "How much knowledge a model can hold and how much information it can take in at once.",
     ),
     refs: ["4.6:moe"],
@@ -267,7 +267,7 @@ export const SIZE: GroupDef = {
         "How much a single call can attend to; longer contexts weigh on the KV cache and HBM.",
       ),
       note: t(
-        "DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んで計算する。",
+        "DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んでアテンションを計算する。",
         "DeepSeek's MLA cuts the KV cache by 93%, and DSA attends only to the 2,048 most relevant tokens.",
       ),
       refs: ["4.4:kvCache"],
@@ -305,7 +305,7 @@ export const STAGES: GroupDef = {
       [
         item("pretraining", t("事前学習", "Pretraining"), {
           summary: t(
-            "大量の文章で次の単語を予測させ、知識と言語の土台をつくる。",
+            "大量の文章で次のトークンを予測させ、知識と言語の土台をつくる。",
             "Predicting the next token over vast amounts of text to build the base of knowledge and language.",
           ),
           note: t(
@@ -315,13 +315,13 @@ export const STAGES: GroupDef = {
           refs: ["5.2:loss", "5.2:slowing", "5.2:data"],
           links: [S.kaplan, S.chinchilla, S.epochScaling, S.villalobos],
         }),
-        item("sft", t("教師あり微調整・蒸留", "Fine-tuning, distillation"), {
+        item("sft", t("教師あり微調整・蒸留", "Fine-tuning and distillation"), {
           summary: t(
             "手本の回答で調整する。強いモデルの出力で別のモデルを学習させる蒸留も含む。",
             "Tuning on example answers, including distillation — training one model on a stronger model's outputs.",
           ),
           note: t(
-            "Anthropic の 2026 年 1〜9 月の売上の約 5〜7% は規約違反の顧客からで、他社が Claude の出力で学習する蒸留目的の利用を含むと報じられている。",
+            "Anthropic の 2026 年 1〜9 月の売上の約 5〜7% は規約違反の顧客からのもので、報道によれば、そこには他社が Claude の出力で学習する蒸留目的の利用も含まれる。",
             "About 5–7% of Anthropic's January–September 2026 revenue came from customers violating its terms, reportedly including distillation by other labs.",
           ),
           refs: ["3.2:distill"],
@@ -333,7 +333,7 @@ export const STAGES: GroupDef = {
             "RL against a reward model trained on people's rankings of answers; usable where correctness is hard to judge, but human judgments are noisy.",
           ),
           note: t(
-            "OpenAI の InstructGPT（2022 年）では、人の評価で、13 億パラメータの InstructGPT の出力が、100 倍以上大きい 1,750 億パラメータの GPT-3 の出力より好まれた。",
+            "OpenAI の InstructGPT の研究（2022 年）では、13 億パラメータの InstructGPT の出力が、100 倍以上大きい 1,750 億パラメータの GPT-3 の出力より、人の評価で好まれた。",
             "In OpenAI's InstructGPT work (2022), people preferred the outputs of the 1.3B-parameter InstructGPT to those of the 175B-parameter GPT-3, a model over 100 times larger.",
           ),
           refs: ["5.3:hardToJudge"],
@@ -345,7 +345,7 @@ export const STAGES: GroupDef = {
             "RL on tasks whose answers a machine can check, such as math and code.",
           ),
           note: t(
-            "DeepSeek-R1 はこの方法で o1 の成果を安く再現し、xAI は Grok 4 で強化学習を事前学習と同じ規模で行ったと発表した。課題の範囲を決めれば、上限に近づくと飽和する S 字で予測できる。",
+            "DeepSeek-R1 はこの方法で o1 の成果を安く再現し、xAI は Grok 4 で強化学習を事前学習と同じ規模で行ったと発表した。課題の範囲を決めれば、伸び方は、上限に近づくと飽和する S 字で予測できる。",
             "DeepSeek-R1 used it to reproduce o1's results cheaply, and xAI says it ran RL for Grok 4 at pretraining scale; within a task range it follows a predictable S-curve that saturates near a ceiling.",
           ),
           refs: ["5.2:rl", "4.6:rlvr"],
@@ -367,7 +367,7 @@ export const STAGES: GroupDef = {
     ),
     sub(
       "inference",
-      t("推論（動かすときに使う）", "Inference (at run time)"),
+      t("推論（モデルを動かす）", "Inference (runs the model)"),
       {
         summary: t(
           "1 件の仕事に使う計算を増やし、その場で出来を上げる。費用は使うたびにかかるが、使った分はトークン単位の売上にもなる。",
@@ -380,7 +380,7 @@ export const STAGES: GroupDef = {
         item("depth", t("深さ：長く考える", "Depth: think longer"), {
           summary: t("回答の前に長く考えさせる。", "Letting the model think longer before answering."),
           note: t(
-            "課題ごとに、考える量の対数に比例して正答率が伸びる。o1 は AIME 2024 で、1 回の回答で 74% を解いた。",
+            "課題ごとに、考える量の対数に比例して正答率が伸びる。AIME 2024 での o1 の正答率は、1 回の回答で 74% だった。",
             "Accuracy rises with the logarithm of thinking compute, task by task; o1 solved 74% of AIME 2024 with a single answer.",
           ),
           refs: ["4.6:tts", "4.6:o1", "5.2:ord"],
@@ -389,7 +389,7 @@ export const STAGES: GroupDef = {
         item("width", t("幅：並列に考えて選ぶ", "Width: sample and select"), {
           summary: t("答えを並列に複数出し、多数決や採点で選ぶ。", "Producing several answers in parallel and picking one by vote or grader."),
           note: t(
-            "o1 は 64 回の多数決で 83%、1,000 個の候補を学習済みの採点関数で選ぶと 93% になった。",
+            "o1 の正答率は、64 回の多数決で 83%、1,000 個の候補を学習済みの採点関数で選ぶと 93% になった。",
             "o1 reached 83% with a 64-sample majority vote and 93% when a learned scorer picked from 1,000 samples.",
           ),
           refs: ["4.6:o1", "4.6:tts"],
@@ -401,7 +401,7 @@ export const STAGES: GroupDef = {
             "Temporarily updating the weights on the task's own examples during inference; the update is discarded after each task, so what it spends is inference compute.",
           ),
           note: t(
-            "Akyürek らは、ARC の課題ごとに例題で重みを更新すると、微調整しただけのモデルより正答率が最大 6 倍になり、80 億パラメータのモデルで公開検証セットの 53.0% を解いたと報告した。",
+            "Akyürek らは、ARC の課題ごとに例題で重みを更新すると、微調整しただけのモデルの最大 6 倍の正答率になり、80 億パラメータのモデルで公開検証セットの 53.0% を解いたと報告した。",
             "Akyürek et al. report that updating the weights on each ARC task's examples gives up to 6x the accuracy of fine-tuned baselines, solving 53.0% of the public validation set with an 8B-parameter model.",
           ),
           links: [S.testTimeTraining, S.tttLayers],
@@ -425,8 +425,8 @@ export const STAGES: GroupDef = {
             "Continually training the deployed model with rewards from real use.",
           ),
           note: t(
-            "Cursor は、コード補完のモデルを 1 日に何度も入れ替え、受け入れられる提案が増え、受け入れられない提案を出すことが減るように報酬を決めて学習させている。新しいモデルの提案は 21% 減り、受け入れ率は 28% 上がった。",
-            "Cursor rolls out new code-completion models to users several times a day, with a reward that favours accepted suggestions and penalises showing ones that are not accepted; the new model makes 21% fewer suggestions with a 28% higher accept rate.",
+            "Cursor は、コード補完のモデルを 1 日に何度も入れ替えている。報酬は、受け入れられる提案を増やし、受け入れられない提案を減らすように決めている。新しいモデルの提案は 21% 減り、受け入れ率は 28% 上がった。",
+            "Cursor rolls out new code-completion models to users several times a day, with a reward that favours accepted suggestions and penalizes showing ones that are not accepted; the new model makes 21% fewer suggestions with a 28% higher accept rate.",
           ),
           links: [S.cursorRl],
         }),
