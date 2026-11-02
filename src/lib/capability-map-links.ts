@@ -264,7 +264,7 @@ export const COMPANIES: CompanyDef[] = [
     name: t("OpenAI", "OpenAI"),
     focus: ["external-capital", "contracts", "compute", "depth", "width", "adoption"],
     refs: ["2.4", "6.4:openai", "2.3:openai", "6.2:market", "7.3:routing"],
-    links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1],
+    links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1, S.companyKnowledge, S.gpt6AstraWork],
     points: [
       t(
         "ChatGPT の週間利用者は 10 億人に達した（報道）が、1 人あたりの収益は小さい。2026 年 2 月に広告を試験導入した。",
@@ -277,6 +277,10 @@ export const COMPANIES: CompanyDef[] = [
       t(
         "2030 年までの計算資源支出は約 6,000 億ドルと投資家に説明した（報道）。10 月の調達は、当初目標の 300 億ドルの半分に届かなかった（報道）。",
         "Told investors it plans about USD 600 billion of compute spending through 2030 (reported); the October round raised less than half of its USD 30 billion target (reported).",
+      ),
+      t(
+        "社内の情報は、2025 年 10 月に ChatGPT に加えた company knowledge で、Slack、SharePoint、Google ドライブなどから探す。2026 年 9 月の GPT-6 Astra では、データを整えたり連携を作ったりしなくても、人が毎日使うアプリをそのまま操作して仕事を進められることを売りにしている。",
+        "Searches company information in Slack, SharePoint, Google Drive and other tools through company knowledge in ChatGPT (October 2025); with GPT-6 Astra (September 2026) it pitches a model that works through the apps people use every day, without first preparing data or building integrations.",
       ),
     ],
   },

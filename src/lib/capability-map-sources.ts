@@ -315,6 +315,13 @@ export const SOURCES = {
     "OpenAI (Sep 2026)",
     "https://openai.com/index/gpt-6-astra/",
   ),
+  gpt6AstraWork: ref(
+    "official",
+    "GPT-6 Astra: The next generation in intelligence for work",
+    "OpenAI（2026 年 9 月）",
+    "OpenAI (Sep 2026)",
+    "https://openai.com/index/gpt-6-astra-next-generation-work/",
+  ),
   claude1m: ref(
     "official",
     "1M context is now generally available for Opus 4.6 and Sonnet 4.6",

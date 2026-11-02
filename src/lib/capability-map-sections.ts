@@ -458,7 +458,7 @@ export const SECTIONS: Record<string, SectionDef> = {
       ),
       routing: t(
         "利用者ではなく文脈の層を持つ側がモデルを振り分けるほど、フロンティアのモデルが「最も賢い」ことに付く上乗せ（第 6.3 節の (2)）は、その振り分けの中で決まるようになる。",
-        "the more it is the owner of the context layer rather than the user who decides which model runs, the more the premium paid for a frontier model being \"the smartest\" (point (2) of Section 6.3) comes to be set inside that routing.",
+        "the more the owner of the context layer, rather than the user, decides which model runs, the more the premium paid for a frontier model being \"the smartest\" (point (2) of Section 6.3) comes to be set inside that routing.",
       ),
     },
   },

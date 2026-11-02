@@ -250,7 +250,7 @@ export function CompanyStrip({ locale, selected, onSelect, onJump }: StripProps)
       </div>
       {company ? (
         <>
-          <ul className="mt-1.5 grid gap-x-5 gap-y-1 text-[12px] leading-snug text-foreground md:grid-cols-3">
+          <ul className={`mt-1.5 grid gap-x-5 gap-y-1 text-[12px] leading-snug text-foreground ${company.points.length === 4 ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
             {company.points.map((p, i) => (
               <li key={i} className="relative pl-3 before:absolute before:left-0 before:top-[0.5em] before:h-1.5 before:w-1.5 before:rounded-full before:bg-accent">
                 {p[locale]}
