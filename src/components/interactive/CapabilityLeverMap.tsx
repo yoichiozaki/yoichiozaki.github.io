@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   COMPANIES,
   DEFAULT_COLLAPSED,
@@ -54,12 +55,16 @@ function findHeading(section: string): HTMLElement | undefined {
 
 const squash = (s: string | null) => (s ?? "").replace(/\s+/g, " ").trim();
 
-/** The quoted sentence inside the section that starts at `heading`: the bold sentence itself when it is one, else its paragraph. */
+/**
+ * The quoted sentence inside the section that starts at `heading`: the bold sentence itself when it is one, else its paragraph.
+ * Figures are skipped — the map sits inside the article and its open panel shows the very same sentence.
+ */
 function findQuote(heading: HTMLElement, quote: string): HTMLElement | undefined {
   const q = squash(quote);
   const level = Number(heading.tagName[1]);
   for (let el = heading.nextElementSibling; el; el = el.nextElementSibling) {
     if (/^H[1-6]$/.test(el.tagName) && Number(el.tagName[1]) <= level) return undefined;
+    if (el.matches("figure, .not-prose") || el.querySelector("figure.not-prose")) continue;
     if (!squash(el.textContent).includes(q)) continue;
     const inner = [...el.querySelectorAll<HTMLElement>("strong, p, li, td")].filter((c) => squash(c.textContent).includes(q));
     return inner.find((c) => c.tagName === "STRONG") ?? inner.at(-1) ?? (el as HTMLElement);
@@ -144,7 +149,10 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   // What the side panel shows. While it is open, selecting anything else on the map shows that instead.
   const [panelId, setPanelId] = useState<string | null>(null);
-  const [showReturn, setShowReturn] = useState(false);
+  // After a jump into the article: the element (placed right after the passage) that hosts the "back to the map" button,
+  // and whether the map is above that passage.
+  const [returnHost, setReturnHost] = useState<{ el: HTMLElement; up: boolean } | null>(null);
+  const returnHostRef = useRef<HTMLElement | null>(null);
   const figureRef = useRef<HTMLElement>(null);
   // The control that sent the reader into the article, so "back to the map" can return focus to it.
   const jumpedFromRef = useRef<HTMLElement | null>(null);
@@ -223,12 +231,19 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
     setShowKeyPoints(!showKeyPoints);
   };
 
+  const dropReturnHost = useCallback(() => {
+    returnHostRef.current?.remove();
+    returnHostRef.current = null;
+    setReturnHost(null);
+  }, []);
+
   /**
    * Scroll the article to the passage a ref quotes and highlight it, leaving the map (and its panel)
    * as it is so the reader can come back. Falls back to the section heading.
    */
   const jumpTo = useCallback(
     (ref: string) => {
+      dropReturnHost();
       const resolved = resolveRef(ref);
       const heading = findHeading(resolved?.section ?? parseRef(ref).section);
       if (!heading) return;
@@ -254,7 +269,12 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
         }
         if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
         target.focus({ preventScroll: true });
-        setShowReturn(true);
+        // The button is drawn fixed in the corner, but lives right after the passage so it is the next Tab stop.
+        const host = document.createElement("span");
+        target.append(host);
+        returnHostRef.current = host;
+        const fig = figureRef.current;
+        setReturnHost({ el: host, up: Boolean(fig && fig.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING) });
       };
       if (fullscreen) {
         setFullscreen(false);
@@ -264,31 +284,37 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
         go();
       }
     },
-    [fullscreen, loc],
+    [fullscreen, loc, dropReturnHost],
   );
 
-  const backToMap = () => {
-    setShowReturn(false);
+  const backToMap = useCallback(() => {
+    dropReturnHost();
     clearHighlight();
     const fig = figureRef.current;
     if (!fig) return;
     window.scrollTo({ top: fig.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET, behavior: smoothOrInstant() });
     const from = jumpedFromRef.current;
     (from?.isConnected ? from : viewport)?.focus({ preventScroll: true });
-  };
+  }, [dropReturnHost, viewport]);
 
-  useEffect(() => clearHighlight, []);
+  useEffect(
+    () => () => {
+      returnHostRef.current?.remove();
+      clearHighlight();
+    },
+    [],
+  );
 
   // The "back to the map" button (and the highlight) go away once the reader scrolls back to the map by themselves.
   useEffect(() => {
     const fig = figureRef.current;
-    if (!showReturn || !fig) return;
+    if (!returnHost || !fig) return;
     let left = false;
     const io = new IntersectionObserver(
       ([entry]) => {
         if (entry.intersectionRatio === 0) left = true;
         else if (left && entry.intersectionRatio >= 0.3) {
-          setShowReturn(false);
+          dropReturnHost();
           clearHighlight();
         }
       },
@@ -296,20 +322,26 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
     );
     io.observe(fig);
     return () => io.disconnect();
-  }, [showReturn]);
+  }, [returnHost, dropReturnHost]);
 
-  // Esc closes the panel first, then clears the selection, then leaves full screen.
+  // Esc acts on the map only while the reader is using it: it closes the panel, then clears the selection,
+  // then leaves full screen. While reading a passage the map sent them to, Esc takes them back to the map.
   useEffect(() => {
-    if (!fullscreen && !selected && !panelId) return;
+    if (!fullscreen && !selected && !panelId && !returnHost) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      const inMap = figureRef.current?.contains(document.activeElement) ?? false;
+      if (!fullscreen && !inMap) {
+        if (returnHost) backToMap();
+        return;
+      }
       if (panelId) closePanel();
       else if (selected) setSelected(null);
       else setFullscreen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [fullscreen, selected, panelId, closePanel]);
+  }, [fullscreen, selected, panelId, returnHost, closePanel, backToMap]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -469,15 +501,19 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
           <Legend locale={loc} />
         </div>
       </div>
-      {showReturn && !fullscreen && (
-        <button
-          type="button"
-          onClick={backToMap}
-          className="fixed bottom-5 right-5 z-[55] rounded-full border border-accent bg-background/95 px-4 py-2 text-sm font-medium text-foreground shadow-lg backdrop-blur-sm hover:bg-muted"
-        >
-          {isJa ? "↑ 地図に戻る" : "↑ Back to the map"}
-        </button>
-      )}
+      {returnHost &&
+        !fullscreen &&
+        createPortal(
+          <button
+            type="button"
+            onClick={backToMap}
+            className="fixed bottom-5 right-5 z-[55] rounded-full border border-accent bg-background/95 px-4 py-2 text-sm font-medium text-foreground shadow-lg backdrop-blur-sm hover:bg-muted"
+          >
+            <span aria-hidden>{returnHost.up ? "↑ " : "↓ "}</span>
+            {isJa ? "地図に戻る" : "Back to the map"}
+          </button>,
+          returnHost.el,
+        )}
       <style href="capability-map-highlight" precedence="default">
         {HIGHLIGHT_CSS}
       </style>

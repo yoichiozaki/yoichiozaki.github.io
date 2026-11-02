@@ -278,10 +278,10 @@ function detailCounts(detail: Detail | undefined, locale: Locale): string {
   if (!detail) return "";
   const isJa = locale === "ja";
   const sources = detail.links?.length ?? 0;
-  const sections = groupRefs(detail.refs).length;
+  const passages = groupRefs(detail.refs).reduce((n, g) => n + g.items.length, 0);
   const parts = [
     sources > 0 && (isJa ? `出典 ${sources} 件` : `${sources} source${sources > 1 ? "s" : ""}`),
-    sections > 0 && (isJa ? `本文 ${sections} か所` : `${sections} article section${sections > 1 ? "s" : ""}`),
+    passages > 0 && (isJa ? `本文 ${passages} か所` : `${passages} passage${passages > 1 ? "s" : ""} in the article`),
   ].filter(Boolean);
   return parts.join(isJa ? "・" : " · ");
 }
@@ -338,6 +338,7 @@ type DetailPanelProps = {
 export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanelProps) {
   const isJa = locale === "ja";
   const closeRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const detail = detailOf(id);
   const el = ELEMENTS.get(id);
@@ -371,7 +372,7 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
               {ends && <span className={lead ? "ml-2" : undefined}>{ends}</span>}
             </p>
           )}
-          <h4 id={titleId} className="text-base font-bold leading-snug text-foreground">
+          <h4 ref={headingRef} id={titleId} tabIndex={-1} className="text-base font-bold leading-snug text-foreground outline-none">
             {labelOf(id)?.[locale]}
           </h4>
           {el?.sublabel && <p className="text-xs text-muted-foreground">{el.sublabel[locale]}</p>}
@@ -424,7 +425,11 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
                 <button
                   key={r}
                   type="button"
-                  onClick={() => onShow(r)}
+                  onClick={() => {
+                    onShow(r);
+                    // The chip disappears with the old content; keep focus in the panel, on the new title.
+                    headingRef.current?.focus({ preventScroll: true });
+                  }}
                   className="rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground hover:bg-muted"
                 >
                   {labelOf(r)?.[locale]}
