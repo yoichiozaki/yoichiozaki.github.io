@@ -56,7 +56,7 @@ export const RESOURCES: GroupDef = {
           "The agreements named in Anthropic's S-1 alone exceed USD 600 billion; Microsoft's leases not yet commenced total USD 364.6 billion.",
         ),
         refs: ["2.2:contracts", "2.3", "7.1:leases"],
-        links: [S.s1, S.msft10q, S.cnbcSpend],
+        links: [S.s1, S.msft10q],
       }),
     ]),
     sub(
@@ -77,7 +77,7 @@ export const RESOURCES: GroupDef = {
             "H100 から Rubin までの性能の伸びに対して、プロセスの寄与は意外に小さい。TSMC の次の A16 も、速度の改善は 8〜10% にとどまる。",
             "Process contributed surprisingly little to the gains from H100 to Rubin; TSMC's next node, A16, improves speed by only 8–10%.",
           ),
-          refs: ["4.3:next"],
+          refs: ["4.3:gains", "4.3:next"],
           links: [S.trendforceTsmc, S.tsmcA16],
         }),
         item("hbm", t("メモリ（HBM）", "Memory (HBM)"), {
@@ -86,20 +86,20 @@ export const RESOURCES: GroupDef = {
             "Bandwidth and capacity of the memory feeding the compute units; it often sets inference speed.",
           ),
           note: t(
-            "1 チップあたりの帯域は H100 の 3.35 TB/s から Rubin の 19.2 TB/s へ広がった。SK hynix は 2029 年まで実質的に売り切れと説明している。",
-            "Per-chip bandwidth went from 3.35 TB/s (H100) to 19.2 TB/s (Rubin); SK hynix says it is effectively sold out through 2029.",
+            "1 チップあたりの帯域は H100 の 3.35 TB/s から Rubin の 19.2 TB/s へ広がった。SK hynix は 2026 年 10 月の決算説明会で、2029 年まで実質的に売り切れていると説明した。",
+            "Per-chip bandwidth went from 3.35 TB/s (H100) to 19.2 TB/s (Rubin); on its October 2026 earnings call, SK hynix said it is effectively sold out through 2029.",
           ),
           refs: ["4.4:soldOut"],
-          links: [S.memoryWall, S.wccftechHbm, S.wccftechStatement],
+          links: [S.memoryWall, S.nvidiaRubin, S.wccftechHbm, S.wccftechStatement],
         }),
         item("packaging", t("先端パッケージ", "Advanced packaging"), {
           summary: t("複数のダイと HBM を 1 つにまとめる技術（CoWoS など）。", "Combining several dies and HBM stacks into one package (CoWoS and others)."),
           note: t(
-            "CoWoS-L はレチクル限界の 5.5 倍の大きさまで量産に入り、2027 年に 9.5 倍を目指す。",
-            "CoWoS-L is in volume production at 5.5 times the reticle limit and aims for 9.5 times in 2027.",
+            "CoWoS はレチクル限界の 5.5 倍の大きさまで量産に入った。TSMC は 2028 年に 14 倍、2029 年にはそれ以上を計画している。",
+            "TSMC is producing CoWoS at 5.5 times the reticle limit and plans 14 times for 2028, and more in 2029.",
           ),
           refs: ["4.5"],
-          links: [S.tsmcCowos, S.nvidiaRubin],
+          links: [S.tsmcCowos, S.tsmcSymposium2026],
         }),
         item("precision", t("数値精度（低精度化）", "Numeric precision"), {
           summary: t(
@@ -139,17 +139,17 @@ export const RESOURCES: GroupDef = {
         item("grid", t("電力（発電・系統接続）", "Power and grid"), {
           summary: t("発電所と系統への接続。2026 年の最大の制約の 1 つ。", "Generation and grid connections — one of the biggest constraints in 2026."),
           note: t(
-            "単一のサイトが GW 単位になった。ガスタービンの受注残は 2031 年まで埋まっていると報じられている。",
-            "Single sites are now measured in gigawatts; gas-turbine backlogs are reported to be booked through 2031.",
+            "単一のサイトが GW 単位になった。GE Vernova のガスタービンの受注残は 2031 年まで埋まっていると報じられている。",
+            "Single sites are now measured in gigawatts; GE Vernova's gas-turbine backlog is reported to be booked through 2031.",
           ),
           refs: ["4.1"],
-          links: [S.lbnl, S.duke, S.googleFlexible],
+          links: [S.epochDataCenters, S.iea, S.lbnl, S.duke, S.googleFlexible],
         }),
         item("cooling", t("冷却・水", "Cooling and water"), {
           summary: t("ラックの電力が増えるほど、液冷と水が欠かせなくなる。", "The more power per rack, the more liquid cooling and water are needed."),
           note: t(
-            "1 ラックの電力は、GB200 NVL72 の約 120〜130 kW から Vera Rubin NVL72 の約 190〜230 kW に増えた。水については、GPT-3 の学習で Microsoft の米国のデータセンターが約 70 万リットルの淡水を直接蒸発させたという推計がある（Li ら）。",
-            "Rack power rose from about 120–130 kW (GB200 NVL72) to about 190–230 kW (Vera Rubin NVL72). On water, Li et al. estimate that training GPT-3 in Microsoft's US data centres could directly evaporate about 700,000 litres of fresh water.",
+            "1 ラックの電力は、GB200 NVL72 の約 120〜130 kW から Vera Rubin NVL72 の約 190〜230 kW（TrendForce の推計）に増えた。水については、GPT-3 の学習で Microsoft の米国のデータセンターが約 70 万リットルの淡水を直接蒸発させたという推計がある（Li ら）。",
+            "Rack power rose from about 120–130 kW (GB200 NVL72) to about 190–230 kW (Vera Rubin NVL72, TrendForce estimate). On water, Li et al. estimate that training GPT-3 in Microsoft's US data centres could directly evaporate about 700,000 litres of fresh water.",
           ),
           refs: ["4.1"],
           links: [S.nvidia800v, S.thirsty, S.lbnl],
@@ -161,7 +161,7 @@ export const RESOURCES: GroupDef = {
             "Lead times for large transformers have reportedly stretched to 30–36 months; local opposition and electricity-price politics also constrain building.",
           ),
           refs: ["4.1"],
-          links: [S.iea, S.duke],
+          links: [S.iea, S.epochDataCenters],
         }),
       ],
     ),
@@ -322,7 +322,7 @@ export const STAGES: GroupDef = {
             "About 5–7% of Anthropic's revenue came from customers violating its terms, reportedly including distillation by other labs.",
           ),
           refs: ["3.2:distill"],
-          links: [S.distillation, S.instructGpt, S.s1],
+          links: [S.distillation, S.instructGpt, S.s1, S.decoderAnthropic],
         }),
         item("rlhf", t("人の好み（RLHF）", "Human preferences (RLHF)"), {
           summary: t(

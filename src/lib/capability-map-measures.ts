@@ -50,7 +50,7 @@ export const MEASURES: GroupDef = {
             "Scores also move with the thinking-effort setting, so comparisons need matched settings; and benchmarks keep saturating and being replaced.",
           ),
           refs: ["5.2:benchmarks"],
-          links: [S.schaeffer, S.epochEciBenchmarks],
+          links: [S.schaeffer, S.o1, S.epochEciBenchmarks],
         }),
       ],
     ),
@@ -207,7 +207,7 @@ export const MEASURES: GroupDef = {
       {
         summary: t("任せても問題が起きないか。", "Whether delegating is safe."),
         refs: ["4.6:monitor"],
-        links: [S.extremeRisks, S.nistCaisi],
+        links: [S.extremeRisks, S.cotMonitorability],
       },
       [
         item("errors", t("誤りと事故", "Errors and incidents"), {
@@ -235,8 +235,8 @@ export const MEASURES: GroupDef = {
         item("third-party", t("第三者の評価", "Third-party evaluation"), {
           summary: t("開発元以外による評価。", "Evaluations by someone other than the developer."),
           note: t(
-            "NIST の CAISI は 2026 年 5 月、中国のオープンウェイトモデルが米国のフロンティアから約 8 か月遅れていると評価した。",
-            "In May 2026, NIST's CAISI judged Chinese open-weight models to be about eight months behind the US frontier.",
+            "NIST の CAISI は 2026 年 5 月、中国で最も強いオープンウェイトモデルの DeepSeek V4 Pro でも、米国のフロンティアから約 8 か月遅れていると評価した。",
+            "In May 2026, NIST's CAISI judged that even the strongest Chinese open-weight model, DeepSeek V4 Pro, trails the US frontier by about eight months.",
           ),
           refs: ["3.1"],
           links: [S.nistCaisi, S.metrTimeHorizons],

@@ -146,6 +146,8 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
   const [panelId, setPanelId] = useState<string | null>(null);
   const [showReturn, setShowReturn] = useState(false);
   const figureRef = useRef<HTMLElement>(null);
+  // The control that sent the reader into the article, so "back to the map" can return focus to it.
+  const jumpedFromRef = useRef<HTMLElement | null>(null);
 
   const layout = useMemo(() => layoutMap(collapsed), [collapsed]);
   const related = useMemo(() => (selected ? relatedIds(selected) : null), [selected]);
@@ -230,6 +232,9 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
       if (!heading) return;
       const target = (resolved && findQuote(heading, resolved.quote[loc])) ?? heading;
       const range = resolved && target !== heading ? quoteRange(target, resolved.quote[loc]) : undefined;
+      if (document.activeElement instanceof HTMLElement && figureRef.current?.contains(document.activeElement)) {
+        jumpedFromRef.current = document.activeElement;
+      }
       const go = () => {
         // Leave some of the preceding text in view when landing mid-section.
         const offset = target === heading ? HEADER_OFFSET : Math.max(HEADER_OFFSET + 24, window.innerHeight * 0.3);
@@ -266,7 +271,8 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
     const fig = figureRef.current;
     if (!fig) return;
     window.scrollTo({ top: fig.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET, behavior: smoothOrInstant() });
-    viewport?.focus({ preventScroll: true });
+    const from = jumpedFromRef.current;
+    (from?.isConnected ? from : viewport)?.focus({ preventScroll: true });
   };
 
   useEffect(() => clearHighlight, []);

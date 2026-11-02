@@ -239,7 +239,7 @@ export const COMPANIES: CompanyDef[] = [
     name: t("OpenAI", "OpenAI"),
     focus: ["external-capital", "contracts", "compute", "depth", "width", "adoption"],
     refs: ["6.2:market"],
-    links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.o1],
+    links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1],
     points: [
       t(
         "ChatGPT の週間利用者は 10 億人に達したが（報道）、1 人あたりの収益は小さい。2026 年 2 月に広告を試験導入した。",
@@ -263,8 +263,8 @@ export const COMPANIES: CompanyDef[] = [
     links: [S.s1, S.decoderAnthropic, S.menlo],
     points: [
       t(
-        "Claude Code と Claude Cowork で、企業のエージェント利用に集中した。Claude Code を使う上位 5% の利用者は、使わない利用者の平均の約 20 倍を支払う。",
-        "Focused on enterprise agents with Claude Code and Claude Cowork; the top 5% of Claude Code users pay about 20 times the average of those who don't use it.",
+        "Claude Code と Claude Cowork で、企業のエージェント利用に集中した。Claude Enterprise の利用者では、Claude Code を使う上位 5% が、使わない利用者の平均の約 20 倍を支払う。",
+        "Focused on enterprise agents with Claude Code and Claude Cowork; the top 5% of Claude Enterprise users who use Claude Code pay about 20 times the average of Enterprise users who don't.",
       ),
       t(
         "企業の LLM API 支出のシェアは 40%、コーディング用途では 54%（Menlo Ventures、2025 年）。",
@@ -281,15 +281,15 @@ export const COMPANIES: CompanyDef[] = [
     name: t("Google", "Google"),
     focus: ["chips", "interconnect", "depth", "width", "grid", "external-capital"],
     refs: ["3.5"],
-    links: [S.goog10q, S.ironwood],
+    links: [S.goog10q, S.ironwood, S.anthropicTpu, S.cnbcCodeRed],
     points: [
       t(
         "自社の TPU を持ち、v7 では 9,216 チップを 1 つのポッドにまとめる。Anthropic には最大 100 万基の TPU を供給する。",
         "Has its own TPUs — a v7 pod joins 9,216 chips — and supplies up to a million TPUs to Anthropic.",
       ),
       t(
-        "2025 年 11 月の Gemini 3 で、OpenAI の社内に「コードレッド」が宣言されたと報じられた。Deep Think で考える量を売る。",
-        "Gemini 3 (November 2025) reportedly set off a “code red” inside OpenAI; Deep Think sells extra thinking.",
+        "2025 年 11 月に Gemini 3 を出すと、OpenAI は 12 月に社内で「コードレッド」を宣言したと報じられた。Deep Think で考える量を売る。",
+        "After Gemini 3 (November 2025), OpenAI reportedly declared a “code red” internally in December; Deep Think sells extra thinking.",
       ),
       t(
         "Alphabet は 2026 年 1〜9 月に自社株買いをやめ、株式で 495 億ドルを調達し、社債などで 852 億ドルを借り入れた。",
@@ -313,8 +313,8 @@ export const COMPANIES: CompanyDef[] = [
         "USD 364.6 billion of leases not yet commenced: it rents compute as well as building it.",
       ),
       t(
-        "ウィスコンシン州とアトランタの Fairwater を専用の広域網でつなぎ、1 つの計算機として使い始めた。Microsoft Cloud の粗利率は 73% から 66% に下がった。",
-        "Its Fairwater sites in Wisconsin and Atlanta are linked by a dedicated wide-area network and run as one computer; Microsoft Cloud's gross margin fell from 73% to 66%.",
+        "ウィスコンシン州とアトランタの Fairwater を専用の広域網でつなぎ、1 つの計算機として使い始めた。Microsoft Cloud の粗利率は 3 年で 73% から 66% に下がった（いずれも 7〜9 月期）。",
+        "Its Fairwater sites in Wisconsin and Atlanta are linked by a dedicated wide-area network and run as one computer; Microsoft Cloud's gross margin fell from 73% to 66% over three years (July–September 2023 vs 2026).",
       ),
     ],
   },
@@ -365,7 +365,7 @@ export const COMPANIES: CompanyDef[] = [
     name: t("xAI（SpaceXAI）", "xAI (SpaceXAI)"),
     focus: ["compute", "grid", "rlvr", "width"],
     refs: ["4.1"],
-    links: [S.epochDataCenters, S.grok4],
+    links: [S.epochDataCenters, S.grok4, S.s1],
     points: [
       t(
         "メンフィスの Colossus 2 は H100 換算で約 111 万基に相当し、2026 年 11 月時点で最大の計算資源を持つサイトである（Epoch AI）。",
@@ -386,7 +386,7 @@ export const COMPANIES: CompanyDef[] = [
     name: t("DeepSeek", "DeepSeek"),
     focus: ["precision", "active", "context", "rlvr", "e-algorithmic"],
     refs: ["4.6:moe"],
-    links: [S.deepseekV3, S.deepseekR1, S.deepseekV32, S.nistCaisi],
+    links: [S.deepseekV2, S.deepseekV3, S.deepseekR1, S.deepseekV32, S.nistCaisi],
     points: [
       t(
         "DeepSeek-V3（2024 年 12 月）を FP8 で学習し、低精度の学習を広めるきっかけをつくった。",
@@ -397,8 +397,8 @@ export const COMPANIES: CompanyDef[] = [
         "MLA compresses the KV cache, and DSA attends only to the 2,048 most relevant tokens.",
       ),
       t(
-        "DeepSeek-R1 で、o1 の成果を RLVR によって安く再現した。NIST の CAISI によれば、中国のオープンウェイトモデルは米国のフロンティアから約 8 か月遅れている。",
-        "DeepSeek-R1 used RLVR to reproduce o1's results cheaply. According to NIST's CAISI, Chinese open-weight models trail the US frontier by about eight months.",
+        "DeepSeek-R1 で、o1 の成果を RLVR によって安く再現した。NIST の CAISI によれば、DeepSeek V4 Pro の能力は米国のフロンティアから約 8 か月遅れている。",
+        "DeepSeek-R1 used RLVR to reproduce o1's results cheaply. According to NIST's CAISI, DeepSeek V4 Pro trails the US frontier by about eight months.",
       ),
     ],
   },
