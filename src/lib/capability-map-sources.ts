@@ -295,10 +295,25 @@ export const SOURCES = {
   ),
   contextualRetrieval: ref(
     "official",
-    "Contextual retrieval in AI systems",
+    "Introducing Contextual Retrieval",
     "Anthropic（2024 年 9 月）",
     "Anthropic (Sep 2024)",
     "https://www.anthropic.com/research/contextual-retrieval",
+  ),
+  claude21: ref("official", "Introducing Claude 2.1", "Anthropic（2023 年 11 月）", "Anthropic (Nov 2023)", "https://www.anthropic.com/news/claude-2-1"),
+  gemini15: ref(
+    "official",
+    "Our next-generation model: Gemini 1.5",
+    "Google（2024 年 2 月）",
+    "Google (Feb 2024)",
+    "https://blog.google/technology/ai/google-gemini-next-generation-model-february-2024/",
+  ),
+  gpt6Astra: ref(
+    "official",
+    "GPT-6 Astra: A new generation of intelligence",
+    "OpenAI（2026 年 9 月）",
+    "OpenAI (Sep 2026)",
+    "https://openai.com/index/gpt-6-astra/",
   ),
   claude1m: ref(
     "official",
@@ -328,6 +343,13 @@ export const SOURCES = {
     "Microsoft Learn（2026 年 9 月）",
     "Microsoft Learn (Sep 2026)",
     "https://learn.microsoft.com/microsoft-365/copilot/extensibility/work-iq/",
+  ),
+  retrievalApi: ref(
+    "official",
+    "Microsoft 365 Copilot Retrieval API Overview",
+    "Microsoft Learn",
+    "Microsoft Learn",
+    "https://learn.microsoft.com/microsoft-365/copilot/extensibility/api/ai-services/retrieval/overview",
   ),
   fabricIq: ref("official", "What is Fabric IQ?", "Microsoft Learn", "Microsoft Learn", "https://learn.microsoft.com/fabric/iq/overview"),
   foundryIq: ref(

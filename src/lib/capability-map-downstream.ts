@@ -138,8 +138,8 @@ export const CONTEXT: GroupDef = {
       "The layer that brings in, at every inference, what the model never learned: company information and anything recent. What is brought in, from where, under whose permissions and how much changes how much work the same model and harness can finish. Microsoft calls this layer Microsoft IQ.",
     ),
     note: t(
-      "Microsoft の Satya Nadella CEO は 2026 年 10 月の決算説明で、Microsoft 365 の下にある人、人どうしの関係、文書、メール、会議、チャットの知識を「企業にとって最も重要なデータベースの 1 つ」と呼んだ。Microsoft IQ を通じて文脈を利用している顧客は 6 万近くで、前四半期から 25% 増えた。どの IQ も MCP で呼べるので、他社のモデルで動くエージェントからも使える。",
-      "On Microsoft's October 2026 earnings call, CEO Satya Nadella called the knowledge underneath Microsoft 365 — people, their relationships, documents, emails, meetings and chats — one of the most important databases for any enterprise. Nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter. Each IQ can be called over MCP, so agents running on other companies' models can use it too.",
+      "Microsoft の Satya Nadella CEO は 2026 年 10 月の決算説明で、Microsoft 365 の下にある人、人どうしの関係、文書、メール、会議、チャット、プロジェクトなどの知識を「企業にとって最も重要なデータベースの 1 つ」と呼んだ。Microsoft IQ を通じて文脈を利用している顧客は 6 万近くで、前四半期から 25% 増えた。どの IQ も MCP で呼べるので、他社のモデルで動くエージェントからも使える。",
+      "On Microsoft's October 2026 earnings call, CEO Satya Nadella called the knowledge underneath Microsoft 365 — people, their relationships, documents, emails, meetings, chats, projects and other artifacts — one of the most important databases for any enterprise. Nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter. Each IQ can be called over MCP, so agents running on other companies' models can use it too.",
     ),
     refs: ["5.2:iq", "5.2:context", "5.3:notCounted", "7.3:iq", "8:context"],
     links: [S.microsoftIq, S.msftEarningsCall, S.contextEngineering, S.postMcp],
@@ -151,11 +151,11 @@ export const CONTEXT: GroupDef = {
         "Emails, meetings, chats and documents, and who works with whom — assembled on Microsoft 365 from what the user is allowed to see.",
       ),
       note: t(
-        "2026 年 9 月時点のドキュメントによれば、Work IQ は Microsoft 365 Copilot のライセンスとは別に、他社のエージェントからも MCP、A2A、REST で使え、利用量に応じて課金される。数百ある操作を 10 個の汎用的な道具にまとめ、要求はすべて利用者の権限で実行する。",
-        "According to its September 2026 documentation, Work IQ can also be used by other companies' agents, over MCP, A2A or REST, billed by usage and independent of Microsoft 365 Copilot licensing. It collapses hundreds of operations into 10 generic tools, and every request runs under the user's own permissions.",
+        "2026 年 9 月時点のドキュメントによれば、Work IQ は Microsoft 365 Copilot のライセンスとは別に、他社のエージェントからも MCP、A2A、REST で使え、利用量に応じて課金される。要求はすべて利用者の権限で実行し、MCP サーバーでは数百ある操作を 10 個の汎用的な道具にまとめている。Copilot が使う索引を外のアプリから引ける Retrieval API は、2025 年に先に出ていた。",
+        "According to its September 2026 documentation, Work IQ can also be used by other companies' agents, over MCP, A2A or REST, billed by usage and independent of Microsoft 365 Copilot licensing. Every request runs under the user's own permissions, and its MCP server collapses hundreds of operations into 10 generic tools. The Retrieval API, which lets outside apps query the index behind Copilot, came first, in 2025.",
       ),
       refs: ["7.3:iq"],
-      links: [S.workIq, S.msftEarningsCall],
+      links: [S.workIq, S.retrievalApi, S.msftEarningsCall],
     }),
     item("fabric-iq", t("データの意味（Fabric IQ）", "Business data (Fabric IQ)"), {
       summary: t(
@@ -187,11 +187,11 @@ export const CONTEXT: GroupDef = {
         "Events after the training cutoff, and current information from outside the company.",
       ),
       note: t(
-        "見つけにくい情報を Web から探し出す力を測る OpenAI の BrowseComp（2025 年）では、ブラウズ機能を付けた GPT-4o の正答率は 1.9% にとどまり、調べ続けるように学習した Deep Research は 51.5% だった。Web を見られるだけでは足りず、探し方が成績を決める。",
-        "On OpenAI's BrowseComp (2025), which measures the ability to dig hard-to-find information out of the web, GPT-4o with browsing scored 1.9% while Deep Research, trained to keep searching, scored 51.5%: access to the web is not enough; how the search is run decides the score.",
+        "見つけにくい情報を Web から探し出す力を測る OpenAI の BrowseComp では、2025 年 4 月の時点で、ブラウズ機能を付けた GPT-4o の正答率は 1.9%、この種の課題に向けて学習した Deep Research は 51.5% だった。2026 年 9 月の GPT-6 Astra は 91.5% である。Web を見られるだけでは足りず、探し方を学習させると成績が大きく伸びる。",
+        "On OpenAI's BrowseComp, which measures the ability to dig hard-to-find information out of the web, GPT-4o with browsing scored 1.9% in April 2025 and Deep Research, trained for this kind of task, 51.5%; GPT-6 Astra scored 91.5% in September 2026. Access to the web is not enough; training a model in how to search raises the score sharply.",
       ),
       refs: ["5.2:iq"],
-      links: [S.webIq, S.browseComp],
+      links: [S.webIq, S.browseComp, S.gpt6Astra],
     }),
     item("search-ranking", t("検索と並べ替え", "Search and ranking"), {
       summary: t(
@@ -199,8 +199,8 @@ export const CONTEXT: GroupDef = {
         "Searching by keywords and vectors together, reranking the results and putting only the top ones into the context. Where documents are split, and what is attached to each piece, also changes what can be found.",
       ),
       note: t(
-        "Anthropic の Contextual Retrieval（2024 年）は、文書の断片ごとに前後の文脈の説明を付けてから索引を作ることで、検索の失敗を 49%、並べ替え（リランキング）と組み合わせると 67% 減らした。検索先のデータを 1.4 兆トークンまで増やすと、成績が目立った飽和なく上がり続けたという研究もある（Shao ら、2024 年）。",
-        "Anthropic's Contextual Retrieval (2024) cut failed retrievals by 49%, and by 67% with reranking, by attaching a short explanation of its context to each chunk before indexing. Another study found results kept improving without obvious saturation as the datastore grew to 1.4 trillion tokens (Shao et al., 2024).",
+        "Anthropic の Contextual Retrieval（2024 年）は、文書の断片ごとに前後の文脈の説明を付けてから索引を作ることで、検索の失敗を 49%、並べ替え（リランキング）と組み合わせると 67% 減らした。検索先のデータを 1.4 兆トークンまで増やすと、言語モデリングといくつかの課題の成績が目立った飽和なく上がり続けたという研究もある（Shao ら、2024 年）。",
+        "Anthropic's Contextual Retrieval (2024) cut failed retrievals by 49%, and by 67% with reranking, by attaching a short explanation of its context to each chunk before indexing. Another study found that language modelling and several downstream tasks kept improving without obvious saturation as the datastore grew to 1.4 trillion tokens (Shao et al., 2024).",
       ),
       refs: ["5.2:retrievalEffort"],
       links: [S.contextualRetrieval, S.massiveDs, S.rag, S.postGraphRag, S.postSearch],
@@ -211,8 +211,8 @@ export const CONTEXT: GroupDef = {
         "Bringing in only what the user may see, in its current state. Pulling in something they must not see is an incident even if the answer is right.",
       ),
       note: t(
-        "Foundry IQ は、アクセス制御リストと Microsoft Purview の秘密度ラベルを検索の時点で適用し、呼び出した人の Microsoft Entra の ID で検索する。OpenAI が 2025 年 10 月に ChatGPT に加えた company knowledge も、既存の権限に従い、利用者が見てよいものだけを読む。",
-        "Foundry IQ enforces access control lists and Microsoft Purview sensitivity labels at query time and searches under the caller's Microsoft Entra identity. The company knowledge feature OpenAI added to ChatGPT in October 2025 likewise respects existing permissions, reading only what each user may see.",
+        "Foundry IQ は、対応する情報源ではアクセス制御リストを同期し、Microsoft Purview の秘密度ラベルとともに検索の時点で適用して、呼び出した人の Microsoft Entra の ID で検索する。OpenAI が 2025 年 10 月に ChatGPT に加えた company knowledge も、既存の権限に従い、利用者が見てよいものだけを読む。",
+        "For supported sources, Foundry IQ syncs access control lists and enforces them at query time together with Microsoft Purview sensitivity labels, searching under the caller's Microsoft Entra identity. The company knowledge feature OpenAI added to ChatGPT in October 2025 likewise respects existing permissions, reading only what each user may see.",
       ),
       refs: ["5.2:iq"],
       links: [S.foundryIq, S.companyKnowledge],

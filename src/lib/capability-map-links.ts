@@ -167,8 +167,8 @@ export const EDGES: EdgeDef[] = [
         "Whether what is needed is brought in, without gaps and without clutter. Bringing in too much makes the context longer, which lowers accuracy and raises inference cost.",
       ),
       note: t(
-        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を得られる最小の、情報の濃いトークンの組を探すよう勧めている。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
-        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises looking for the smallest set of high-signal tokens that gets the desired result. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model's performance less reliable and lower.",
+        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めている。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
+        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model's performance less reliable and lower.",
       ),
       refs: ["5.2:contextRot", "5.2:context"],
       links: [S.contextEngineering, S.contextRot, S.lostInTheMiddle],
@@ -444,8 +444,8 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-context",
     title: t("文脈は推論のたびに持ち込む", "Context is brought in at every inference"),
     body: t(
-      "社内の文書や昨日の決定は、モデルの重みにはない。推論のたびに、正しい文脈を、権限を守って、必要な分だけ持ち込めるかどうかで、同じモデルとハーネスでも完了できる仕事が変わる。Microsoft はこの層を IQ と呼び、他社のモデルで動くエージェントにも使わせている。",
-      "Company documents and yesterday's decisions are not in a model's weights. Whether the right context can be brought in at each inference, within permissions and no more than needed, decides how much work the same model and harness can finish. Microsoft calls this layer IQ and lets agents running on other companies' models use it too.",
+      "社内の文書や昨日の決定は、モデルの重みにはない。推論のたびに、正しい文脈を、権限を守って、必要な分だけ持ち込めるかどうかで、同じモデルとハーネスでも完了できる仕事が変わる。Microsoft はこの層を Microsoft IQ と呼び、他社のモデルで動くエージェントにも使わせている。",
+      "Company documents and yesterday's decisions are not in a model's weights. Whether the right context can be brought in at each inference, within permissions and no more than needed, decides how much work the same model and harness can finish. Microsoft calls this layer Microsoft IQ and lets agents running on other companies' models use it too.",
     ),
     ids: ["context-layer", "e-context", "system", "context-mgmt"],
     refs: ["5.2:context", "7.3:iq"],

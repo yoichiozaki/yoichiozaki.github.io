@@ -279,11 +279,11 @@ export const SIZE: GroupDef = {
         "How much a single call can attend to; longer contexts weigh on the KV cache and HBM.",
       ),
       note: t(
-        "GPT-4 Turbo（2023 年 11 月）の 12 万 8,000 トークンから、Claude Opus 4.6 の 100 万トークン（2026 年 3 月に通常の価格で提供）まで伸びた。DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んでアテンションを計算する。",
-        "It grew from 128,000 tokens for GPT-4 Turbo (November 2023) to 1 million for Claude Opus 4.6 (offered at standard prices from March 2026). DeepSeek's MLA cuts the KV cache by 93%, and DSA attends only to the 2,048 most relevant tokens.",
+        "2023 年 11 月には GPT-4 Turbo が 12 万 8,000 トークン、Claude 2.1 が 20 万トークンだった。100 万トークンは 2024 年に Gemini 1.5 Pro が初めて提供し、2026 年 3 月には Claude Opus 4.6 で通常の価格になった。長い文脈から指定された情報を取り出す力も上がり、OpenAI によれば GPT-6 Astra（2026 年 9 月）は約 50 万〜100 万トークンの MRCR v2 で 96.3% を出した。DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んでアテンションを計算する。",
+        "In November 2023, GPT-4 Turbo offered 128,000 tokens and Claude 2.1 200,000. Gemini 1.5 Pro first offered 1 million in 2024, and in March 2026 Claude Opus 4.6 made 1 million available at standard prices. Recall from long contexts has improved too: according to OpenAI, GPT-6 Astra (September 2026) scored 96.3% on MRCR v2 at roughly 500,000 to 1 million tokens. DeepSeek's MLA cuts the KV cache by 93%, and DSA attends only to the 2,048 most relevant tokens.",
       ),
       refs: ["4.4:kvCache", "5.2:contextWindow"],
-      links: [S.claude1m, S.deepseekV2, S.deepseekV32, S.minimax],
+      links: [S.claude21, S.gemini15, S.claude1m, S.gpt6Astra, S.deepseekV2, S.deepseekV32, S.minimax],
     }),
   ],
 };

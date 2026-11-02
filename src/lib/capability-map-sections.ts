@@ -319,12 +319,12 @@ export const SECTIONS: Record<string, SectionDef> = {
         "so the time horizon tracks what a system gets done, not what the model can do alone.",
       ),
       contextWindow: t(
-        "2026 年 3 月には Anthropic が Claude Opus 4.6 の 100 万トークンの文脈を通常の価格で提供し始めたが、長く入れれば済むわけではない。",
-        "In March 2026 Anthropic began offering a 1-million-token context at standard prices for Claude Opus 4.6, but filling it is not the answer.",
+        "それでも、長く入れれば済むわけではない。入れたトークンの分だけ推論費がかかり、企業の情報は 100 万トークンにはとても収まらない。",
+        "Even so, filling the context is not the answer. Every token put in adds to inference cost, and a company's information is far too large to fit in a million tokens.",
       ),
       contextRot: t(
-        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を得られる最小の、情報の濃いトークンの組を探すよう勧めている。",
-        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises looking for the smallest set of high-signal tokens that gets the desired result.",
+        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めている。",
+        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome.",
       ),
       iq: t(
         "何を、どこから、誰の権限で、どれだけ持ち込むかを担う層を、Microsoft は Microsoft IQ と呼び",
