@@ -35,7 +35,11 @@ function kicker(id: string, locale: Locale): string {
     const category = CATEGORY_LABEL[ELEMENTS.get(id)!.category][locale];
     return category === labelOf(id)?.[locale] ? "" : category;
   }
-  if (kind === "edge") return EDGE_BY_ID.get(id)!.kind === "measure" ? (isJa ? "成果の測り方" : "Measuring results") : isJa ? "効率" : "Efficiency";
+  if (kind === "edge") {
+    const e = EDGE_BY_ID.get(id)!;
+    if (e.kind === "measure") return isJa ? "成果の測り方" : "Measuring results";
+    return e.kicker?.[locale] ?? (isJa ? "効率" : "Efficiency");
+  }
   if (kind === "loop") return isJa ? "成果が戻るループ" : "Feedback loop";
   return "";
 }
@@ -165,7 +169,7 @@ function RefButtons({ refs, locale, onJump }: JumpProps & { refs?: string[] }) {
 
 export function Legend({ locale }: { locale: Locale }) {
   const isJa = locale === "ja";
-  const categories: Category[] = ["resource", "compute", "size", "stage", "material", "harness", "capability", "measure"];
+  const categories: Category[] = ["resource", "compute", "size", "stage", "material", "harness", "context", "capability", "measure"];
   return (
     <ul className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
       {categories.map((c) => (
@@ -449,7 +453,7 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
   );
 }
 
-const LIST_ORDER = ["resources", "compute", "size", "stages", "materials", "model", "harness", "system", "uses", "measures"];
+const LIST_ORDER = ["resources", "compute", "size", "stages", "materials", "model", "harness", "context-layer", "system", "uses", "measures"];
 
 function Extras({ detail, locale, onJump }: JumpProps & { detail: Detail }) {
   const isJa = locale === "ja";
@@ -543,7 +547,7 @@ export function ListView({ locale, onJump }: JumpProps) {
 
       <details className="group rounded-lg border bg-background" style={{ borderColor: tint(EFFICIENCY_COLOR, 50) }}>
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
-          {isJa ? "効率（矢印のラベル）" : "Efficiencies (arrow labels)"}
+          {isJa ? "効率と精度（矢印のラベル）" : "Efficiency and precision (arrow labels)"}
           <Chevron />
         </summary>
         <ul className="divide-y divide-border border-t border-border px-3 pb-2">

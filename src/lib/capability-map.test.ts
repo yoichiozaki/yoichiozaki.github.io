@@ -171,6 +171,14 @@ describe("capability map: data", () => {
     expect(EDGES.find((e) => e.id === "e-system-uses")).toMatchObject({ from: "system", to: "uses" });
   });
 
+  it("feeds getting work done from the context layer (IQ), apart from the harness", () => {
+    expect(ELEMENTS.get("context-layer")).toMatchObject({ kind: "group", category: "context" });
+    expect(ELEMENTS.get("context-layer")?.children).toEqual(["work-iq", "fabric-iq", "foundry-iq", "web-iq", "search-ranking", "permissions"]);
+    expect(EDGES.find((e) => e.id === "e-context")).toMatchObject({ from: "context-layer", to: "system", kind: "flow" });
+    // "Context length" is a property of the model; the context layer is what gets brought in.
+    expect(ELEMENTS.get("context")?.parent).toBe("size");
+  });
+
   it("measures the model alone and getting work done separately", () => {
     expect(ELEMENTS.get("measure-model")?.children).toEqual(["loss", "benchmarks"]);
     expect(ELEMENTS.get("measure-system")?.children).toEqual(["metr", "gdpval", "rli", "arc-agi-3"]);
@@ -324,6 +332,14 @@ describe("capability map: layout", () => {
     }
   });
 
+  it.each(states)("puts the context layer under the system it feeds (%s)", (_, collapsed) => {
+    const { boxes } = layoutMap(collapsed);
+    const system = boxes.get("system")!;
+    const context = boxes.get("context-layer")!;
+    expect(context.x).toBe(system.x);
+    expect(context.y).toBeGreaterThan(system.y + system.h);
+  });
+
   it("hides the items of collapsed subgroups", () => {
     const layout = layoutMap(new Set(["training"]));
     expect(layout.boxes.get("training")?.collapsed).toBe(true);
@@ -356,6 +372,11 @@ describe("capability map: relations", () => {
     expect(system).toContain("measure-system");
     expect(system).toContain("uses");
     expect(system).not.toContain("model");
+    expect(system).toContain("context-layer");
+    const workIq = relatedIds("work-iq");
+    expect(workIq).toContain("e-context");
+    expect(workIq).toContain("system");
+    expect(workIq).not.toContain("foundry-iq");
   });
 
   it("lets an item borrow its parent's links without lighting up its siblings", () => {

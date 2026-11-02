@@ -279,11 +279,11 @@ export const SIZE: GroupDef = {
         "How much a single call can attend to; longer contexts weigh on the KV cache and HBM.",
       ),
       note: t(
-        "DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んでアテンションを計算する。",
-        "DeepSeek's MLA cuts the KV cache by 93%, and DSA attends only to the 2,048 most relevant tokens.",
+        "GPT-4 Turbo（2023 年 11 月）の 12 万 8,000 トークンから、Claude Opus 4.6 の 100 万トークン（2026 年 3 月に通常の価格で提供）まで伸びた。DeepSeek の MLA は KV キャッシュを 93% 削り、DSA は重要な 2,048 トークンだけを選んでアテンションを計算する。",
+        "It grew from 128,000 tokens for GPT-4 Turbo (November 2023) to 1 million for Claude Opus 4.6 (offered at standard prices from March 2026). DeepSeek's MLA cuts the KV cache by 93%, and DSA attends only to the 2,048 most relevant tokens.",
       ),
-      refs: ["4.4:kvCache"],
-      links: [S.deepseekV2, S.deepseekV32, S.minimax],
+      refs: ["4.4:kvCache", "5.2:contextWindow"],
+      links: [S.claude1m, S.deepseekV2, S.deepseekV32, S.minimax],
     }),
   ],
 };

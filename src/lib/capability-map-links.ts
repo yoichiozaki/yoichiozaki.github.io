@@ -152,6 +152,28 @@ export const EDGES: EdgeDef[] = [
       links: [S.memoryWall, S.deepseekV2, S.anthropicMultiAgent],
     },
   },
+  {
+    id: "e-context",
+    from: "context-layer",
+    to: "system",
+    fromSide: "top",
+    toSide: "bottom",
+    kind: "flow",
+    label: t("文脈の精度", "Context precision"),
+    kicker: t("精度", "Precision"),
+    detail: {
+      summary: t(
+        "必要な情報を漏らさず、余計な情報を入れずに持ち込めているか。持ち込みすぎると文脈が長くなって精度が落ち、推論費も増える。",
+        "Whether what is needed is brought in, without gaps and without clutter. Bringing in too much makes the context longer, which lowers accuracy and raises inference cost.",
+      ),
+      note: t(
+        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を得られる最小の、情報の濃いトークンの組を探すよう勧めている。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
+        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises looking for the smallest set of high-signal tokens that gets the desired result. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model's performance less reliable and lower.",
+      ),
+      refs: ["5.2:contextRot", "5.2:context"],
+      links: [S.contextEngineering, S.contextRot, S.lostInTheMiddle],
+    },
+  },
   { id: "e-system-uses", from: "system", to: "uses", fromSide: "right", toSide: "left", kind: "flow" },
   { id: "m-model", from: "model", to: "measure-model", fromSide: "right", toSide: "left", kind: "measure", label: MEASURE },
   { id: "m-system", from: "system", to: "measure-system", fromSide: "right", toSide: "left", kind: "measure", label: MEASURE },
@@ -303,21 +325,21 @@ export const COMPANIES: CompanyDef[] = [
   {
     id: "co-microsoft",
     name: t("Microsoft", "Microsoft"),
-    focus: ["ocf", "contracts", "grid", "software", "knowledge-work"],
-    refs: ["7.1:selfFunded", "7.2:coupled", "7.3"],
-    links: [S.msft10k, S.msft10q, S.openaiMicrosoft],
+    focus: ["ocf", "contracts", "context-layer", "software", "knowledge-work"],
+    refs: ["7.1:selfFunded", "7.2:coupled", "7.3", "7.3:iq"],
+    links: [S.msft10k, S.msft10q, S.msftEarningsCall, S.openaiMicrosoft],
     points: [
       t(
-        "2026 会計年度の営業キャッシュフローは 1,829 億ドル。設備投資 1,159 億ドルを自己資金で賄い、FCF も 670 億ドル残った。",
-        "Operating cash flow of USD 182.9 billion in fiscal 2026 covered USD 115.9 billion of capex and still left USD 67 billion of FCF.",
-      ),
-      t(
-        "開始前のリースは 3 年で 826 億ドルから 3,646 億ドルに増え、建てるだけでなく借りても計算資源を確保している。ウィスコンシン州とアトランタの Fairwater は専用の広域網でつなぎ、1 つの計算機として使う。",
-        "Leases not yet commenced grew from USD 82.6 billion to USD 364.6 billion in three years: it rents compute as well as building it. Its Fairwater sites in Wisconsin and Atlanta are linked by a dedicated wide-area network and run as one computer.",
+        "2026 会計年度の営業キャッシュフローは 1,829 億ドルで、設備投資 1,159 億ドルを賄っても FCF が 670 億ドル残った。開始前のリースは 3 年で 826 億ドルから 3,646 億ドルに増え、建てるだけでなく借りても計算資源を確保している。",
+        "Operating cash flow of USD 182.9 billion in fiscal 2026 covered USD 115.9 billion of capex and still left USD 67 billion of FCF. Leases not yet commenced grew from USD 82.6 billion to USD 364.6 billion in three years: it rents compute as well as building it.",
       ),
       t(
         "OpenAI から計上した売上は 2026 年 7〜9 月期に 100 億ドル（全社売上の約 11%）で、商用 RPO の少なくとも約 3 分の 1 が OpenAI 関連である（2026 年 6 月末）。Microsoft Cloud の粗利率は 3 年で 73% から 66% に下がった。",
         "OpenAI accounted for USD 10.0 billion of revenue in July–September 2026 (about 11% of the total) and at least about a third of commercial RPO (end of June 2026). Microsoft Cloud's gross margin fell from 73% to 66% over three years.",
+      ),
+      t(
+        "モデルの外側では、Microsoft 365 と Fabric の上にある企業の文脈を Microsoft IQ にまとめ、他社のモデルで動くエージェントにも提供する。Microsoft IQ で文脈を利用する顧客は 6 万近く、前四半期から 25% 増えた（2026 年 10 月の決算説明）。",
+        "Beyond the model, it bundles the enterprise context held in Microsoft 365 and Fabric into Microsoft IQ and offers it to agents running on other companies' models too; nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter (October 2026 earnings call).",
       ),
     ],
   },
@@ -419,6 +441,16 @@ export const KEY_POINTS: KeyPointDef[] = [
     refs: ["5.2:twoKinds", "5.3:target"],
   },
   {
+    id: "kp-context",
+    title: t("文脈は推論のたびに持ち込む", "Context is brought in at every inference"),
+    body: t(
+      "社内の文書や昨日の決定は、モデルの重みにはない。推論のたびに、正しい文脈を、権限を守って、必要な分だけ持ち込めるかどうかで、同じモデルとハーネスでも完了できる仕事が変わる。Microsoft はこの層を IQ と呼び、他社のモデルで動くエージェントにも使わせている。",
+      "Company documents and yesterday's decisions are not in a model's weights. Whether the right context can be brought in at each inference, within permissions and no more than needed, decides how much work the same model and harness can finish. Microsoft calls this layer IQ and lets agents running on other companies' models use it too.",
+    ),
+    ids: ["context-layer", "e-context", "system", "context-mgmt"],
+    refs: ["5.2:context", "7.3:iq"],
+  },
+  {
     id: "kp-predictable",
     title: t("予測しやすいレバー", "The predictable levers"),
     body: t(
@@ -452,10 +484,10 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-efficiency",
     title: t("効率が 1 GW あたりの成果を決める", "Efficiencies decide output per gigawatt"),
     body: t(
-      "矢印に書いた効率を上げれば、同じ電力でより多くの仕事を完了できる。電力を増やせないときの伸びしろは、ここにある。",
-      "Raising the efficiencies on the arrows gets more work done from the same power — the room left to grow when power cannot be added.",
+      "矢印に書いた効率と精度を上げれば、同じ電力でより多くの仕事を完了できる。電力を増やせないときの伸びしろは、ここにある。",
+      "Raising the efficiencies and the precision on the arrows gets more work done from the same power — the room left to grow when power cannot be added.",
     ),
-    ids: ["e-hardware", "e-allocation", "e-parameter", "e-data", "e-algorithmic", "e-inference", "e-harness"],
+    ids: ["e-hardware", "e-allocation", "e-parameter", "e-data", "e-algorithmic", "e-inference", "e-harness", "e-context"],
     refs: ["4.7:tokens"],
   },
   {

@@ -1,10 +1,10 @@
 /**
  * The "levers of AI capability" map: element index, layout and relations.
- * Content lives in capability-map-{upstream,downstream,measures,links}.ts,
- * sources in capability-map-sources.ts and article quotes in
- * capability-map-sections.ts.
+ * Content lives in capability-map-{upstream,downstream,measures,links}.ts
+ * (the context layer is in downstream, next to the harness), sources in
+ * capability-map-sources.ts and article quotes in capability-map-sections.ts.
  */
-import { HARNESS, MODEL, SYSTEM, USES } from "./capability-map-downstream";
+import { CONTEXT, HARNESS, MODEL, SYSTEM, USES } from "./capability-map-downstream";
 import { COMPANIES, EDGES, KEY_POINTS, LOOPS } from "./capability-map-links";
 import { MATERIALS, MEASURES } from "./capability-map-measures";
 import { SECTIONS } from "./capability-map-sections";
@@ -24,7 +24,7 @@ export * from "./capability-map-types";
 export { SOURCES } from "./capability-map-sources";
 export { COMPANIES, EDGES, KEY_POINTS, LOOPS, SECTIONS };
 
-export const GROUPS: GroupDef[] = [RESOURCES, SIZE, STAGES, HARNESS, MEASURES, USES, MATERIALS];
+export const GROUPS: GroupDef[] = [RESOURCES, SIZE, STAGES, HARNESS, CONTEXT, MEASURES, USES, MATERIALS];
 export const NODES: NodeDef[] = [COMPUTE, MODEL, SYSTEM];
 
 export type ElementKind = "group" | "sub" | "item" | "node";
@@ -449,14 +449,18 @@ function loopPoints(id: string, boxes: Map<string, BoxLayout>, edges: EdgeLayout
       const system = box("system");
       const synthetic = box("synthetic");
       const materials = box("materials");
-      const startX = system.x + 40;
+      const stages = box("stages");
+      // Leaves the system's left side and runs down the gap before it, clear of the context layer underneath.
+      const laneX = (stages.x + stages.w + system.x) / 2;
+      const startY = bottom(system) - 18;
       const points: [number, number][] = [
-        [startX, bottom(system)],
-        [startX, bottomHigh],
+        [system.x, startY],
+        [laneX, startY],
+        [laneX, bottomHigh],
         [cx(synthetic), bottomHigh],
         [cx(synthetic), bottom(materials)],
       ];
-      return { points, labelX: (startX + cx(synthetic)) / 2, labelY: bottomHigh };
+      return { points, labelX: (laneX + cx(synthetic)) / 2, labelY: bottomHigh };
     }
     default:
       throw new Error(`No layout for loop ${id}`);
@@ -480,6 +484,8 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
   const model = node(MODEL, C.D, L.TOP, L.NODE_H);
   const harness = layoutGroup(HARNESS, C.D.x, bottom(model) + 48, C.D.w, collapsed, boxes);
   const system = node(SYSTEM, C.D, bottom(harness) + 52, L.SYSTEM_H);
+  // The context layer sits under the system it feeds, the way Microsoft draws its IQ layer under agents.
+  const context = layoutGroup(CONTEXT, C.D.x, bottom(system) + 52, C.D.w, collapsed, boxes);
   const measures = layoutGroup(MEASURES, C.E.x, L.TOP, C.E.w, collapsed, boxes);
   const uses = layoutGroup(USES, C.E.x, Math.max(system.y, bottom(measures) + 44), C.E.w, collapsed, boxes);
   // Learning materials sit under model size and the stages they feed.
@@ -487,7 +493,7 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
   const materials = layoutGroup(MATERIALS, C.B.x, materialsY, C.C.x + C.C.w - C.B.x, collapsed, boxes);
 
   const width = C.E.x + C.E.w + 60;
-  const height = Math.max(bottom(materials), bottom(resources), bottom(system), bottom(uses)) + 72;
+  const height = Math.max(bottom(materials), bottom(resources), bottom(context), bottom(uses)) + 72;
 
   const edges: EdgeLayout[] = EDGES.map((e) => {
     const a = boxes.get(e.from);

@@ -13,6 +13,7 @@ const articles = (["ja", "en"] as const).map((locale) => ({
 const section = (source: string, from: string, to: string) => source.slice(source.indexOf(from), source.indexOf(to));
 
 const HARNESS_LEAD = { ja: "<strong>ハーネス。</strong>", en: "<strong>The harness.</strong>" } as const;
+const CONTEXT_LEAD = { ja: "<strong>推論時の文脈。</strong>", en: "<strong>Inference-time context.</strong>" } as const;
 const SCAFFOLD = { ja: "スキャフォールド", en: "scaffold" } as const;
 
 describe("ai-industry-capital-to-fcf: capability lever map", () => {
@@ -37,6 +38,21 @@ describe("ai-industry-capital-to-fcf: capability lever map", () => {
     expect(harness).toBeGreaterThan(0);
     expect(harness).toBeLessThan(s52.indexOf("<CapabilityLeverMap />"));
     expect(s52).toMatch(/^\| (ハーネス（|Harness \()/m);
+  });
+
+  it.each(articles)("discusses inference-time context (the IQ layer) after the harness and in Microsoft's bet ($locale)", ({ locale, source }) => {
+    const s52 = section(source, "\n### 5.2 ", "\n### 5.3 ");
+    const context = s52.indexOf(CONTEXT_LEAD[locale]);
+    expect(context).toBeGreaterThan(s52.indexOf(HARNESS_LEAD[locale]));
+    expect(context).toBeLessThan(s52.indexOf("<CapabilityLeverMap />"));
+    expect(s52).toMatch(/^\| (推論時の文脈（IQ 層）|Inference-time context \(IQ layer\)) \|/m);
+    const s73 = section(source, "\n### 7.3 ", "\n## 8. ");
+    const terms = locale === "ja" ? ["Microsoft IQ", "Work IQ", "6 万近く", "company knowledge"] : ["Microsoft IQ", "Work IQ", "nearly 60,000", "company knowledge"];
+    for (const term of terms) expect(s73).toContain(term);
+    // The same measurement appears in the map's context layer.
+    const scores = locale === "ja" ? "59 点から 80 点" : "from 59 to 80";
+    expect(s52).toContain(scores);
+    expect(ELEMENTS.get("foundry-iq")!.detail.note![locale]).toContain(scores);
   });
 
   it.each(articles)("says METR measures a model inside a harness ($locale)", ({ locale, source }) => {
@@ -82,6 +98,11 @@ describe("ai-industry-capital-to-fcf: capability lever map", () => {
       "https://arxiv.org/abs/2508.15734",
       "https://arxiv.org/abs/2211.04325",
       "https://arxiv.org/abs/2403.05812",
+      "https://www.anthropic.com/research/effective-context-engineering-for-ai-agents",
+      "https://www.trychroma.com/research/context-rot",
+      "https://arxiv.org/abs/2407.12854",
+      "https://learn.microsoft.com/microsoft-iq/",
+      "https://www.microsoft.com/en-us/investor/events/fy-2027/earnings-fy-2027-q1",
     ]) {
       expect(refs).toContain(url);
     }

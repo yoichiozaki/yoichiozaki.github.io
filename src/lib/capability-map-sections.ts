@@ -299,8 +299,8 @@ export const SECTIONS: Record<string, SectionDef> = {
         "One set raises the model's capability (pretraining, reinforcement learning, algorithmic efficiency), and its cost is paid up front, as training and research cost.",
       ),
       perUse: t(
-        "もう 1 つはモデルを仕事に使う側のレバー（推論時計算とハーネス）で、費用は前払いの学習費ではなく、主に推論費として出る。",
-        "The other set puts the model to work (inference-time compute and the harness), and its cost shows up not as up-front training cost but mainly as inference cost.",
+        "もう 1 つはモデルを仕事に使う側のレバー（推論時計算、ハーネス、推論時の文脈）で、費用は前払いの学習費ではなく、主に推論費として出る。",
+        "The other set puts the model to work (inference-time compute, the harness and inference-time context), and its cost shows up not as up-front training cost but mainly as inference cost.",
       ),
       perToken: t(
         "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",
@@ -317,6 +317,26 @@ export const SECTIONS: Record<string, SectionDef> = {
       metrSystem: t(
         "つまりタイムホライズンは、モデル単体ではなく、仕事を完了するシステムの能力の指標である。",
         "so the time horizon tracks what a system gets done, not what the model can do alone.",
+      ),
+      contextWindow: t(
+        "2026 年 3 月には Anthropic が Claude Opus 4.6 の 100 万トークンの文脈を通常の価格で提供し始めたが、長く入れれば済むわけではない。",
+        "In March 2026 Anthropic began offering a 1-million-token context at standard prices for Claude Opus 4.6, but filling it is not the answer.",
+      ),
+      contextRot: t(
+        "Anthropic は、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を得られる最小の、情報の濃いトークンの組を探すよう勧めている。",
+        "Anthropic notes that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advises looking for the smallest set of high-signal tokens that gets the desired result.",
+      ),
+      iq: t(
+        "何を、どこから、誰の権限で、どれだけ持ち込むかを担う層を、Microsoft は Microsoft IQ と呼び",
+        "The layer that decides what to bring in, from where, under whose permissions and how much is what Microsoft calls Microsoft IQ",
+      ),
+      retrievalEffort: t(
+        "探すことに推論の計算を使うのも、推論時計算の 1 つの形である。",
+        "Spending inference compute on searching is another form of inference-time compute.",
+      ),
+      context: t(
+        "同じモデルとハーネスでも、推論時に正しい文脈を持ち込めるかどうかで、完了できる仕事は変わる。",
+        "With the same model and harness, whether the right context can be brought in at inference time changes how much work gets done.",
       ),
     },
   },
@@ -358,6 +378,10 @@ export const SECTIONS: Record<string, SectionDef> = {
       inferenceRecovery: t(
         "回収が先送りにならない推論時計算のほうが、チェーンの後半を予測しやすくする",
         "Because its recovery is not deferred, inference-time compute makes the back half of the chain more predictable",
+      ),
+      notCounted: t(
+        "ハーネスと文脈は、伸び方を予測する法則がまだないので予測できる軸には数えなかったが、同じモデルで完了できる仕事を増やす手段として、推論時計算と組み合わせて使われる。",
+        "The harness and context are not counted as predictable axes, since no law yet predicts how far they go, but they are used together with inference-time compute as ways to finish more work with the same model.",
       ),
     },
   },
@@ -424,12 +448,17 @@ export const SECTIONS: Record<string, SectionDef> = {
         "Microsoft の弱点は、OpenAI のような存続にかかわるリスクではなく、この余力が少しずつ削られていくことにある。",
         "Microsoft's weakness is not an existential risk like OpenAI's, but the gradual erosion of this headroom.",
       ),
+      iq: t(
+        "Microsoft にとって、モデルは選んで使う部品になりつつあり、差をつける場所はモデルの外側の文脈に移りつつある",
+        "for Microsoft, models are becoming components to choose among, and the place to differentiate is moving to the context outside the model",
+      ),
     },
   },
   "8": {
     title: t("2030 年までに何を見ればよいか", "What to watch through 2030"),
     points: {
       growth: t("能力の向上が売上に変わる速さ", "How fast capability gains turn into revenue"),
+      context: t("モデルの外側の文脈にも、利用と対価が付くか", "Whether context outside the model also draws use and payment"),
       knowledge: t(
         "エージェントが知識労働の多くの仕事に広がり、推論の需要が供給を上回り続ける。",
         "Agents spread to much of knowledge work, and inference demand keeps exceeding supply.",

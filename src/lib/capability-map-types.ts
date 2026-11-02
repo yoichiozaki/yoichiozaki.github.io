@@ -4,8 +4,10 @@
  *
  * The map separates what a model can do on its own ("model capability") from
  * what a whole system gets done ("completing the work"); the harness sits
- * between them. Labels on arrows name the efficiency that converts one thing
- * into the next, and dashed loops show how results flow back upstream.
+ * between them, and the context layer (Microsoft's "IQ") feeds the system
+ * what the model never learned. Labels on arrows name the efficiency (or, for
+ * context, the precision) that converts one thing into the next, and dashed
+ * loops show how results flow back upstream.
  */
 
 export type Locale = "ja" | "en";
@@ -18,6 +20,7 @@ export type Category =
   | "stage"
   | "material"
   | "harness"
+  | "context"
   | "capability"
   | "measure";
 
@@ -73,6 +76,8 @@ export type EdgeDef = {
   toSide: Side;
   kind: "flow" | "measure";
   label?: Text;
+  /** What the label measures, shown above it in the panel; flow edges default to efficiency. */
+  kicker?: Text;
   detail?: Detail;
   /** Box the line is drawn to, when it differs from the logical target. */
   drawTo?: string;
@@ -103,6 +108,7 @@ export const CATEGORY_LABEL: Record<Category, Text> = {
   stage: t("計算を使う段階", "Where compute is spent"),
   material: t("学習の材料", "Training data and tasks"),
   harness: t("ハーネス", "Harness"),
+  context: t("推論時の文脈（IQ 層）", "Context (IQ layer)"),
   capability: t("能力と使い道", "Capability and uses"),
   measure: t("成果の測り方", "Measuring results"),
 };
@@ -115,6 +121,7 @@ export const CATEGORY_COLOR: Record<Category, string> = {
   stage: "#6a9bcc",
   material: "#5db872",
   harness: "#5db8a6",
+  context: "#9db83f",
   capability: "currentColor",
   measure: "#9d8ac7",
 };
