@@ -275,7 +275,7 @@ export const SIZE: GroupDef = {
     }),
     item("context", t("文脈の長さ", "Context length"), {
       summary: t(
-        "1 回の呼び出しで参照できる情報の量。長いほど KV キャッシュと HBM の負担が増える。何を入れるかは、ハーネスの文脈の管理と、推論時の文脈（IQ 層）で決まる。",
+        "1 回の呼び出しで参照できる情報の量。長いほど KV キャッシュと HBM の負担が増える。何を入れるかは、ハーネスによる文脈の管理と、推論時の文脈（IQ 層）で決まる。",
         "How much a single call can attend to; longer contexts weigh on the KV cache and HBM. What fills it is decided by the harness's context management and by the context layer (IQ).",
       ),
       note: t(

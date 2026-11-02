@@ -319,15 +319,15 @@ export const SECTIONS: Record<string, SectionDef> = {
         "so the time horizon tracks what a system gets done, not what the model can do alone.",
       ),
       contextWindow: t(
-        "それでも、長く入れれば済むわけではない。入れたトークンの分だけ推論費がかかり、企業の情報は 100 万トークンにはとても収まらない。",
+        "それでも、長い文脈に詰め込めば済むわけではない。入れたトークンの分だけ推論費がかかり、企業の情報は 100 万トークンにはとても収まらない。",
         "Even so, filling the context is not the answer. Every token put in adds to inference cost, and a company's information is far too large to fit in a million tokens.",
       ),
       contextRot: t(
-        "Anthropic は 2025 年 9 月に、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めた。",
-        "In September 2025, Anthropic noted that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advised choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome.",
+        "Anthropic は 2025 年 9 月に、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果につながる情報の濃いトークンだけに絞り、文脈をできるだけ小さく保つよう勧めた。",
+        "In September 2025, Anthropic noted that as the number of tokens in the context grows, a model's ability to recall information from them accurately declines (context rot), and advised choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome.",
       ),
       iq: t(
-        "推論のたびに、どこを、誰の権限で探し、何を渡すかを担う層を、Microsoft は Microsoft IQ と呼び",
+        "推論のたびに、どこを、誰の権限で探し、何を渡すかを決める層を、Microsoft は Microsoft IQ と呼び",
         "The layer that decides, at each inference, where to look, under whose permissions, and what to hand over is what Microsoft calls Microsoft IQ",
       ),
       retrievalEffort: t(
@@ -335,7 +335,7 @@ export const SECTIONS: Record<string, SectionDef> = {
         "Spending inference compute on searching is another form of inference-time compute.",
       ),
       contextMoney: t(
-        "一方、データを整え、索引と権限を最新に保つ費用は、主にラボのチェーンの外、つまり顧客自身か文脈の層を持つ事業者の側に出て、その対価も文脈の層を持つ事業者に入る。",
+        "一方、データを整え、索引と権限を最新に保つ費用は、主にラボのチェーンの外、つまり顧客自身か文脈の層を持つ事業者の側に出て、その対価もこの事業者に入る。",
         "The cost of preparing the data and keeping indexes and permissions current, on the other hand, falls mostly outside the lab's chain, on customers themselves or on whoever runs the context layer, and what is paid for it goes to the operator of that layer.",
       ),
       context: t(
@@ -458,7 +458,7 @@ export const SECTIONS: Record<string, SectionDef> = {
       ),
       routing: t(
         "利用者ではなく文脈の層を持つ側がモデルを振り分けるほど、フロンティアのモデルが「最も賢い」ことに付く上乗せ（第 6.3 節の (2)）は、その振り分けの中で決まるようになる。",
-        "the more it is the owner of the context layer rather than the user who decides which model runs, the more the premium paid for a frontier model being \"the smartest\" (point (2) of Section 6.3) is set inside that routing.",
+        "the more it is the owner of the context layer rather than the user who decides which model runs, the more the premium paid for a frontier model being \"the smartest\" (point (2) of Section 6.3) comes to be set inside that routing.",
       ),
     },
   },
@@ -466,7 +466,7 @@ export const SECTIONS: Record<string, SectionDef> = {
     title: t("2030 年までに何を見ればよいか", "What to watch through 2030"),
     points: {
       growth: t("能力の向上が売上に変わる速さ", "How fast capability gains turn into revenue"),
-      context: t("モデルの外側の文脈にも、利用と対価が付くか", "Whether context outside the model also draws use and payment"),
+      context: t("モデルの外側の文脈も使われ、対価が払われるか", "Whether context outside the model also gets used and paid for"),
       knowledge: t(
         "エージェントが知識労働の多くの仕事に広がり、推論の需要が供給を上回り続ける。",
         "Agents spread to much of knowledge work, and inference demand keeps exceeding supply.",

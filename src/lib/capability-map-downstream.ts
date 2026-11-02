@@ -66,7 +66,7 @@ export const HARNESS: GroupDef = {
     }),
     item("context-mgmt", t("文脈の管理", "Context management"), {
       summary: t(
-        "作業の途中で、限られた文脈に何を残し、何を捨て、いつ外へ情報を取りに行くかを決める。古いやり取りの要約（コンパクション）や、必要になった時点で道具を使って読み込む工夫。取りに行った先から何が返ってくるかは、推論時の文脈（IQ 層）の側で決まる。",
+        "作業の途中で、限られた文脈に何を残し、何を捨て、いつ外へ情報を取りに行くかを決める。古いやり取りの要約（コンパクション）や、情報を必要になった時点で道具で読み込むといった工夫がある。取りに行った先から何が返ってくるかは、推論時の文脈（IQ 層）の側で決まる。",
         "Deciding, as a job goes on, what to keep in a limited context, what to drop and when to go out for more: summarizing old turns (compaction) and loading information through tools only when it is needed. What comes back from a fetch is decided on the context-layer (IQ) side.",
       ),
       note: t(
@@ -134,11 +134,11 @@ export const CONTEXT: GroupDef = {
   label: t("推論時の文脈（IQ 層）", "Context (IQ layer)"),
   detail: {
     summary: t(
-      "モデルが学習していない社内の情報や最新の情報を、推論のたびに探して渡す層。どこを、誰の権限で探し、何を渡すかで、同じモデルとハーネスでも完了できる仕事が変わる。文脈は実際にはハーネスの道具を通じてモデルに届くが、どのハーネスからも呼べる別のレバーなので、地図では仕事を完了する能力に直接つないだ。Microsoft はこの層を Microsoft IQ と呼ぶ。",
-      "The layer that finds and hands over, at every inference, what the model never learned: company information and anything recent. Where it looks, under whose permissions, and what it hands over change how much work the same model and harness can finish. At run time context reaches the model through the harness's tools, but any harness can call it, so it is a separate lever, and the map connects it straight to getting work done. Microsoft calls this layer Microsoft IQ.",
+      "モデルが学習していない社内の情報や最新の情報を、推論のたびに探して渡す層。どこを、誰の権限で探し、何を渡すかで、同じモデルとハーネスでも完了できる仕事が変わる。文脈は実際にはハーネスの道具を通じてモデルに届くが、この層はどのハーネスからも呼べる別のレバーなので、地図では仕事を完了する能力に直接つないだ。Microsoft はこの層を Microsoft IQ と呼ぶ。",
+      "The layer that finds and hands over, at every inference, what the model never learned: company information and anything recent. Where it looks, under whose permissions, and what it hands over change how much work the same model and harness can finish. At run time, context reaches the model through the harness's tools, but any harness can call this layer, so it is a separate lever, and the map connects it straight to getting work done. Microsoft calls this layer Microsoft IQ.",
     ),
     note: t(
-      "Microsoft の Satya Nadella CEO は 2026 年 10 月の決算説明で、Microsoft 365 の下にある人、人どうしの関係、文書、メール、会議、チャット、プロジェクトなどの知識を「企業にとって最も重要なデータベースの 1 つ」と呼んだ。Microsoft IQ を通じて文脈を利用している顧客は 6 万近くで、前四半期から 25% 増えた。どの IQ も MCP で呼べるので、他社のモデルで動くエージェントからも使える。",
+      "Microsoft の Satya Nadella CEO は 2026 年 10 月の決算説明で、人、人どうしの関係、文書、メール、会議、チャット、プロジェクトなど、Microsoft 365 に蓄積された知識を「企業にとって最も重要なデータベースの 1 つ」と呼んだ。Microsoft IQ を通じて文脈を利用している顧客は 6 万近くで、前四半期から 25% 増えた。どの IQ も MCP で呼べるので、他社のモデルで動くエージェントからも使える。",
       "On Microsoft's October 2026 earnings call, CEO Satya Nadella called the knowledge underneath Microsoft 365 — people, their relationships, documents, emails, meetings, chats, projects and other artifacts — one of the most important databases for any enterprise. Nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter. Each IQ can be called over MCP, so agents running on other companies' models can use it too.",
     ),
     refs: ["5.2:iq", "5.2:contextMoney", "5.2:context", "5.3:notCounted", "7.3:iq", "8:context"],
@@ -157,14 +157,14 @@ export const CONTEXT: GroupDef = {
         links: [S.microsoftIq],
       },
       [
-        item("work-iq", t("働き方の文脈（Work IQ）", "Work context (Work IQ)"), {
+        item("work-iq", t("仕事の文脈（Work IQ）", "Work context (Work IQ)"), {
           summary: t(
-            "メール、会議、チャット、文書と、誰と誰が一緒に働いているか。Microsoft 365 の上で、利用者が見てよい範囲から組み立てる。",
+            "メール、会議、チャット、文書と、誰と誰が一緒に働いているか。Microsoft 365 にある情報のうち、利用者が見てよい範囲から組み立てる。",
             "Emails, meetings, chats and documents, and who works with whom — assembled on Microsoft 365 from what the user is allowed to see.",
           ),
           note: t(
             "2026 年 9 月時点のドキュメントによれば、Work IQ は Microsoft 365 Copilot のライセンスとは別に、他社のエージェントからも MCP、A2A、REST で使え、利用量に応じて課金される。要求はすべて利用者の権限で実行し、MCP サーバーでは数百ある操作を 10 個の汎用的な道具にまとめている。Copilot が使う索引を外のアプリから引ける Retrieval API は、2025 年に先に出ていた。",
-            "According to its September 2026 documentation, Work IQ can also be used by other companies' agents, over MCP, A2A or REST, billed by usage and independent of Microsoft 365 Copilot licensing. Every request runs under the user's own permissions, and its MCP server collapses hundreds of operations into 10 generic tools. The Retrieval API, which lets outside apps query the index behind Copilot, came first, in 2025.",
+            "According to its September 2026 documentation, Work IQ can also be used by other companies' agents, over MCP, A2A or REST, with usage-based billing independent of Microsoft 365 Copilot licensing. Every request runs under the user's own permissions, and its MCP server collapses hundreds of operations into 10 generic tools. The Retrieval API, which lets outside apps query the index behind Copilot, came first, in 2025.",
           ),
           refs: ["7.3:iq"],
           links: [S.workIq, S.retrievalApi, S.msftEarningsCall],
@@ -175,7 +175,7 @@ export const CONTEXT: GroupDef = {
             "Business concepts such as customers, orders and shipments, with their relationships, metrics and rules. Shown only table columns, an agent misreads what the numbers mean.",
           ),
           note: t(
-            "Fabric IQ のオントロジーは、こうした概念を OneLake のデータに結び付け、人とエージェントが同じ言葉で業務を扱えるようにする。概念を 1 度定義すれば、レポートにもエージェントにも使い回せる。",
+            "Fabric IQ のオントロジーは、こうした概念を OneLake のデータに結び付け、人とエージェントが同じ言葉で業務を扱えるようにする。概念を一度定義すれば、レポートにもエージェントにも使い回せる。",
             "The Fabric IQ ontology binds these concepts to data in OneLake so that people and agents work with the business in the same vocabulary; a concept defined once can be reused across reports and agents.",
           ),
           refs: ["5.2:iq"],
@@ -193,9 +193,9 @@ export const CONTEXT: GroupDef = {
           refs: ["5.2:retrievalEffort"],
           links: [S.foundryIq, S.foundryIqRelevance],
         }),
-        item("web-iq", t("Web の情報（Web IQ）", "The web (Web IQ)"), {
+        item("web-iq", t("Web の情報（Web IQ）", "Web content (Web IQ)"), {
           summary: t(
-            "学習の締め切りより後の出来事や、社外の最新の情報。",
+            "学習データの締め切りより後の出来事や、社外の最新の情報。",
             "Events after the training cutoff, and current information from outside the company.",
           ),
           note: t(
@@ -225,7 +225,7 @@ export const CONTEXT: GroupDef = {
             "Searching by keywords and vectors together, reranking the results and returning only the top ones. Where documents are split, and what is attached to each piece, also changes what can be found.",
           ),
           note: t(
-            "Anthropic の Contextual Retrieval（2024 年）は、文書の断片ごとに前後の文脈の説明を付けてから索引を作ることで、検索の失敗を 49%、並べ替え（リランキング）と組み合わせると 67% 減らした。検索先のデータを 1.4 兆トークンまで増やすと、言語モデリングといくつかの課題の成績が目立った飽和なく上がり続けたという研究もある（Shao ら、2024 年）。",
+            "Anthropic の Contextual Retrieval（2024 年）は、文書の断片ごとに前後の文脈の説明を付けてから索引を作ることで、検索の失敗を 49%、並べ替え（リランキング）と組み合わせると 67% 減らした。検索先のデータを 1.4 兆トークンまで増やすと、言語モデリングといくつかの課題の成績が目立った頭打ちもなく上がり続けたという研究もある（Shao ら、2024 年）。",
             "Anthropic's Contextual Retrieval (2024) cut failed retrievals by 49%, and by 67% with reranking, by attaching a short explanation of its context to each chunk before indexing. Another study found that language modelling and several downstream tasks kept improving without obvious saturation as the datastore grew to 1.4 trillion tokens (Shao et al., 2024).",
           ),
           refs: ["5.2:retrievalEffort"],
@@ -233,8 +233,8 @@ export const CONTEXT: GroupDef = {
         }),
         item("permissions", t("権限と鮮度", "Permissions, freshness"), {
           summary: t(
-            "利用者が見てよいものだけを、最新の状態で持ち込む。見てはいけない情報を持ち込めば、答えが正しくても事故になる。",
-            "Bringing in only what the user may see, in its current state. Pulling in something they must not see is an incident even if the answer is right.",
+            "利用者が見てよいものだけを、最新の状態で渡す。見てはいけない情報を渡せば、答えが正しくても事故になる。",
+            "Handing over only what the user may see, in its current state. Handing over anything they must not see is an incident, even if the answer is right.",
           ),
           note: t(
             "Foundry IQ は、対応する情報源ではアクセス制御リストを同期し、Microsoft Purview の秘密度ラベルとともに検索の時点で適用して、呼び出した人の Microsoft Entra の ID で検索する。OpenAI が 2025 年 10 月に ChatGPT に加えた company knowledge も、既存の権限に従い、利用者が見てよいものだけを読む。",

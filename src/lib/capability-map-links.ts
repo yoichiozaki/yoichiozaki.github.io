@@ -167,8 +167,8 @@ export const EDGES: EdgeDef[] = [
         "Whether what is needed is brought in, without gaps and without clutter. Bringing in too much makes the context longer, so the model has a harder time pulling out what it needs, and inference cost rises.",
       ),
       note: t(
-        "Anthropic は 2025 年 9 月に、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果を最も得やすくなるように、情報の濃いトークンをできるだけ少なく選ぶよう勧めた。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
-        "In September 2025, Anthropic noted that as the tokens in the context grow, a model's ability to recall information from them accurately declines (context rot), and advised choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model's performance less reliable and lower.",
+        "Anthropic は 2025 年 9 月に、文脈のトークンが増えるほど、そこから情報を正確に取り出す力が落ちる（文脈の劣化）として、望む結果につながる情報の濃いトークンだけに絞り、文脈をできるだけ小さく保つよう勧めた。18 のモデルを調べた Chroma の研究（2025 年 7 月）でも、課題の難しさを変えずに入力だけを長くすると、どのモデルも成績が不安定になり、下がった。",
+        "In September 2025, Anthropic noted that as the number of tokens in the context grows, a model's ability to recall information from them accurately declines (context rot), and advised choosing the smallest possible set of high-signal tokens that maximizes the likelihood of the desired outcome. Chroma's study of 18 models (July 2025) likewise found that lengthening only the input, with the task's difficulty held fixed, made every model perform worse and less consistently.",
       ),
       refs: ["5.2:contextRot", "5.2:context"],
       links: [S.contextEngineering, S.contextRot, S.lostInTheMiddle],
@@ -338,7 +338,7 @@ export const COMPANIES: CompanyDef[] = [
         "OpenAI accounted for USD 10.0 billion of revenue in July–September 2026 (about 11% of the total) and at least about a third of commercial RPO (end of June 2026). Microsoft Cloud's gross margin fell from 73% to 66% over three years.",
       ),
       t(
-        "モデルの外側では、Microsoft 365 と Fabric の上にある企業の文脈に、組織の文書と Web の情報を加えて Microsoft IQ にまとめ、他社のモデルで動くエージェントにも提供する。Microsoft IQ で文脈を利用する顧客は 6 万近く、前四半期から 25% 増えた（2026 年 10 月の決算説明）。",
+        "モデルの外側では、Microsoft 365 と Fabric にある企業の文脈に、組織の文書と Web の情報を加えて Microsoft IQ にまとめ、他社のモデルで動くエージェントにも提供する。Microsoft IQ で文脈を利用する顧客は 6 万近くで、前四半期から 25% 増えた（2026 年 10 月の決算説明）。",
         "Beyond the model, it bundles the enterprise context held in Microsoft 365 and Fabric, plus organizational documents and the web, into Microsoft IQ and offers it to agents running on other companies' models too; nearly 60,000 customers access context through Microsoft IQ, up 25% from the previous quarter (October 2026 earnings call).",
       ),
     ],
@@ -444,8 +444,8 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-context",
     title: t("文脈は推論のたびに持ち込む", "Context is brought in at every inference"),
     body: t(
-      "社内の文書や昨日の決定は、モデルの重みにはない。推論のたびに、正しい文脈を、権限を守って、必要な分だけ持ち込めるかどうかで、同じモデルとハーネスでも完了できる仕事が変わる。Microsoft はこの層を Microsoft IQ と呼び、他社のモデルで動くエージェントにも使わせている。",
-      "Company documents and yesterday's decisions are not in a model's weights. Whether the right context can be brought in at each inference, within permissions and no more than needed, decides how much work the same model and harness can finish. Microsoft calls this layer Microsoft IQ and lets agents running on other companies' models use it too.",
+      "社内の文書や昨日の決定は、モデルの重みにはない。推論のたびに、正しい文脈を、権限を守って、必要な分だけ持ち込めるかどうかで、同じモデルとハーネスでも完了できる仕事が変わる。この文脈を探して渡す層を、Microsoft は Microsoft IQ と呼び、他社のモデルで動くエージェントからも使えるようにしている。",
+      "Company documents and yesterday's decisions are not in a model's weights. Whether the right context can be brought in at each inference, within the user's permissions and no more than is needed, decides how much work the same model and harness can finish. The layer that finds and hands over this context is what Microsoft calls Microsoft IQ, and agents running on other companies' models can use it too.",
     ),
     ids: ["context-layer", "e-context", "system", "context-mgmt"],
     refs: ["5.2:context", "7.3:iq"],
