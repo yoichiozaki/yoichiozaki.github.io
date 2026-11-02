@@ -18,8 +18,8 @@ export const EDGES: EdgeDef[] = [
         "Compute per dollar and per watt, set by chip generation, lower precision, memory, packaging and how well the fleet is run.",
       ),
       note: t(
-        "長期では指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。",
-        "It improves exponentially over the long run, but in steps with each generation. Most of the gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory.",
+        "長期では指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。ただし、電力を増やした分は 1 ワットあたりの効率を上げない。",
+        "It improves exponentially over the long run, but in steps with each generation. Most of the per-chip performance gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory — and the added power raises performance per chip, not per watt.",
       ),
       refs: ["4.3:gains", "4.7:tokens"],
       links: [S.epochScaling, S.nvidiaRubin],
@@ -42,7 +42,7 @@ export const EDGES: EdgeDef[] = [
         "Toby Ord の分析では、AIME の正答率を 20% から 80% に上げるのに、推論時の計算なら約 100 倍の増加で済むが、強化学習の計算では約 1 万倍が必要になる（推定の幅は大きい）。",
         "Toby Ord estimates that raising AIME accuracy from 20% to 80% takes about 100x more inference compute but about 10,000x more RL compute (with wide uncertainty).",
       ),
-      refs: ["5.2:ord"],
+      refs: ["5.2:ord", "5.3:allocate"],
       links: [S.tobyOrd, S.testTimeCompute],
     },
   },
@@ -56,8 +56,8 @@ export const EDGES: EdgeDef[] = [
     label: t("パラメータ効率", "Parameter efficiency"),
     detail: {
       summary: t(
-        "同じパラメータ数から、どれだけの能力を引き出せるか。MoE で 1 トークンあたりに動かすパラメータを絞ると、学習と推論が安くなる。",
-        "How much capability a given number of parameters yields. MoE runs only some of them per token, making training and inference cheaper.",
+        "モデルの大きさを、どれだけ少ない計算で能力に変えられるか。MoE は総パラメータを増やしながら、1 トークンの計算に使うパラメータ（稼働パラメータ）を絞り、学習と推論の計算を減らす。その代わり、重みを置くメモリと、エキスパート間の通信の負担は増える。",
+        "How little compute it takes to turn model size into capability. MoE grows the total parameter count while using only a few parameters (the active ones) per token, cutting training and inference compute at the cost of more memory for the weights and more communication between experts.",
       ),
       note: t(
         "エキスパートを細かくするほど計算量あたりの性能が上がるという Krajewski らのスケーリング則（2024 年）が、MoE の流れを裏づけている。",
@@ -141,8 +141,8 @@ export const EDGES: EdgeDef[] = [
     label: t("推論効率", "Inference efficiency"),
     detail: {
       summary: t(
-        "1 トークン、1 件の仕事あたりの推論費。KV キャッシュの圧縮、低精度化、MoE で下がる。",
-        "Inference cost per token and per job, lowered by KV-cache compression, lower precision and MoE.",
+        "1 トークンあたりの推論費（裏返せば、1 ワット・1 ドルあたりに出せるトークン）。KV キャッシュの圧縮、低精度化、MoE で下がる。",
+        "Inference cost per token — equivalently, tokens per watt and per dollar — lowered by KV-cache compression, lower precision and MoE.",
       ),
       note: t(
         "長く考えさせ、サブエージェントで分担するほど、1 件あたりのトークンは増える。電力と HBM が上限を決めるなかでは、1 ワットあたりのトークンが、推論時計算を伸ばせる上限を決める。",
@@ -209,8 +209,8 @@ export const LOOPS: LoopDef[] = [
         "Usage records from deployed models and agents show where they fail and feed the next round of training.",
       ),
       note: t(
-        "Cursor は、新しいモデルを 1.5〜2 時間ごとに利用者に配り、集まった利用のデータで次の学習を行っている。",
-        "Cursor rolls a new checkpoint out to users and collects the data for the next training step every 1.5 to 2 hours.",
+        "Cursor は、新しいモデルを利用者に配り、次の学習のためのデータを集めるまでを 1.5〜2 時間で回している。",
+        "Cursor takes 1.5 to 2 hours to roll a new checkpoint out to users and collect the data for the next training step.",
       ),
       links: [S.cursorRl],
     },
@@ -225,8 +225,8 @@ export const LOOPS: LoopDef[] = [
         "Records of the system solving tasks, and problems and answers the models write, become material for the next round; for gradable tasks only the correct ones are kept.",
       ),
       note: t(
-        "DeepSeek-R1 の論文は、大きなモデルが強化学習で身につけた推論のやり方を、小さなモデルの強化にも使えることを示した。",
-        "The DeepSeek-R1 paper showed that the reasoning patterns a large model learns through RL can also be used to strengthen smaller models.",
+        "DeepSeek-R1 は、強化学習の途中のモデルに 1 問あたり複数の答えを出させて正しいものだけを残し（約 60 万件）、次の学習に使った。こうして集めた約 80 万件のデータで小さなモデルを学習させるだけでも、その推論の力は大きく上がった。",
+        "DeepSeek-R1 sampled several answers per prompt from an RL checkpoint and kept only the correct ones (about 600,000) for the next round of training; fine-tuning smaller models on the resulting 800,000 samples alone substantially improved their reasoning.",
       ),
       links: [S.deepseekR1, S.phi1],
     },
@@ -238,7 +238,7 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-openai",
     name: t("OpenAI", "OpenAI"),
     focus: ["external-capital", "contracts", "compute", "depth", "width", "adoption"],
-    refs: ["6.2:market"],
+    refs: ["2.3:openai", "6.2:market"],
     links: [S.wsj, S.decoderOpenAI, S.cnbcSpend, S.gpt5, S.o1],
     points: [
       t(
@@ -250,8 +250,8 @@ export const COMPANIES: CompanyDef[] = [
         "Sells extra thinking as a product; GPT-5 launched as a system with a router between a fast model and a thinking model.",
       ),
       t(
-        "2030 年までの計算資源支出は約 6,000 億ドル。10 月の調達は、当初目標の 300 億ドルの半分に届かなかった（報道）。",
-        "About USD 600 billion of compute spending planned through 2030; the October round raised less than half of its USD 30 billion target (reported).",
+        "2030 年までの計算資源支出は約 6,000 億ドルと投資家に説明した（報道）。10 月の調達は、当初目標の 300 億ドルの半分に届かなかった（報道）。",
+        "Told investors it plans about USD 600 billion of compute spending through 2030 (reported); the October round raised less than half of its USD 30 billion target (reported).",
       ),
     ],
   },
@@ -263,16 +263,16 @@ export const COMPANIES: CompanyDef[] = [
     links: [S.s1, S.decoderAnthropic, S.menlo],
     points: [
       t(
-        "Claude Code と Claude Cowork で、企業のエージェント利用に集中した。Claude Enterprise の利用者では、Claude Code を使う上位 5% が、使わない利用者の平均の約 20 倍を支払う。",
-        "Focused on enterprise agents with Claude Code and Claude Cowork; the top 5% of Claude Enterprise users who use Claude Code pay about 20 times the average of Enterprise users who don't.",
+        "Claude Code と Claude Cowork で、企業のエージェント利用に集中した。Claude Enterprise の利用者では、Claude Code を使う上位 5% が、使わない利用者の平均の約 20 倍を支払う（2026 年 7〜9 月期）。",
+        "Focused on enterprise agents with Claude Code and Claude Cowork; the top 5% of Claude Enterprise users who use Claude Code pay about 20 times the average of Enterprise users who don't (July–September 2026).",
       ),
       t(
         "企業の LLM API 支出のシェアは 40%、コーディング用途では 54%（Menlo Ventures、2025 年）。",
         "40% of enterprise LLM API spending, and 54% for coding (Menlo Ventures, 2025).",
       ),
       t(
-        "2026 年上期に 1,100 億ドル超を調達した。名前の挙がった計算資源の契約だけで 6,000 億ドルを超える。",
-        "Raised more than USD 110 billion in H1 2026; the compute agreements named in its S-1 alone exceed USD 600 billion.",
+        "2026 年上期に 1,100 億ドル超を調達した。名前の挙がった計算資源の契約だけで、上限値を含めて 6,000 億ドルを超える。",
+        "Raised more than USD 110 billion in H1 2026; the compute agreements named in its S-1 alone exceed USD 600 billion, including upper-bound amounts.",
       ),
     ],
   },
@@ -292,8 +292,8 @@ export const COMPANIES: CompanyDef[] = [
         "After Gemini 3 (November 2025), OpenAI reportedly declared a “code red” internally in December; Deep Think sells extra thinking.",
       ),
       t(
-        "Alphabet は 2026 年 1〜9 月に自社株買いをやめ、株式で 495 億ドルを調達し、社債などで 852 億ドルを借り入れた。",
-        "Alphabet stopped buybacks in January–September 2026, raised USD 49.5 billion in equity and borrowed USD 85.2 billion.",
+        "Alphabet は 2026 年 1〜9 月に自社株買いをやめ、6 月に株式で 495 億ドルを調達し、社債などで 852 億ドルを借り入れた。",
+        "Alphabet stopped buybacks in January–September 2026, raised USD 49.5 billion in equity in June and borrowed USD 85.2 billion.",
       ),
     ],
   },
@@ -343,7 +343,7 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-meta",
     name: t("Meta", "Meta"),
     focus: ["precision", "mfu", "grid", "external-capital"],
-    refs: ["4.2:fp8"],
+    refs: ["4.2:llama4", "6.2:lenders"],
     links: [S.metaLlama4, S.llama3, S.epochDataCenters],
     points: [
       t(
@@ -385,7 +385,7 @@ export const COMPANIES: CompanyDef[] = [
     id: "co-deepseek",
     name: t("DeepSeek", "DeepSeek"),
     focus: ["precision", "active", "context", "rlvr", "e-algorithmic"],
-    refs: ["4.6:moe"],
+    refs: ["4.6:moe", "4.6:rlvr"],
     links: [S.deepseekV2, S.deepseekV3, S.deepseekR1, S.deepseekV32, S.nistCaisi],
     points: [
       t(
@@ -429,11 +429,11 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-pretraining",
     title: t("事前学習は早く回収する必要がある", "Pretraining has to pay back fast"),
     body: t(
-      "事前学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。後続のモデルが約 8 か月遅れで追いかけてくるなかで、その期間は長くない。",
-      "Pretraining is paid for up front and must be recovered while the model sells — not long when followers trail by only about eight months.",
+      "事前学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。米国の各社は数か月単位で首位を入れ替え、中国で最も強いオープンウェイトモデルも約 8 か月遅れで追いかけてくる（NIST の評価）なかで、その期間は長くない。",
+      "Pretraining is paid for up front and must be recovered while the model sells — not long when US labs trade the lead every few months and even the strongest Chinese open-weight model trails by only about eight months (per NIST).",
     ),
     ids: ["pretraining", "human-data", "compute", "external-capital"],
-    refs: ["3.1", "6.3:training"],
+    refs: ["3.1", "5.3:recover", "6.3:training"],
   },
   {
     id: "kp-ceiling",

@@ -46,7 +46,7 @@ export const HARNESS: GroupDef = {
         "Call the model, turn its output into tool calls, feed the results back and call it again — the loop that carries multi-step work.",
       ),
       note: t(
-        "考えることと道具を使うことを交互に行わせる ReAct（2022 年）は、対話型の課題 ALFWorld と WebShop で、模倣学習や強化学習の手法を成功率で 34 ポイントと 10 ポイント上回った。",
+        "考えることと行動すること（検索や環境の操作）を交互に行わせる ReAct（2022 年）は、対話型の課題 ALFWorld と WebShop で、模倣学習や強化学習の手法を成功率で 34 ポイントと 10 ポイント上回った。",
         "ReAct (2022), which interleaves reasoning with actions, beat imitation- and reinforcement-learning methods on the interactive ALFWorld and WebShop benchmarks by 34 and 10 points of success rate.",
       ),
       refs: ["5.2:harness"],
@@ -85,7 +85,7 @@ export const HARNESS: GroupDef = {
         "Anthropic は、最初のセッションで環境を整えるエージェントと、少しずつ進めるエージェントを分け、進捗ファイルと git の履歴で引き継ぐ方式を紹介した。",
         "Anthropic described splitting the work between an agent that sets up the environment in the first session and one that makes incremental progress, handing over through a progress file and the git history.",
       ),
-      refs: ["5.2:longRun"],
+      refs: ["5.2:handoff"],
       links: [S.anthropicHarness, S.memGpt],
     }),
     item("verify", t("検証（テスト・採点）", "Checks (tests, graders)"), {
@@ -94,8 +94,8 @@ export const HARNESS: GroupDef = {
         "Checking the output with tests or graders and retrying on failure; the same checks can serve as RL rewards.",
       ),
       note: t(
-        "途中の各ステップを採点する報酬モデル（プロセス監督）は、最終的な答えだけを採点するものより成績が良く、MATH の代表的な問題の 78% を解いた（Lightman ら、2023 年）。",
-        "A reward model that grades each intermediate step (process supervision) outperformed one that grades only the final answer, solving 78% of a representative subset of MATH (Lightman et al., 2023).",
+        "途中の各ステップを採点する報酬モデル（プロセス監督）は、最終的な答えだけを採点するものより成績が良く、多数の解答から 1 つを選ばせると、MATH の代表的な問題の 78% を解けた（Lightman ら、2023 年）。",
+        "A reward model that grades each intermediate step (process supervision) outperformed one that grades only the final answer; picking from many sampled solutions, it solved 78% of a representative subset of MATH (Lightman et al., 2023).",
       ),
       refs: ["5.3:answer"],
       links: [S.verifyStepByStep, S.verifiers, S.postJudge],
@@ -145,7 +145,7 @@ export const SYSTEM: NodeDef = {
       "METR のタイムホライズンも、道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測っている。測っているのはモデル単体ではなく、システムの能力である。",
       "METR's time horizons are measured with the model inside a scaffold that provides tools and runs the loop — they measure the system, not the model alone.",
     ),
-    refs: ["5.3:target", "5.2:twoKinds"],
+    refs: ["5.3:target", "5.2:twoKinds", "5.2:metrSystem"],
     links: [S.metrTimeHorizons, S.rliLeaderboard, S.postOutcome],
   },
 };
@@ -168,8 +168,8 @@ export const USES: GroupDef = {
         "AI helping to build the next models — what Anthropic's S-1 calls “closing the loop”.",
       ),
       note: t(
-        "アルゴリズムの効率の伸びを速める可能性があるが、予測できる軸とは言えない。Lu ら（2024 年）の The AI Scientist は、アイデアの立案から実験、論文の執筆までを 1 本あたり 15 ドル未満で行った。",
-        "It may speed up algorithmic progress, but it is not a predictable axis. Lu et al.'s The AI Scientist (2024) went from idea to experiments to a written paper for under USD 15 per paper.",
+        "アルゴリズムの効率の伸びを速める可能性があるが、予測できる軸とは言えない。Google DeepMind の AlphaEvolve は、Gemini のアーキテクチャの重要なカーネルを 23% 速くし、Gemini の学習時間を 1% 縮めた。Lu ら（2024 年）の The AI Scientist は、アイデアの立案から実験、論文の執筆までを 1 本あたり 15 ドル未満で行った。",
+        "It may speed up algorithmic progress, but it is not a predictable axis. Google DeepMind's AlphaEvolve sped up a key kernel in Gemini's architecture by 23%, cutting Gemini's training time by 1%; Lu et al.'s The AI Scientist (2024) went from idea to experiments to a written paper for under USD 15 per paper.",
       ),
       refs: ["2.2:loop", "5.3:loop"],
       links: [S.s1, S.aiScientist, S.alphaEvolve],
@@ -195,7 +195,7 @@ export const USES: GroupDef = {
         "Anthropic は Claude Code の仕組みを知識労働に広げた Claude Cowork を出している。",
         "Anthropic extended the Claude Code approach to knowledge work with Claude Cowork.",
       ),
-      refs: ["2.2:agents", "5.3:hardToJudge"],
+      refs: ["2.2:cowork", "5.3:hardToJudge"],
       links: [S.gdpval, S.genAiAtWork, S.s1],
     }),
     item("science", t("科学", "Science"), {

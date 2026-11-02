@@ -62,7 +62,7 @@ export const MEASURES: GroupDef = {
           "モデルとハーネスを組み合わせたシステムが、任された仕事を完了できるか。",
           "Whether a model and its harness, working together, can complete the job they are given.",
         ),
-        refs: ["5.2:twoKinds"],
+        refs: ["5.2:twoKinds", "5.2:mixed"],
         links: [S.metrTimeHorizons, S.rliLeaderboard],
       },
       [
@@ -75,7 +75,7 @@ export const MEASURES: GroupDef = {
             "道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測り、仕組みはモデルごとに選ぶ。16 時間を超える値は今の課題セットでは信頼できない。METR が測定値を追加したのは 2026 年 5 月が最後で、9 月には公開ページをもう更新しないと明記した。",
             "Measured with the model inside a scaffold that provides tools and runs the loop, chosen for each model. Values above 16 hours are unreliable on the current task set; METR's last new measurement was in May 2026, and in September it stated that its time-horizons page is no longer actively updated.",
           ),
-          refs: ["5.2:outrun"],
+          refs: ["5.2:metrSystem", "5.2:outrun"],
           links: [S.metrTimeHorizons, S.metrPaper],
         }),
         item("gdpval", t("実務の評価（GDPval）", "Real work (GDPval)"), {
@@ -125,6 +125,18 @@ export const MEASURES: GroupDef = {
       ),
       links: [S.epochEci, S.epochEciBenchmarks],
     }),
+    item("third-party", t("第三者の評価", "Third-party evaluation"), {
+      summary: t(
+        "開発元以外による評価。開発元が公表した数字を確かめる役割がある。",
+        "Evaluations by someone other than the developer, which check the developer's own numbers.",
+      ),
+      note: t(
+        "NIST の CAISI は 2026 年 5 月、DeepSeek V4 Pro について、開発元の公表値では約 2 か月前に出た米国のモデルと同等に見えるが、非公開のベンチマークを含む自らの評価では約 8 か月前のモデル（GPT-5）並みだと報告した。",
+        "In May 2026, NIST's CAISI reported that DeepSeek V4 Pro looks on a par with US models released about two months earlier on DeepSeek's own numbers, but performs like GPT-5, released about eight months earlier, on CAISI's evaluations, which include non-public benchmarks.",
+      ),
+      refs: ["3.1:caisi"],
+      links: [S.nistCaisi, S.metrTimeHorizons],
+    }),
     sub(
       "measure-economy",
       t("経済", "Economy"),
@@ -137,8 +149,8 @@ export const MEASURES: GroupDef = {
         item("adoption", t("利用の広がり", "Adoption"), {
           summary: t("利用者の数と、企業での利用の深さ。", "How many people use it, and how deeply companies use it."),
           note: t(
-            "ChatGPT の週間利用者は 10 億人に達し（報道）、Anthropic では 10 万ドル以上を支払う顧客が 1 万 1,900 社を超える。",
-            "ChatGPT has reportedly reached a billion weekly users; Anthropic has more than 11,900 customers paying over USD 100,000.",
+            "ChatGPT の週間利用者は 2026 年 8 月に 10 億人に達し（報道）、Anthropic では過去 12 か月に 10 万ドル以上を支払った顧客が 1 万 1,900 社を超える（2026 年 9 月末）。",
+            "ChatGPT reportedly reached a billion weekly users in August 2026; Anthropic had more than 11,900 customers paying over USD 100,000 in the trailing twelve months (end of September 2026).",
           ),
           refs: ["3.3"],
           links: [S.menlo, S.howPeopleUseChatGpt, S.s1],
@@ -147,7 +159,7 @@ export const MEASURES: GroupDef = {
           summary: t("能力がお金に変わったかどうか。", "Whether capability turned into money."),
           note: t(
             "Anthropic の粗利率は 2025 年の 40% から 2026 年上期の 85% に上がったが、供給の制約と先行契約が生んだ一時的に高い水準と見るべきである。",
-            "Anthropic's gross margin rose from 40% in 2025 to 85% in H1 2026, but that is a temporarily high level created by tight supply and contracts signed in advance.",
+            "Anthropic's gross margin rose from 40% in 2025 to 85% in H1 2026, but it should be read as a temporarily high level created by tight supply and contracts signed in advance.",
           ),
           refs: ["2.2:margin", "6.3:margin"],
           links: [S.s1, S.decoderAnthropic],
@@ -155,8 +167,8 @@ export const MEASURES: GroupDef = {
         item("productivity", t("生産性", "Productivity"), {
           summary: t("同じ仕事にかかる時間と人手が、どれだけ減ったか。", "How much less time and labour the same work takes."),
           note: t(
-            "顧客サポートの担当者 5,172 人を調べた研究では、AI の支援で 1 時間あたりに解決した問い合わせが平均 15% 増えた（Brynjolfsson ら）。一方、経験豊富なオープンソース開発者を対象にした METR の 2025 年の実験では、AI の道具を使うと作業時間がかえって 19% 長くなった。",
-            "A study of 5,172 customer-support agents found AI assistance raised issues resolved per hour by 15% on average (Brynjolfsson et al.); in METR's 2025 trial with experienced open-source developers, AI tools instead made tasks take 19% longer.",
+            "顧客サポートの担当者 5,172 人を調べた研究では、AI の支援で 1 時間あたりに解決した問い合わせが平均 15% 増えた（Brynjolfsson ら）。一方、経験豊富なオープンソース開発者 16 人を対象にした METR の 2025 年の実験では、AI の道具を使うと作業時間がかえって 19% 長くなった。",
+            "A study of 5,172 customer-support agents found AI assistance raised issues resolved per hour by 15% on average (Brynjolfsson et al.); in METR's 2025 trial with 16 experienced open-source developers, AI tools instead made tasks take 19% longer.",
           ),
           links: [S.genAiAtWork, S.metrProductivity],
         }),
@@ -232,15 +244,6 @@ export const MEASURES: GroupDef = {
           ),
           links: [S.extremeRisks, S.anthropicRsp],
         }),
-        item("third-party", t("第三者の評価", "Third-party evaluation"), {
-          summary: t("開発元以外による評価。", "Evaluations by someone other than the developer."),
-          note: t(
-            "NIST の CAISI は 2026 年 5 月、中国で最も強いオープンウェイトモデルの DeepSeek V4 Pro でも、米国のフロンティアから約 8 か月遅れていると評価した。",
-            "In May 2026, NIST's CAISI judged that even the strongest Chinese open-weight model, DeepSeek V4 Pro, trails the US frontier by about eight months.",
-          ),
-          refs: ["3.1"],
-          links: [S.nistCaisi, S.metrTimeHorizons],
-        }),
       ],
     ),
   ],
@@ -265,8 +268,8 @@ export const MATERIALS: GroupDef = {
     item("human-data", t("人が書いたデータ", "Human-written data"), {
       summary: t("インターネットの文章、書籍、コード。", "Web text, books and code."),
       note: t(
-        "Villalobos らは、人間が書いた公開テキストを約 300 兆トークンと見積もり、2026〜2032 年に使い切ると予測した。",
-        "Villalobos et al. estimate public human-written text at about 300 trillion tokens and expect it to be used up between 2026 and 2032.",
+        "Villalobos らは、学習に使える人間が書いた公開テキストを約 300 兆トークンと見積もり、今の傾向が続けば 2026〜2032 年に使い切ると予測した。",
+        "Villalobos et al. estimate the usable stock of public human-written text at about 300 trillion tokens and, if current trends continue, expect it to be used up between 2026 and 2032.",
       ),
       refs: ["5.2:data"],
       links: [S.villalobos, S.dataConstrained],
@@ -282,16 +285,16 @@ export const MATERIALS: GroupDef = {
     item("experiment-data", t("実験データ", "Experimental data"), {
       summary: t("科学の実験や計算の結果。答えを確かめる手段にもなる。", "Results of experiments and simulations, which can also check answers."),
       note: t(
-        "Coscientist（2023 年）は、GPT-4 に検索、コードの実行、実験装置の自動制御を組み合わせ、化学の実験を自律的に計画して実行した。",
-        "Coscientist (2023) combined GPT-4 with search, code execution and lab automation to plan and run chemistry experiments on its own.",
+        "Coscientist（2023 年）は、GPT-4 に検索、コードの実行、実験装置の自動制御を組み合わせ、化学の実験を自律的に計画して実行した。実験の結果が、AI の立てた計画が正しいかを確かめる手段になる。",
+        "Coscientist (2023) combined GPT-4 with search, code execution and lab automation to plan and run chemistry experiments on its own; the experimental results become a way to check the AI's plans.",
       ),
       links: [S.coscientist],
     }),
     item("world-model", t("世界モデル・シミュレーション", "World models, simulation"), {
       summary: t("現実を模した環境で、安く何度も試行錯誤させる。", "Environments that imitate reality, where trial and error is cheap."),
       note: t(
-        "Google DeepMind の Genie 3 は、文章の指示から、720p・毎秒 24 コマでリアルタイムに動き回れる世界を生成し、数分間は一貫性を保つ。",
-        "Google DeepMind's Genie 3 turns a text prompt into a world you can move through in real time at 720p and 24 frames per second, staying consistent for a few minutes.",
+        "Google DeepMind の Genie 3 は、文章の指示から、720p・毎秒 24 コマでリアルタイムに動き回れる世界を生成し、数分間は一貫性を保つ。Google DeepMind は、世界モデルを使えば、多様なシミュレーション環境でエージェントを際限なく訓練できるとしている。",
+        "Google DeepMind's Genie 3 turns a text prompt into a world you can move through in real time at 720p and 24 frames per second, staying consistent for a few minutes; Google DeepMind argues that world models make it possible to train agents in an unlimited curriculum of rich simulated environments.",
       ),
       links: [S.genie3, S.cosmos],
     }),
@@ -320,8 +323,8 @@ export const MATERIALS: GroupDef = {
         "Tasks a machine can grade and environments where agents can practise; they decide how far RL can be extended.",
       ),
       note: t(
-        "SWE-Gym（2024 年）は、実行環境とユニットテストの付いた実際の Python の課題 2,438 件を用意し、それで学習したエージェントの解決率を最大 19 ポイント上げた。",
-        "SWE-Gym (2024) packaged 2,438 real Python tasks with runnable environments and unit tests; training agents on it raised resolve rates by up to 19 points.",
+        "SWE-Gym（2024 年）は、実行環境とユニットテストの付いた実際の Python の課題 2,438 件を用意し、それで学習したエージェントの SWE-bench Verified と Lite での解決率を最大 19 ポイント上げた。",
+        "SWE-Gym (2024) packaged 2,438 real Python tasks with runnable environments and unit tests; training agents on it raised their resolve rates on SWE-bench Verified and Lite by up to 19 points.",
       ),
       refs: ["5.2:rl", "5.3:answer"],
       links: [S.sweGym, S.tulu3, S.sweBench],

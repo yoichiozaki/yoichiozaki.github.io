@@ -37,6 +37,10 @@ export const SECTIONS: Record<string, SectionDef> = {
         "85% は構造的な水準というより、供給制約と先行契約が生んだ一時的に高い水準と見るべき",
         "The 85% should be read less as a structural level than as a temporarily high level produced by supply constraints and advance contracting.",
       ),
+      cowork: t(
+        "けん引役はコーディングエージェントの Claude Code と、その仕組みを知識労働に広げた Claude Cowork だ。",
+        "The drivers are the coding agent Claude Code and Claude Cowork, which extends the same mechanism to knowledge work.",
+      ),
     },
   },
   "2.3": {
@@ -46,6 +50,10 @@ export const SECTIONS: Record<string, SectionDef> = {
     ),
     points: {
       timing: t("支払い義務は 5〜20 年、売上は月単位から数年単位", "payment obligations run 5–20 years, while revenue runs from months to a few years."),
+      openai: t(
+        "WSJ が報じた OpenAI の調達難は、この連鎖の入口に負担が表れた例と読める。",
+        "OpenAI's fundraising difficulty reported by the WSJ can be read as strain showing up at the entrance of the chain.",
+      ),
     },
   },
   "3.1": {
@@ -54,6 +62,10 @@ export const SECTIONS: Record<string, SectionDef> = {
       window: t(
         "フロンティアにいる期間が短くなるほど、1 つのモデルの学習費を回収できる期間も短くなる。",
         "The shorter the time a model stays at the frontier, the shorter the window for recovering its training cost.",
+      ),
+      caisi: t(
+        "米国立標準技術研究所（NIST）の CAISI が 2026 年 5 月に公表した評価によれば、中国で最も強いオープンウェイトモデルの DeepSeek V4 Pro でも、米国のフロンティアから約 8 か月遅れている。",
+        "Even the strongest Chinese open-weight model, DeepSeek V4 Pro, sits about eight months behind the U.S. frontier, according to an assessment published in May 2026 by NIST's Center for AI Standards and Innovation (CAISI).",
       ),
     },
   },
@@ -95,6 +107,10 @@ export const SECTIONS: Record<string, SectionDef> = {
         "2023 年には「チップを作る速さ」が上限だったが、2026 年には「GW 単位の電源を建て、送電網につなぎ、許認可を得る速さ」が上限になった。",
         "In 2023 the ceiling was how fast chips could be made; in 2026 it is how fast gigawatt-scale power plants can be built, connected to the grid and permitted.",
       ),
+      cooling: t(
+        "この水準では、ラック内の配電を 800 V の直流に切り替え、液冷を標準にするしかない。",
+        "At these levels, power distribution in the rack has to move to 800 V DC and liquid cooling has to become standard.",
+      ),
     },
   },
   "4.2": {
@@ -107,6 +123,10 @@ export const SECTIONS: Record<string, SectionDef> = {
       fp8: t(
         "学習の主力は FP8（と MXFP8）、推論の主力は FP4",
         "FP8 (and MXFP8) as the workhorse for training, FP4 as the workhorse for inference.",
+      ),
+      llama4: t(
+        "Meta も 2025 年 4 月、Llama 4 の最大のモデル（Behemoth）を 3.2 万基の GPU を使って FP8 で事前学習し、GPU 1 基あたり 390 TFLOPS を出したと公表した。",
+        "Meta likewise reported in April 2025 that it pretrained its largest Llama 4 model (Behemoth) in FP8 on 32,000 GPUs, achieving 390 TFLOPS per GPU.",
       ),
     },
   },
@@ -143,6 +163,7 @@ export const SECTIONS: Record<string, SectionDef> = {
         "確かなのは、ボトルネックが 1 か所にとどまらず、1 つを解消すると次の場所へ移っていくことである。",
         "What is certain is that the bottleneck does not stay in one place: resolve one, and it moves to the next.",
       ),
+      interconnect: t("パッケージの外でも、相互接続の単位が大きくなった。", "Beyond the package, the unit of interconnection grew as well."),
     },
   },
   "4.6": {
@@ -163,6 +184,14 @@ export const SECTIONS: Record<string, SectionDef> = {
       monitor: t(
         "効率を上げる設計と、監視しやすさを保つ設計がぶつかる場面が、2030 年に向けて増えていく。",
         "Situations in which designs that raise efficiency collide with designs that keep models monitorable will become more frequent heading toward 2030.",
+      ),
+      o1: t(
+        "数学コンテスト AIME 2024 の正答率は、GPT-4o の 12% から、o1 の 1 回の回答で 74%、64 回の多数決で 83%、1,000 個の候補を学習済みの採点関数で順位づけすると 93% になった。",
+        "Accuracy on the AIME 2024 math competition went from GPT-4o's 12% to 74% for a single o1 answer, 83% with majority voting over 64 samples, and 93% when re-ranking 1,000 samples with a learned scoring function.",
+      ),
+      rlvr: t(
+        "2025 年 1 月の DeepSeek-R1 は、数学やプログラミングのように正誤を機械的に判定できる課題の報酬で強化学習を行う RLVR（Reinforcement Learning with Verifiable Rewards）と、価値関数のモデルを使わない GRPO という手法で、同じことを安く再現した。",
+        "DeepSeek-R1 in January 2025 reproduced this cheaply with RLVR (reinforcement learning with verifiable rewards) on tasks whose correctness can be checked automatically, such as math and programming, and GRPO, a method that does not use a value model.",
       ),
     },
   },
@@ -232,6 +261,30 @@ export const SECTIONS: Record<string, SectionDef> = {
         "それでも、8 割近くの仕事は発注者が受け入れる水準に届いていない。",
         "Even so, nearly 80% of the projects still fall short of what a client would accept.",
       ),
+      upfront: t(
+        "1 つはモデルの能力を上げるレバー（事前学習、強化学習、アルゴリズムの効率）で、費用は学習費や研究費として前払いで出る。",
+        "One set raises the model's capability (pretraining, reinforcement learning, algorithmic efficiency), and its cost is paid up front, as training and research cost.",
+      ),
+      perUse: t(
+        "もう 1 つはモデルを仕事に使う側のレバー（推論時計算とハーネス）で、費用は主に、使うたびに推論費として出る。",
+        "The other set puts the model to work (inference-time compute and the harness), and its cost arrives mainly with each use, as inference cost.",
+      ),
+      perToken: t(
+        "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",
+        "As long as customers pay per token, more thinking also means more revenue.",
+      ),
+      handoff: t(
+        "Anthropic は、最初のセッションで環境を整えるエージェントと、少しずつ進めて進捗を書き残すエージェントに分けることで、これに対処している。",
+        "it addressed this by splitting the work between an agent that sets up the environment in the first session and one that makes incremental progress and records it.",
+      ),
+      mixed: t(
+        "売上に直接つながるのは仕事を完了する側だが、その指標（METR のタイムホライズンや RLI）には、モデルの改善と、ハーネスや推論計算の改善が混ざっている。",
+        "Revenue follows the side that gets work done, but its measures (METR's time horizon, RLI) mix improvements in the model with improvements in the harness and inference compute.",
+      ),
+      metrSystem: t(
+        "つまりタイムホライズンは、モデル単体ではなく、仕事を完了するシステムの能力の指標である。",
+        "so the time horizon tracks what a system gets done, not what the model can do alone.",
+      ),
     },
   },
   "5.3": {
@@ -264,6 +317,10 @@ export const SECTIONS: Record<string, SectionDef> = {
       allocate: t(
         "予測できる部分に資本を集め、予測できない部分は研究として小さく試す",
         "Concentrating capital on the predictable parts and testing the unpredictable parts on a small scale as research",
+      ),
+      recover: t(
+        "事前学習の費用は、モデルが売れる期間をかけて後から回収しなければならない。",
+        "pretraining has to be recovered afterwards, over the period in which the model sells.",
       ),
     },
   },
