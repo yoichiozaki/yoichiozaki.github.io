@@ -34,8 +34,8 @@ export const CAPITAL: GroupDef = {
   label: t("資本調達", "Capital raising"),
   detail: {
     summary: t(
-      "チェーンの入口。自社の営業キャッシュフローのほか、株式、転換社債、借入、リース、取引先からの融資などで、計算資源を確保するためのお金を用意する。",
-      "Where the chain starts: the money to secure compute, from a company's own operating cash flow as well as equity, convertible notes, debt, leases and financing from suppliers.",
+      "チェーンの入口。内部資金（自社の営業キャッシュフロー）のほか、株式、転換社債、借入、リース、取引先からの融資などで、計算資源を確保するためのお金を用意する。",
+      "Where the chain starts: the money to secure compute, from internal funds (a company's own operating cash flow) as well as equity, convertible notes, debt, leases and financing from suppliers and partners.",
     ),
     note: t(
       "次の巨額の資本を集めるのに必要なものは、能力への期待から、ユニットエコノミクスの証明に変わった。1 回の調達額は数百億ドルを超え、それを出せる相手は限られる。Anthropic の財務キャッシュフローは 2023 年の 23 億ドルから 2026 年上期の 1,108 億ドルに増えたが、OpenAI の 10 月の調達は、当初目標の 300 億ドルに対して、WSJ の報道時点で約 110 億ドルしか集まっていない。",
@@ -75,7 +75,7 @@ export const CAPITAL: GroupDef = {
         "Anthropic は Broadcom から TPU を載せたラックをリースし、その賃料の一部を Broadcom に発行する転換社債で賄える。Microsoft の開始前のリースは 3,646 億ドルで、貸借対照表に載る前の実質的な長期債務である。",
         "Anthropic leases TPU racks from Broadcom and can pay part of the rent with convertible notes issued to Broadcom. Microsoft's leases not yet commenced total USD 364.6 billion — effectively long-term debt that has not yet reached the balance sheet.",
       ),
-      refs: ["2.2:contracts", "2.3", "7.1:leases"],
+      refs: ["2.2:vendor", "2.2:contracts", "2.3", "7.1:leases"],
       links: [S.s1, S.msft10q],
     }),
   ],

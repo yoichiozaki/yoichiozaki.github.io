@@ -179,9 +179,17 @@ function RefButtons({ refs, locale, onJump }: JumpProps & { refs?: string[] }) {
   );
 }
 
-export function Legend({ locale }: { locale: Locale }) {
+export function Legend({ locale, list = false }: { locale: Locale; list?: boolean }) {
   const isJa = locale === "ja";
   const categories: Category[] = ["resource", "compute", "size", "stage", "material", "harness", "context", "capability", "measure"];
+  // The list has no top row to read right to left, so it only explains the numbers.
+  const chainNote = list
+    ? isJa
+      ? "資本から FCF までのチェーン（数字は第 2.1 節の環）"
+      : "Chain from capital to FCF (numbers are the links of Section 2.1)"
+    : isJa
+      ? "資本から FCF までのチェーン（数字は第 2.1 節の環。上段は右から左へ読む）"
+      : "Chain from capital to FCF (numbers are the links of Section 2.1; the top row reads right to left)";
   return (
     <ul className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
       <li className="flex items-center gap-1.5 font-medium text-foreground">
@@ -191,9 +199,7 @@ export function Legend({ locale }: { locale: Locale }) {
             <line x1="1" y1="4" x2="25" y2="4" stroke={CHAIN_COLOR} strokeWidth="3" strokeLinecap="round" />
           </svg>
         </span>
-        {isJa
-          ? "資本から FCF までのチェーン（数字は第 2.1 節の環。上段は右から左へ読む）"
-          : "Chain from capital to FCF (numbers are the links of Section 2.1; the top row reads right to left)"}
+        {chainNote}
       </li>
       {categories.map((c) => (
         <li key={c} className="flex items-center gap-1.5">

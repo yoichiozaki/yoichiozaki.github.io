@@ -13,13 +13,19 @@ export const SECTIONS: Record<string, SectionDef> = {
     points: {
       link4: t("モデル能力: 学習で上がる、モデル単体の能力。", "Model capability: the capability the model itself gains from training."),
       link1: t(
-        "資本調達: 株式、転換社債、借入、リース、取引先からの融資など",
-        "Capital raising: equity, convertible notes, debt, leases, financing from suppliers and partners",
+        "資本調達: 内部資金（営業キャッシュフロー）、株式、転換社債、借入、リース、取引先からの融資など",
+        "Capital raising: internal funds (operating cash flow), equity, convertible notes, debt, leases, financing from suppliers and partners",
       ),
       link2: t(
         "計算資源の確保: クラウド契約、チップのリース、自社データセンター。電力・チップ・HBM・パッケージの供給に縛られる",
         "Securing compute: cloud contracts, chip leases, own data centres — bounded by the supply of power, chips, HBM and packaging",
       ),
+      link3: t(
+        "学習: 事前学習、強化学習などの事後学習、研究のための計算",
+        "Training: pretraining, post-training such as reinforcement learning, and compute for research",
+      ),
+      link5: t("推論の供給: トークンを生成できる量（処理能力）と、その単価", "Inference supply: the capacity to generate tokens, and its unit cost"),
+      link6: t("需要: 利用者数、顧客数、トークン消費量", "Demand: users, customers, token consumption"),
       link7: t("売上: 従量課金とサブスクリプション", "Revenue: usage-based billing and subscriptions"),
       link8: t("粗利: 売上から顧客向け推論のコストを引いたもの", "Gross profit: revenue minus the cost of serving customers"),
       link9: t(
@@ -341,8 +347,8 @@ export const SECTIONS: Record<string, SectionDef> = {
         "The other set puts the model to work (inference-time compute, the harness and inference-time context), and its cost shows up not as up-front training cost but mainly as inference cost.",
       ),
       chainCosts: t(
-        "上段のチェーンで見ると、学習費と研究費は営業利益の手前で、顧客向けの推論費は粗利の手前で、計算資源を自社で持つための設備投資は FCF の手前で差し引かれる。",
-        "On the chain along the top, training and research costs are deducted on the way to operating profit, the cost of serving customers on the way to gross profit, and capex on compute the lab owns on the way to FCF.",
+        "上段のチェーンで見ると、顧客向けの推論費は粗利の手前で、学習費と研究費は営業利益の手前で、計算資源を自社で持つための設備投資は FCF の手前で差し引かれる。",
+        "Along the top row, the cost of serving customers is deducted on the way to gross profit, training and research costs on the way to operating profit, and capex on compute the lab owns on the way to FCF.",
       ),
       perToken: t(
         "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",

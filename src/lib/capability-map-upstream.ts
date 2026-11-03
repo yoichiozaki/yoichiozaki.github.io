@@ -264,7 +264,7 @@ export const STAGES: GroupDef = {
           "重みを更新して、モデルの能力そのものを上げる。費用は前払いになる。",
           "Updating the weights to raise the model's own capability; the cost is paid up front.",
         ),
-        refs: ["5.2:upfront", "3.1"],
+        refs: ["2.1:link3", "5.2:upfront", "3.1"],
         links: [S.kaplan, S.chinchilla, S.epochModels],
       },
       [
@@ -342,7 +342,7 @@ export const STAGES: GroupDef = {
           "チェーンの環 5（推論の供給）にあたる。処理能力は計算量のうち推論に振り分けた分で、トークンあたりの単価は右の矢印に書いた推論効率で決まる。",
           "This is link 5 of the chain (inference supply): its capacity is the share of compute allocated to inference, and its cost per token is set by inference efficiency, the arrow to its right.",
         ),
-        refs: ["5.2:perUse", "5.2:perToken", "5.3:inferenceRecovery", "5.3:answer"],
+        refs: ["2.1:link5", "5.2:perUse", "5.2:perToken", "5.3:inferenceRecovery", "5.3:answer"],
         links: [S.o1, S.testTimeCompute, S.priceOfProgress],
       },
       [

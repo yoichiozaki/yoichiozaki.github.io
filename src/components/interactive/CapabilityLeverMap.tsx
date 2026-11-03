@@ -498,7 +498,7 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
         )}
 
         <div className="border-t border-border px-3 py-2 sm:px-4">
-          <Legend locale={loc} />
+          <Legend locale={loc} list={mode === "list"} />
         </div>
       </div>
       {returnHost &&

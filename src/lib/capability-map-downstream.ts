@@ -284,7 +284,7 @@ export const USES: GroupDef = {
       "仕事を完了する能力が使われる先で、チェーンの環 6（需要）にあたる。顧客の利用は、「価格」の矢印で売上に変わる。ラボが自社の研究開発に使う分は、売上を生まず、計算資源費として研究開発費に入るが、次のモデルの開発を速める。",
       "Where getting work done is put to use — link 6 of the chain (demand). Customers' use turns into revenue through the “Price” arrow. A lab's own use in AI research earns no revenue — its compute is booked as R&D — but speeds up work on the next model.",
     ),
-    refs: ["3.3", "6.3:demand"],
+    refs: ["2.1:link6", "3.3", "6.3:demand"],
     links: [S.menlo, S.gdpval],
   },
   children: [
