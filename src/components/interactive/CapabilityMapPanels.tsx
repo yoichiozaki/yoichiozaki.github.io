@@ -26,7 +26,7 @@ import {
   type Locale,
   type Text,
 } from "@/lib/capability-map";
-import { CHAIN_COLOR, ChainBadge, MEASURE_COLOR, categoryColor, tint } from "./CapabilityMapCanvas";
+import { CHAIN_COLOR, ChainBadge, MEASURE_COLOR, categoryColor, chainPrefix, tint } from "./CapabilityMapCanvas";
 
 const panel = "rounded-lg border border-border bg-background/95 shadow-lg backdrop-blur-sm";
 
@@ -563,7 +563,7 @@ export function ListView({ locale, onJump }: JumpProps) {
                 ) : (
                   <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden />
                 )}
-                {CHAIN_LINK[id] && <span className="sr-only">{isJa ? `環 ${CHAIN_LINK[id]}：` : `Link ${CHAIN_LINK[id]}: `}</span>}
+                {CHAIN_LINK[id] && <span className="sr-only">{chainPrefix(id, locale)}</span>}
                 {el.label[locale]}
                 {el.sublabel && <span className="font-normal text-muted-foreground">— {el.sublabel[locale]}</span>}
                 <Chevron />
@@ -584,7 +584,7 @@ export function ListView({ locale, onJump }: JumpProps) {
                       <li key={childId} className="py-2">
                         <p className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
                           {CHAIN_LINK[childId] && <ChainBadge n={CHAIN_LINK[childId]} className="relative shrink-0" />}
-                          {CHAIN_LINK[childId] && <span className="sr-only">{isJa ? `環 ${CHAIN_LINK[childId]}：` : `Link ${CHAIN_LINK[childId]}: `}</span>}
+                          {CHAIN_LINK[childId] && <span className="sr-only">{chainPrefix(childId, locale)}</span>}
                           {child.label[locale]}
                         </p>
                         <Extras detail={child.detail} locale={locale} onJump={onJump} />

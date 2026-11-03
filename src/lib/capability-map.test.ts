@@ -419,15 +419,11 @@ describe("capability map: the chain from capital to FCF", () => {
     for (const e of EDGES.filter((x) => x.kind === "money")) {
       expect(CHAIN_LINK[e.to], e.id).toBe((CHAIN_LINK[e.from] % 10) + 1);
     }
-    // In between, the chain runs through the capability layer; a box counts as reaching what it contains and is contained in.
+    // In between, the chain runs through the capability layer; a box reaches what it contains, so the stages reach training and inference.
     const next = new Map<string, Set<string>>();
     const link = (a: string, b: string) => next.set(a, (next.get(a) ?? new Set()).add(b));
     for (const e of chainEdges) link(e.from, e.to);
-    for (const el of ELEMENTS.values()) {
-      if (!el.parent) continue;
-      link(el.parent, el.id);
-      link(el.id, el.parent);
-    }
+    for (const el of ELEMENTS.values()) if (el.parent) link(el.parent, el.id);
     const reach = (start: string) => {
       const seen = new Set([start]);
       const queue = [start];
@@ -443,6 +439,8 @@ describe("capability map: the chain from capital to FCF", () => {
     const fromCapital = reach("capital");
     for (const id of Object.keys(CHAIN_LINK)) expect(fromCapital, id).toContain(id);
     expect(reach("fcf")).toContain("capital");
+    // Every numbered box carries the thick line onward itself, so none of them is reached only through its frame.
+    for (const id of Object.keys(CHAIN_LINK)) expect(chainEdges.some((e) => e.from === id), `${id} has no chain arrow out`).toBe(true);
   });
 
   it.each(states)("puts the money links along the top, each over a column, reading right to left (%s)", (_, collapsed) => {

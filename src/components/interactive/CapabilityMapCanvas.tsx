@@ -35,11 +35,11 @@ export function ChainBadge({ n, className = "absolute -left-2.5 -top-2.5" }: { n
   );
 }
 
-/** "環 7：売上" for boxes on the chain, so screen readers hear the link number the badge shows. */
-export const chainName = (id: string, label: string, locale: Locale) => {
+/** "環 7：" for boxes on the chain, read before the label so screen readers hear the link number the badge shows. */
+export const chainPrefix = (id: string, locale: Locale) => {
   const n = CHAIN_LINK[id];
-  if (!n) return label;
-  return locale === "ja" ? `環 ${n}：${label}` : `Link ${n}: ${label}`;
+  if (!n) return "";
+  return locale === "ja" ? `環 ${n}：` : `Link ${n}: `;
 };
 
 type Props = {
@@ -102,10 +102,15 @@ export const CapabilityMapCanvas = memo(function CapabilityMapCanvas({ layout, l
           type: "button" as const,
           "aria-pressed": selected === id,
           title: label,
-          ...(CHAIN_LINK[id] ? { "aria-label": chainName(id, label, locale) } : {}),
           ...handlers(id),
         };
-        const badge = CHAIN_LINK[id] ? <ChainBadge n={CHAIN_LINK[id]} /> : null;
+        // The badge is decorative; the link number reaches screen readers as hidden text, so the name keeps the sublabel too.
+        const badge = CHAIN_LINK[id] ? (
+          <>
+            <ChainBadge n={CHAIN_LINK[id]} />
+            <span className="sr-only">{chainPrefix(id, locale)}</span>
+          </>
+        ) : null;
 
         if (b.kind === "group") {
           return (
