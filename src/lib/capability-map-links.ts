@@ -428,8 +428,8 @@ export const KEY_POINTS: KeyPointDef[] = [
     id: "kp-chain",
     title: t("FCF が次の調達の条件を決める", "FCF sets the terms of the next raise"),
     body: t(
-      "仕事を完了する能力が売上に変わり、推論費、学習・研究費、設備投資などを順に引いた残りが FCF になる。次の巨額の資本を集めるには、このチェーンが回ることを、箱に添えた問いに数字で答えて示す必要がある（第 6.3 節）。Anthropic の計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がった。",
-      "Getting work done turns into revenue; subtract inference cost, then training and research, then capex and the rest, and what is left is FCF. To raise the next round, a lab has to show that this chain turns by answering the questions under its boxes in numbers (Section 6.3). Anthropic's revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026.",
+      "仕事を完了する能力が売上に変わり、そこから推論費、学習・研究費、設備投資などを順に引いた残りが FCF になる。次の巨額の資本を集めるには、このチェーンが回ることを、箱に添えた問いに数字で答えて示す必要がある（第 6.3 節）。Anthropic の計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がった。",
+      "Getting work done turns into revenue; subtract inference cost, then training and research, then capex and the rest, and what is left is FCF. To raise the next round, a lab has to answer the questions under the boxes with numbers, showing that this chain turns (Section 6.3). Anthropic's revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026.",
     ),
     ids: [
       "capital",

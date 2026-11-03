@@ -83,7 +83,7 @@ export const CapabilityMapCanvas = memo(function CapabilityMapCanvas({ layout, l
         className="pointer-events-none absolute -translate-y-1/2 whitespace-nowrap text-[11px] font-medium text-muted-foreground"
         style={{ left: layout.caption.x, top: layout.caption.y, opacity: related === null ? 1 : DIM }}
       >
-        {isJa ? "上段はお金の流れ。右の売上から左へ読む" : "Top row: the money, read right to left from revenue"}
+        {isJa ? "上段はお金の流れ。右の売上から左へ読む" : "Top row: the money flow, read right to left from revenue"}
       </p>
       {layout.order.map((id) => {
         const b = layout.boxes.get(id)!;

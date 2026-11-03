@@ -468,7 +468,7 @@ describe("capability map: the chain from capital to FCF", () => {
     expect(capital.x).toBe(resources.x);
     expect(capital.y + capital.h).toBeLessThan(resources.y);
     // The caption ("read right to left") sits under the strip, clear of every box and of the loop lane further right.
-    const captionBox = { x: caption.x, y: caption.y - 8, w: 280, h: 16 };
+    const captionBox = { x: caption.x, y: caption.y - 8, w: 340, h: 16 };
     expect(caption.y).toBeGreaterThan(band.y + band.h);
     for (const b of top(layoutMap(collapsed))) expect(overlaps(captionBox, b), b.id).toBe(false);
     const research = pathPoints(layoutMap(collapsed).loops.find((l) => l.id === "loop-research")!.path);

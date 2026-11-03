@@ -450,7 +450,7 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
                   : "Contains",
             related,
           ] as const,
-          [isJa ? "この費用が出るところ" : "Where this cost arises", EDGE_BY_ID.get(id)?.ties ?? []] as const,
+          [isJa ? "この費用がかかるところ" : "Where this cost arises", EDGE_BY_ID.get(id)?.ties ?? []] as const,
         ].map(([heading, ids]) =>
           ids.length === 0 ? null : (
             <Fragment key={heading}>

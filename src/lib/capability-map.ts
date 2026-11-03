@@ -257,7 +257,7 @@ export const LAYOUT = {
   CHAIN_GAP: 44,
   GROUP_HEADER: 32,
   /** Extra header room for a group's sublabel. */
-  GROUP_SUBLABEL: 16,
+  GROUP_SUBLABEL: 18,
   PAD: 10,
   SUB_HEADER: 26,
   SUB_PAD: 6,

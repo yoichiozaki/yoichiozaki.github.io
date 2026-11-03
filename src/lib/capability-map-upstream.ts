@@ -9,7 +9,7 @@ export const RESOURCES: GroupDef = {
   label: t("上流の資源", "Upstream resources"),
   detail: {
     summary: t(
-      "計算資源のもとになるもの。チップ、電力と用地、それらを動かす運用からなる。資本調達（環 1）で集めたお金で、これらを買ったり借りたりして計算資源を確保する（環 2）。",
+      "計算資源のもとになるもの。チップ、電力と用地、それらの運用からなる。資本調達（環 1）で集めたお金で、これらを買ったり借りたりして計算資源を確保する（環 2）。",
       "What compute is built from: chips, power and sites, and the operations that keep them running. Money raised at link 1 buys or rents them to secure compute (link 2).",
     ),
     note: t(
@@ -339,7 +339,7 @@ export const STAGES: GroupDef = {
           "Spending more compute on each job to raise quality on the spot. The capacity it runs on is a pre-committed fixed cost, but what is used turns into per-token revenue at once, so recovery is not deferred as it is for training.",
         ),
         note: t(
-          "チェーンの環 5（推論の供給）にあたる。処理能力は計算量のうち推論に振り分けた分で、トークンあたりの単価は右の推論効率で決まる。",
+          "チェーンの環 5（推論の供給）にあたる。処理能力は計算量のうち推論に振り分けた分で、トークンあたりの単価は右の矢印に書いた推論効率で決まる。",
           "This is link 5 of the chain (inference supply): its capacity is the share of compute allocated to inference, and its cost per token is set by inference efficiency, the arrow to its right.",
         ),
         refs: ["5.2:perUse", "5.2:perToken", "5.3:inferenceRecovery", "5.3:answer"],

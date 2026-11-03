@@ -144,8 +144,8 @@ export const MEASURES: GroupDef = {
       t("経済", "Economy"),
       {
         summary: t(
-          "能力が、利用の広がりと生産性に変わったかどうか。売上と利益は、上段のチェーン（環 7〜10）で見る。",
-          "Whether capability turned into wider use and productivity; revenue and profit sit on the chain along the top (links 7–10).",
+          "能力が、利用の広がりと生産性に変わったかどうか。売上、利益、FCF は、上段のチェーン（環 7〜10）で見る。",
+          "Whether capability turned into wider use and productivity; revenue, profit and FCF sit on the chain along the top (links 7–10).",
         ),
         refs: ["3.3", "8:growth"],
         links: [S.s1, S.menlo],
