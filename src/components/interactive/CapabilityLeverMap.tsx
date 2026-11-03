@@ -352,7 +352,7 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
     };
   }, [fullscreen]);
 
-  const title = isJa ? "資本から FCF までのチェーンと、AI の能力を伸ばすレバー" : "Map: the chain from capital to FCF, and the levers on AI capability";
+  const title = isJa ? "資本から FCF までのチェーンと、AI の能力を伸ばすレバー" : "The chain from capital to FCF, and the levers that raise AI capability";
   const hint =
     mode === "list"
       ? isJa

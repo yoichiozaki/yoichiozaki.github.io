@@ -74,6 +74,17 @@ export const CapabilityMapCanvas = memo(function CapabilityMapCanvas({ layout, l
 
   return (
     <div className="relative" style={{ width: layout.width, height: layout.height }}>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute rounded-2xl"
+        style={{ left: layout.band.x, top: layout.band.y, width: layout.band.w, height: layout.band.h, background: tint(CHAIN_COLOR, 5) }}
+      />
+      <p
+        className="pointer-events-none absolute -translate-y-1/2 whitespace-nowrap text-[11px] font-medium text-muted-foreground"
+        style={{ left: layout.caption.x, top: layout.caption.y, opacity: related === null ? 1 : DIM }}
+      >
+        {isJa ? "上段はお金の流れ。右の売上から左へ読む" : "Top row: the money, read right to left from revenue"}
+      </p>
       {layout.order.map((id) => {
         const b = layout.boxes.get(id)!;
         const el = ELEMENTS.get(id)!;
@@ -109,6 +120,7 @@ export const CapabilityMapCanvas = memo(function CapabilityMapCanvas({ layout, l
                 <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} aria-hidden />
                 {label}
               </span>
+              {el.sublabel && <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{el.sublabel[locale]}</span>}
             </button>
           );
         }

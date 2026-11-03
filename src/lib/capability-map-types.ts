@@ -56,6 +56,8 @@ export type GroupDef = {
   id: string;
   category: Category;
   label: Text;
+  /** A short line under the header, such as the question a link of the chain must answer. */
+  sublabel?: Text;
   detail: Detail;
   layout: "column" | "row";
   /** Items per row for "row" layouts; wraps onto further rows. */

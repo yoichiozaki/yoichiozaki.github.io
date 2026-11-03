@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef } from "react";
 import {
   CATEGORY_LABEL,
   CHAIN_LINK,
+  CHAIN_LINK_NAME,
   COMPANIES,
   EDGE_BY_ID,
   EDGES,
@@ -37,8 +38,14 @@ function kicker(id: string, locale: Locale): string {
     const base = category === labelOf(id)?.[locale] ? "" : category;
     const n = CHAIN_LINK[id];
     if (!n) return base;
-    if (isJa) return base ? `${base}（環 ${n}）` : `チェーンの環 ${n}`;
-    return base ? `${base} (link ${n})` : `Link ${n} of the chain`;
+    // §2.1's own name for the link, where the box on the map is labelled differently.
+    const name = CHAIN_LINK_NAME[id]?.[locale];
+    if (isJa) {
+      const link = name ? `環 ${n}：${name}` : `環 ${n}`;
+      return base ? `${base}（${link}）` : `チェーンの${link}`;
+    }
+    const link = name ? `link ${n}: ${name}` : `link ${n}`;
+    return base ? `${base} (${link})` : `Chain ${link}`;
   }
   if (kind === "edge") {
     const e = EDGE_BY_ID.get(id)!;
@@ -184,7 +191,9 @@ export function Legend({ locale }: { locale: Locale }) {
             <line x1="1" y1="4" x2="25" y2="4" stroke={CHAIN_COLOR} strokeWidth="3" strokeLinecap="round" />
           </svg>
         </span>
-        {isJa ? "資本から FCF までのチェーン（数字は第 2.1 節の環）" : "Chain from capital to FCF (numbers are the links of Section 2.1)"}
+        {isJa
+          ? "資本から FCF までのチェーン（数字は第 2.1 節の環。上段は右から左へ読む）"
+          : "Chain from capital to FCF (numbers are the links of Section 2.1; the top row reads right to left)"}
       </li>
       {categories.map((c) => (
         <li key={c} className="flex items-center gap-1.5">
@@ -197,7 +206,7 @@ export function Legend({ locale }: { locale: Locale }) {
           {isJa ? "効率・精度" : "Efficiency, precision"}
         </span>
         <span className="rounded-full border px-1.5 text-[10px] font-semibold text-foreground" style={{ borderColor: CHAIN_COLOR, background: tint(CHAIN_COLOR, 9) }}>
-          {isJa ? "−\u00a0費用" : "−\u00a0Cost"}
+          {isJa ? "−\u00a0費用など" : "−\u00a0Cost, etc."}
         </span>
         {isJa ? "矢印のラベル" : "Arrow labels"}
       </li>

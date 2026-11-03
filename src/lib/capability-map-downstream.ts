@@ -278,10 +278,11 @@ export const USES: GroupDef = {
   category: "capability",
   layout: "column",
   label: t("使い道（需要）", "Uses (demand)"),
+  sublabel: t("契約と継続利用で裏づけられるか", "Backed by contracts and continued use?"),
   detail: {
     summary: t(
-      "仕事を完了する能力が使われる先で、チェーンの環 6（需要）にあたる。ここで売上や研究の成果に変わる。",
-      "Where getting work done is put to use — link 6 of the chain (demand) — and turns into revenue and research results.",
+      "仕事を完了する能力が使われる先で、チェーンの環 6（需要）にあたる。顧客の利用は価格を通じて売上に変わる。ラボ自身の研究開発での利用は売上を生まず、その計算資源費は研究開発費に入るが、次のモデルの開発を速める。",
+      "Where getting work done is put to use — link 6 of the chain (demand). Customers' use turns into revenue through the price; a lab's own use in AI research earns no revenue and its compute counts as R&D, but it speeds up the next model.",
     ),
     refs: ["3.3", "6.3:demand"],
     links: [S.menlo, S.gdpval],

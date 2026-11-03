@@ -446,11 +446,16 @@ describe("capability map: the chain from capital to FCF", () => {
   });
 
   it.each(states)("puts the money links along the top, each over a column, reading right to left (%s)", (_, collapsed) => {
-    const { boxes, edges } = layoutMap(collapsed);
-    const columnX = Object.values(COLUMNS).map((c) => c.x);
+    const { boxes, edges, band, caption } = layoutMap(collapsed);
+    const centre = (r: { x: number; w: number }) => r.x + r.w / 2;
+    const columnCentres = Object.values(COLUMNS).map(centre);
     for (const id of MONEY_IDS) {
-      expect(boxes.get(id)!.y, id).toBe(LAYOUT.BAND_Y);
-      expect(columnX, id).toContain(boxes.get(id)!.x);
+      const b = boxes.get(id)!;
+      expect(b.y, id).toBe(LAYOUT.BAND_Y);
+      expect(columnCentres, id).toContain(centre(b));
+      // The strip behind the band holds the money nodes, and the top of the capital group.
+      if (id === "capital") expect(b.y >= band.y && b.x >= band.x, id).toBe(true);
+      else expect(inside(b, band), id).toBe(true);
     }
     for (const id of ["chain-gross", "chain-operating", "chain-fcf", "chain-next"]) {
       const def = EDGES.find((e) => e.id === id)!;
@@ -462,6 +467,18 @@ describe("capability map: the chain from capital to FCF", () => {
     const resources = boxes.get("resources")!;
     expect(capital.x).toBe(resources.x);
     expect(capital.y + capital.h).toBeLessThan(resources.y);
+    // The caption ("read right to left") sits under the strip, clear of every box and of the loop lane further right.
+    const captionBox = { x: caption.x, y: caption.y - 8, w: 280, h: 16 };
+    expect(caption.y).toBeGreaterThan(band.y + band.h);
+    for (const b of top(layoutMap(collapsed))) expect(overlaps(captionBox, b), b.id).toBe(false);
+    const research = pathPoints(layoutMap(collapsed).loops.find((l) => l.id === "loop-research")!.path);
+    expect(Math.min(...research.map((p) => p[0]))).toBeGreaterThan(captionBox.x + captionBox.w);
+  });
+
+  it("asks each link the question §6.3 says a lab must answer", () => {
+    for (const id of ["revenue", "gross-profit", "operating-profit", "fcf", "uses"]) expect(ELEMENTS.get(id)?.sublabel, id).toBeDefined();
+    expect(ELEMENTS.get("fcf")?.detail.refs).toEqual(expect.arrayContaining(["6.3:obligations", "6.3:tranche"]));
+    expect(ELEMENTS.get("uses")?.detail.refs).toContain("6.3:demand");
   });
 
   it.each(states)("takes the uses to revenue round the right-hand side, clear of other boxes (%s)", (_, collapsed) => {

@@ -338,6 +338,10 @@ export const STAGES: GroupDef = {
           "1 件の仕事に使う計算を増やし、その場で出来を上げる。動かす計算資源は前もって契約した固定費だが、使った分はその場でトークン単位の売上になるので、学習費のように回収が先送りにならない。",
           "Spending more compute on each job to raise quality on the spot. The capacity it runs on is a pre-committed fixed cost, but what is used turns into per-token revenue at once, so recovery is not deferred as it is for training.",
         ),
+        note: t(
+          "チェーンの環 5（推論の供給）にあたる。処理能力は計算量のうち推論に振り分けた分で、トークンあたりの単価は右の推論効率で決まる。",
+          "This is link 5 of the chain (inference supply): its capacity is the share of compute allocated to inference, and its cost per token is set by inference efficiency, the arrow to its right.",
+        ),
         refs: ["5.2:perUse", "5.2:perToken", "5.3:inferenceRecovery", "5.3:answer"],
         links: [S.o1, S.testTimeCompute, S.priceOfProgress],
       },

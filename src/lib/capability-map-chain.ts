@@ -4,7 +4,7 @@
  * Links 2–6 are the map's own resources, training, model, inference and uses.
  */
 import { SOURCES as S } from "./capability-map-sources";
-import { item, t, type EdgeDef, type GroupDef, type NodeDef } from "./capability-map-types";
+import { item, t, type EdgeDef, type GroupDef, type NodeDef, type Text } from "./capability-map-types";
 
 /** Link numbers from §2.1, shown as badges on the boxes that stand for each link. */
 export const CHAIN_LINK: Readonly<Record<string, number>> = {
@@ -20,6 +20,12 @@ export const CHAIN_LINK: Readonly<Record<string, number>> = {
   fcf: 10,
 };
 
+/** §2.1's names for the links whose boxes on the map carry a different label. */
+export const CHAIN_LINK_NAME: Readonly<Record<string, Text>> = {
+  resources: t("計算資源の確保", "securing compute"),
+  inference: t("推論の供給", "inference supply"),
+};
+
 export const CAPITAL: GroupDef = {
   kind: "group",
   id: "capital",
@@ -28,8 +34,8 @@ export const CAPITAL: GroupDef = {
   label: t("資本調達", "Capital raising"),
   detail: {
     summary: t(
-      "チェーンの入口。株式、転換社債、借入、リース、取引先からの融資などで、計算資源を確保するためのお金を集める。",
-      "The entrance of the chain: raising the money to secure compute through equity, convertible notes, debt, leases and financing from suppliers.",
+      "チェーンの入口。自社の営業キャッシュフローのほか、株式、転換社債、借入、リース、取引先からの融資などで、計算資源を確保するためのお金を集める。",
+      "The entrance of the chain: the money to secure compute, from a company's own operating cash flow as well as equity, convertible notes, debt, leases and financing from suppliers.",
     ),
     note: t(
       "次の巨額の資本を集める条件は、能力への期待から、ユニットエコノミクスの証明に移った。1 回の調達額は数百億ドルを超え、それを出せる相手は限られる。Anthropic の財務キャッシュフローは 2023 年の 23 億ドルから 2026 年上期の 1,108 億ドルに増えたが、OpenAI の 10 月の調達は、当初目標の 300 億ドルに対して、WSJ の報道時点で約 110 億ドルしか集まっていない。",
@@ -39,10 +45,10 @@ export const CAPITAL: GroupDef = {
     links: [S.s1, S.wsj, S.decoderOpenAI, S.cnbcRound],
   },
   children: [
-    item("ocf", t("営業キャッシュフロー", "Operating cash flow"), {
+    item("ocf", t("内部資金", "Internal funds"), {
       summary: t(
-        "本業が生む現金。外部に頼らずに投資を続けられるかを決める。",
-        "Cash from the core business; it decides whether investment can continue without outside money.",
+        "本業が生む現金（営業キャッシュフロー）で投資を賄う。設備投資のあとに残る分（FCF）が、外部に頼らずに投資を続けられるかを決める。",
+        "Investment paid for out of the cash the core business generates (operating cash flow); what is left after capex (FCF) decides whether investment can continue without outside money.",
       ),
       note: t(
         "Microsoft の 2026 会計年度の営業キャッシュフローは 1,829 億ドル。設備投資 1,159 億ドルを払っても FCF が残る。ただし、営業キャッシュフローのうち FCF として残る割合は 2023 会計年度の 68% から 37% に下がり、Amazon（過去 12 か月）と Alphabet（2026 年 1〜9 月）では設備投資が営業キャッシュフローを上回った。",
@@ -60,14 +66,14 @@ export const CAPITAL: GroupDef = {
       refs: ["3.5", "6.2:lenders", "2.2:vendor"],
       links: [S.wsj, S.decoderOpenAI, S.cnbcRound, S.s1, S.goog10q, S.amzn10q],
     }),
-    item("contracts", t("長期契約・リース", "Contracts and leases"), {
+    item("contracts", t("リース・取引先の融資", "Leases, vendor financing"), {
       summary: t(
-        "計算資源の代金を何年にも分けて払う資金の出し方。前払いは軽くなるが、長い支払い義務を負う。",
-        "A way of financing compute by paying for it over many years: less cash up front, but long payment obligations.",
+        "計算資源の代金を、リースや売り手からの融資で何年にも分けて払う資金の出し方。前払いは軽くなるが、長い支払い義務を負う。",
+        "Paying for compute over many years through leases or financing from the sellers: less cash up front, but long payment obligations.",
       ),
       note: t(
-        "Microsoft の開始前のリースは 3,646 億ドルで、貸借対照表に載る前の実質的な長期債務である。",
-        "Microsoft's leases not yet commenced total USD 364.6 billion — effectively long-term debt that has not yet reached the balance sheet.",
+        "Anthropic は Broadcom から TPU を載せたラックをリースし、その賃料の一部を Broadcom に発行する転換社債で賄える。Microsoft の開始前のリースは 3,646 億ドルで、貸借対照表に載る前の実質的な長期債務である。",
+        "Anthropic leases TPU racks from Broadcom and can pay part of the rent with convertible notes issued to Broadcom. Microsoft's leases not yet commenced total USD 364.6 billion — effectively long-term debt that has not yet reached the balance sheet.",
       ),
       refs: ["2.2:contracts", "2.3", "7.1:leases"],
       links: [S.s1, S.msft10q],
@@ -140,7 +146,7 @@ export const FCF: NodeDef = {
   id: "fcf",
   category: "money",
   label: t("FCF", "FCF"),
-  sublabel: t("設備投資とリース返済のあとに残るか", "Left after capex and lease payments?"),
+  sublabel: t("支払い義務と売上の期間が釣り合うか", "Obligations matched to revenue timing?"),
   emphasis: true,
   detail: {
     summary: t(
@@ -151,7 +157,7 @@ export const FCF: NodeDef = {
       "Anthropic の FCF は 2023 年の −16.3 億ドルから 2026 年上期の +34.5 億ドルになった。ただし、上期の GAAP の営業損益は −6.9 億ドルで、営業キャッシュフローには利息収入（約 11 億ドル）と株式報酬の足し戻し（約 22 億ドル）が含まれる。また、自社設備とリースへの移行で、設備投資とリースの支払いはこれから大きく増える。OpenAI は、2026〜2030 年の累計で約 2,800 億ドルの現金流出を見込み、手元資金は 2028 年に尽きる想定だと報じられている。",
       "Anthropic's FCF went from −USD 1.63 billion in 2023 to +USD 3.45 billion in H1 2026, but GAAP operating income for the half was −USD 0.69 billion: operating cash flow included about USD 1.1 billion of interest income and about USD 2.2 billion of stock-based compensation added back. Capex and lease payments are also about to rise sharply as it moves to its own facilities and leases. OpenAI reportedly projects about USD 280 billion of cumulative cash outflow over 2026–2030, with its cash running out in 2028.",
     ),
-    refs: ["2.1:link10", "2.2:finance", "2.2:leasePrincipal"],
+    refs: ["2.1:link10", "6.3:obligations", "6.3:tranche", "2.2:finance", "2.2:leasePrincipal"],
     links: [S.s1],
   },
 };
@@ -217,8 +223,8 @@ export const CHAIN_EDGES: EdgeDef[] = [
     kicker: DEDUCTED,
     detail: {
       summary: t(
-        "顧客向けの推論にかかる計算資源費で、環 5（推論の供給）の費用にあたる。推論時計算やハーネスで 1 件の仕事に使うトークンが増えるほど、ここが大きくなる。",
-        "The compute cost of serving customers' inference — the cost of link 5 (inference supply). The more tokens inference-time compute and the harness spend on each job, the larger it gets.",
+        "顧客向けの推論にかかる計算資源費で、環 5（推論の供給）の費用にあたる。推論時計算、ハーネス、推論時に持ち込む文脈で 1 件の仕事に使うトークンが増えるほど、ここが大きくなる。",
+        "The compute cost of serving customers' inference — the cost of link 5 (inference supply). The more tokens inference-time compute, the harness and the context brought in spend on each job, the larger it gets.",
       ),
       note: t(
         "Anthropic では、2024 年に顧客向け推論のコストが売上の 2 倍近くあったが、2026 年上期には売上の 15% まで下がった。ただし Anthropic は、無料ユーザーへの推論のコストと、販売パートナーへの手数料を、売上原価ではなく販売・マーケティング費に分類している。",
@@ -240,8 +246,8 @@ export const CHAIN_EDGES: EdgeDef[] = [
     kicker: DEDUCTED,
     detail: {
       summary: t(
-        "学習と研究の計算資源費（環 3 の費用）、人件費、営業費。学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。",
-        "Compute for training and research (the cost of link 3), personnel and sales costs. Training is paid for up front and has to be recovered while the model sells.",
+        "学習と研究の計算資源費（環 3 の費用）、ハーネスの開発などの人件費、営業費。Anthropic は、無料ユーザーへの推論のコストも販売・マーケティング費としてここに入れている。学習の費用は前払いで、モデルが売れる期間のうちに回収するしかない。",
+        "Compute for training and research (the cost of link 3), personnel — including the people building the harness — and sales costs; Anthropic also books the cost of inference for free users here, as sales and marketing. Training is paid for up front and has to be recovered while the model sells.",
       ),
       note: t(
         "Anthropic の 2026 年上期の研究開発費は 97 億ドルで、売上の 60% にあたる。7〜9 月期の売上の 80% 超が直前 6 か月に出たモデルによるという S-1 の数字は、1 つのモデルが売上の中心にいる期間が、半年から 1 年ほどしかないことを示唆している。",
@@ -263,8 +269,8 @@ export const CHAIN_EDGES: EdgeDef[] = [
     kicker: DEDUCTED,
     detail: {
       summary: t(
-        "設備投資（環 2 の費用）、運転資本の増加、税金など。一方で、株式報酬や減価償却のような現金の出ない費用は足し戻され、利息収入も加わるので、FCF が営業利益を上回ることもある。リースで計算資源を持つなら、リースの元本返済も引いて見る必要がある。",
-        "Capex (the cost of link 2), the increase in working capital, taxes and so on. Going the other way, non-cash expenses such as stock-based compensation and depreciation are added back and interest income comes in, so FCF can exceed operating profit. Where compute is held through leases, lease principal repayments need to be subtracted too.",
+        "計算資源を自社で持つための設備投資、運転資本の増加、税金など。環 2 の費用のうち、クラウドで借りる計算資源の利用料は、ここではなく推論費と学習・研究費に入る。一方で、株式報酬や減価償却のような現金の出ない費用は足し戻され、利息収入も加わるので、FCF が営業利益を上回ることもある。リースで計算資源を持つなら、リースの元本返済も引いて見る必要がある。",
+        "Capex to own compute, the increase in working capital, taxes and so on. Of link 2's cost, fees for compute rented from clouds are counted not here but in inference and training cost. Going the other way, non-cash expenses such as stock-based compensation and depreciation are added back and interest income comes in, so FCF can exceed operating profit. Where compute is held through leases, lease principal repayments need to be subtracted too.",
       ),
       note: t(
         "計算資源をクラウドの利用料として払えば、その支出は営業キャッシュフローから出ていく。ファイナンスリースに置き換えると、賃料の元本部分は財務キャッシュフローに入るので、営業キャッシュフロー − 設備投資で計算した FCF にはほとんど表れない。Anthropic の Broadcom とのリースだけで、賃料総額は約 1,612 億ドルにのぼる。",

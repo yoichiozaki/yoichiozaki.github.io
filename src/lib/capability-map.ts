@@ -5,7 +5,7 @@
  * next to the harness), sources in capability-map-sources.ts and article
  * quotes in capability-map-sections.ts.
  */
-import { CAPITAL, CHAIN_LINK, FCF, GROSS_PROFIT, OPERATING_PROFIT, REVENUE } from "./capability-map-chain";
+import { CAPITAL, CHAIN_LINK, CHAIN_LINK_NAME, FCF, GROSS_PROFIT, OPERATING_PROFIT, REVENUE } from "./capability-map-chain";
 import { CONTEXT, HARNESS, MODEL, SYSTEM, USES } from "./capability-map-downstream";
 import { COMPANIES, EDGES, KEY_POINTS, LOOPS } from "./capability-map-links";
 import { MATERIALS, MEASURES } from "./capability-map-measures";
@@ -24,7 +24,7 @@ import { COMPUTE, RESOURCES, SIZE, STAGES } from "./capability-map-upstream";
 
 export * from "./capability-map-types";
 export { SOURCES } from "./capability-map-sources";
-export { CHAIN_LINK, COMPANIES, EDGES, KEY_POINTS, LOOPS, SECTIONS };
+export { CHAIN_LINK, CHAIN_LINK_NAME, COMPANIES, EDGES, KEY_POINTS, LOOPS, SECTIONS };
 
 export const GROUPS: GroupDef[] = [CAPITAL, RESOURCES, SIZE, STAGES, HARNESS, CONTEXT, MEASURES, USES, MATERIALS];
 export const NODES: NodeDef[] = [REVENUE, GROSS_PROFIT, OPERATING_PROFIT, FCF, COMPUTE, MODEL, SYSTEM];
@@ -51,7 +51,15 @@ function buildIndex(): Map<string, ElementInfo> {
     map.set(info.id, info);
   };
   for (const g of GROUPS) {
-    add({ id: g.id, kind: "group", category: g.category, label: g.label, detail: g.detail, children: g.children.map((c) => c.id) });
+    add({
+      id: g.id,
+      kind: "group",
+      category: g.category,
+      label: g.label,
+      sublabel: g.sublabel,
+      detail: g.detail,
+      children: g.children.map((c) => c.id),
+    });
     for (const c of g.children) {
       if (isSub(c)) {
         add({
@@ -235,9 +243,12 @@ export function relatedIds(id: string): Set<string> {
 // ---------------------------------------------------------------------------
 
 export const LAYOUT = {
-  /** The money links of the chain run along the top. */
+  /** The money links of the chain run along the top, on a faint strip with a caption under it. */
   BAND_Y: 14,
   MONEY_H: 60,
+  /** Money nodes are narrower than their columns, which leaves the arrows between them room for labels. */
+  MONEY_W: 160,
+  BAND_PAD: 8,
   /** Lane for loops that cross the map above the capability layer, under the money band. */
   LANE_TOP: 96,
   /** Top of the capability layer in columns B–E; column A starts under the capital group. */
@@ -245,6 +256,8 @@ export const LAYOUT = {
   /** Room between the capital group and the resources it pays for. */
   CHAIN_GAP: 44,
   GROUP_HEADER: 32,
+  /** Extra header room for a group's sublabel. */
+  GROUP_SUBLABEL: 16,
   PAD: 10,
   SUB_HEADER: 26,
   SUB_PAD: 6,
@@ -290,6 +303,9 @@ export type MapLayout = {
   order: string[];
   edges: EdgeLayout[];
   loops: LoopLayout[];
+  /** The strip behind the money band, and where its caption starts (left edge, vertical centre). */
+  band: Rect;
+  caption: { x: number; y: number };
 };
 
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -300,6 +316,7 @@ const cy = (r: Rect) => r.y + r.h / 2;
 
 function layoutGroup(g: GroupDef, x: number, y: number, w: number, collapsed: ReadonlySet<string>, boxes: Map<string, BoxLayout>): Rect {
   const L = LAYOUT;
+  const header = L.GROUP_HEADER + (g.sublabel ? L.GROUP_SUBLABEL : 0);
   if (g.layout === "row") {
     const n = g.children.length;
     const cols = Math.min(n, g.columns ?? n);
@@ -311,19 +328,19 @@ function layoutGroup(g: GroupDef, x: number, y: number, w: number, collapsed: Re
         kind: "item",
         depth: 1,
         x: x + L.PAD + (i % cols) * (iw + L.ROW_GAP),
-        y: y + L.GROUP_HEADER + Math.floor(i / cols) * (L.ROW_ITEM_H + L.ROW_GAP),
+        y: y + header + Math.floor(i / cols) * (L.ROW_ITEM_H + L.ROW_GAP),
         w: iw,
         h: L.ROW_ITEM_H,
       });
     });
-    const rect = { x, y, w, h: L.GROUP_HEADER + rows * L.ROW_ITEM_H + (rows - 1) * L.ROW_GAP + L.PAD };
+    const rect = { x, y, w, h: header + rows * L.ROW_ITEM_H + (rows - 1) * L.ROW_GAP + L.PAD };
     boxes.set(g.id, { ...rect, id: g.id, kind: "group", depth: 0 });
     return rect;
   }
 
   const innerX = x + L.PAD;
   const innerW = w - 2 * L.PAD;
-  let cursor = y + L.GROUP_HEADER;
+  let cursor = y + header;
   g.children.forEach((c, i) => {
     if (i > 0) cursor += isSub(c) || isSub(g.children[i - 1]) ? L.SUB_GAP : L.ITEM_GAP;
     if (!isSub(c)) {
@@ -484,19 +501,27 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
   const L = LAYOUT;
   const C = COLUMNS;
   const boxes = new Map<string, BoxLayout>();
-  const node = (n: NodeDef, col: { x: number; w: number }, y: number, h: number): Rect => {
-    const rect = { x: col.x, y, w: col.w, h };
+  const node = (n: NodeDef, col: { x: number; w: number }, y: number, h: number, w = col.w): Rect => {
+    const rect = { x: col.x + (col.w - w) / 2, y, w, h };
     boxes.set(n.id, { ...rect, id: n.id, kind: "node", depth: 0 });
     return rect;
   };
 
-  // The money band: each link sits over the column whose cost is deducted on the way to it, so the chain
-  // reads right to left along the top, from revenue (over the uses) back to capital (over the resources).
+  // The money band reads right to left along the top, from revenue (over the uses it comes from) back to
+  // capital (over the resources it pays for); each money node is centred over a column.
   const capital = layoutGroup(CAPITAL, C.A.x, L.BAND_Y, C.A.w, collapsed, boxes);
-  node(FCF, C.B, L.BAND_Y, L.MONEY_H);
-  node(OPERATING_PROFIT, C.C, L.BAND_Y, L.MONEY_H);
-  node(GROSS_PROFIT, C.D, L.BAND_Y, L.MONEY_H);
-  node(REVENUE, C.E, L.BAND_Y, L.MONEY_H);
+  node(FCF, C.B, L.BAND_Y, L.MONEY_H, L.MONEY_W);
+  node(OPERATING_PROFIT, C.C, L.BAND_Y, L.MONEY_H, L.MONEY_W);
+  node(GROSS_PROFIT, C.D, L.BAND_Y, L.MONEY_H, L.MONEY_W);
+  node(REVENUE, C.E, L.BAND_Y, L.MONEY_H, L.MONEY_W);
+  const band = {
+    x: C.A.x - L.BAND_PAD - 2,
+    y: L.BAND_Y - L.BAND_PAD,
+    w: C.E.x + C.E.w - C.A.x + 2 * (L.BAND_PAD + 2),
+    h: L.MONEY_H + 2 * L.BAND_PAD,
+  };
+  // Under the strip, left of the loop lane that crosses the gap further right.
+  const caption = { x: C.B.x, y: (bottom(band) + L.TOP) / 2 };
 
   const resources = layoutGroup(RESOURCES, C.A.x, bottom(capital) + L.CHAIN_GAP, C.A.w, collapsed, boxes);
   node(COMPUTE, C.B, L.TOP + 86, L.NODE_H);
@@ -522,7 +547,8 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
     const b = boxes.get(e.drawTo ?? e.to);
     if (!a || !b) throw new Error(`Edge ${e.id} has no box to draw between`);
     if (e.lane === "right") {
-      // Leaves low on the right of `a`, runs up the outer lane and comes back in to the right of `b`.
+      // Leaves low on the right of `a`, runs up the outer lane and comes back in to the right of `b`;
+      // the label sits on that last stretch, next to the box the arrow feeds.
       const y1 = bottom(a) - 26;
       const y2 = cy(b);
       const points: [number, number][] = [
@@ -535,9 +561,9 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
         id: e.id,
         kind: e.kind,
         path: roundedPath(points),
-        labelX: round((a.x + a.w + outerRight) / 2),
-        labelY: round(y1),
-        labelMaxW: outerRight - (a.x + a.w) - 8,
+        labelX: round((b.x + b.w + outerRight) / 2),
+        labelY: round(y2),
+        labelMaxW: outerRight - (b.x + b.w) - 8,
       };
     }
     const g = edgeGeometry(a, b, e.fromSide, e.toSide);
@@ -560,5 +586,5 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
     .sort((p, q) => (p.kind === "group" ? 0 : p.kind === "sub" ? 1 : 2) - (q.kind === "group" ? 0 : q.kind === "sub" ? 1 : 2))
     .map((b) => b.id);
 
-  return { width, height, boxes, order, edges, loops };
+  return { width, height, boxes, order, edges, loops, band, caption };
 }

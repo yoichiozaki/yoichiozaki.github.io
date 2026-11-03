@@ -341,8 +341,8 @@ export const SECTIONS: Record<string, SectionDef> = {
         "The other set puts the model to work (inference-time compute, the harness and inference-time context), and its cost shows up not as up-front training cost but mainly as inference cost.",
       ),
       chainCosts: t(
-        "上段のチェーンで見ると、学習費と研究費は営業利益の手前で、顧客向けの推論費は粗利の手前で差し引かれる。",
-        "On the chain along the top, training and research costs are deducted on the way to operating profit, and the cost of serving customers on the way to gross profit.",
+        "上段のチェーンで見ると、学習費と研究費は営業利益の手前で、顧客向けの推論費は粗利の手前で、計算資源を自社で持つための設備投資は FCF の手前で差し引かれる。",
+        "On the chain along the top, training and research costs are deducted on the way to operating profit, the cost of serving customers on the way to gross profit, and capex on compute the lab owns on the way to FCF.",
       ),
       perToken: t(
         "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",
