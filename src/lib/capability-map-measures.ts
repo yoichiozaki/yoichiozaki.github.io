@@ -143,8 +143,11 @@ export const MEASURES: GroupDef = {
       "measure-economy",
       t("経済", "Economy"),
       {
-        summary: t("能力が、利用と売上に変わったかどうか。", "Whether capability turned into use and revenue."),
-        refs: ["6.3:revenuePerCompute", "8:growth"],
+        summary: t(
+          "能力が、利用の広がりと生産性に変わったかどうか。売上と利益は、上段のチェーン（環 7〜10）で見る。",
+          "Whether capability turned into wider use and productivity; revenue and profit sit on the chain along the top (links 7–10).",
+        ),
+        refs: ["3.3", "8:growth"],
         links: [S.s1, S.menlo],
       },
       [
@@ -156,15 +159,6 @@ export const MEASURES: GroupDef = {
           ),
           refs: ["3.3"],
           links: [S.menlo, S.howPeopleUseChatGpt, S.s1],
-        }),
-        item("revenue", t("売上と粗利", "Revenue and margin"), {
-          summary: t("能力がお金に変わったかどうか。", "Whether capability turned into money."),
-          note: t(
-            "Anthropic の計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がり（7〜9 月期は報道で 1.70）、粗利率は 2025 年の 40% から 2026 年上期の 85% になった。",
-            "Anthropic's revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026 (1.70 in July–September, as reported), and its gross margin from 40% in 2025 to 85% in H1 2026.",
-          ),
-          refs: ["2.2:margin", "6.3:margin"],
-          links: [S.s1, S.decoderAnthropic],
         }),
         item("productivity", t("生産性", "Productivity"), {
           summary: t("同じ仕事にかかる時間と人手が、どれだけ減ったか。", "How much less time and labour the same work takes."),

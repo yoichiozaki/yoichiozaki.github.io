@@ -2,11 +2,15 @@
  * Types and builders for the "levers of AI capability" map used in
  * content/blog/{ja,en}/ai-industry-capital-to-fcf.mdx (§5.2).
  *
- * The map separates what a model can do on its own ("model capability") from
- * what a whole system gets done ("completing the work"); the harness sits
- * between them, and the context layer (Microsoft's "IQ") feeds the system
- * what the model never learned. Labels on arrows name the efficiency (or, for
- * context, the precision) that converts one thing into the next, and dashed
+ * The map lays the article's chain from capital to FCF (§2.1) over the levers
+ * that raise capability. The money links run along the top; links 2–6 are
+ * opened up below into resources, compute, training and inference, the model,
+ * the harness and the uses. The map separates what a model can do on its own
+ * ("model capability") from what a whole system gets done ("completing the
+ * work"); the harness sits between them, and the context layer (Microsoft's
+ * "IQ") feeds the system what the model never learned. Labels on capability
+ * arrows name the efficiency (or, for context, the precision) that converts one
+ * thing into the next, labels on money arrows the cost deducted, and dashed
  * loops show how results flow back upstream.
  */
 
@@ -14,6 +18,7 @@ export type Locale = "ja" | "en";
 export type Text = { ja: string; en: string };
 
 export type Category =
+  | "money"
   | "resource"
   | "compute"
   | "size"
@@ -74,13 +79,20 @@ export type EdgeDef = {
   to: string;
   fromSide: Side;
   toSide: Side;
-  kind: "flow" | "measure";
+  /** "money" edges are the links of the chain from capital to FCF that carry money, labelled with what they deduct. */
+  kind: "flow" | "measure" | "money";
   label?: Text;
   /** What the label measures, shown above it in the panel; flow edges default to efficiency. */
   kicker?: Text;
   detail?: Detail;
   /** Box the line is drawn to, when it differs from the logical target. */
   drawTo?: string;
+  /** A capability arrow on the chain from capital to FCF; drawn as thick as the money arrows. */
+  chain?: boolean;
+  /** Elements the edge belongs to without touching them, such as the stage whose cost a money arrow deducts. */
+  ties?: string[];
+  /** Route round the right-hand side of the map instead of straight across. */
+  lane?: "right";
 };
 
 export type LoopDef = { id: string; label: Text; detail: Detail; cycle: string[] };
@@ -102,6 +114,7 @@ export const sub = (id: string, label: Text, detail: Detail, items: ItemDef[]): 
 export const isSub = (c: ItemDef | SubDef): c is SubDef => c.kind === "sub";
 
 export const CATEGORY_LABEL: Record<Category, Text> = {
+  money: t("資本から FCF までのチェーン", "Chain from capital to FCF"),
   resource: t("上流の資源", "Upstream resources"),
   compute: t("計算量", "Compute"),
   size: t("モデルの大きさ", "Model size"),
@@ -113,8 +126,9 @@ export const CATEGORY_LABEL: Record<Category, Text> = {
   measure: t("成果の測り方", "Measuring results"),
 };
 
-/** Border colours; "capability" uses the theme's foreground instead. */
+/** Border colours; the chain from capital to FCF and "capability" use the theme's foreground (ink) instead. */
 export const CATEGORY_COLOR: Record<Category, string> = {
+  money: "currentColor",
   resource: "#d4a017",
   compute: "#e07a95",
   size: "#8e8b82",

@@ -1,9 +1,11 @@
+import { CHAIN_EDGES } from "./capability-map-chain";
 import { SOURCES as S } from "./capability-map-sources";
 import { t, type CompanyDef, type EdgeDef, type KeyPointDef, type LoopDef } from "./capability-map-types";
 
 const MEASURE = t("測る", "Measure");
 
 export const EDGES: EdgeDef[] = [
+  ...CHAIN_EDGES,
   {
     id: "e-hardware",
     from: "resources",
@@ -11,6 +13,7 @@ export const EDGES: EdgeDef[] = [
     fromSide: "right",
     toSide: "left",
     kind: "flow",
+    chain: true,
     label: t("ハードウェア効率", "Hardware efficiency"),
     detail: {
       summary: t(
@@ -32,6 +35,7 @@ export const EDGES: EdgeDef[] = [
     fromSide: "right",
     toSide: "left",
     kind: "flow",
+    chain: true,
     label: t("配分効率", "Allocation efficiency"),
     detail: {
       summary: t(
@@ -95,6 +99,7 @@ export const EDGES: EdgeDef[] = [
     fromSide: "right",
     toSide: "left",
     kind: "flow",
+    chain: true,
     label: t("アルゴリズム効率", "Algorithmic efficiency"),
     detail: {
       summary: t(
@@ -109,7 +114,7 @@ export const EDGES: EdgeDef[] = [
       links: [S.ho],
     },
   },
-  { id: "e-model-harness", from: "model", to: "harness", fromSide: "bottom", toSide: "top", kind: "flow" },
+  { id: "e-model-harness", from: "model", to: "harness", fromSide: "bottom", toSide: "top", kind: "flow", chain: true },
   {
     id: "e-harness",
     from: "harness",
@@ -117,6 +122,7 @@ export const EDGES: EdgeDef[] = [
     fromSide: "bottom",
     toSide: "top",
     kind: "flow",
+    chain: true,
     label: t("ハーネス効率", "Harness efficiency"),
     detail: {
       summary: t(
@@ -138,6 +144,7 @@ export const EDGES: EdgeDef[] = [
     fromSide: "right",
     toSide: "left",
     kind: "flow",
+    chain: true,
     label: t("推論効率", "Inference efficiency"),
     detail: {
       summary: t(
@@ -174,7 +181,7 @@ export const EDGES: EdgeDef[] = [
       links: [S.contextEngineering, S.contextRot, S.lostInTheMiddle],
     },
   },
-  { id: "e-system-uses", from: "system", to: "uses", fromSide: "right", toSide: "left", kind: "flow" },
+  { id: "e-system-uses", from: "system", to: "uses", fromSide: "right", toSide: "left", kind: "flow", chain: true },
   { id: "m-model", from: "model", to: "measure-model", fromSide: "right", toSide: "left", kind: "measure", label: MEASURE },
   { id: "m-system", from: "system", to: "measure-system", fromSide: "right", toSide: "left", kind: "measure", label: MEASURE },
   {
@@ -190,23 +197,6 @@ export const EDGES: EdgeDef[] = [
 ];
 
 export const LOOPS: LoopDef[] = [
-  {
-    id: "loop-revenue",
-    label: t("売上と投資", "Revenue and investment"),
-    cycle: ["uses", "revenue", "funding"],
-    detail: {
-      summary: t(
-        "使い道から生まれた売上と利益が、次の計算資源を買う資金になる。",
-        "Revenue and profit from the uses pay for the next round of compute.",
-      ),
-      note: t(
-        "次の巨額の資本を集めるには、このループが回ることを示す必要がある。Anthropic の計算資源 1 ドルあたりの売上は 2026 年上期に 1.82 になった。OpenAI は、報道されている社内の見通しでは 2028 年に手元資金が尽き、FCF が黒字に転じるのは 2030 年前後である。",
-        "To raise the next round of capital, a lab has to show that this loop turns. Anthropic's revenue per dollar of compute reached 1.82 in H1 2026; OpenAI, by its reported internal projections, runs out of cash in 2028 and turns FCF-positive around 2030.",
-      ),
-      refs: ["6.3:revenuePerCompute", "2.3", "6.4:openai"],
-      links: [S.s1, S.wsj, S.msft10q],
-    },
-  },
   {
     id: "loop-research",
     label: t("AI 研究の自動化", "Automating AI research"),
@@ -435,6 +425,16 @@ export const COMPANIES: CompanyDef[] = [
 
 export const KEY_POINTS: KeyPointDef[] = [
   {
+    id: "kp-chain",
+    title: t("FCF が次の調達を決める", "FCF decides the next raise"),
+    body: t(
+      "仕事を完了する能力が売上に変わり、推論費、学習・研究費、設備投資などを順に引いた残りが FCF になる。次の巨額の資本を集めるには、このチェーンが回ることを数字で示す必要がある。Anthropic の計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がった。",
+      "Getting work done turns into revenue; subtract inference cost, then training and research, then capex and the rest, and what is left is FCF. To raise the next round, a lab has to show in numbers that this chain turns. Anthropic's revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026.",
+    ),
+    ids: ["capital", "revenue", "gross-profit", "operating-profit", "fcf", "uses", "resources", "chain-capital", "chain-revenue", "chain-gross", "chain-operating", "chain-fcf", "chain-next"],
+    refs: ["6.3:revenuePerCompute", "6.2:market"],
+  },
+  {
     id: "kp-two-capabilities",
     title: t("能力には 2 種類ある", "There are two kinds of capability"),
     body: t(
@@ -493,15 +493,5 @@ export const KEY_POINTS: KeyPointDef[] = [
     ),
     ids: ["e-hardware", "e-allocation", "e-parameter", "e-data", "e-algorithmic", "e-inference", "e-harness", "e-context"],
     refs: ["4.7:tokens"],
-  },
-  {
-    id: "kp-revenue-loop",
-    title: t("売上のループが次の調達を決める", "The revenue loop decides the next round"),
-    body: t(
-      "仕事を完了する能力が売上と粗利に変わり、それが次の計算資源の資金になる。次の巨額の資本を集めるには、このループが回ることを示す必要がある。",
-      "Getting work done turns into revenue and margin, which fund the next compute. To raise the next round, a lab has to show that this loop turns.",
-    ),
-    ids: ["loop-revenue", "system", "uses", "revenue", "funding"],
-    refs: ["6.3:revenuePerCompute"],
   },
 ];

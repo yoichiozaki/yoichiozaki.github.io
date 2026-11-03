@@ -1,9 +1,11 @@
 /**
  * The "levers of AI capability" map: element index, layout and relations.
- * Content lives in capability-map-{upstream,downstream,measures,links}.ts
- * (the context layer is in downstream, next to the harness), sources in
- * capability-map-sources.ts and article quotes in capability-map-sections.ts.
+ * Content lives in capability-map-{chain,upstream,downstream,measures,links}.ts
+ * (the chain from capital to FCF in chain; the context layer in downstream,
+ * next to the harness), sources in capability-map-sources.ts and article
+ * quotes in capability-map-sections.ts.
  */
+import { CAPITAL, CHAIN_LINK, FCF, GROSS_PROFIT, OPERATING_PROFIT, REVENUE } from "./capability-map-chain";
 import { CONTEXT, HARNESS, MODEL, SYSTEM, USES } from "./capability-map-downstream";
 import { COMPANIES, EDGES, KEY_POINTS, LOOPS } from "./capability-map-links";
 import { MATERIALS, MEASURES } from "./capability-map-measures";
@@ -22,10 +24,12 @@ import { COMPUTE, RESOURCES, SIZE, STAGES } from "./capability-map-upstream";
 
 export * from "./capability-map-types";
 export { SOURCES } from "./capability-map-sources";
-export { COMPANIES, EDGES, KEY_POINTS, LOOPS, SECTIONS };
+export { CHAIN_LINK, COMPANIES, EDGES, KEY_POINTS, LOOPS, SECTIONS };
 
-export const GROUPS: GroupDef[] = [RESOURCES, SIZE, STAGES, HARNESS, CONTEXT, MEASURES, USES, MATERIALS];
-export const NODES: NodeDef[] = [COMPUTE, MODEL, SYSTEM];
+export const GROUPS: GroupDef[] = [CAPITAL, RESOURCES, SIZE, STAGES, HARNESS, CONTEXT, MEASURES, USES, MATERIALS];
+export const NODES: NodeDef[] = [REVENUE, GROSS_PROFIT, OPERATING_PROFIT, FCF, COMPUTE, MODEL, SYSTEM];
+/** The money links along the top of the map, from the entrance of the chain to its end. */
+export const MONEY_IDS: readonly string[] = [CAPITAL.id, REVENUE.id, GROSS_PROFIT.id, OPERATING_PROFIT.id, FCF.id];
 
 export type ElementKind = "group" | "sub" | "item" | "node";
 export type ElementInfo = {
@@ -163,8 +167,10 @@ export function resolveRef(ref: string): ResolvedRef | undefined {
 /**
  * Everything that should stay highlighted when `id` is selected: the element
  * itself with its ancestors (so its frames stay visible) and descendants, the
- * edges touching it, and the far ends of those edges. Items without edges of
- * their own borrow the edges of their nearest ancestor that has some.
+ * edges touching it, and the far ends of those edges. An edge also touches the
+ * elements it is tied to, so a stage lights up the money arrow that deducts its
+ * cost. Items without edges of their own borrow the edges of their nearest
+ * ancestor that has some.
  */
 export function relatedIds(id: string): Set<string> {
   const out = new Set<string>();
@@ -178,16 +184,18 @@ export function relatedIds(id: string): Set<string> {
     if (kind === "element") addElement(anyId);
     else if (kind === "edge" || kind === "loop") out.add(anyId);
   };
+  const touches = (e: (typeof EDGES)[number], ids: ReadonlySet<string>) =>
+    ids.has(e.from) || ids.has(e.to) || (e.ties ?? []).some((tie) => ids.has(tie));
 
   switch (kindOf(id)) {
     case "element": {
       addElement(id);
       const own = new Set([id, ...descendants(id)]);
       const lineage = new Set([id, ...ancestors(id), ...descendants(id)]);
-      let touching = EDGES.filter((e) => own.has(e.from) || own.has(e.to));
+      let touching = EDGES.filter((e) => touches(e, own));
       for (let p = ELEMENTS.get(id)?.parent; touching.length === 0 && p; p = ELEMENTS.get(p)?.parent) {
-        const parent = p;
-        touching = EDGES.filter((e) => e.from === parent || e.to === parent);
+        const parent = new Set([p]);
+        touching = EDGES.filter((e) => touches(e, parent));
       }
       for (const e of touching) {
         out.add(e.id);
@@ -204,6 +212,7 @@ export function relatedIds(id: string): Set<string> {
       out.add(id);
       addElement(e.from);
       addElement(e.to);
+      for (const tie of e.ties ?? []) addElement(tie);
       break;
     }
     case "loop": {
@@ -226,7 +235,15 @@ export function relatedIds(id: string): Set<string> {
 // ---------------------------------------------------------------------------
 
 export const LAYOUT = {
-  TOP: 64,
+  /** The money links of the chain run along the top. */
+  BAND_Y: 14,
+  MONEY_H: 52,
+  /** Lane for loops that cross the map above the capability layer, under the money band. */
+  LANE_TOP: 88,
+  /** Top of the capability layer in columns B–E; column A starts under the capital group. */
+  TOP: 110,
+  /** Room between the capital group and the resources it pays for. */
+  CHAIN_GAP: 44,
   GROUP_HEADER: 32,
   PAD: 10,
   SUB_HEADER: 26,
@@ -238,9 +255,11 @@ export const LAYOUT = {
   ROW_GAP: 8,
   NODE_H: 72,
   SYSTEM_H: 84,
-  /** Loop lanes, measured from the canvas edges. */
+  /** Loop lanes, measured from the right and bottom edges of the canvas. */
   LANE_OUTER: 22,
   LANE_INNER: 42,
+  /** Room right of column E for the right-hand lanes and the price label between them and the uses. */
+  RIGHT_MARGIN: 80,
 } as const;
 
 export const COLUMNS = {
@@ -248,14 +267,14 @@ export const COLUMNS = {
   B: { x: 334, w: 176 },
   C: { x: 620, w: 226 },
   D: { x: 960, w: 204 },
-  E: { x: 1234, w: 214 },
+  E: { x: 1254, w: 214 },
 } as const;
 
 export type Rect = { x: number; y: number; w: number; h: number };
 export type BoxLayout = Rect & { id: string; kind: ElementKind; depth: number; collapsed?: boolean };
 export type EdgeLayout = {
   id: string;
-  kind: "flow" | "measure";
+  kind: "flow" | "measure" | "money";
   path: string;
   labelX: number;
   labelY: number;
@@ -340,9 +359,11 @@ function layoutGroup(g: GroupDef, x: number, y: number, w: number, collapsed: Re
  * Anchor positions along one axis: if the two spans overlap, both ends share
  * one coordinate (the centre of the smaller span, kept inside the overlap) so
  * the line runs straight; otherwise each end points at the other's centre.
+ * `lead1` and `lead2` keep an end further from the start of its span, clear of
+ * a badge pinned to the box's top-left corner.
  */
-function align(s1: number, l1: number, s2: number, l2: number, inset = 10): [number, number] {
-  const lo = Math.max(s1, s2) + inset;
+function align(s1: number, l1: number, s2: number, l2: number, lead1 = 10, lead2 = 10, inset = 10): [number, number] {
+  const lo = Math.max(s1 + lead1, s2 + lead2);
   const hi = Math.min(s1 + l1, s2 + l2) - inset;
   const c1 = s1 + l1 / 2;
   const c2 = s2 + l2 / 2;
@@ -350,16 +371,21 @@ function align(s1: number, l1: number, s2: number, l2: number, inset = 10): [num
     const v = clamp(l1 <= l2 ? c1 : c2, lo, hi);
     return [v, v];
   }
-  return [clamp(c2, s1 + inset, s1 + l1 - inset), clamp(c1, s2 + inset, s2 + l2 - inset)];
+  return [clamp(c2, s1 + lead1, s1 + l1 - inset), clamp(c1, s2 + lead2, s2 + l2 - inset)];
 }
 
-function edgeGeometry(a: Rect, b: Rect, fromSide: Side, toSide: Side) {
+/** Room an arrow end keeps from the top-left corner of a box that carries a chain badge. */
+const BADGE_CLEAR = 24;
+
+function edgeGeometry(a: BoxLayout, b: BoxLayout, fromSide: Side, toSide: Side) {
   const horizontal = fromSide === "left" || fromSide === "right";
+  // A badge sits on the top-left corner, so only ends on a left side (near its top) or a top side (near its left) need room.
+  const lead = (box: BoxLayout, side: Side) => (CHAIN_LINK[box.id] && side === (horizontal ? "left" : "top") ? BADGE_CLEAR : 10);
   if (horizontal) {
-    const [y1, y2] = align(a.y, a.h, b.y, b.h);
+    const [y1, y2] = align(a.y, a.h, b.y, b.h, lead(a, fromSide), lead(b, toSide));
     return { x1: fromSide === "right" ? a.x + a.w : a.x, y1, x2: toSide === "left" ? b.x : b.x + b.w, y2, horizontal };
   }
-  const [x1, x2] = align(a.x, a.w, b.x, b.w);
+  const [x1, x2] = align(a.x, a.w, b.x, b.w, lead(a, fromSide), lead(b, toSide));
   return { x1, y1: fromSide === "bottom" ? a.y + a.h : a.y, x2, y2: toSide === "top" ? b.y : b.y + b.h, horizontal };
 }
 
@@ -401,37 +427,24 @@ function loopPoints(id: string, boxes: Map<string, BoxLayout>, edges: EdgeLayout
     if (!b) throw new Error(`Loop ${id} needs box ${bid}`);
     return b;
   };
-  const outerRight = width - L.LANE_OUTER;
   const innerRight = width - L.LANE_INNER;
   const bottomLow = height - L.LANE_OUTER;
   const bottomHigh = height - L.LANE_INNER;
 
   switch (id) {
-    case "loop-revenue": {
-      const uses = box("uses");
-      const res = box("resources");
-      const y = bottom(uses) - 26;
-      const points: [number, number][] = [
-        [uses.x + uses.w, y],
-        [outerRight, y],
-        [outerRight, L.LANE_OUTER],
-        [cx(res), L.LANE_OUTER],
-        [cx(res), res.y],
-      ];
-      return { points, labelX: (outerRight + cx(res)) / 2, labelY: L.LANE_OUTER };
-    }
     case "loop-research": {
       const ai = box("ai-research");
       const target = edges.find((e) => e.id === "e-algorithmic");
       if (!target) throw new Error("loop-research needs e-algorithmic");
+      // Crosses above the capability layer, below the money band.
       const points: [number, number][] = [
         [ai.x + ai.w, cy(ai)],
         [innerRight, cy(ai)],
-        [innerRight, L.LANE_INNER],
-        [target.labelX, L.LANE_INNER],
+        [innerRight, L.LANE_TOP],
+        [target.labelX, L.LANE_TOP],
         [target.labelX, target.labelY - 12],
       ];
-      return { points, labelX: (innerRight + target.labelX) / 2, labelY: L.LANE_INNER };
+      return { points, labelX: (innerRight + target.labelX) / 2, labelY: L.LANE_TOP };
     }
     case "loop-deployment": {
       const uses = box("uses");
@@ -477,28 +490,56 @@ export function layoutMap(collapsed: ReadonlySet<string> = new Set(DEFAULT_COLLA
     return rect;
   };
 
-  const resources = layoutGroup(RESOURCES, C.A.x, L.TOP, C.A.w, collapsed, boxes);
-  node(COMPUTE, C.B, 150, L.NODE_H);
-  const size = layoutGroup(SIZE, C.B.x, 326, C.B.w, collapsed, boxes);
+  // The money band: each link sits over the column whose cost is deducted on the way to it, so the chain
+  // reads right to left along the top, from revenue (over the uses) back to capital (over the resources).
+  const capital = layoutGroup(CAPITAL, C.A.x, L.BAND_Y, C.A.w, collapsed, boxes);
+  node(FCF, C.B, L.BAND_Y, L.MONEY_H);
+  node(OPERATING_PROFIT, C.C, L.BAND_Y, L.MONEY_H);
+  node(GROSS_PROFIT, C.D, L.BAND_Y, L.MONEY_H);
+  node(REVENUE, C.E, L.BAND_Y, L.MONEY_H);
+
+  const resources = layoutGroup(RESOURCES, C.A.x, bottom(capital) + L.CHAIN_GAP, C.A.w, collapsed, boxes);
+  node(COMPUTE, C.B, L.TOP + 86, L.NODE_H);
+  const size = layoutGroup(SIZE, C.B.x, L.TOP + 262, C.B.w, collapsed, boxes);
   const stages = layoutGroup(STAGES, C.C.x, L.TOP, C.C.w, collapsed, boxes);
   const model = node(MODEL, C.D, L.TOP, L.NODE_H);
-  const harness = layoutGroup(HARNESS, C.D.x, bottom(model) + 48, C.D.w, collapsed, boxes);
-  const system = node(SYSTEM, C.D, bottom(harness) + 52, L.SYSTEM_H);
+  const harness = layoutGroup(HARNESS, C.D.x, bottom(model) + 40, C.D.w, collapsed, boxes);
+  const system = node(SYSTEM, C.D, bottom(harness) + 46, L.SYSTEM_H);
   // The context layer sits under the system it feeds, the way Microsoft draws its IQ layer under agents.
-  const context = layoutGroup(CONTEXT, C.D.x, bottom(system) + 52, C.D.w, collapsed, boxes);
+  const context = layoutGroup(CONTEXT, C.D.x, bottom(system) + 46, C.D.w, collapsed, boxes);
   const measures = layoutGroup(MEASURES, C.E.x, L.TOP, C.E.w, collapsed, boxes);
   const uses = layoutGroup(USES, C.E.x, Math.max(system.y, bottom(measures) + 44), C.E.w, collapsed, boxes);
   // Learning materials sit under model size and the stages they feed.
   const materialsY = Math.max(bottom(size), bottom(stages)) + 64;
   const materials = layoutGroup(MATERIALS, C.B.x, materialsY, C.C.x + C.C.w - C.B.x, collapsed, boxes);
 
-  const width = C.E.x + C.E.w + 60;
+  const width = C.E.x + C.E.w + L.RIGHT_MARGIN;
   const height = Math.max(bottom(materials), bottom(resources), bottom(context), bottom(uses)) + 72;
+  const outerRight = width - L.LANE_OUTER;
 
   const edges: EdgeLayout[] = EDGES.map((e) => {
     const a = boxes.get(e.from);
     const b = boxes.get(e.drawTo ?? e.to);
     if (!a || !b) throw new Error(`Edge ${e.id} has no box to draw between`);
+    if (e.lane === "right") {
+      // Leaves low on the right of `a`, runs up the outer lane and comes back in to the right of `b`.
+      const y1 = bottom(a) - 26;
+      const y2 = cy(b);
+      const points: [number, number][] = [
+        [a.x + a.w, y1],
+        [outerRight, y1],
+        [outerRight, y2],
+        [b.x + b.w, y2],
+      ];
+      return {
+        id: e.id,
+        kind: e.kind,
+        path: roundedPath(points),
+        labelX: round((a.x + a.w + outerRight) / 2),
+        labelY: round(y1),
+        labelMaxW: outerRight - (a.x + a.w) - 8,
+      };
+    }
     const g = edgeGeometry(a, b, e.fromSide, e.toSide);
     return {
       id: e.id,

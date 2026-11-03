@@ -12,6 +12,24 @@ export const SECTIONS: Record<string, SectionDef> = {
     title: t("チェーンを 10 の環に分ける", "Ten links in the chain"),
     points: {
       link4: t("モデル能力: 学習で上がる、モデル単体の能力。", "Model capability: the capability the model itself gains from training."),
+      link1: t(
+        "資本調達: 株式、転換社債、借入、リース、取引先からの融資など",
+        "Capital raising: equity, convertible notes, debt, leases, financing from suppliers and partners",
+      ),
+      link2: t(
+        "計算資源の確保: クラウド契約、チップのリース、自社データセンター。電力・チップ・HBM・パッケージの供給に縛られる",
+        "Securing compute: cloud contracts, chip leases, own data centres — bounded by the supply of power, chips, HBM and packaging",
+      ),
+      link7: t("売上: 従量課金とサブスクリプション", "Revenue: usage-based billing and subscriptions"),
+      link8: t("粗利: 売上から顧客向け推論のコストを引いたもの", "Gross profit: revenue minus the cost of serving customers"),
+      link9: t(
+        "営業利益: 粗利から学習・研究の計算資源費、人件費、営業費を引いたもの",
+        "Operating profit: gross profit minus training and research compute, personnel, and sales costs",
+      ),
+      link10: t(
+        "FCF: 営業キャッシュフローから設備投資（とリースの元本返済）を引いたもの。これが次の資本調達の条件を決める",
+        "FCF: operating cash flow minus capital expenditure (and lease principal repayments). This sets the terms for the next round of capital",
+      ),
     },
   },
   "2.2": {
@@ -20,6 +38,26 @@ export const SECTIONS: Record<string, SectionDef> = {
       finance: t(
         "チェーンの後半が黒字になった直後に、環 2（計算資源の確保）の資金の出し方が「費用」から「投資と負債」へ変わる。",
         "Just as the back half of the chain turned profitable, the way link 2 (securing compute) is financed is shifting from expense to investment and debt.",
+      ),
+      valuation: t(
+        "発表された評価額は、シリーズ G が 3,800 億ドル、シリーズ H が 9,650 億ドルで、2 年前の 200 億ドル未満から約 50 倍になった。",
+        "The announced valuations were USD 380 billion for the Series G and USD 965 billion for the Series H, roughly 50 times the less-than-USD 20 billion of two years earlier.",
+      ),
+      payg: t(
+        "2026 年の Anthropic では、トークン量に応じた従量課金（S-1 は「pay-for-intelligence」と呼ぶ）が 2026 年上期の売上の 80%（131 億ドル）を占め、サブスクリプションは 20%（32 億ドル）である。",
+        "At Anthropic in 2026, token-metered usage billing (which the S-1 calls \"pay-for-intelligence\") made up 80% of first-half revenue (USD 13.1 billion), with subscriptions at 20% (USD 3.2 billion).",
+      ),
+      inferenceCost: t(
+        "2024 年は顧客向け推論のコストが売上の 2 倍近くあった。2026 年上期には推論のコストが売上の 15% まで下がっている。",
+        "In 2024, the cost of serving customers was nearly twice revenue. In the first half of 2026 it was down to 15% of revenue.",
+      ),
+      operating: t(
+        "営業利益率は 2023 年の −1,344% から、2026 年上期の −4% まで改善した。",
+        "Operating margin improved from −1,344% in 2023 to −4% in the first half of 2026.",
+      ),
+      leasePrincipal: t(
+        "移行後の FCF は、リースの元本返済も差し引いて見る必要がある。",
+        "so after the shift FCF needs to be read with lease principal repayments subtracted as well.",
       ),
       contracts: t(
         "施設と中身の契約を切り離して、拘束の強さを調整する工夫である。",
@@ -302,6 +340,10 @@ export const SECTIONS: Record<string, SectionDef> = {
         "もう 1 つはモデルを仕事に使う側のレバー（推論時計算、ハーネス、推論時の文脈）で、費用は前払いの学習費ではなく、主に推論費として出る。",
         "The other set puts the model to work (inference-time compute, the harness and inference-time context), and its cost shows up not as up-front training cost but mainly as inference cost.",
       ),
+      chainCosts: t(
+        "上段のチェーンで見ると、学習費と研究費は営業利益の手前で、推論費は粗利の手前で差し引かれる。",
+        "On the chain along the top, training and research costs are deducted on the way to operating profit, and inference cost on the way to gross profit.",
+      ),
       perToken: t(
         "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",
         "As long as customers pay per token, more thinking also means more revenue.",
@@ -412,6 +454,11 @@ export const SECTIONS: Record<string, SectionDef> = {
       margin: t(
         "(2) 推論の粗利が、価格競争とオープンウェイトモデルの追い上げの下でも残ること。",
         "(2) Gross margin on inference survives price competition and the catch-up of open-weight models.",
+      ),
+      demand: t("(3) 需要が契約と継続利用で裏づけられていること。", "(3) Demand is backed by contracts and continued use."),
+      obligations: t(
+        "(4) 支払い義務の期間と、売上が入ってくる期間が釣り合っていること。",
+        "(4) The duration of payment obligations matches the period over which revenue comes in.",
       ),
       training: t("(5) 学習への投資が回収できていること。", "(5) Investment in training is being recovered."),
     },

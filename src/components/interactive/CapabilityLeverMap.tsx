@@ -352,7 +352,7 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
     };
   }, [fullscreen]);
 
-  const title = isJa ? "AI の能力を伸ばすレバーの地図" : "Map: the levers on AI capability";
+  const title = isJa ? "資本から FCF までのチェーンと、AI の能力を伸ばすレバー" : "Map: the chain from capital to FCF, and the levers on AI capability";
   const hint =
     mode === "list"
       ? isJa
@@ -435,11 +435,11 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
         {mode === "companies" && <CompanyStrip locale={loc} selected={selected} onSelect={pick} onJump={jumpTo} />}
 
         {mode === "list" ? (
-          <div className={fullscreen ? "flex-1 overflow-y-auto" : "max-h-[min(78vh,760px)] overflow-y-auto"}>
+          <div className={fullscreen ? "flex-1 overflow-y-auto" : "max-h-[min(80vh,780px)] overflow-y-auto"}>
             <ListView locale={loc} onJump={jumpTo} />
           </div>
         ) : (
-          <div className={`relative ${fullscreen ? "min-h-0 flex-1" : "h-[min(60vh,560px)] sm:h-[min(78vh,760px)]"}`}>
+          <div className={`relative ${fullscreen ? "min-h-0 flex-1" : "h-[min(60vh,560px)] sm:h-[min(80vh,780px)]"}`}>
             <div
               ref={viewportRef}
               tabIndex={0}

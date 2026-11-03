@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import {
   CATEGORY_LABEL,
+  CHAIN_LINK,
   COMPANIES,
   EDGE_BY_ID,
   EDGES,
@@ -24,7 +25,7 @@ import {
   type Locale,
   type Text,
 } from "@/lib/capability-map";
-import { MEASURE_COLOR, categoryColor, tint } from "./CapabilityMapCanvas";
+import { CHAIN_COLOR, ChainBadge, MEASURE_COLOR, categoryColor, tint } from "./CapabilityMapCanvas";
 
 const panel = "rounded-lg border border-border bg-background/95 shadow-lg backdrop-blur-sm";
 
@@ -33,7 +34,11 @@ function kicker(id: string, locale: Locale): string {
   const kind = kindOf(id);
   if (kind === "element") {
     const category = CATEGORY_LABEL[ELEMENTS.get(id)!.category][locale];
-    return category === labelOf(id)?.[locale] ? "" : category;
+    const base = category === labelOf(id)?.[locale] ? "" : category;
+    const n = CHAIN_LINK[id];
+    if (!n) return base;
+    if (isJa) return base ? `${base}（環 ${n}）` : `チェーンの環 ${n}`;
+    return base ? `${base} (link ${n})` : `Link ${n} of the chain`;
   }
   if (kind === "edge") {
     const e = EDGE_BY_ID.get(id)!;
@@ -172,6 +177,15 @@ export function Legend({ locale }: { locale: Locale }) {
   const categories: Category[] = ["resource", "compute", "size", "stage", "material", "harness", "context", "capability", "measure"];
   return (
     <ul className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+      <li className="flex items-center gap-1.5 font-medium text-foreground">
+        <span className="flex items-center" aria-hidden>
+          <ChainBadge n={1} className="relative" />
+          <svg width="26" height="8">
+            <line x1="1" y1="4" x2="25" y2="4" stroke={CHAIN_COLOR} strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        </span>
+        {isJa ? "資本から FCF までのチェーン（数字は第 2.1 節の環）" : "Chain from capital to FCF (numbers are the links of Section 2.1)"}
+      </li>
       {categories.map((c) => (
         <li key={c} className="flex items-center gap-1.5">
           <span className="inline-block h-3 w-3 rounded-sm border-2" style={{ borderColor: categoryColor(c), background: tint(categoryColor(c), 12) }} />
@@ -181,6 +195,9 @@ export function Legend({ locale }: { locale: Locale }) {
       <li className="flex items-center gap-1.5">
         <span className="rounded-full border px-1.5 text-[10px] text-foreground" style={{ borderColor: EFFICIENCY_COLOR, background: tint(EFFICIENCY_COLOR, 16) }}>
           {isJa ? "効率・精度" : "Efficiency, precision"}
+        </span>
+        <span className="rounded-full border px-1.5 text-[10px] font-semibold text-foreground" style={{ borderColor: CHAIN_COLOR, background: tint(CHAIN_COLOR, 9) }}>
+          {isJa ? "−\u00a0費用" : "−\u00a0Cost"}
         </span>
         {isJa ? "矢印のラベル" : "Arrow labels"}
       </li>
@@ -409,38 +426,44 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
           </>
         )}
 
-        {related.length > 0 && (
-          <>
-            <h5 className={sectionHeading}>
-              {EDGE_BY_ID.has(id)
+        {[
+          [
+            EDGE_BY_ID.has(id)
+              ? isJa
+                ? "矢印の両端"
+                : "Connects"
+              : LOOP_BY_ID.has(id)
                 ? isJa
-                  ? "矢印の両端"
-                  : "Connects"
-                : LOOP_BY_ID.has(id)
-                  ? isJa
-                    ? "ループが通る項目"
-                    : "Passes through"
-                  : isJa
-                    ? "含まれる項目"
-                    : "Contains"}
-            </h5>
-            <div className="flex flex-wrap gap-1.5">
-              {related.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => {
-                    onShow(r);
-                    // The chip disappears with the old content; keep focus in the panel, on the new title.
-                    headingRef.current?.focus({ preventScroll: true });
-                  }}
-                  className="rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground hover:bg-muted"
-                >
-                  {labelOf(r)?.[locale]}
-                </button>
-              ))}
-            </div>
-          </>
+                  ? "ループが通る項目"
+                  : "Passes through"
+                : isJa
+                  ? "含まれる項目"
+                  : "Contains",
+            related,
+          ] as const,
+          [isJa ? "この費用が出るところ" : "Where this cost arises", EDGE_BY_ID.get(id)?.ties ?? []] as const,
+        ].map(([heading, ids]) =>
+          ids.length === 0 ? null : (
+            <Fragment key={heading}>
+              <h5 className={sectionHeading}>{heading}</h5>
+              <div className="flex flex-wrap gap-1.5">
+                {ids.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => {
+                      onShow(r);
+                      // The chip disappears with the old content; keep focus in the panel, on the new title.
+                      headingRef.current?.focus({ preventScroll: true });
+                    }}
+                    className="rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground hover:bg-muted"
+                  >
+                    {labelOf(r)?.[locale]}
+                  </button>
+                ))}
+              </div>
+            </Fragment>
+          ),
         )}
 
         <p className="mt-5 border-t border-border pt-2 text-[11px] leading-snug text-muted-foreground">
@@ -453,7 +476,24 @@ export function DetailPanel({ id, locale, onClose, onShow, onJump }: DetailPanel
   );
 }
 
-const LIST_ORDER = ["resources", "compute", "size", "stages", "materials", "model", "harness", "context-layer", "system", "uses", "measures"];
+const LIST_ORDER = [
+  "capital",
+  "resources",
+  "compute",
+  "size",
+  "stages",
+  "materials",
+  "model",
+  "harness",
+  "context-layer",
+  "system",
+  "uses",
+  "revenue",
+  "gross-profit",
+  "operating-profit",
+  "fcf",
+  "measures",
+];
 
 function Extras({ detail, locale, onJump }: JumpProps & { detail: Detail }) {
   const isJa = locale === "ja";
@@ -509,7 +549,12 @@ export function ListView({ locale, onJump }: JumpProps) {
           <details key={id} className="group rounded-lg border bg-background" style={{ borderColor: tint(color, 50) }}>
             <summary className="cursor-pointer list-none px-3 py-2 [&::-webkit-details-marker]:hidden">
               <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden />
+                {CHAIN_LINK[id] ? (
+                  <ChainBadge n={CHAIN_LINK[id]} className="relative shrink-0" />
+                ) : (
+                  <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden />
+                )}
+                {CHAIN_LINK[id] && <span className="sr-only">{isJa ? `環 ${CHAIN_LINK[id]}：` : `Link ${CHAIN_LINK[id]}: `}</span>}
                 {el.label[locale]}
                 {el.sublabel && <span className="font-normal text-muted-foreground">— {el.sublabel[locale]}</span>}
                 <Chevron />
@@ -528,7 +573,11 @@ export function ListView({ locale, onJump }: JumpProps) {
                     if (child.kind !== "sub") return <ListEntry key={childId} id={childId} locale={locale} onJump={onJump} />;
                     return (
                       <li key={childId} className="py-2">
-                        <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">{child.label[locale]}</p>
+                        <p className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {CHAIN_LINK[childId] && <ChainBadge n={CHAIN_LINK[childId]} className="relative shrink-0" />}
+                          {CHAIN_LINK[childId] && <span className="sr-only">{isJa ? `環 ${CHAIN_LINK[childId]}：` : `Link ${CHAIN_LINK[childId]}: `}</span>}
+                          {child.label[locale]}
+                        </p>
                         <Extras detail={child.detail} locale={locale} onJump={onJump} />
                         <ul className="ml-3 divide-y divide-border">
                           {child.children.map((itemId) => (
@@ -544,6 +593,26 @@ export function ListView({ locale, onJump }: JumpProps) {
           </details>
         );
       })}
+
+      <details className="group rounded-lg border bg-background" style={{ borderColor: tint(CHAIN_COLOR, 50) }}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+          {isJa ? "チェーンの矢印（差し引く費用など）" : "Arrows on the chain (costs deducted and more)"}
+          <Chevron />
+        </summary>
+        <ul className="divide-y divide-border border-t border-border px-3 pb-2">
+          {EDGES.filter((e) => e.kind === "money" && e.label && e.detail).map((e) => (
+            <li key={e.id} className="py-1.5">
+              <p className="text-[13px] font-semibold text-foreground">
+                {e.label![locale]}
+                <span className="font-normal text-muted-foreground"> — {edgeEnds(e.id, locale)}</span>
+              </p>
+              <p className="text-[12px] leading-snug text-muted-foreground">{e.detail!.summary[locale]}</p>
+              {e.detail!.note && <p className="mt-0.5 text-[12px] leading-snug text-foreground/80">{e.detail!.note[locale]}</p>}
+              <Extras detail={e.detail!} locale={locale} onJump={onJump} />
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <details className="group rounded-lg border bg-background" style={{ borderColor: tint(EFFICIENCY_COLOR, 50) }}>
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">

@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CHAIN_LINK,
+  COLUMNS,
   COMPANIES,
   DEFAULT_COLLAPSED,
   EDGES,
@@ -10,6 +12,7 @@ import {
   LAYOUT,
   LINK_KIND_LABEL,
   LOOPS,
+  MONEY_IDS,
   SECTIONS,
   SOURCES,
   SUB_IDS,
@@ -333,10 +336,13 @@ describe("capability map: layout", () => {
     expect(layout.edges.map((e) => e.id)).toEqual(EDGES.map((e) => e.id));
     expect(layout.loops.map((l) => l.id)).toEqual(LOOPS.map((l) => l.id));
     const boxes = top(layout);
-    const minY = Math.min(...boxes.map((b) => b.y));
+    const band = boxes.filter((b) => MONEY_IDS.includes(b.id));
+    const below = boxes.filter((b) => !MONEY_IDS.includes(b.id));
+    // The lane under the money band clears the band's nodes (the capital group hangs below it over column A).
+    for (const b of band.filter((x) => x.id !== "capital")) expect(b.y + b.h, b.id).toBeLessThan(LAYOUT.LANE_TOP - 12);
+    expect(Math.min(...below.map((b) => b.y))).toBeGreaterThan(LAYOUT.LANE_TOP + 12);
     const maxY = Math.max(...boxes.map((b) => b.y + b.h));
     const maxX = Math.max(...boxes.map((b) => b.x + b.w));
-    expect(minY).toBeGreaterThan(LAYOUT.LANE_INNER + 12);
     expect(maxY).toBeLessThan(layout.height - LAYOUT.LANE_INNER - 12);
     expect(maxX).toBeLessThan(layout.width - LAYOUT.LANE_INNER - 12);
     for (const p of [...layout.edges, ...layout.loops]) {
@@ -389,6 +395,104 @@ describe("capability map: layout", () => {
       const parent = ELEMENTS.get(b.id)?.parent;
       if (parent) expect(rank(parent), b.id).toBeLessThan(rank(b.id));
     }
+  });
+});
+
+describe("capability map: the chain from capital to FCF", () => {
+  const chainEdges = EDGES.filter((e) => e.kind === "money" || e.chain);
+  const top = (layout: MapLayout) => [...layout.boxes.values()].filter((b) => b.depth === 0);
+
+  it("numbers the ten links of §2.1 on boxes that are always drawn", () => {
+    const entries = Object.entries(CHAIN_LINK).sort((a, b) => a[1] - b[1]);
+    expect(entries.map(([, n]) => n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    for (const [id] of entries) expect(ELEMENTS.has(id), id).toBe(true);
+    for (const id of MONEY_IDS) expect(ELEMENTS.get(id)?.category, id).toBe("money");
+    for (const [state, collapsed] of states) {
+      const { boxes } = layoutMap(collapsed);
+      for (const [id] of entries) expect(boxes.has(id), `${id} (${state})`).toBe(true);
+    }
+    expect(KEY_POINTS[0].id).toBe("kp-chain");
+  });
+
+  it("runs from capital through every link to FCF and back to capital", () => {
+    // Each money arrow joins one link to the next.
+    for (const e of EDGES.filter((x) => x.kind === "money")) {
+      expect(CHAIN_LINK[e.to], e.id).toBe((CHAIN_LINK[e.from] % 10) + 1);
+    }
+    // In between, the chain runs through the capability layer; a box counts as reaching what it contains and is contained in.
+    const next = new Map<string, Set<string>>();
+    const link = (a: string, b: string) => next.set(a, (next.get(a) ?? new Set()).add(b));
+    for (const e of chainEdges) link(e.from, e.to);
+    for (const el of ELEMENTS.values()) {
+      if (!el.parent) continue;
+      link(el.parent, el.id);
+      link(el.id, el.parent);
+    }
+    const reach = (start: string) => {
+      const seen = new Set([start]);
+      const queue = [start];
+      while (queue.length) {
+        for (const n of next.get(queue.shift()!) ?? []) {
+          if (seen.has(n)) continue;
+          seen.add(n);
+          queue.push(n);
+        }
+      }
+      return seen;
+    };
+    const fromCapital = reach("capital");
+    for (const id of Object.keys(CHAIN_LINK)) expect(fromCapital, id).toContain(id);
+    expect(reach("fcf")).toContain("capital");
+  });
+
+  it.each(states)("puts the money links along the top, each over a column, reading right to left (%s)", (_, collapsed) => {
+    const { boxes, edges } = layoutMap(collapsed);
+    const columnX = Object.values(COLUMNS).map((c) => c.x);
+    for (const id of MONEY_IDS) {
+      expect(boxes.get(id)!.y, id).toBe(LAYOUT.BAND_Y);
+      expect(columnX, id).toContain(boxes.get(id)!.x);
+    }
+    for (const id of ["chain-gross", "chain-operating", "chain-fcf", "chain-next"]) {
+      const def = EDGES.find((e) => e.id === id)!;
+      expect(boxes.get(def.from)!.x, id).toBeGreaterThan(boxes.get(def.to)!.x);
+      const points = pathPoints(edges.find((e) => e.id === id)!.path);
+      expect(points[0][1], id).toBe(points[points.length - 1][1]);
+    }
+    const capital = boxes.get("capital")!;
+    const resources = boxes.get("resources")!;
+    expect(capital.x).toBe(resources.x);
+    expect(capital.y + capital.h).toBeLessThan(resources.y);
+  });
+
+  it.each(states)("takes the uses to revenue round the right-hand side, clear of other boxes (%s)", (_, collapsed) => {
+    const layout = layoutMap(collapsed);
+    const points = pathPoints(layout.edges.find((e) => e.id === "chain-revenue")!.path);
+    const others = top(layout).filter((b) => b.id !== "uses" && b.id !== "revenue");
+    for (let i = 1; i < points.length; i++) {
+      const [a, b] = [points[i - 1], points[i]];
+      for (let s = 0; s <= 24; s++) {
+        const p: Point = [a[0] + ((b[0] - a[0]) * s) / 24, a[1] + ((b[1] - a[1]) * s) / 24];
+        for (const box of others) expect(strictlyIn(p, box), `chain-revenue runs through ${box.id}`).toBe(false);
+      }
+    }
+    expect(Math.max(...points.map((p) => p[0]))).toBe(layout.width - LAYOUT.LANE_OUTER);
+  });
+
+  it("ties each deducted cost to the link it comes from", () => {
+    const ties = (id: string) => EDGES.find((e) => e.id === id)?.ties;
+    expect(ties("chain-gross")).toEqual(["inference"]);
+    expect(ties("chain-operating")).toEqual(["training"]);
+    expect(ties("chain-fcf")).toEqual(["resources"]);
+    for (const e of EDGES.filter((x) => x.kind === "money")) {
+      expect(e.label && e.kicker && e.detail, e.id).toBeTruthy();
+      for (const tie of e.ties ?? []) expect(CHAIN_LINK[tie], `${e.id} → ${tie}`).toBeDefined();
+    }
+    const inference = relatedIds("inference");
+    expect(inference).toContain("chain-gross");
+    expect(inference).toContain("gross-profit");
+    expect(relatedIds("chain-gross")).toContain("inference");
+    // Items borrow their stage's tie: pretraining lights up the training cost on its way to operating profit.
+    expect(relatedIds("pretraining")).toContain("chain-operating");
   });
 });
 

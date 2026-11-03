@@ -9,8 +9,8 @@ export const RESOURCES: GroupDef = {
   label: t("上流の資源", "Upstream resources"),
   detail: {
     summary: t(
-      "計算資源のもとになるもの。資金、チップ、電力と用地、それらを動かす運用からなる。",
-      "What compute is built from: money, chips, power and sites, and the operations that keep them running.",
+      "計算資源のもとになるもの。チップ、電力と用地、それらを動かす運用からなる。資本調達（環 1）で集めたお金で、これらを買ったり借りたりして計算資源を確保する（環 2）。",
+      "What compute is built from: chips, power and sites, and the operations that keep them running. Money raised at link 1 buys or rents them to secure compute (link 2).",
     ),
     note: t(
       "2023 年の制約は GPU と CoWoS だったが、2026 年には電力、HBM、データセンター、資本に移った。どれも増強に年単位の時間がかかり、確保するための支払い義務は売上より何年も先行する。",
@@ -20,53 +20,6 @@ export const RESOURCES: GroupDef = {
     links: [S.epochDataCenters, S.iea, S.s1],
   },
   children: [
-    sub(
-      "funding",
-      t("資金", "Funding"),
-      {
-        summary: t("計算資源を買ったり借りたりするためのお金。", "Money to buy or rent compute."),
-        note: t(
-          "次の巨額の資本を集める条件は、能力への期待からユニットエコノミクスの証明に移った。1 回の調達額は数百億ドルを超え、それを出せる相手は限られる。計算資源を売るハイパースケーラー自身も、外部資本に頼り始めた。",
-          "The condition for raising the next round has shifted from expectations about capability to proof of unit economics. Single raises now run to tens of billions of dollars, few parties can supply that much, and the hyperscalers selling the compute have begun to rely on outside capital themselves.",
-        ),
-        refs: ["3.5", "6.2:market", "6.3:revenuePerCompute"],
-        links: [S.wsj, S.s1, S.goog10q],
-      },
-      [
-      item("ocf", t("営業キャッシュフロー", "Operating cash flow"), {
-        summary: t(
-          "本業が生む現金。外部に頼らずに投資を続けられるかを決める。",
-          "Cash from the core business; it decides whether investment can continue without outside money.",
-        ),
-        note: t(
-          "Microsoft の 2026 会計年度の営業キャッシュフローは 1,829 億ドル。設備投資 1,159 億ドルを払っても FCF が残る。ただし、営業キャッシュフローのうち FCF として残る割合は 2023 会計年度の 68% から 37% に下がり、Amazon（過去 12 か月）と Alphabet（2026 年 1〜9 月）では設備投資が営業キャッシュフローを上回った。",
-          "Microsoft's operating cash flow in fiscal 2026 was USD 182.9 billion, leaving FCF even after USD 115.9 billion of capex. But the share of operating cash flow left as FCF fell from 68% in fiscal 2023 to 37%, and at Amazon (trailing twelve months) and Alphabet (January–September 2026) capex exceeded operating cash flow.",
-        ),
-        refs: ["7.1:selfFunded", "3.5", "7.3:weakness"],
-        links: [S.msft10k, S.msft10q],
-      }),
-      item("external-capital", t("出資・上場・借入", "Equity, IPOs and debt"), {
-        summary: t("外から集める資金。", "Money raised from outside."),
-        note: t(
-          "Anthropic は 2026 年上期に 1,100 億ドル超を調達した。OpenAI の 10 月の調達は目標に届かず（報道）、Alphabet は株式と借入に、Amazon は借入に頼り始めた。",
-          "Anthropic raised more than USD 110 billion in H1 2026. OpenAI's October round fell short of its target (reported), while Alphabet has turned to equity and debt, and Amazon to debt.",
-        ),
-        refs: ["3.5", "6.2:lenders", "2.2:vendor"],
-        links: [S.wsj, S.decoderOpenAI, S.cnbcRound, S.s1, S.goog10q, S.amzn10q],
-      }),
-      item("contracts", t("長期契約・リース", "Contracts and leases"), {
-        summary: t(
-          "何年も先まで計算資源を押さえる契約。前払いは軽くなるが、長い支払い義務を負う。",
-          "Contracts that lock in compute for years: less cash up front, but long payment obligations.",
-        ),
-        note: t(
-          "Anthropic の S-1 で名前の挙がった契約だけで、上限値を含めて 6,000 億ドルを超える。Microsoft の開始前のリースは 3,646 億ドル。",
-          "The agreements named in Anthropic's S-1 alone exceed USD 600 billion, including upper-bound amounts; Microsoft's leases not yet commenced total USD 364.6 billion.",
-        ),
-        refs: ["2.2:contracts", "2.3", "7.1:leases"],
-        links: [S.s1, S.msft10q],
-      }),
-    ]),
     sub(
       "chips",
       t("チップ", "Chips"),

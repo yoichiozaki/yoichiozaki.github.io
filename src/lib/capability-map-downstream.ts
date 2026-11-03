@@ -277,10 +277,13 @@ export const USES: GroupDef = {
   id: "uses",
   category: "capability",
   layout: "column",
-  label: t("使い道", "Uses"),
+  label: t("使い道（需要）", "Uses (demand)"),
   detail: {
-    summary: t("仕事を完了する能力が、売上や研究の成果に変わる場所。", "Where getting work done turns into revenue and research results."),
-    refs: ["3.3"],
+    summary: t(
+      "仕事を完了する能力が使われる先で、チェーンの環 6（需要）にあたる。ここで売上や研究の成果に変わる。",
+      "Where getting work done is put to use — link 6 of the chain (demand) — and turns into revenue and research results.",
+    ),
+    refs: ["3.3", "6.3:demand"],
     links: [S.menlo, S.gdpval],
   },
   children: [

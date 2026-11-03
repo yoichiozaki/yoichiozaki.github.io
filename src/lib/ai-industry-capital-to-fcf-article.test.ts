@@ -14,6 +14,7 @@ const section = (source: string, from: string, to: string) => source.slice(sourc
 
 const HARNESS_LEAD = { ja: "<strong>ハーネス。</strong>", en: "<strong>The harness.</strong>" } as const;
 const CONTEXT_LEAD = { ja: "<strong>推論時の文脈。</strong>", en: "<strong>Inference-time context.</strong>" } as const;
+const MAP_LEAD = { ja: "<strong>地図で見る。</strong>", en: "<strong>Seeing it as a map.</strong>" } as const;
 const SCAFFOLD = { ja: "スキャフォールド", en: "scaffold" } as const;
 
 describe("ai-industry-capital-to-fcf: capability lever map", () => {
@@ -53,6 +54,16 @@ describe("ai-industry-capital-to-fcf: capability lever map", () => {
     const scores = locale === "ja" ? "59 点から 80 点" : "from 59 to 80";
     expect(s52).toContain(scores);
     expect(ELEMENTS.get("foundry-iq")!.detail.note![locale]).toContain(scores);
+  });
+
+  it.each(articles)("points from the chain in §2.1 to the map, which reads the chain with its link numbers ($locale)", ({ locale, source }) => {
+    const s21 = section(source, "\n### 2.1 ", "\n### 2.2 ");
+    expect(s21).toContain(locale === "ja" ? "第 5.2 節の地図" : "map in Section 5.2");
+    const lead = source.slice(source.indexOf(MAP_LEAD[locale])).split("\n")[0];
+    expect(lead).toContain(locale === "ja" ? "資本から FCF までのチェーン" : "chain from capital to FCF");
+    expect(lead).toContain(locale === "ja" ? "第 2.1 節の環" : "links of Section 2.1");
+    // The map follows its description.
+    expect(source.indexOf("<CapabilityLeverMap />")).toBeGreaterThan(source.indexOf(MAP_LEAD[locale]));
   });
 
   it.each(articles)("says METR measures a model inside a harness ($locale)", ({ locale, source }) => {
