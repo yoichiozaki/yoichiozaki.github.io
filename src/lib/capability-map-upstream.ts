@@ -13,8 +13,8 @@ export const RESOURCES: GroupDef = {
       "What compute is built from: chips, power and sites, and the operations that keep them running. Money raised at link 1 buys or rents them to secure compute (link 2).",
     ),
     note: t(
-      "2023 年の制約は GPU と CoWoS だったが、2026 年には電力、HBM、データセンター、資本に移った。どれも増強に年単位の時間がかかり、確保するための支払い義務は売上より何年も先行する。",
-      "The binding constraints moved from GPUs and CoWoS in 2023 to power, HBM, data centres and capital in 2026. All take years to expand, and the obligations taken on to secure them run years ahead of revenue.",
+      "2023 年の制約は GPU と CoWoS だったが、2026 年には電力、HBM、データセンターに移った。どれも増強に年単位の時間がかかり、確保するための支払い義務は売上より何年も先行する。",
+      "The binding constraints moved from GPUs and CoWoS in 2023 to power, HBM and data centres in 2026. All take years to expand, and the obligations taken on to secure them run years ahead of revenue.",
     ),
     refs: ["4.7:outside", "2.3", "2.2:finance"],
     links: [S.epochDataCenters, S.iea, S.s1],

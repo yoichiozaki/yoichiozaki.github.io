@@ -426,7 +426,7 @@ export const COMPANIES: CompanyDef[] = [
 export const KEY_POINTS: KeyPointDef[] = [
   {
     id: "kp-chain",
-    title: t("FCF が次の調達を決める", "FCF decides the next raise"),
+    title: t("FCF が次の調達の条件を決める", "FCF sets the terms of the next raise"),
     body: t(
       "仕事を完了する能力が売上に変わり、推論費、学習・研究費、設備投資などを順に引いた残りが FCF になる。次の巨額の資本を集めるには、このチェーンが回ることを数字で示す必要がある。Anthropic の計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がった。",
       "Getting work done turns into revenue; subtract inference cost, then training and research, then capex and the rest, and what is left is FCF. To raise the next round, a lab has to show in numbers that this chain turns. Anthropic's revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026.",

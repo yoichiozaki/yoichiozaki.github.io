@@ -32,8 +32,8 @@ export const CAPITAL: GroupDef = {
       "The entrance of the chain: raising the money to secure compute through equity, convertible notes, debt, leases and financing from suppliers.",
     ),
     note: t(
-      "次の巨額の資本を集める条件は、能力への期待から、ユニットエコノミクスの証明に移った。1 回の調達額は数百億ドルを超え、それを出せる相手は限られる。Anthropic の財務キャッシュフローは 2023 年の 23 億ドルから 2026 年上期の 1,108 億ドルに増えたが、OpenAI の 10 月の調達は、当初目標の 300 億ドルに対して約 110 億ドルにとどまった（報道）。",
-      "The condition for raising the next round has shifted from expectations about capability to proof of unit economics. Single raises now run to tens of billions of dollars, and few parties can supply that much. Anthropic's financing cash flow grew from USD 2.3 billion in 2023 to USD 110.8 billion in H1 2026, while OpenAI's October round raised about USD 11 billion against an initial target of USD 30 billion (reported).",
+      "次の巨額の資本を集める条件は、能力への期待から、ユニットエコノミクスの証明に移った。1 回の調達額は数百億ドルを超え、それを出せる相手は限られる。Anthropic の財務キャッシュフローは 2023 年の 23 億ドルから 2026 年上期の 1,108 億ドルに増えたが、OpenAI の 10 月の調達は、当初目標の 300 億ドルに対して、WSJ の報道時点で約 110 億ドルしか集まっていない。",
+      "The condition for raising the next round has shifted from expectations about capability to proof of unit economics. Single raises now run to tens of billions of dollars, and few parties can supply that much. Anthropic's financing cash flow grew from USD 2.3 billion in 2023 to USD 110.8 billion in H1 2026, while OpenAI's October round had raised only about USD 11 billion against an initial target of USD 30 billion as of the WSJ report.",
     ),
     refs: ["2.1:link1", "6.2:market", "2.2:valuation", "2.2:vendor", "2.3:openai"],
     links: [S.s1, S.wsj, S.decoderOpenAI, S.cnbcRound],
@@ -62,12 +62,12 @@ export const CAPITAL: GroupDef = {
     }),
     item("contracts", t("長期契約・リース", "Contracts and leases"), {
       summary: t(
-        "何年も先まで計算資源を押さえる契約。前払いは軽くなるが、長い支払い義務を負う。",
-        "Contracts that lock in compute for years: less cash up front, but long payment obligations.",
+        "計算資源の代金を何年にも分けて払う資金の出し方。前払いは軽くなるが、長い支払い義務を負う。",
+        "A way of financing compute by paying for it over many years: less cash up front, but long payment obligations.",
       ),
       note: t(
-        "Anthropic の S-1 で名前の挙がった契約だけで、上限値を含めて 6,000 億ドルを超える。Microsoft の開始前のリースは 3,646 億ドル。",
-        "The agreements named in Anthropic's S-1 alone exceed USD 600 billion, including upper-bound amounts; Microsoft's leases not yet commenced total USD 364.6 billion.",
+        "Microsoft の開始前のリースは 3,646 億ドルで、貸借対照表に載る前の実質的な長期債務である。",
+        "Microsoft's leases not yet commenced total USD 364.6 billion — effectively long-term debt that has not yet reached the balance sheet.",
       ),
       refs: ["2.2:contracts", "2.3", "7.1:leases"],
       links: [S.s1, S.msft10q],
@@ -87,8 +87,8 @@ export const REVENUE: NodeDef = {
       "What customers pay for the work that gets done, through usage billing and subscriptions.",
     ),
     note: t(
-      "2023 年の生成 AI の売上は、チャットのサブスクリプションと試験的な API 利用が中心だった。2026 年の Anthropic では、トークン量に応じた従量課金が上期の売上の 80% を占め、売上は 2023 年通期の 4,100 万ドルから 2026 年上期の 162.9 億ドルになった。計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がった（7〜9 月期は報道で 1.70）。",
-      "In 2023, generative AI revenue came mainly from chat subscriptions and experimental API use. At Anthropic in 2026, token-metered usage billing made up 80% of first-half revenue, and revenue grew from USD 41 million in 2023 to USD 16.29 billion in H1 2026. Revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026 (1.70 in July–September, as reported).",
+      "2023 年の生成 AI の売上は、チャットのサブスクリプションと試験的な API 利用が中心だった。2026 年の Anthropic では、トークン量に応じた従量課金が上期の売上の 80% を占め、売上は 2023 年通期の 4,100 万ドルから 2026 年上期の 162.9 億ドルになった。Anthropic の計算資源 1 ドルあたりの売上は、2023 年の 0.09 から 2026 年上期の 1.82 に上がった（7〜9 月期は報道で 1.70）。",
+      "In 2023, generative AI revenue came mainly from chat subscriptions and experimental API use. At Anthropic in 2026, token-metered usage billing made up 80% of first-half revenue, and revenue grew from USD 41 million in 2023 to USD 16.29 billion in H1 2026. Anthropic's revenue per dollar of compute rose from 0.09 in 2023 to 1.82 in H1 2026 (1.70 in July–September, as reported).",
     ),
     refs: ["2.1:link7", "2.2:payg", "6.3:revenuePerCompute", "8:growth"],
     links: [S.s1, S.decoderAnthropic],
@@ -107,8 +107,8 @@ export const GROSS_PROFIT: NodeDef = {
       "Revenue minus the cost of serving customers' inference (cost of revenue).",
     ),
     note: t(
-      "Anthropic の粗利率は 2023 年の 37% から、2024 年の −95% を経て、2026 年上期に 85% になった。OpenAI は 2025 年に約 33%（報道）。85% は、需要が供給を上回り、計算資源の単価が過去の契約で固定されていた時期の数字である。",
-      "Anthropic's gross margin went from 37% in 2023, through −95% in 2024, to 85% in H1 2026; OpenAI's was about 33% in 2025 (reported). The 85% comes from a period when demand exceeded supply and compute prices were fixed by earlier contracts.",
+      "Anthropic の粗利率は 2023 年の 37% から、2024 年の −95%、2025 年の 40% を経て、2026 年上期に 85% になった。OpenAI は 2025 年に約 33%（報道）で、2026 年の数字は報じられていない。85% は、需要が供給を上回り、計算資源の単価が過去の契約で固定されていた時期の数字である。",
+      "Anthropic's gross margin went from 37% in 2023, through −95% in 2024 and 40% in 2025, to 85% in H1 2026; OpenAI's was about 33% in 2025 (reported), and its 2026 figure has not been reported. The 85% comes from a period when demand exceeded supply and compute prices were fixed by earlier contracts.",
     ),
     refs: ["2.1:link8", "6.3:margin", "2.2:margin"],
     links: [S.s1],
@@ -140,7 +140,7 @@ export const FCF: NodeDef = {
   id: "fcf",
   category: "money",
   label: t("FCF", "FCF"),
-  sublabel: t("設備投資のあとに残るか", "Cash left after capex?"),
+  sublabel: t("設備投資とリース返済のあとに残るか", "Left after capex and lease payments?"),
   emphasis: true,
   detail: {
     summary: t(
@@ -148,8 +148,8 @@ export const FCF: NodeDef = {
       "Operating cash flow minus capex (and lease principal repayments); it sets the terms on which the next round of capital can be raised.",
     ),
     note: t(
-      "Anthropic の FCF は 2023 年の −16.3 億ドルから 2026 年上期の +34.5 億ドルになった。ただし、自社設備とリースへの移行で、設備投資とリースの支払いはこれから大きく増える。OpenAI は、2026〜2030 年の累計で約 2,800 億ドルの現金流出を見込み、手元資金は 2028 年に尽きる想定だと報じられている。",
-      "Anthropic's FCF went from −USD 1.63 billion in 2023 to +USD 3.45 billion in H1 2026, but capex and lease payments are about to rise sharply as it moves to its own facilities and leases. OpenAI reportedly projects about USD 280 billion of cumulative cash outflow over 2026–2030, with its cash running out in 2028.",
+      "Anthropic の FCF は 2023 年の −16.3 億ドルから 2026 年上期の +34.5 億ドルになった。ただし、上期の GAAP の営業損益は −6.9 億ドルで、営業キャッシュフローには利息収入（約 11 億ドル）と株式報酬の足し戻し（約 22 億ドル）が含まれる。また、自社設備とリースへの移行で、設備投資とリースの支払いはこれから大きく増える。OpenAI は、2026〜2030 年の累計で約 2,800 億ドルの現金流出を見込み、手元資金は 2028 年に尽きる想定だと報じられている。",
+      "Anthropic's FCF went from −USD 1.63 billion in 2023 to +USD 3.45 billion in H1 2026, but GAAP operating income for the half was −USD 0.69 billion: operating cash flow included about USD 1.1 billion of interest income and about USD 2.2 billion of stock-based compensation added back. Capex and lease payments are also about to rise sharply as it moves to its own facilities and leases. OpenAI reportedly projects about USD 280 billion of cumulative cash outflow over 2026–2030, with its cash running out in 2028.",
     ),
     refs: ["2.1:link10", "2.2:finance", "2.2:leasePrincipal"],
     links: [S.s1],
@@ -175,8 +175,8 @@ export const CHAIN_EDGES: EdgeDef[] = [
         "The capital raised secures compute through cloud contracts, chip leases and own data centres. In 2023 the constraint was getting GPUs at all; what Anthropic's 2026 S-1 describes is compute contracted 12–18 months ahead and paid for over many years.",
       ),
       note: t(
-        "支払い義務は 5〜20 年続くのに対し、売上が入ってくる期間は月単位から数年単位である。投資家が知りたいのは、需要が想定の半分だったら、どれだけの固定費が残るかである。",
-        "Payment obligations run 5–20 years, while revenue comes in over months to a few years. What investors want to know is how much fixed cost would remain if demand came in at half the plan.",
+        "Anthropic の S-1 で名前の挙がった契約だけで、上限値を含めて 6,000 億ドルを超える。支払い義務は 5〜20 年続くのに対し、売上が入ってくる期間は月単位から数年単位である。投資家が知りたいのは、需要が想定の半分だったら、どれだけの固定費が残るかである。",
+        "The agreements named in Anthropic's S-1 alone exceed USD 600 billion, including upper-bound amounts. Payment obligations run 5–20 years, while revenue comes in over months to a few years. What investors want to know is how much fixed cost would remain if demand came in at half the plan.",
       ),
       refs: ["2.1:link2", "2.3:timing", "6.3:obligations"],
       links: [S.s1, S.msft10q],
@@ -221,8 +221,8 @@ export const CHAIN_EDGES: EdgeDef[] = [
         "The compute cost of serving customers' inference — the cost of link 5 (inference supply). The more tokens inference-time compute and the harness spend on each job, the larger it gets.",
       ),
       note: t(
-        "Anthropic では、2024 年に顧客向け推論のコストが売上の 2 倍近くあったが、2026 年上期には売上の 15% まで下がった。ただし、無料ユーザーへの推論のコストと、販売パートナーへの手数料は、売上原価ではなく販売・マーケティング費に分類されている。",
-        "At Anthropic, the cost of serving customers was nearly twice revenue in 2024 but down to 15% of revenue in H1 2026. The cost of inference for free users and the fees paid to sales partners, however, are classified as sales and marketing expenses, not cost of revenue.",
+        "Anthropic では、2024 年に顧客向け推論のコストが売上の 2 倍近くあったが、2026 年上期には売上の 15% まで下がった。ただし Anthropic は、無料ユーザーへの推論のコストと、販売パートナーへの手数料を、売上原価ではなく販売・マーケティング費に分類している。",
+        "At Anthropic, the cost of serving customers was nearly twice revenue in 2024 but down to 15% of revenue in H1 2026. Anthropic, however, classifies the cost of inference for free users and the fees paid to sales partners as sales and marketing expenses, not cost of revenue.",
       ),
       refs: ["2.2:inferenceCost", "5.2:chainCosts", "6.3:margin"],
       links: [S.s1],
@@ -263,8 +263,8 @@ export const CHAIN_EDGES: EdgeDef[] = [
     kicker: DEDUCTED,
     detail: {
       summary: t(
-        "設備投資（環 2 の費用）、運転資本の増加、税金など。リースで計算資源を持つなら、リースの元本返済も引いて見る必要がある。",
-        "Capex (the cost of link 2), the increase in working capital, taxes and so on. Where compute is held through leases, lease principal repayments need to be subtracted too.",
+        "設備投資（環 2 の費用）、運転資本の増加、税金など。一方で、株式報酬や減価償却のような現金の出ない費用は足し戻され、利息収入も加わるので、FCF が営業利益を上回ることもある。リースで計算資源を持つなら、リースの元本返済も引いて見る必要がある。",
+        "Capex (the cost of link 2), the increase in working capital, taxes and so on. Going the other way, non-cash expenses such as stock-based compensation and depreciation are added back and interest income comes in, so FCF can exceed operating profit. Where compute is held through leases, lease principal repayments need to be subtracted too.",
       ),
       note: t(
         "計算資源をクラウドの利用料として払えば、その支出は営業キャッシュフローから出ていく。ファイナンスリースに置き換えると、賃料の元本部分は財務キャッシュフローに入るので、営業キャッシュフロー − 設備投資で計算した FCF にはほとんど表れない。Anthropic の Broadcom とのリースだけで、賃料総額は約 1,612 億ドルにのぼる。",
@@ -289,10 +289,10 @@ export const CHAIN_EDGES: EdgeDef[] = [
         "FCF and its outlook set the terms on which the next round of capital can be raised; while FCF is negative, outside capital fills the gap.",
       ),
       note: t(
-        "2023 年の資本は、将来の能力への前払いだった。2026 年に資本の出し手が見ているのは、成長率の高さではなく、成長率の変化とユニットエコノミクスである。示すべきことは、計算資源 1 ドルあたりの売上、推論の粗利、需要の裏づけ、支払い義務と売上の期間の釣り合い、学習投資の回収の 5 つにまとめられる（第 6.3 節）。",
-        "In 2023, capital was a prepayment for future capability. In 2026, providers of capital look not at how high growth is but at how it is changing and at unit economics. What a lab has to show comes down to five things: revenue per dollar of compute, gross margin on inference, backing for demand, a match between the duration of obligations and of revenue, and recovery of the investment in training (Section 6.3).",
+        "2023 年の資本は、将来の能力への前払いだった。2026 年の市場が見ているのは、成長率の高さではなく、成長率の変化とユニットエコノミクスである。少なくとも示す必要があるのは、計算資源 1 ドルあたりの売上、推論の粗利、需要の裏づけ、支払い義務と売上の期間の釣り合い、学習投資の回収の 5 つである（第 6.3 節）。FCF がしばらくマイナスでも、契約した計算資源の 1 単位ごとに費用を回収し、資本コストを上回る収益を上げていれば、成長のための投資と見なされる。",
+        "In 2023, capital was a prepayment for future capability. In 2026, the market looks not at how high growth is but at how it is changing and at unit economics. A lab has to show at least five things: revenue per dollar of compute, gross margin on inference, backing for demand, a match between the duration of obligations and of revenue, and recovery of the investment in training (Section 6.3). Negative FCF for a while is read as investment in growth if each tranche of contracted compute recovers its cost and earns a return above the cost of capital.",
       ),
-      refs: ["2.1:link10", "6.2:market", "2.3:openai"],
+      refs: ["2.1:link10", "6.2:market", "6.3:tranche", "2.3:openai"],
       links: [S.wsj, S.s1],
     },
   },

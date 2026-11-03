@@ -237,11 +237,11 @@ export function relatedIds(id: string): Set<string> {
 export const LAYOUT = {
   /** The money links of the chain run along the top. */
   BAND_Y: 14,
-  MONEY_H: 52,
+  MONEY_H: 60,
   /** Lane for loops that cross the map above the capability layer, under the money band. */
-  LANE_TOP: 88,
+  LANE_TOP: 96,
   /** Top of the capability layer in columns B–E; column A starts under the capital group. */
-  TOP: 110,
+  TOP: 118,
   /** Room between the capital group and the resources it pays for. */
   CHAIN_GAP: 44,
   GROUP_HEADER: 32,

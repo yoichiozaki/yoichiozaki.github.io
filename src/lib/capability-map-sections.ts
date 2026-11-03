@@ -341,8 +341,8 @@ export const SECTIONS: Record<string, SectionDef> = {
         "The other set puts the model to work (inference-time compute, the harness and inference-time context), and its cost shows up not as up-front training cost but mainly as inference cost.",
       ),
       chainCosts: t(
-        "上段のチェーンで見ると、学習費と研究費は営業利益の手前で、推論費は粗利の手前で差し引かれる。",
-        "On the chain along the top, training and research costs are deducted on the way to operating profit, and inference cost on the way to gross profit.",
+        "上段のチェーンで見ると、学習費と研究費は営業利益の手前で、顧客向けの推論費は粗利の手前で差し引かれる。",
+        "On the chain along the top, training and research costs are deducted on the way to operating profit, and the cost of serving customers on the way to gross profit.",
       ),
       perToken: t(
         "顧客がトークン単位で払う限り、考える量を増やすことは、売上を増やすことでもある。",
@@ -461,6 +461,10 @@ export const SECTIONS: Record<string, SectionDef> = {
         "(4) The duration of payment obligations matches the period over which revenue comes in.",
       ),
       training: t("(5) 学習への投資が回収できていること。", "(5) Investment in training is being recovered."),
+      tranche: t(
+        "問われるのは、契約した計算資源の 1 単位（トランシュ）ごとに、その費用を回収したうえで、資本コストを上回る収益を上げられているかどうかである。",
+        "What matters is whether each tranche of contracted compute recovers its cost and earns a return above the cost of capital.",
+      ),
     },
   },
   "6.4": {
