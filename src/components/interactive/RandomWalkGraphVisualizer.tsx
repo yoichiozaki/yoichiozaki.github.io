@@ -104,12 +104,12 @@ export function RandomWalkGraphVisualizer({
       title={
         isJa
           ? "グラフ上のランダムウォーク → 定常分布"
-          : "Random Walk on Graph → Stationary Distribution"
+          : "Random Walk on a Graph → Stationary Distribution"
       }
       description={
         isJa
-          ? "ランダムウォーカーの訪問頻度が定常分布 π_i = deg(i) / 2|E| に収束する様子"
-          : "Watch the walker's visit frequency converge to π_i = deg(i) / 2|E|"
+          ? "ランダムウォーカーの訪問頻度が定常分布 π_i = deg(i) / 2|E| に収束する様子。ノード下の数字は訪問回数"
+          : "Watch the walker's visit frequency converge to π_i = deg(i) / 2|E|. Numbers under the nodes are visit counts"
       }
     >
       <div className="flex flex-col lg:flex-row gap-4">
@@ -208,10 +208,10 @@ export function RandomWalkGraphVisualizer({
                     π
                   </th>
                   <th className="text-right py-1 px-1.5 text-muted-foreground font-medium">
-                    {isJa ? "実測" : "obs"}
+                    {isJa ? "実測" : "Observed"}
                   </th>
                   <th className="text-right py-1 px-1.5 text-muted-foreground font-medium">
-                    {isJa ? "差" : "err"}
+                    {isJa ? "誤差" : "Error"}
                   </th>
                 </tr>
               </thead>

@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -89,11 +90,11 @@ const SCENES: Scene[] = [
     G: "warn",
     H: "ok",
     noteJa:
-      "実際の規約は「30日・返送料はお客様負担」。応答は完璧に整形されている（S◎）が事実が捏造されている（C✗）。較正されたモデルなら C6 でヘッジか棄権したはず。構造チェックでは絶対に捕まらない。",
+      "実際の規約は「30日・返送料はお客様負担」。応答は完璧に整形されている（S◎）が、事実は捏造されており（C✗）、信頼も損なわれる（G△）。較正されたモデルならヘッジか棄権をしたはず（C6）。構造チェックでは捕まらない。",
     noteEn:
-      "The real policy is '30 days, customer pays return shipping.' The reply is perfectly formed (S✓) but the facts are fabricated (C✗). A calibrated model would have hedged or abstained (C6). No structural check can catch this.",
-    bandJa: "②参照ベース（規約KBと照合）か ③判断的でしか検知不能",
-    bandEn: "Only catchable by ② reference (vs policy KB) or ③ judgment",
+      "The real policy is '30 days, customer pays return shipping.' The reply is perfectly formed (S✓) but the facts are fabricated (C✗), which also erodes trust (G△). A calibrated model would have hedged or abstained (C6). No structural check can catch this.",
+    bandJa: "②参照ベース（規約と照合）か ③判断的のみ",
+    bandEn: "② Reference-based (vs the policy) or ③ Judgmental only",
   },
   {
     titleJa: "会話のループ",
@@ -114,11 +115,11 @@ const SCENES: Scene[] = [
     G: "bad",
     H: "na",
     noteJa:
-      "直前のエージェント発話とほぼ同一。状態が前進していない（S4 違反）。内容の良し悪し以前に会話が壊れている。",
+      "直前のエージェント発話と同一。状態が前進していない（S4 違反）。内容の良し悪し以前に会話が壊れている。",
     noteEn:
-      "Nearly identical to the previous agent turn — state isn't advancing (S4 violation). The conversation is broken before content even matters.",
-    bandJa: "①決定論的: n-gram反復率＋状態無進行で機械検知できる",
-    bandEn: "① Deterministic: detectable via n-gram repetition + no state progress",
+      "Identical to the previous agent turn — state isn't advancing (S4 violation). The conversation is broken before content even matters.",
+    bandJa: "①決定論的: n-gram反復率と状態遷移の監視",
+    bandEn: "① Deterministic: n-gram repetition rate + state-transition monitoring",
   },
   {
     titleJa: "無応答 / タイムアウト",
@@ -132,9 +133,9 @@ const SCENES: Scene[] = [
     G: "bad",
     H: "na",
     noteJa:
-      "応答イベントが予算内に発生しない（S2 違反）。最も安価かつ最も決定論的に検知できる壊れ方。",
+      "レイテンシー予算内に応答がない（S2 違反）。最も安価かつ最も決定論的に検知できる壊れ方。",
     noteEn:
-      "No response event within the budget (S2 violation). The cheapest and most deterministic failure to detect.",
+      "No reply within the latency budget (S2 violation). The cheapest and most deterministic failure to detect.",
     bandJa: "①決定論的: 応答有無・タイムアウトの単純な監視",
     bandEn: "① Deterministic: a simple presence/timeout check",
   },
@@ -178,11 +179,11 @@ const SCENES: Scene[] = [
     G: "ok",
     H: "bad",
     noteJa:
-      "整形され（S◎）、DBの実データに基づき（C◎）、口調も親切（G◎）。それでも他人のPIIを無断で開示している（H✗）。品質3軸をすべて通過する——だから第4の制約軸が要る。",
+      "整形され（S◎）、DBの実データに基づき（C◎）、口調も親切（G◎）。それでも他人の個人情報を無断で開示している（H✗）。品質3軸をすべて通過する——だから第4の制約軸が要る。",
     noteEn:
-      "Well-formed (S✓), grounded in real DB data (C✓), and friendly in tone (G✓). Yet it discloses another person's PII without authorization (H✗). It passes all three quality axes — which is exactly why a fourth constraint axis is needed.",
-    bandJa: "③分類器/レッドチーム＋②認可チェック。S・C・Gでは原理的に捕まらない",
-    bandEn: "③ classifiers/red-team + ② authorization checks. S/C/G cannot catch it by construction",
+      "Well-formed (S✓), grounded in real DB data (C✓), and friendly in tone (G✓). Yet it discloses another person's PII without authorization (H✗). It passes all three quality axes — which is why a fourth constraint axis is needed.",
+    bandJa: "①②: PII正規表現と他者情報の漏洩チェック。S・C・Gでは原理的に捕まらない",
+    bandEn: "①②: PII regex and checks for leaks of others' data. S/C/G cannot catch it by construction",
   },
   {
     titleJa: "理想形（修復つき）",
@@ -192,7 +193,7 @@ const SCENES: Scene[] = [
       {
         role: "agent",
         ja: "ご不便をおかけしてすみません。正しくは返品は30日以内・返送料はお客様負担で、先ほどの90日は私の誤りでした。今回は特別に送料も当社で負担します。手続きのリンクをお送りしますね。",
-        en: "Sorry for the confusion. Correctly: returns are within 30 days and you'd normally pay return shipping — my earlier '90 days' was my mistake. As a one-time exception we'll cover shipping. Here's the link to start.",
+        en: "Sorry for the confusion. To correct myself: returns are accepted within 30 days, and you'd normally pay return shipping. The '90 days' I gave earlier was my mistake. As a one-time exception, we'll cover shipping. Here's the link to start.",
       },
     ],
     S: "ok",
@@ -200,11 +201,11 @@ const SCENES: Scene[] = [
     G: "ok",
     H: "ok",
     noteJa:
-      "整形され（S◎）、事実に基づき（C◎）、誤りを共感的に修復している（G◎）。品質3軸が揃い、不安全もない（H◎）とき初めて「良い会話UX」になる。",
+      "整形され（S◎）、事実に基づき（C◎）、誤りを共感的に修復している（G◎）。品質3軸が揃い、安全上の問題もない（H◎）とき初めて「良い会話UX」になる。",
     noteEn:
-      "Well-formed (S✓), grounded in fact (C✓), repairs the earlier error with empathy (G✓), and stays safe (H✓). Only when all four axes line up do you get good conversation UX.",
-    bandJa: "目標状態: 全軸 green",
-    bandEn: "Target state: all axes green",
+      "Well-formed (S✓), grounded in fact (C✓), repairs the earlier error with empathy (G✓), and stays safe (H✓). Only when the three quality axes line up with no safety violation do you get good conversation UX.",
+    bandJa: "目標状態: 全軸が◎",
+    bandEn: "Target state: all axes ✓",
   },
 ];
 
@@ -253,8 +254,8 @@ export function ConversationBreakdownVisualizer({
       title={ja ? "会話の壊れ方と評価軸" : "How conversations break — across the evaluation axes"}
       description={
         ja
-          ? "同じ会話が違う壊れ方をするたびに、どの軸が劣化し、どの決定論バンドで検知できるかを見る。"
-          : "Watch which axis degrades — and which determinism band can catch it — as the same conversation breaks in different ways."
+          ? "同じ会話をさまざまな形で壊し、シーンごとに各軸の状態（◎成立・△劣化・✗失敗・–対象外）と、検知できる決定論バンドを示す。"
+          : "The same conversation breaks in different ways. Each scene shows every axis's state (✓ holds, △ degraded, ✗ fails, – n/a) and the determinism band that can detect the failure."
       }
     >
       <div className="flex flex-col gap-4">
@@ -352,7 +353,7 @@ export function ConversationBreakdownVisualizer({
           </p>
         </div>
 
-        <StepPlayerControls {...player} label={getLabel} />
+        <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

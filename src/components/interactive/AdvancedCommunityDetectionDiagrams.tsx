@@ -8,7 +8,7 @@ type Props = { locale?: string };
 
 export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
   const isJa = locale === "ja";
-  // Graph A: 6 nodes, 9 edges, 3 triangles (two overlapping triangles sharing an edge, forming K4-like structure)
+  // Graph A: 6 nodes, 9 edges, 4 triangles (two overlapping triangles sharing an edge, forming K4-like structure)
   // Layout: two triangles sharing edge 1-2, plus triangle 4-5-0 bridging
   const graphA = {
     nodes: [
@@ -33,6 +33,7 @@ export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
       [0, 1, 2],
       [1, 2, 3],
       [0, 2, 4],
+      [2, 4, 5],
     ],
   };
   // Graph B: 6 nodes, 9 edges, 0 triangles — K_{3,3} complete bipartite graph
@@ -137,15 +138,15 @@ export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "グラフ A と B は同じノード数・辺数を持ちますが、三角形（triadic closure）の有無で構造が根本的に異なります。辺密度だけでは区別できません。"
-          : "Graphs A and B have the same number of nodes and edges, but differ fundamentally in triangle (triadic closure) presence. Edge density alone cannot distinguish them."
+          ? "グラフ A と B はノード数・辺数が同じですが、A は全ての辺が三角形に含まれ、B には三角形が 1 つもありません。辺密度だけではこの違いを区別できません。"
+          : "Graphs A and B have the same numbers of nodes and edges, but every edge of A lies in a triangle, while B has no triangles at all. Edge density alone cannot tell them apart."
       }
     >
       <svg
         viewBox="0 0 310 125"
         className="w-full h-auto border border-neutral-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-900"
       >
-        {renderGraph(graphA, isJa ? "グラフ A" : "Graph A", 3, "#3b82f6", 5)}
+        {renderGraph(graphA, isJa ? "グラフ A" : "Graph A", 4, "#3b82f6", 5)}
         {/* Divider */}
         <line
           x1={155}
@@ -174,8 +175,8 @@ export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
           </span>
           <span className="mx-1">—</span>
           {isJa
-            ? "三角形が密に分布。局所的凝集（triadic closure）が強く、「友人の友人は友人」が成り立つ構造。"
-            : "Dense triangles. Strong triadic closure — 'a friend of a friend is a friend.'"}
+            ? "全ての辺が三角形に含まれる。三角形の閉包（triadic closure）による局所的な凝集が強く、「友人の友人は友人」にあたる構造。"
+            : "Every edge lies in a triangle. Strong local cohesion from triadic closure ('a friend of a friend is a friend')."}
         </div>
         <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-2.5 text-xs text-red-800 dark:text-red-300">
           <span className="font-bold">
@@ -183,8 +184,8 @@ export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
           </span>
           <span className="mx-1">—</span>
           {isJa
-            ? "三角形なし。完全二部グラフ K\u{2083},\u{2083} は同じ辺密度でも三角形（奇数長サイクル）を一切持たない。"
-            : "No triangles. Complete bipartite K\u{2083},\u{2083} has the same edge density but zero triangles (no odd cycles)."}
+            ? "三角形なし。完全二部グラフ K\u{2083},\u{2083} には奇数長のサイクルがないため、同じ辺密度でも三角形を 1 つも持たない。"
+            : "No triangles. The complete bipartite graph K\u{2083},\u{2083} has no odd cycles, so despite the same edge density it has no triangles."}
         </div>
       </div>
     </InteractiveDemo>
@@ -196,22 +197,22 @@ export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
 const timelineData = [
   {
     year: "2005",
-    titleJa: "Palla — CFinder (重複コミュニティー)",
-    titleEn: "Palla — CFinder (Overlapping)",
+    titleJa: "Palla — CPM（重複コミュニティー）",
+    titleEn: "Palla — CPM (Overlapping)",
     descJa:
-      "Palla らが Clique Percolation Method (CPM) を提案。k-クリークの連鎖で重複コミュニティーを定義する初の実用的手法。",
+      "Palla らが Clique Percolation Method (CPM) を提案。隣接する k-クリークの連鎖でコミュニティーを定義し、重複コミュニティーも検出できる初期の代表的手法。",
     descEn:
-      "Palla et al. propose the Clique Percolation Method (CPM). First practical method to define overlapping communities via chains of k-cliques.",
+      "Palla et al. propose the Clique Percolation Method (CPM), an early representative method that defines communities as chains of adjacent k-cliques and can detect overlapping communities.",
     color: "#3b82f6",
   },
   {
-    year: "2009",
+    year: "2010",
     titleJa: "Ahn — リンクコミュニティー",
     titleEn: "Ahn — Link Communities",
     descJa:
-      "Ahn, Bagrow, Lehmann がリンク（辺）をクラスタリングする手法を提案。ノードが複数コミュニティーに自然に所属可能。",
+      "Ahn, Bagrow, Lehmann がノードではなくリンク（辺）をクラスタリングする手法を提案。辺が複数のコミュニティーに分かれるノードは、その全てに属する。",
     descEn:
-      "Ahn, Bagrow & Lehmann propose clustering links (edges) rather than nodes. Nodes naturally belong to multiple communities.",
+      "Ahn, Bagrow & Lehmann propose clustering links (edges) rather than nodes. A node whose links fall into several communities belongs to all of them.",
     color: "#10b981",
   },
   {
@@ -219,13 +220,13 @@ const timelineData = [
     titleJa: "Mucha — 多重・時間依存ネットワーク",
     titleEn: "Mucha — Multislice Networks",
     descJa:
-      "Mucha らが多重・時間依存ネットワークにおけるコミュニティー検出を Modularity の拡張として統一的に定式化（Science 掲載）。",
+      "Mucha らが時間依存・マルチスケール・多重ネットワークのコミュニティー検出を、Modularity の拡張（Multislice Modularity）として統一的に定式化（Science 掲載）。",
     descEn:
-      "Mucha et al. unify community detection in time-dependent, multiscale, multiplex networks via generalized Modularity (published in Science).",
+      "Mucha et al. unify community detection in time-dependent, multiscale, and multiplex networks with Multislice Modularity, a generalization of Modularity (published in Science).",
     color: "#8b5cf6",
   },
   {
-    year: "2012",
+    year: "2013",
     titleJa: "De Domenico — テンソルフレームワーク",
     titleEn: "De Domenico — Tensor Framework",
     descJa:
@@ -246,12 +247,12 @@ const timelineData = [
   },
   {
     year: "2014",
-    titleJa: "Gauvin — テンポラル信号のスペクトラル法",
-    titleEn: "Gauvin — Spectral for Temporal",
+    titleJa: "Gauvin — 非負テンソル因子分解",
+    titleEn: "Gauvin — Non-Negative Tensor Factorization",
     descJa:
-      "活動駆動型テンポラルネットワークに対するスペクトラルクラスタリングの拡張。時間的パターンの検出が可能に。",
+      "Gauvin らが対面接触ネットワークに非負テンソル因子分解 (NTF) を適用し、コミュニティーのメンバーシップと時間的な活動パターンを同時に推定。",
     descEn:
-      "Extension of spectral clustering to activity-driven temporal networks, enabling detection of temporal patterns.",
+      "Gauvin et al. apply non-negative tensor factorization (NTF) to face-to-face contact networks, estimating community membership and temporal activity patterns together.",
     color: "#06b6d4",
   },
   {
@@ -265,43 +266,43 @@ const timelineData = [
     color: "#ec4899",
   },
   {
-    year: "2017",
-    titleJa: "Benson — 高次スペクトラルクラスタリング",
-    titleEn: "Benson — Higher-Order Spectral",
+    year: "2016",
+    titleJa: "Benson — モチーフ版 Cheeger 不等式",
+    titleEn: "Benson — Motif Cheeger Inequality",
     descJa:
-      "モチーフ重みラプラシアンによるスペクトラル法の一般化。任意のモチーフに対するチーガー不等式の類似物を証明。",
+      "同じ論文で、モチーフ重み付きラプラシアンによるスペクトラル法に Cheeger 不等式の類似物を証明。三角形などアンカーが 3 ノードのモチーフで成り立ち、得られる分割の質に保証を与える。",
     descEn:
-      "Generalization of spectral methods via motif-weighted Laplacians. Proves Cheeger-like inequalities for arbitrary motifs.",
+      "The same paper proves a Cheeger-like inequality for spectral clustering with the motif-weighted Laplacian. It holds for motifs with three anchor nodes, such as triangles, and bounds the quality of the resulting partition.",
     color: "#ec4899",
   },
   {
     year: "2019",
-    titleJa: "Interdonato — 多重ネットワークのサーベイ",
-    titleEn: "Interdonato — Multiplex CD Survey",
-    descJa:
-      "多重ネットワークにおけるコミュニティー検出の包括的サーベイ。手法を体系的に分類。",
-    descEn:
-      "Comprehensive survey of community detection in multiplex networks, systematically categorizing methods.",
-    color: "#64748b",
-  },
-  {
-    year: "2021",
     titleJa: "Rossetti — CDlib",
     titleEn: "Rossetti — CDlib",
     descJa:
-      "Python ライブラリー CDlib の公開。動的・重複・高次コミュニティー検出を含む包括的なツールキット。",
+      "Rossetti, Milli, Cazabet が Python ライブラリー CDlib を発表。重複コミュニティー用を含む多数の検出アルゴリズムと、結果の評価・比較・可視化の機能をまとめて提供。",
     descEn:
-      "Release of CDlib, a comprehensive Python library covering dynamic, overlapping, and higher-order community detection.",
+      "Rossetti, Milli & Cazabet release CDlib, a Python library that bundles many detection algorithms, including overlapping ones, with tools to evaluate, compare, and visualize the results.",
     color: "#10b981",
+  },
+  {
+    year: "2021",
+    titleJa: "Magnani — 多重ネットワークのサーベイ",
+    titleEn: "Magnani — Multiplex Survey",
+    descJa:
+      "Magnani, Hanteer, Interdonato, Rossi, Tagarelli のサーベイ（ACM Computing Surveys）。多重ネットワークの手法を、レイヤーの扱い方でフラット化・レイヤー単位・多層型に分類。",
+    descEn:
+      "Survey by Magnani, Hanteer, Interdonato, Rossi & Tagarelli (ACM Computing Surveys) that classifies multiplex methods by how they handle layers: flattening, layer-by-layer, and multilayer.",
+    color: "#64748b",
   },
   {
     year: "2023",
     titleJa: "GNN ベース手法の台頭",
     titleEn: "GNN-Based Methods Rise",
     descJa:
-      "Graph Neural Network による教師なし・半教師ありコミュニティー検出がベンチマークで既存手法を凌駕し始める。",
+      "Graph Neural Network (GNN) を使うコミュニティー検出の研究が増える。例: Modularity を微分可能な形に緩和し、GNN でコミュニティー割り当てを直接予測する DMoN（Tsitsulin ら, JMLR）。",
     descEn:
-      "Graph Neural Network-based unsupervised and semi-supervised community detection begins outperforming traditional methods on benchmarks.",
+      "Research on Graph Neural Network (GNN)-based community detection grows; for example, DMoN (Tsitsulin et al., JMLR) relaxes Modularity into a differentiable form and predicts community assignments directly with a GNN.",
     color: "#f97316",
   },
 ];
@@ -317,8 +318,8 @@ export function AdvancedCDTimeline({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "2000年代中盤以降、従来の辺密度ベースの手法を超えた研究が本格化します。"
-          : "From the mid-2000s onward, research pushes beyond simple edge-density approaches."
+          ? "2000 年代半ば以降の、重複・高次構造・動的・多重ネットワークを扱うコミュニティー検出の主な研究。"
+          : "Key work since the mid-2000s on overlapping, higher-order, dynamic, and multiplex community detection."
       }
     >
       <div className="relative space-y-0 py-4">
@@ -358,8 +359,8 @@ const MOTIF_DATA = [
   {
     nameJa: "三角形 (M₃)",
     nameEn: "Triangle (M₃)",
-    descJa: "最も基本的な高次構造。3 ノード間の完全結合。社会ネットワークにおける「友人の友人は友人」の体現。",
-    descEn: "The most basic higher-order structure. Complete connection among 3 nodes. Embodies 'a friend of a friend is a friend' in social networks.",
+    descJa: "3 ノードが互いに結ばれた、最も基本的な高次構造。社会ネットワークの「友人の友人は友人」（三角形の閉包）にあたる。",
+    descEn: "The most basic higher-order structure: 3 mutually connected nodes. Corresponds to 'a friend of a friend is a friend' (triadic closure) in social networks.",
     nodes: [
       { x: 50, y: 15 },
       { x: 20, y: 70 },
@@ -370,8 +371,8 @@ const MOTIF_DATA = [
   {
     nameJa: "4-サイクル (M₄)",
     nameEn: "4-Cycle (M₄)",
-    descJa: "二部グラフ的構造に多く出現。レビューサイトやレコメンドシステムで重要。",
-    descEn: "Frequent in bipartite-like structures. Important in review sites and recommendation systems.",
+    descJa: "二部グラフ的な構造に多く現れる。ユーザー–商品ネットワークでは協調フィルタリングの基盤になる。",
+    descEn: "Frequent in bipartite-like structures; underlies collaborative filtering in user–product networks.",
     nodes: [
       { x: 20, y: 20 },
       { x: 80, y: 20 },
@@ -383,8 +384,8 @@ const MOTIF_DATA = [
   {
     nameJa: "フィードフォワードループ",
     nameEn: "Feed-Forward Loop",
-    descJa: "有向ネットワークのモチーフ。生体調節ネットワークや神経回路で頻出する情報転送パターン。",
-    descEn: "Directed motif common in gene regulatory networks and neural circuits. An information relay pattern.",
+    descJa: "有向ネットワークのモチーフ。遺伝子調節ネットワークや神経回路に多く現れ、遺伝子調節では信号のフィルタリングを担う。",
+    descEn: "Directed motif common in gene regulatory networks and neural circuits; filters signals in gene regulation.",
     nodes: [
       { x: 50, y: 15 },
       { x: 20, y: 70 },
@@ -396,8 +397,8 @@ const MOTIF_DATA = [
   {
     nameJa: "4-クリーク (K₄)",
     nameEn: "4-Clique (K₄)",
-    descJa: "4 ノードの完全グラフ。強いグループ凝集性の指標。CPM の基本構成要素。",
-    descEn: "Complete graph of 4 nodes. Indicator of strong group cohesion. Building block for CPM.",
+    descJa: "4 ノードの完全グラフ。強いグループ凝集性の指標。k = 4 の CPM の構成単位。",
+    descEn: "Complete graph of 4 nodes. Indicator of strong group cohesion. Building block of CPM with k = 4.",
     nodes: [
       { x: 30, y: 15 },
       { x: 70, y: 15 },
@@ -415,8 +416,8 @@ export function MotifCatalog({ locale = "ja" }: Props) {
       title={isJa ? "ネットワークモチーフのカタログ" : "Catalog of Network Motifs"}
       description={
         isJa
-          ? "高次コミュニティー検出で重要な役割を果たす代表的なモチーフ（部分グラフパターン）。"
-          : "Representative motifs (subgraph patterns) that play key roles in higher-order community detection."
+          ? "高次構造に基づくコミュニティー検出で使われる代表的なモチーフ（小さな部分グラフのパターン）。"
+          : "Representative motifs (small subgraph patterns) used in higher-order community detection."
       }
     >
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -502,13 +503,13 @@ export function MultiplexNetworkDiagram({ locale = "ja" }: Props) {
     },
     {
       nameJa: "レイヤー 2: 仕事関係",
-      nameEn: "Layer 2: Collaboration",
+      nameEn: "Layer 2: Work",
       color: "#10b981",
       edges: [[0, 3], [1, 3], [2, 3]] as [number, number][],
     },
     {
-      nameJa: "レイヤー 3: 趣味の繋がり",
-      nameEn: "Layer 3: Hobby",
+      nameJa: "レイヤー 3: 趣味のつながり",
+      nameEn: "Layer 3: Shared Hobbies",
       color: "#f59e0b",
       edges: [[0, 1], [0, 3], [1, 2]] as [number, number][],
     },
@@ -529,7 +530,7 @@ export function MultiplexNetworkDiagram({ locale = "ja" }: Props) {
       description={
         isJa
           ? "同じノード集合が異なる種類の関係（レイヤー）で結ばれています。各レイヤーのコミュニティー構造は異なり得ます。"
-          : "The same set of nodes connected by different types of relationships (layers). Each layer may have different community structure."
+          : "The same nodes are connected by different types of relationships (layers), and each layer can have a different community structure."
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -584,8 +585,8 @@ export function MultiplexNetworkDiagram({ locale = "ja" }: Props) {
       </div>
       <div className="mt-4 p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 text-xs text-neutral-600 dark:text-neutral-400">
         {isJa
-          ? "💡 ノード A〜D は全レイヤーで共通ですが、辺の構造はレイヤーごとに異なります。多重ネットワークのコミュニティー検出では、これらのレイヤーを統合的に考慮する必要があります。"
-          : "💡 Nodes A–D are shared across all layers, but edge structures differ per layer. Multiplex community detection must consider all layers jointly."}
+          ? "💡 ノード A〜D は全レイヤーで共通ですが、辺の構造はレイヤーごとに異なります。多重ネットワークの手法は、これらのレイヤーをどう組み合わせて扱うかで分かれます。"
+          : "💡 Nodes A–D are shared across all layers, but the edges differ from layer to layer. Multiplex methods differ in how they combine the layers."}
       </div>
     </InteractiveDemo>
   );
@@ -615,7 +616,7 @@ const comparisonData = [
     yearRange: "2010–",
     typeJa: "動的・多重",
     typeEn: "Dynamic / Multiplex",
-    basisJa: "時間・レイヤー結合されたModularity",
+    basisJa: "時刻・レイヤー間を結合した Modularity",
     basisEn: "Time/layer-coupled Modularity",
     complexityJa: "O(n log n) per slice",
     complexityEn: "O(n log n) per slice",
@@ -625,12 +626,12 @@ const comparisonData = [
     consEn: "Coupling parameter ω selection",
   },
   {
-    nameJa: "Motif-Conductance",
-    nameEn: "Motif-Conductance",
+    nameJa: "Motif Conductance",
+    nameEn: "Motif Conductance",
     yearRange: "2016–",
     typeJa: "高次構造",
     typeEn: "Higher-Order",
-    basisJa: "モチーフ重み付きConductance",
+    basisJa: "モチーフ重み付き Conductance",
     basisEn: "Motif-weighted Conductance",
     complexityJa: "モチーフ列挙 + スペクトラル",
     complexityEn: "Motif enumeration + spectral",
@@ -650,37 +651,37 @@ const comparisonData = [
     complexityJa: "ベースアルゴリズム依存",
     complexityEn: "Depends on base algorithm",
     prosJa: "既存手法を動的に拡張可能",
-    prosEn: "Extends existing methods to dynamic",
-    consJa: "平滑化パラメーターの調整",
-    consEn: "Smoothing parameter tuning",
+    prosEn: "Extends existing methods to dynamic networks",
+    consJa: "トレードオフパラメーター α の設定",
+    consEn: "Setting the trade-off parameter α",
   },
   {
-    nameJa: "Tensor Decomposition",
+    nameJa: "テンソル分解",
     nameEn: "Tensor Decomposition",
-    yearRange: "2012–",
-    typeJa: "多重",
-    typeEn: "Multiplex",
+    yearRange: "2013–",
+    typeJa: "動的・多重",
+    typeEn: "Dynamic / Multiplex",
     basisJa: "テンソル分解（CP / Tucker）",
     basisEn: "Tensor decomposition (CP / Tucker)",
     complexityJa: "O(n²L) 〜 O(n³L)",
     complexityEn: "O(n²L) to O(n³L)",
     prosJa: "レイヤー間相関を捕捉",
     prosEn: "Captures inter-layer correlations",
-    consJa: "大規模グラフに非スケーラブル",
-    consEn: "Not scalable for large graphs",
+    consJa: "大規模ネットワークへの適用が難しい",
+    consEn: "Scales poorly to large networks",
   },
   {
-    nameJa: "GNN (DMoN, MinCutPool等)",
+    nameJa: "GNN (DMoN, MinCutPool 等)",
     nameEn: "GNN (DMoN, MinCutPool, etc.)",
     yearRange: "2020–",
     typeJa: "汎用・学習ベース",
     typeEn: "General / Learning-based",
-    basisJa: "微分可能目的関数の勾配降下",
+    basisJa: "微分可能な目的関数の勾配降下",
     basisEn: "Gradient descent on differentiable objectives",
     complexityJa: "O(n·d·L) (d=特徴次元, L=層数)",
     complexityEn: "O(n·d·L) (d=feature dim, L=layers)",
     prosJa: "ノード特徴量を活用可能",
-    prosEn: "Can leverage node features",
+    prosEn: "Can use node features",
     consJa: "解釈性・汎化性に課題",
     consEn: "Interpretability and generalization issues",
   },
@@ -690,7 +691,7 @@ export function AdvancedCDComparisonTable({ locale = "ja" }: Props) {
   const isJa = locale === "ja";
   return (
     <InteractiveDemo
-      title={isJa ? "高次・動的手法の比較" : "Comparison of Advanced Methods"}
+      title={isJa ? "高次・動的手法の比較" : "Comparison of Higher-Order and Dynamic Methods"}
       description={
         isJa
           ? "高次構造・動的・多重ネットワーク向けの主要アルゴリズムの特徴を比較します。"
@@ -775,7 +776,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelEn: "Growth",
       color: "#3b82f6",
       descJa: "既存コミュニティーにメンバーが増加",
-      descEn: "Members join existing community",
+      descEn: "Members join an existing community",
       icon: "▲",
     },
     {
@@ -783,14 +784,14 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelEn: "Shrink",
       color: "#f59e0b",
       descJa: "メンバーが離脱して規模が縮小",
-      descEn: "Members leave; community shrinks",
+      descEn: "Members leave and the community shrinks",
       icon: "▽",
     },
     {
       labelJa: "分裂",
       labelEn: "Split",
       color: "#ef4444",
-      descJa: "1つのコミュニティーが2つ以上に分かれる",
+      descJa: "1 つのコミュニティーが 2 つ以上に分かれる",
       descEn: "One community splits into two or more",
       icon: "⟨",
     },
@@ -798,7 +799,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "統合",
       labelEn: "Merge",
       color: "#8b5cf6",
-      descJa: "2つ以上のコミュニティーが合併する",
+      descJa: "2 つ以上のコミュニティーが合併する",
       descEn: "Two or more communities merge",
       icon: "⟩",
     },
@@ -806,8 +807,8 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "消滅",
       labelEn: "Death",
       color: "#94a3b8",
-      descJa: "コミュニティーが消えてなくなる",
-      descEn: "Community ceases to exist",
+      descJa: "コミュニティーが消える",
+      descEn: "The community ceases to exist",
       icon: "✕",
     },
   ];
@@ -817,8 +818,8 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       title={isJa ? "コミュニティーのライフサイクルイベント" : "Community Lifecycle Events"}
       description={
         isJa
-          ? "動的ネットワークにおいて、コミュニティーは時間とともに様々な変遷を経験します。"
-          : "In dynamic networks, communities undergo various transitions over time."
+          ? "連続するスナップショットの間で、コミュニティーに起こる主な変化。"
+          : "The main changes a community can go through between consecutive snapshots."
       }
     >
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -857,11 +858,11 @@ export function MotifWeightedAdjacencyDiagram({ locale = "ja" }: Props) {
   const isJa = locale === "ja";
   return (
     <InteractiveDemo
-      title={isJa ? "モチーフ重み付き隣接行列の構築" : "Building Motif-Weighted Adjacency"}
+      title={isJa ? "モチーフ重み付き隣接行列の構築" : "Building the Motif-Weighted Adjacency Matrix"}
       description={
         isJa
-          ? "通常の隣接行列は辺の有無（0/1）ですが、モチーフ重み付き隣接行列では、辺(i,j)が指定モチーフ内に何回共起するかを重みとして記録します。"
-          : "While the standard adjacency matrix records edge presence (0/1), the motif-weighted adjacency records how many instances of a target motif each edge participates in."
+          ? "通常の隣接行列は辺の有無（0/1）を記録しますが、モチーフ重み付き隣接行列は、ノード i と j を両方含むモチーフ（ここでは三角形）の数を記録します。"
+          : "The standard adjacency matrix records whether an edge exists (0/1); the motif-weighted adjacency matrix records how many instances of the motif (here, triangles) contain both nodes i and j."
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
@@ -908,7 +909,7 @@ export function MotifWeightedAdjacencyDiagram({ locale = "ja" }: Props) {
         {/* Weighted Matrix */}
         <div className="text-center">
           <p className="text-xs font-bold text-neutral-600 dark:text-neutral-400 mb-2">
-            {isJa ? "② モチーフ重み付き行列 W(M₃)" : "② Motif-Weighted Matrix W(M₃)"}
+            {isJa ? "② モチーフ重み付き隣接行列 W(M₃)" : "② Motif-Weighted Adjacency Matrix W(M₃)"}
           </p>
           <div className="inline-block">
             <table className="text-xs border-collapse">
@@ -922,10 +923,10 @@ export function MotifWeightedAdjacencyDiagram({ locale = "ja" }: Props) {
               </thead>
               <tbody>
                 {[
-                  [0, 2, 2, 1, 0],
-                  [2, 0, 2, 1, 0],
-                  [2, 2, 0, 1, 0],
-                  [1, 1, 1, 0, 0],
+                  [0, 1, 1, 0, 0],
+                  [1, 0, 2, 1, 0],
+                  [1, 2, 0, 1, 0],
+                  [0, 1, 1, 0, 0],
                   [0, 0, 0, 0, 0],
                 ].map((row, ri) => (
                   <tr key={ri}>
@@ -951,8 +952,8 @@ export function MotifWeightedAdjacencyDiagram({ locale = "ja" }: Props) {
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
             {isJa
-              ? "辺(0,1)は三角形 {0,1,2} に属するため重み=2"
-              : "Edge (0,1) participates in triangle {0,1,2}, weight=2"}
+              ? "辺(1,2)は三角形 {0,1,2} と {1,2,3} に含まれるので重み 2、辺(0,4)はどの三角形にも含まれないので重み 0"
+              : "Edge (1,2) is in triangles {0,1,2} and {1,2,3}, so its weight is 2; edge (0,4) is in no triangle, so its weight is 0"}
           </p>
         </div>
       </div>

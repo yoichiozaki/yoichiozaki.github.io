@@ -42,7 +42,7 @@ const TEXT = {
   ja: {
     title: "エンジン内スケジューリング：静的 / 連続 / チャンク化プレフィル",
     description:
-      "同じ到着列を 3 つのバッチ処理方式で回し、スロットの空きとデコード停止がどこで生じるかを 1 反復ずつ確認します。",
+      "同じ到着列に対して 3 つのバッチ処理方式を切り替え、スロットの空きとデコードの停止がどこで生じるかを 1 反復ずつ示します。",
     mode: "方式",
     modes: {
       static: "静的バッチ",
@@ -51,7 +51,7 @@ const TEXT = {
     } satisfies Record<BatchingMode, string>,
     modeDescriptions: {
       static:
-        "バッチ全体が完了するまでスロットを再利用しません。短いリクエストが長いリクエストの完了を待たされ、スロットが遊びます。",
+        "バッチ全体が完了するまでスロットを再利用しません。短いリクエストが長いリクエストの完了を待たされ、その間スロットは空いたままです。",
       continuous:
         "反復ごとに空きスロットを補充します。ただしプレフィルは 1 反復を占有するため、その間デコードは停止します。",
       chunked:
@@ -67,17 +67,18 @@ const TEXT = {
     done: "完了",
     none: "なし",
     tokensThis: "この反復の出力トークン",
+    outputTokens: (count: number) => `出力 ${count} トークン`,
     summary: "3 方式の比較",
     finishedAt: "全完了までの反復数",
     stalls: "出力 0 の反復数",
-    utilization: "スロット占有率",
+    utilization: "スロット充填率",
     caution:
-      "1 反復あたりのプレフィルチャンク数とデコード歩数を整数に単純化した模式図です。実機ではチャンク化プレフィルにも計算予算の上限があり、プレフィルとデコードの比率を変えるとスループットとトークン間遅延がトレードオフになります。",
+      "プレフィルとデコードの仕事量を、整数のチャンク数とステップ数に単純化した模式図です。実機のチャンク化プレフィルには 1 反復あたりのトークン予算があり、プレフィルとデコードへの配分を変えるとスループットとトークン間遅延がトレードオフになります。",
   },
   en: {
     title: "Engine scheduling: static, continuous, and chunked prefill",
     description:
-      "One arrival trace under three batching styles, iteration by iteration, showing where slots idle and where decode stalls.",
+      "One arrival trace under three batching modes, iteration by iteration, showing where slots idle and where decode stalls.",
     mode: "Mode",
     modes: {
       static: "Static batching",
@@ -102,12 +103,13 @@ const TEXT = {
     done: "Completed",
     none: "none",
     tokensThis: "Output tokens this iteration",
+    outputTokens: (count: number) => `${count} output ${count === 1 ? "token" : "tokens"}`,
     summary: "Comparison of the three modes",
     finishedAt: "Iterations to drain",
     stalls: "Zero-output iterations",
     utilization: "Slot occupancy",
     caution:
-      "Prefill chunks and decode steps are integer-quantised for legibility. Real chunked prefill has a per-iteration token budget, and shifting the prefill/decode mix trades throughput against inter-token latency.",
+      "Prefill chunks and decode steps are integer-quantized for legibility. Real chunked prefill has a per-iteration token budget, and shifting the prefill/decode mix trades throughput against inter-token latency.",
   },
 } as const;
 
@@ -229,7 +231,7 @@ export function ContinuousBatchingVisualizer({ locale = "ja" }: Props) {
           ariaLabels={stepPlayerAriaLabels(locale)}
           label={(value) =>
             `${t.iteration} ${value + 1} · ${
-              run.iterations[value]?.stalled ? t.stalled : `${run.iterations[value]?.tokens ?? 0} tok`
+              run.iterations[value]?.stalled ? t.stalled : t.outputTokens(run.iterations[value]?.tokens ?? 0)
             }`
           }
         />

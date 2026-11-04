@@ -27,8 +27,8 @@ export function LLMTimeline({ locale = "ja" }: DiagramProps) {
     { year: "2013", label: "Word2Vec", desc: en ? "Word embeddings" : "単語埋め込み", color: border, x: 40 },
     { year: "2017", label: "Transformer", desc: en ? "Attention Is All You Need" : "Attention Is All You Need", color: accent, x: 140 },
     { year: "2018", label: "BERT / GPT-1", desc: en ? "Pre-training era begins" : "事前学習時代の幕開け", color: green, x: 250 },
-    { year: "2020", label: "GPT-3", desc: en ? "175B params, few-shot" : "1750億パラメーター", color: orange, x: 380 },
-    { year: "2022", label: "ChatGPT", desc: en ? "RLHF + Instruction tuning" : "RLHF + 指示チューニング", color: purple, x: 500 },
+    { year: "2020", label: "GPT-3", desc: en ? "175B parameters" : "1750 億パラメーター", color: orange, x: 380 },
+    { year: "2022", label: "ChatGPT", desc: en ? "SFT + RLHF" : "SFT + RLHF", color: purple, x: 500 },
     { year: "2024–", label: en ? "GPT-4o / Gemini / Claude" : "GPT-4o / Gemini / Claude", desc: en ? "Multimodal, reasoning" : "マルチモーダル・推論", color: purple, x: 640 },
   ];
 
@@ -121,7 +121,7 @@ export function TransformerArchitecture({ locale = "ja" }: DiagramProps) {
         {/* Output arrow */}
         <line x1={cx} y1={70} x2={cx} y2={40} stroke={border} strokeWidth={1.2} markerEnd="url(#arrowUp)" />
         <text x={cx} y={30} textAnchor="middle" dominantBaseline="auto" fill={muted} fontSize={10}>
-          {en ? "Next token prediction" : "次トークン予測"}
+          {en ? "Next-token prediction" : "次トークン予測"}
         </text>
 
         <defs>
@@ -151,26 +151,26 @@ export function TrainingPipeline({ locale = "ja" }: DiagramProps) {
   const stages = [
     {
       label: en ? "Pre-training" : "事前学習",
-      desc: en ? "Next-token prediction on massive corpus" : "大規模コーパスで次トークン予測",
+      desc: en ? "Next-token prediction" : "大規模コーパスで次トークン予測",
       detail: en ? "Trillions of tokens" : "数兆トークン",
       color: accent,
     },
     {
-      label: en ? "SFT" : "SFT（教師ありFT）",
-      desc: en ? "Supervised Fine-Tuning on instructions" : "指示データで教師あり微調整",
-      detail: en ? "~100K examples" : "〜10万件の指示データ",
+      label: en ? "SFT" : "SFT",
+      desc: en ? "Supervised fine-tuning" : "指示データで教師あり微調整",
+      detail: en ? "~13K examples (InstructGPT)" : "約 1.3 万件（InstructGPT）",
       color: green,
     },
     {
       label: "RLHF / DPO",
-      desc: en ? "Align with human preferences" : "人間の選好に合わせて整合",
-      detail: en ? "Reward model + PPO or DPO" : "報酬モデル + PPO or DPO",
+      desc: en ? "Align with human preferences" : "モデルを人間の選好に合わせる",
+      detail: en ? "Reward model + PPO, or DPO" : "報酬モデル + PPO、または DPO",
       color: orange,
     },
     {
       label: en ? "Deployment" : "デプロイ",
       desc: en ? "API / chat interface" : "API / チャットインターフェース",
-      detail: en ? "Quantization, serving" : "量子化・推論最適化",
+      detail: en ? "Quantization, efficient inference" : "量子化・推論最適化",
       color: purple,
     },
   ];
@@ -242,12 +242,12 @@ export function ScalingLawsDiagram({ locale = "ja" }: DiagramProps) {
   const pw = w - pad * 2;
   const ph = h - pad - 20;
 
-  /* Stylized power-law curve */
+  /* On log–log axes a power law L ∝ x^(−α) is a straight line with slope −α */
   const points: [number, number][] = [];
   for (let i = 0; i <= 40; i++) {
     const t = i / 40;
     const x = pad + t * pw;
-    const y = h - pad - ph * (1 - 0.55 * Math.pow(1 - t, 0.45));
+    const y = h - pad - ph * (0.9 - 0.7 * t);
     points.push([x, y]);
   }
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
@@ -266,10 +266,10 @@ export function ScalingLawsDiagram({ locale = "ja" }: DiagramProps) {
         <line x1={pad} y1={h - pad} x2={pad} y2={15} stroke={border} strokeWidth={1.5} />
         {/* Axis labels */}
         <text x={pad + pw / 2} y={h - 8} textAnchor="middle" fill={muted} fontSize={10}>
-          {en ? "log(Compute / Parameters / Data)" : "log(計算量 / パラメーター数 / データ量)"}
+          {en ? "log x (x is N, D, or C)" : "log x（x は N、D、C のいずれか）"}
         </text>
         <text x={14} y={15 + ph / 2} textAnchor="middle" fill={muted} fontSize={10} transform={`rotate(-90, 14, ${15 + ph / 2})`}>
-          {en ? "log(Loss)" : "log(損失)"}
+          {en ? "log L (loss)" : "log L（損失）"}
         </text>
         {/* Curve */}
         <path d={pathD} fill="none" stroke={accent} strokeWidth={2.5} />
@@ -332,9 +332,9 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
           {en ? "Encoder-only" : "エンコーダー系"}
         </text>
         {[
-          { label: "BERT", year: "2018", desc: en ? "Masked LM" : "マスク言語モデル" },
-          { label: "RoBERTa", year: "2019", desc: en ? "Robust BERT" : "頑健なBERT" },
-          { label: "DeBERTa", year: "2020", desc: en ? "Disentangled attn" : "分離注意" },
+          { label: "BERT", year: "2018", desc: en ? "Masked language model" : "マスク言語モデル" },
+          { label: "RoBERTa", year: "2019", desc: en ? "BERT with improved training" : "学習方法を改良した BERT" },
+          { label: "DeBERTa", year: "2020", desc: en ? "Disentangled attention" : "内容と位置を分けた注意機構" },
         ].map((m, i) => (
           <g key={i}>
             <line x1={100} y1={110} x2={100} y2={130 + i * 44} stroke={border} strokeWidth={1} strokeDasharray="3 2" />
@@ -351,12 +351,12 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
         {/* Encoder-Decoder */}
         <rect x={240} y={80} width={140} height={30} rx={6} fill={bg} stroke={orange} strokeWidth={2} />
         <text x={310} y={95} textAnchor="middle" dominantBaseline="central" fill={orange} fontSize={11} fontWeight={700}>
-          {en ? "Encoder-Decoder" : "エンコーダー・デコーダー系"}
+          {en ? "Encoder-decoder" : "エンコーダー・デコーダー系"}
         </text>
         {[
-          { label: "T5", year: "2019", desc: en ? "Text-to-Text" : "テキスト→テキスト" },
-          { label: "BART", year: "2019", desc: en ? "Denoising AE" : "ノイズ除去AE" },
-          { label: "Flan-T5", year: "2022", desc: en ? "Instruction tuned" : "指示チューニング" },
+          { label: "T5", year: "2019", desc: en ? "Text-to-text" : "テキスト→テキスト" },
+          { label: "BART", year: "2019", desc: en ? "Denoising autoencoder" : "ノイズ除去オートエンコーダー" },
+          { label: "Flan-T5", year: "2022", desc: en ? "Instruction tuning" : "指示チューニング" },
         ].map((m, i) => (
           <g key={i}>
             <line x1={310} y1={110} x2={310} y2={130 + i * 44} stroke={border} strokeWidth={1} strokeDasharray="3 2" />
@@ -376,8 +376,8 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
           {en ? "Decoder-only" : "デコーダー系"}
         </text>
         {[
-          { label: "GPT-2/3", year: "2019–20", desc: en ? "Autoregressive LM" : "自己回帰型LM" },
-          { label: "LLaMA", year: "2023", desc: en ? "Open-weight" : "オープンウェイト" },
+          { label: "GPT-2/3", year: "2019–20", desc: en ? "Autoregressive language model" : "自己回帰型言語モデル" },
+          { label: "LLaMA", year: "2023", desc: en ? "Open weights" : "オープンウェイト" },
           { label: "GPT-4 / Claude", year: "2023–", desc: en ? "Frontier models" : "最先端モデル" },
         ].map((m, i) => (
           <g key={i}>
@@ -394,7 +394,7 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
 
         {/* Category descriptions */}
         <text x={100} y={270} textAnchor="middle" dominantBaseline="central" fill={muted} fontSize={8}>
-          {en ? "Classification, NER, embeddings" : "分類・固有表現抽出・埋め込み"}
+          {en ? "Classification, entity recognition, embeddings" : "分類・固有表現抽出・埋め込み"}
         </text>
         <text x={310} y={270} textAnchor="middle" dominantBaseline="central" fill={muted} fontSize={8}>
           {en ? "Translation, summarization" : "翻訳・要約"}
@@ -422,7 +422,7 @@ export function BPETokenizationDiagram({ locale = "ja" }: DiagramProps) {
   const tokens = [
     { text: "The", id: 464, color: accent },
     { text: "Ġcat", id: 3797, color: green },
-    { text: "Ġsat", id: 3520, color: green },
+    { text: "Ġsat", id: 3332, color: green },
     { text: "Ġon", id: 319, color: border },
     { text: "Ġthe", id: 262, color: border },
     { text: "Ġmat", id: 2603, color: green },
@@ -442,7 +442,7 @@ export function BPETokenizationDiagram({ locale = "ja" }: DiagramProps) {
 
         {/* Arrow */}
         <text x={310} y={78} textAnchor="middle" fill={muted} fontSize={11}>
-          ↓ BPE {en ? "Tokenizer" : "トークナイザー"}
+          ↓ {en ? "GPT-2 BPE tokenizer (Ġ = space before a word)" : "GPT-2 の BPE トークナイザー（Ġ = 単語の前の空白）"}
         </text>
 
         {/* Tokens */}

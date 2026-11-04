@@ -1,15 +1,15 @@
 ---
 title: "Load Balancing LLM Calls — From Why Round Robin Fails to KV-Cache-Aware Routing"
 date: "2026-08-25"
-description: "Request-cost skew, prefix caches, continuous batching, and agent session structure, organized layer by layer — with a simulator you can run in the page."
+description: "Round robin fails for LLM calls because per-request cost varies 100x and replicas hold prefix caches. From client retries to engine batching, every layer of an LLM or agent stack trades cache locality against load balance on stale signals before the first token ships — with a simulator you can run in the page."
 tags: ["LLM", "Load Balancing", "Distributed Systems", "Agents", "Scheduling", "Interactive"]
 ---
 
 For a stateless HTTP API, round robin is usually the right first move. Per-request work is roughly uniform, so equalizing counts equalizes resources.
 
-LLM serving breaks all four of the assumptions behind that. Per-request work varies by two orders of magnitude, the amount is unknown at dispatch time, the server holds state from previous requests in its KV cache, and the response streams for seconds to minutes. Add agents and the scheduling unit shifts again — from one request to one session of tens or hundreds of calls.
+LLM serving breaks all four of the assumptions behind that. Per-request work varies by two orders of magnitude, the amount is unknown at dispatch time, the server holds state from previous requests in its KV cache, and the response streams for seconds to minutes. Add agents and the scheduling unit changes too — from one request to one session of tens or hundreds of calls.
 
-This article argues that <strong>every layer of this stack makes the same trade</strong>. You are choosing between locality (send it where the work is already done) and balance (send it where there is room), you are choosing on a signal that is already out of date, and you are choosing inside a window that closes the moment the first token ships. Only the names of the signals and the size of the time constants change from layer to layer.
+This article argues that <strong>every layer from client to engine makes the same trade</strong>. Each layer chooses between locality (send it where the work is already done) and balance (send it where there is room), on a signal that is already out of date, inside a window that closes the moment the first token ships. Only the names of the signals and the size of the time constants change from layer to layer.
 
 We test that claim by asking, for each layer, what signal it observes and what it optimizes. Along the way we check what vLLM, SGLang, NVIDIA Dynamo, the Kubernetes Gateway API Inference Extension, LiteLLM, and Azure API Management actually compute, reading their upstream sources.
 
@@ -23,7 +23,7 @@ The genealogy of CPU scheduling and fair queueing itself is covered in [A Geneal
 
 | Assumption | Stateless HTTP | LLM inference |
 |---|---|---|
-| Per-request work | roughly uniform (small CV) | varies 100x with prompt and output length |
+| Per-request work | roughly uniform (small coefficient of variation, CV) | varies 100x with prompt and output length |
 | Work known in advance | mostly (inferable from request size) | output length unknown until generation ends |
 | Server state | stateless by design | prefix cache creates locality |
 | Response time | milliseconds | seconds to minutes, streaming throughout |
@@ -49,7 +49,7 @@ Deterministic service gives $C_s^2=0$; exponential gives $C_s^2=1$. LLM requests
 
 <QueueingKneeCurve />
 
-Read the chart horizontally rather than vertically. Pick a waiting time you can tolerate — say three times the service time — and trace across: deterministic service reaches it at $\rho = 0.86$, exponential at $\rho = 0.75$, and a heavy tail at $C_s^2 = 4$ at $\rho = 0.55$. At that target, the heavy tail costs about thirty points of usable utilization.
+Read the chart horizontally rather than vertically. Pick a waiting time you can tolerate — say three times the service time — and trace across: deterministic service reaches it at $\rho = 0.86$, exponential at $\rho = 0.75$, and a heavy tail at $C_s^2 = 4$ at $\rho = 0.55$. At that target, the heavy tail costs about thirty points of usable utilization relative to deterministic service.
 
 This formula is the theoretical basis for not running an LLM pool at high utilization. It also says something less obvious: measures that reduce variability — chunked prefill, output-length caps, separating models by shape — are worth roughly as much as measures that add capacity.
 
@@ -63,7 +63,7 @@ $$
 
 The mean number of items in the system, $L$, equals arrival rate times mean time in system. It assumes nothing about distributions, so it holds for any scheduler.
 
-Take the inside of one inference engine as the system. Then $L$ is the number of co-resident sequences — the batch size — and $W$ is in-engine residency (prefill plus decode). Batch size is bounded above by KV cache capacity, $L_{\max}$, so
+Take the inside of one inference engine as the system. Then $L$ is the number of co-resident sequences — the batch size — and $W$ is in-engine residency (prefill, which processes the whole prompt at once, plus decode, which generates one token at a time). Batch size is bounded above by KV cache capacity, $L_{\max}$, so
 
 $$
 \lambda_{\max}=\frac{L_{\max}}{W}
@@ -83,7 +83,7 @@ Streaming distorts measurement. From the client, "response complete" is when the
 
 Normalized latency exists for comparison. Dividing E2E by output tokens removes output-length differences so load levels can be compared. When reading benchmark results, always check whether output length was pinned (whether `--ignore-eos` was used).
 
-Of the six rows, TTFT matters most for the rest of this article. <strong>Besides measuring user experience, TTFT is the length of time during which a mistake is still recoverable.</strong> Once the first token has been written to the client, retrying, hedging, failing over, or spilling to another provider all become impossible or user-visible. Every mechanism in sections 9 and 12 is therefore a pre-first-token mechanism, and its window of effectiveness is, by construction, exactly TTFT. Section 9.4 returns to this point after describing those mechanisms.
+Of the six rows, TTFT alone has a second meaning. <strong>Besides measuring user experience, TTFT is the length of time during which a mistake is still recoverable.</strong> Once the first token has been written to the client, retrying, hedging, failing over, or spilling to another provider all become impossible or user-visible. Section 9.4 returns to this point after describing the mechanisms of sections 9 and 12.
 
 ## 3. Five layers where decisions happen
 
@@ -131,7 +131,7 @@ flowchart TB
     TIER -. constrains .-> PREEMPT
 ```
 
-Solid edges follow the request; dotted edges carry information. The "metrics" and "saturation signal" edges carry information in the reverse direction: what L4 publishes determines L3's next decision. That feedback path always lags, and the lag is what section 5.6 is about. The two "constrains" edges show static L5 topology bounding L4's runtime decisions rather than causing them.
+Solid edges follow the request; dotted edges carry information. The "metrics" and "saturation signal" edges carry information in the reverse direction: L4's state drives L3's next selection and L2's circuit breaker. That feedback always lags, and the lag causes the oscillation described in section 5.6. The two "constrains" edges show static L5 topology bounding L4's runtime decisions rather than causing them.
 
 Keeping the layers straight makes common failures easy to locate.
 
@@ -145,17 +145,17 @@ Keeping the layers straight makes common failures easy to locate.
 
 <LBPolicyComparison />
 
-Round robin equalizes counts, not work. With per-request work of mean $E[S]$ and coefficient of variation $C_s$, dealing $n$ requests to $k$ replicas gives each replica a total-work standard deviation of $\sigma_S\sqrt{n/k}$. Relative to the mean $n E[S]/k$, the spread is $C_s/\sqrt{n/k}$, which converges for large $n$. The problem is the short-run skew: two long requests landing back to back on one replica degrade its TTFT immediately.
+Round robin equalizes counts, not work. With per-request work of mean $E[S]$ and coefficient of variation $C_s$, dealing $n$ requests to $k$ replicas gives each replica a total-work standard deviation of $\sigma_S\sqrt{n/k}$. Relative to the mean $n E[S]/k$, the spread is $C_s/\sqrt{n/k}$, which shrinks toward zero as $n$ grows. The problem is the short-run skew: two long requests landing back to back on one replica degrade its TTFT immediately.
 
-Power of two choices buys an exponential improvement for one extra observation. Throwing $n$ balls into $n$ bins uniformly at random gives a maximum load of $\Theta(\log n/\log\log n)$; sampling two bins and taking the lighter one drops it to $\ln\ln n/\ln 2+\Theta(1)$ (Azar, Broder, Karlin, and Upfal, 1994). Mitzenmacher (1996) extended the result to queueing models, showing the same effect holds for dynamic load balancing.
+Power of two choices (P2C) buys an exponential improvement for one extra observation. Throwing $n$ balls into $n$ bins uniformly at random gives a maximum load of $\Theta(\log n/\log\log n)$; sampling two bins and taking the lighter one drops it to $\ln\ln n/\ln 2+\Theta(1)$ (Azar, Broder, Karlin, and Upfal, 1994). Mitzenmacher (1996) extended the result to queueing models, showing the same effect holds for dynamic load balancing.
 
-Raising $d$ above 2 shrinks the leading term only as $1/\ln d$, so nearly all of the gain comes from going from one choice to two. In deployments with many independent routers there is also a practical advantage — two choices avoids herding, because not every router stampedes to the same currently-idlest replica.
+Raising $d$ above 2 shrinks the leading term only as $1/\ln d$, so nearly all of the gain comes from going from one choice to two. In deployments with many independent routers there is also a practical advantage — the two-choice rule avoids herding, because not every router stampedes to the same currently-idlest replica.
 
 Consistent hashing is a locality tool, not a balancing tool. Skewed key distributions produce hot spots. Consistent hashing with bounded loads (Mirrokni, Thorup, and Zadimoghaddam, 2016) caps each of $n$ nodes at $\lceil c\,m/n\rceil$ for $m$ balls with $c>1$, and forwards overflow to the next node on the ring. The affinity-versus-balance switch in prefix-aware routing, discussed below, has the same motivation.
 
-### 4.2 What the numbers say when the trace is held fixed
+### 4.2 Rankings measured on one arrival trace
 
-Replaying one arrival trace while changing only the selection rule shows what actually moves.
+The simulator below replays one arrival trace and lets you swap only the selection rule.
 
 <LLMLoadBalancerLab />
 
@@ -175,7 +175,7 @@ TTFT is in ticks and the SLO is 80 ticks.
 - Round robin has a zero assignment gap and still loses the tail to least outstanding. This confirms that equal counts do not give equal work.
 - Random has the worst tail among the load-oblivious rules. Its assignment skew is small, but coincidental clustering of heavy requests drives TTFT P95 up.
 - Power of two choices matches round robin's SLO attainment at $O(1)$ observation cost and matches least outstanding on throughput, without reaching its tail.
-- Least-KV is last on every column except cache hit rate. Its primary signal is blocks occupied by running and currently-prefilling sequences — and a queued request occupies zero KV blocks until it is admitted, so a gauge reading current occupancy literally cannot see it. Assigned-but-unadmitted work therefore acts only as a secondary tie-breaker. It keeps piling large prompts onto whichever replica just drained, opening an assignment gap of 50.
+- Least-KV is last on every column except cache hit rate. Its primary signal is blocks occupied by running and currently-prefilling sequences — and a queued request occupies zero KV blocks until it is admitted, so a gauge reading current occupancy cannot see it in principle. In this implementation, assigned-but-unadmitted work serves only as a secondary tie-breaker, so the rule keeps piling large prompts onto whichever replica just drained, opening an assignment gap of 50.
 - Prefix-aware wins cache hit rate and throughput but not the tail, because it tolerates some load skew in exchange for affinity.
 
 The least-KV result applies beyond this simulator: <strong>a load signal must count every piece of accepted-but-unfinished work.</strong> That is why Envoy's least-request policy counts active requests rather than connections, and why the Dynamo cost function includes prefill load from queued requests.
@@ -184,22 +184,22 @@ This ordering changes as you move the sliders. Lower the arrival rate far enough
 
 ### 4.3 When replicas are not identical
 
-Every rule so far has been stated as though replicas were interchangeable. Real pools rarely are: mixed GPU generations, different tensor-parallel degrees, different quantizations, or — right after any scale-up — different cache temperatures.
+Every rule so far has been stated as though replicas were interchangeable. Real pools often are not: mixed GPU generations, different tensor-parallel degrees, different quantizations, or — right after any scale-up — different cache temperatures.
 
-Under heterogeneity, plain least-outstanding is actively wrong. A replica that is twice as fast <em>should</em> hold roughly twice the outstanding requests; equalizing counts underfills it. Envoy's weighted least request handles this by computing an effective weight at pick time whenever weights differ ([Supported load balancers](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers)):
+Under heterogeneity, plain least-outstanding misallocates work. A replica that is twice as fast <em>should</em> hold roughly twice the outstanding requests; equalizing counts underfills it. Envoy's weighted least request handles this by computing an effective weight at pick time whenever weights differ ([Supported load balancers](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers)):
 
 $$
 \text{weight}=\frac{\text{load\_balancing\_weight}}{\left(\text{active\_requests}+1\right)^{\text{active\_request\_bias}}}
 $$
 
-`active_request_bias` defaults to 1.0. This single knob spans the whole family of rules continuously:
+`active_request_bias` defaults to 1.0. This single knob moves continuously from weighted round robin to least-outstanding:
 
 - at $0$ the active-request count is ignored and the policy degenerates to weighted round robin;
 - as it grows, active requests depress the effective weight more aggressively, approaching strict least-outstanding.
 
 Envoy's documentation states the trade-off: the formula balances well at steady state but adapts slowly to a sudden imbalance, and unlike P2C a host never truly drains.
 
-The part that stays hard for LLM serving is that the weight cannot be fixed statically, because a replica's effective capacity depends on the prompt-length and output-length mix it happens to receive. GIE's roadmap lists "heterogeneous accelerators — serve workloads on multiple types of accelerator using latency and request cost-aware load balancing" as outstanding work, so the problem remains open.
+The part that stays hard for LLM serving is that the weight cannot be fixed statically, because a replica's effective capacity depends on the prompt-length and output-length mix it happens to receive. The roadmap of the Kubernetes Gateway API Inference Extension (GIE), covered in section 5.2, lists "heterogeneous accelerators — serve workloads on multiple types of accelerator using latency and request cost-aware load balancing" as outstanding work, so the problem remains open.
 
 ## 5. Signals specific to LLM serving
 
@@ -240,21 +240,21 @@ The Kubernetes [Gateway API Inference Extension](https://gateway-api-inference-e
 3. The EPP fetches endpoint metrics and selects the endpoint that best achieves the configured objectives.
 4. The Gateway forwards to that endpoint.
 
-The key design decision is that the EPP is an explicitly replaceable extension point. In 2026 that extensibility was institutionalized as a repository split. Per the current README, the full EPP and the `InferenceObjective` and `InferenceModelRewrite` APIs moved to [llm-d/llm-d-router](https://github.com/llm-d/llm-d-router), and the Body Based Router moved to [llm-d/llm-d-inference-payload-processor](https://github.com/llm-d/llm-d-inference-payload-processor); the packages left behind will be archived. The GIE repository itself has narrowed to the lightweight EPP (LWEPP) for conformance testing, the `InferencePool` API, and the conformance tests themselves.
+Signals available to an EPP include prefix cache status and LoRA adapter availability. The EPP is defined as a replaceable extension point, and in 2026 the project split its repository along that boundary. Per the current README, the full EPP and the `InferenceObjective` and `InferenceModelRewrite` APIs moved to [llm-d/llm-d-router](https://github.com/llm-d/llm-d-router), and the Body Based Router moved to [llm-d/llm-d-inference-payload-processor](https://github.com/llm-d/llm-d-inference-payload-processor); the packages left behind will be archived. The GIE repository itself has narrowed to the lightweight EPP (LWEPP) for conformance testing, the `InferencePool` API, and the conformance tests themselves.
 
-The resulting division of labour is to standardize the pool API and the conformance suite upstream, and let routing algorithms compete in separate repositories. The migration is not finished — the project FAQ says the `InferencePool` and `InferencePoolImport` APIs and the conformance suite will themselves move into the Gateway API repository. Signals available to an EPP include prefix cache status and LoRA adapter availability. `InferencePoolImport` is the API type for spanning clusters, still `v1alpha1` and explicitly subject to breaking changes.
+The resulting division of labour is to standardize the pool API and the conformance suite upstream, and let routing algorithms compete in separate repositories. The migration is not finished — the project FAQ says the `InferencePool` and `InferencePoolImport` APIs and the conformance suite will themselves move into the Gateway API repository. `InferencePoolImport` is the API type for spanning clusters, still `v1alpha1` and explicitly subject to breaking changes.
 
-The roadmap lists what is still unsolved in this area: prefix-cache aware load balancing with interfaces for remote caches, a recommended LoRA adapter rollout pipeline, fairness and priority between workloads within the same criticality band, HPA support for autoscaling on aggregate metrics derived from the load balancer, large multi-modal inputs and outputs, other GenAI model types such as diffusion, heterogeneous accelerators, and disaggregated serving with independently scaling pools. Most of those map onto a section below; multi-modal serving and non-completion model types are the two this article does not attempt.
+The roadmap lists what is still unsolved in this area: prefix-cache aware load balancing with interfaces for remote caches, a recommended LoRA adapter rollout pipeline, fairness and priority between workloads within the same criticality band, HPA (Horizontal Pod Autoscaler) support for autoscaling on aggregate metrics derived from the load balancer, large multi-modal inputs and outputs, other GenAI model types such as diffusion, heterogeneous accelerators, and disaggregated serving with independently scaling pools. Most of those map onto a section below; multi-modal serving and non-completion model types are the two this article does not attempt.
 
-On the engine side, vLLM maps `vllm:kv_cache_usage_perc` and `vllm:num_requests_waiting` into ORCA-format endpoint load reports ([`vllm/entrypoints/serve/utils/orca_metrics.py`](https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/orca_metrics.py)), so the set of numbers the engine hands the router is settling into a protocol.
+On the engine side, vLLM maps `vllm:kv_cache_usage_perc` and `vllm:num_requests_waiting` into endpoint load reports in ORCA (Open Request Cost Aggregation) format ([`vllm/entrypoints/serve/utils/orca_metrics.py`](https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/orca_metrics.py)), so the set of numbers the engine hands the router is settling into a protocol.
 
 ### 5.3 Why prefix overlap is a signal at all
 
 Every signal so far has been a classical load metric with an LLM-shaped replacement. The next one has no classical counterpart: <strong>is there a replica that has already computed the head of this request?</strong>
 
-In an agent conversation the system prompt, the tool definitions, and every prior turn all sit at the head of the next call. On step 10, 95% of the prompt being identical to step 9 is ordinary. In that regime, whether the same conversation lands on the same replica changes prefill cost by an order of magnitude.
+In an agent conversation the system prompt, the tool definitions, and every prior turn all sit at the head of the next call. By step 10, it is ordinary for 95% of the prompt to match step 9. In that regime, whether the same conversation lands on the same replica changes prefill cost by an order of magnitude.
 
-Autoregressive generation processes the whole prompt once (prefill), then emits one token at a time (decode). Prefill parallelizes across all prompt tokens and is compute-bound; decode advances one token at a time and is memory-bandwidth-bound. If the KV for the first $m$ tokens of an $n$-token prompt is already computed, only $n-m$ tokens need computing.
+Prefill parallelizes across all prompt tokens and is compute-bound; decode advances one token at a time and is memory-bandwidth-bound. If the KV for the first $m$ tokens of an $n$-token prompt is already computed, only $n-m$ tokens need computing.
 
 How much that saves depends on the layer. Token-linear layers — QKV projections, MLP — save exactly $m/n$. Attention saves less, because the uncached $n-m$ tokens must still attend across the entire cached prefix:
 
@@ -266,7 +266,7 @@ So the total saving sits between $(m/n)^2$ and $m/n$, with the quadratic attenti
 
 In practice the quadratic term barely bites outside long-context work. Write $d$ for the model's hidden dimension and $P \approx c\,d^2$ for the parameter count of one block. Ignoring constants, the token-linear part of a block costs about $2n\cdot P$ and the causally-masked attention terms cost about $2n^2 d$, so attention's share of prefill FLOPs is roughly $n/(n+c\,d)$, with $c$ typically between 11 and 19 (exactly 12 for the classic MHA plus 4d-GELU block, $4d^2 + 8d^2$). At $d=4096$, attention does not reach half the total until $n$ approaches 50,000 tokens. For ordinary prompt lengths, you can therefore treat the saving as $m/n$.
 
-The next two subsections show two ways of turning "prefill work I get to skip" into a routing decision.
+Dynamo and SGLang turn this skippable prefill work into a routing decision in two different ways.
 
 ### 5.4 Writing it as a cost function: NVIDIA Dynamo
 
@@ -297,7 +297,7 @@ $$
 \text{effective\_device\_credit}=\frac{\text{overlap\_score\_credit}}{1+\text{decay}\times\text{normalized\_excess\_prefill}}
 $$
 
-so the more a cache-holding worker's prefill load exceeds that of the least loaded eligible worker, the weaker its affinity pull becomes. Note the default, though: `--router-kv-overlap-score-credit-decay` is <strong>0, which disables decay entirely</strong>. Out of the box, Dynamo's cost function has no brake on affinity; you must opt in. Setting `router_temperature` to a non-zero value switches selection to softmax sampling over normalized cost logits, which spreads deterministic concentration.
+so the more a cache-holding worker's prefill load exceeds that of the least loaded eligible worker, the weaker its affinity pull becomes. The default for `--router-kv-overlap-score-credit-decay` is 0, though, which disables decay, so out of the box Dynamo's cost function has no brake on affinity; you must opt in. Setting `router_temperature` to a non-zero value switches selection to softmax sampling over normalized cost logits, which spreads deterministic concentration.
 
 The worked example in the documentation (with `overlap_score_credit = 1.0` and `decode_active_request_weight = 0`):
 
@@ -337,9 +337,9 @@ Dynamo's continuous cost function and SGLang's discrete threshold switch are two
 
 ### 5.6 Signal freshness — what happens when every router trusts the same stale number
 
-One assumption has been running silently underneath everything so far: that the router knows the current load of each replica. It does not. Routers <strong>decide at millisecond cadence and observe at multi-second cadence</strong>, and that gap reproduces a classic distributed-systems failure mode.
+Everything so far has assumed that the router knows the current load of each replica. It does not. Routers <strong>decide at millisecond cadence and observe at multi-second cadence</strong>, and that gap reproduces a classic distributed-systems failure mode.
 
-The mechanism depends on the routers being in phase:
+When the routers scrape in phase (at the same moments), the failure unfolds like this:
 
 1. $N$ routers read the same snapshot.
 2. All of them pick the same "currently idlest" replica.
@@ -347,26 +347,26 @@ The mechanism depends on the routers being in phase:
 4. At the next scrape it looks worst, and everyone flees at once.
 5. Return to step 1.
 
-The oscillation sustains itself instead of converging. Its amplitude is set by how many requests are dispatched on a single stale snapshot — roughly $\min(\lambda \times T_{\text{scrape}},\ L)$, the smaller of what arrives during a scrape interval and the total work in flight $L = \lambda W$ — the pool-wide version of the population section 1.3 plugged into Little's law. It grows with the scrape interval up to that ceiling. Router count does not affect it: as long as every router reads the same snapshot, the total dispatched per window is the same however it is divided (leave scrapes unstaggered, move the router-count slider in the lab below, and the top row's numbers do not budge). Router count matters instead for the first of the fixes below — counting your own in-flight dispatches.
+The oscillation sustains itself instead of converging. Its amplitude is set by how many requests are dispatched on a single stale snapshot: roughly $\min(\lambda \times T_{\text{scrape}},\ L)$, the smaller of what arrives during a scrape interval and the total work in flight, $L = \lambda W$. This $L$ is the pool-wide version of the population that section 1.3 plugged into Little's law. It grows with the scrape interval up to that ceiling. Router count does not affect it: as long as every router reads the same snapshot, the total dispatched per window is the same however it is divided (leave scrapes unstaggered, move the router-count slider in the lab below, and the top row's numbers do not budge). Router count matters instead for the first of the fixes below — counting your own in-flight dispatches.
 
 <SignalStalenessLab />
 
 At the default settings (5 replicas, 4 routers, 10-tick scrape interval):
 
-| Selection rule | Peak skew | Mean skew | Ticks where every arrival hit one replica |
+| Selection rule | Peak skew | Mean skew | Pile-up (share of ticks where every arrival hit one replica) |
 |---|---|---|---|
 | Least outstanding (trust the stale view) | 21 | 12.0 | 64% |
 | Least outstanding + my own dispatches | 20 | 9.1 | 48% |
 | Two random replicas (no correction) | 9 | 5.2 | 21% |
 | Both | 10 | 4.4 | 23% |
 
-(The lower three rows replace the top row rather than stacking on it. In particular, "two random replicas" does not include the in-flight correction; only "both" combines the two. The pile-up column is only comparable within this configuration — setting the scrape interval to 1 tick, i.e. a perfectly fresh view, pushes pile-up to 87%, but that is every router reaching the same correct conclusion, and peak skew falls from 21 to 2.)
+(Each of the lower three rows replaces the top row's rule. "Two random replicas" does not include the in-flight correction; only "both" combines the two. The pile-up column is only comparable within this configuration — setting the scrape interval to 1 tick, i.e. a perfectly fresh view, pushes pile-up to 87%, but that is every router reaching the same correct conclusion, and peak skew falls from 21 to 2.)
 
 There are four fixes.
 
 <strong>0. Stop the routers being in phase.</strong> The cheapest fix is to stagger scrapes per router. Turn on "stagger scrape times" in the lab and the top row's skew falls without changing the selection rule at all. But this is only available when scrapes can be centrally coordinated — independently launched sidecars cannot do it. The three below assume you cannot break the phase alignment.
 
-<strong>1. Count your own in-flight dispatches.</strong> Add "requests I sent since the last scrape" to the snapshot before choosing. How much this helps depends directly on router count. With one router the correction is exact: peak skew 3, mean 1.44, pile-up 6% — better than P2C. With four routers each sees only a quarter of the dispatches and mean skew climbs back to 9.1. In the table above that is roughly 40% of the achievable reduction in mean skew, and almost nothing on peak skew, which moves only from 21 to 20.
+<strong>1. Count your own in-flight dispatches.</strong> Add "requests I sent since the last scrape" to the snapshot before choosing. How much this helps depends directly on router count. With one router the correction is exact: peak skew 3, mean 1.44, pile-up 6% — better than P2C. With four routers, each sees only a quarter of the dispatches, so mean skew falls only from 12.0 to 9.1, roughly 40% of the way to the table's best value (4.4, for "both"), and peak skew barely moves, from 21 to 20.
 
 <strong>2. Randomize.</strong> P2C severs the path by which everyone stampedes toward the same minimum. Envoy's documentation states outright that `LEAST_REQUEST` with equal weights <em>is</em> P2C (`choice_count` defaults to 2), and that "P2C selection is particularly useful for load balancer implementations due to its resistance to herding behavior." Dynamo's `router_temperature` softmax sampling is a different implementation of the same idea.
 
@@ -376,7 +376,7 @@ $$
 \text{weight}=\frac{\text{qps}}{\text{utilization}+\dfrac{\text{eps}}{\text{qps}}\times\text{error\_utilization\_penalty}}
 $$
 
-The rules around that formula matter more here. While an endpoint has no valid weight — because its reports are being ignored, during the initial `blackout_period`, or after `weight_expiration_period` has elapsed — it is assigned the median weight of the endpoints that currently have a valid weight (or 1 if none do). The blackout and expiry machinery is specific to `ClientSideWeightedRoundRobin`, but slow start — ramping traffic gradually into new or recovered endpoints — is available for round robin and least request as well.
+The formula comes with rules for stale weights and new endpoints. While an endpoint has no valid weight — because its reports are being ignored, during the initial `blackout_period`, or after `weight_expiration_period` has elapsed — it is assigned the median weight of the endpoints that currently have a valid weight (or 1 if none do). The blackout and expiry machinery is specific to `ClientSideWeightedRoundRobin`, but slow start — ramping traffic gradually into new or recovered endpoints — is available for round robin and least request as well.
 
 That third fix matters especially for LLM serving. A replica that just became ready has zero outstanding requests <em>and</em> a cold cache — a problem section 11.3 takes up in full. One caveat from Envoy's own documentation: slow start is "most effective for cases where few new endpoints come up," and "when all the endpoints are relatively new e.g. new deployment in Kubernetes, slow start is not very effective." It handles adding one replica to a warm pool; it does not handle replacing the pool.
 
@@ -390,11 +390,11 @@ The previous section showed how to price prefix overlap. What remains is the que
 
 Cache slots are narrowed to one prefix per replica, and the trace is skewed: a single prefix (P1) accounts for 8 of the 12 requests. Running both routers side by side on it shows three things at once.
 
-<strong>Affinity works.</strong> The load-only router hits 4 of 12; the prefix-aware router hits 6. Cumulative prefill tokens are 29,180 versus 21,180 — a 27.4% reduction. Note that the load-only router does not "miss every time": as it fills three replicas in turn it sometimes lands back on the one holding the prefix. What prefix-aware routing changes is that those hits stop being accidental.
+<strong>Affinity works.</strong> The load-only router hits 4 of 12; the prefix-aware router hits 6. Cumulative prefill tokens are 29,180 versus 21,180 — a 27.4% reduction. The load-only router also gets hits: as it fills three replicas in turn, it sometimes lands back on the one holding the prefix. What prefix-aware routing changes is that those hits stop being accidental.
 
 <strong>You still need an escape hatch.</strong> Because P1 dominates, pure affinity would pile onto replica 1. When the load gap exceeds the threshold (2 in this implementation), the router abandons affinity and takes the least-loaded replica instead. Two of the twelve requests go down that path.
 
-<strong>The escape hatch is not free.</strong> Both of those two requests miss. So the 6/12 hit rate would rise if you raised the threshold toward infinity — at the price of a final load distribution skewed like 8, 2, 2. The tension here is not which of cache affinity and load balance is right, but where to sit between them. Stepping through the player shows the reason for each decision: first sight, affinity, or affinity dropped on load gap.
+<strong>The escape hatch is not free.</strong> Both of those requests miss. So the 6/12 hit rate would rise if you raised the threshold toward infinity — at the price of a final load distribution skewed like 8, 2, 2. The threshold is the dial that sets where to sit between cache affinity and load balance. Stepping through the player shows the reason for each decision: first sight, affinity, or affinity dropped on load gap.
 
 The two implementations in the previous section each provide this escape hatch in a different form — SGLang as a threshold, Dynamo as a decay term — though only SGLang ships with its hatch open. The design space:
 
@@ -405,7 +405,7 @@ The two implementations in the previous section each provide this escape hatch i
 | When affinity is abandoned | absolute and relative load gap / continuous decay / softmax temperature |
 | Cache tiers | GPU HBM only / host memory / disk / cluster-shared store |
 
-The last row changes the shape of the whole decision. If KV blocks can be fetched from a cluster-shared store, a "miss" on replica B no longer costs a full prefill — it costs a transfer. Affinity stops being binary and becomes a bandwidth-versus-compute comparison, which is what Dynamo's 0.75 and 0.25 tier weights were already pricing, extended across machines instead of within one. vLLM ships connectors for this under `vllm/distributed/kv_transfer/`, covering LMCache, Mooncake, NIXL, and plain CPU/disk offloading. It is also the GIE roadmap's "interfaces for remote caches" item, and it is the reason that item is still open: once the transfer is cheap enough, the router's cost function needs a term for network as well as compute.
+The last row changes the shape of the whole decision. If KV blocks can be fetched from a cluster-shared store, a "miss" on another replica no longer costs a full prefill — it costs a transfer. Affinity stops being binary and becomes a bandwidth-versus-compute comparison, which is what Dynamo's 0.75 and 0.25 tier weights were already pricing, extended across machines instead of within one. vLLM ships connectors for this under `vllm/distributed/kv_transfer/`, covering LMCache, Mooncake, NIXL, and plain CPU/disk offloading. It is also the GIE roadmap's "interfaces for remote caches" item, and it is the reason that item is still open: once the transfer is cheap enough, the router's cost function needs a term for network as well as compute.
 
 ### 6.2 A lighter alternative: prefix hashing
 
@@ -414,7 +414,7 @@ If maintaining a radix tree feels heavy, SGLang also ships a `prefix_hash` polic
 1. Take the first $k$ tokens of the request (`prefix_token_count`).
 2. Hash them with xxhash.
 3. Look up the owning worker on a consistent hash ring.
-4. If that worker's load exceeds average times `load_factor`, walk to the least loaded one instead.
+4. If that worker's load exceeds average times `load_factor`, send the request to the least-loaded worker instead.
 
 The idea is consistent hashing with bounded loads from section 4.1, though this implementation deviates from the theoretical model by jumping straight to the globally least-loaded worker instead of walking the ring. There is no tree to maintain, ring lookup is $O(\log n)$, and growing the pool from $n$ to $n+1$ workers moves about $1/(n+1)$ of the keys. Keyed on the head of an agent conversation, it is often enough in practice.
 
@@ -432,7 +432,7 @@ A router cannot make up for a scheduler inside the replica that leaves work idle
 
 ### 7.1 From static to continuous batching
 
-Early inference servers grouped requests into a batch and processed the batch as a unit. No slot is freed until the longest generation in the batch finishes, so a request that stops after 10 tokens waits for one that generates 1000.
+Early inference servers grouped requests into a batch and processed the batch as a unit. No slot is freed until the longest generation in the batch finishes, so a request that stops after 10 tokens waits for one that generates 1,000.
 
 The <strong>iteration-level scheduling</strong> introduced by Orca (Yu et al., OSDI 2022) replaced this with a per-iteration decision: at every iteration, remove finished sequences and admit waiting ones. That is the origin of what is now called continuous batching.
 
@@ -446,7 +446,7 @@ The <strong>chunked prefill</strong> of Sarathi-Serve (Agrawal et al., OSDI 2024
 
 <ContinuousBatchingVisualizer />
 
-Switching between the three modes shows the two effects measured against different baselines. Slot occupancy climbs from 57% under static batching to 91% under continuous batching and 93% under chunked prefill — that gain belongs to continuous batching. Zero-output iterations, meanwhile, go 6 → 8 → 1. Under continuous batching those really are decode stalls, and it makes them worse, precisely because keeping slots full admits more new prefills. (Static batching's six are mostly its initial prefills, when there is no decode to stall.) Chunked prefill erases that regression and then pushes below the static-batching baseline. In this schematic the very first iteration still emits nothing, because no sequence has finished prefill yet.
+Switching between the three modes shows two effects on two different metrics. Slot occupancy climbs from 57% under static batching to 91% under continuous batching and 93% under chunked prefill — that gain belongs to continuous batching. Zero-output iterations, meanwhile, go 6 → 8 → 1. Under continuous batching those really are decode stalls, and it makes them worse, precisely because keeping slots full admits more new prefills. (Static batching's six are mostly its initial prefills, when there is no decode to stall.) Chunked prefill erases that regression and then pushes below the static-batching baseline. In this schematic the very first iteration still emits nothing, because no sequence has finished prefill yet.
 
 Chunked prefill is not free. Prefill and decode share the per-iteration token budget, so the split is itself a throughput-versus-ITL trade-off: bias toward prefill for throughput, toward decode for steady inter-token latency.
 
@@ -471,9 +471,9 @@ The last engine-side lever worth naming changes what a decode iteration <em>is</
 
 Two things follow for a load balancer.
 
-<strong>Per-request cost gets less predictable, not more.</strong> Every argument in section 1.2 was about the variance of service time. Speculation adds a second source of it, because the acceptance rate depends on the content: structured, low-entropy output accepts long runs, open-ended prose does not. The same prompt length can now cost meaningfully different amounts of GPU time on the same replica, and the variation is <em>correlated with the workload mix</em> rather than random, which is the kind of variation that makes a fixed capacity model wrong.
+<strong>Per-request cost becomes less predictable.</strong> Every argument in section 1.2 was about the variance of service time. Speculation adds a second source of it, because the acceptance rate depends on the content: structured, low-entropy output accepts long runs, open-ended prose does not. The same prompt length can now cost meaningfully different amounts of GPU time on the same replica, and the variation is <em>correlated with the workload mix</em> rather than random, which is the kind of variation that makes a fixed capacity model wrong.
 
-<strong>Inter-token latency stops meaning what section 2 said it means.</strong> With speculation, one streamed chunk can carry several tokens. vLLM's benchmark documentation is explicit that ITL records only the gaps <em>between</em> streamed outputs, without adding zero-length gaps for tokens bundled into the same output, while TPOT amortizes the request's decoding time over every output token ([Benchmark CLI](https://docs.vllm.ai/en/latest/benchmarking/cli/)). The two diverge. Write the SLO against ITL and then turn speculation on, and the number improves by more than the experience does; compare a speculative deployment against a non-speculative one on ITL, and you are not comparing the same quantity. Pin the SLO to TPOT, or to normalized end-to-end latency.
+<strong>Inter-token latency stops tracking TPOT.</strong> With speculation, one streamed chunk can carry several tokens. vLLM's benchmark documentation is explicit that ITL records only the gaps <em>between</em> streamed outputs, without adding zero-length gaps for tokens bundled into the same output, while TPOT amortizes the request's decoding time over every output token ([Benchmark CLI](https://docs.vllm.ai/en/latest/benchmarking/cli/)). The two diverge: in the documentation's example, mean ITL is 40 ms while TPOT is 20 ms per token. Write the SLO against ITL and then turn speculation on, and the number improves less than the experience does; compare a speculative deployment against a non-speculative one on ITL, and you are not comparing the same quantity. Pin the SLO to TPOT, or to normalized end-to-end latency.
 
 ## 8. Fairness — fair to whom?
 
@@ -532,12 +532,12 @@ The realistic use is <strong>hedging only until prefill completes</strong>: if T
 
 Queues are not infinite. Letting them behave as if they were produces the worst state: waiting time grows while goodput does not.
 
-- Cap <strong>queue length</strong> and return 429 immediately past the cap. Failing fast beats failing after a long wait.
-- Attach <strong>deadlines</strong>. A request that has already blown its SLO has no value left to deliver, so drop it.
-- Bound <strong>queue time</strong> as a constant multiple of mean service time.
-- Use a <strong>circuit breaker</strong> to remove a repeatedly failing backend for a fixed period.
+- Cap queue length and return 429 immediately past the cap. Failing fast beats failing after a long wait.
+- Attach deadlines. A request that has already blown its SLO has no value left to deliver, so drop it.
+- Bound queue time as a constant multiple of mean service time.
+- Use a circuit breaker to remove a repeatedly failing backend for a fixed period.
 
-The Azure API Management circuit breaker takes failure count, observation interval, failure status code ranges, and trip duration as a rule. Its constraints matter: only one rule per backend, unsupported in the Consumption tier, and approximate because gateway instances do not synchronize state.
+The Azure API Management circuit breaker takes failure count, observation interval, failure status code ranges, and trip duration as a rule. It has three constraints: only one rule per backend, no support in the Consumption tier, and approximate tripping because gateway instances do not synchronize state.
 
 ### 9.4 The commitment point — once the first token ships, the options are gone
 
@@ -545,19 +545,19 @@ Every reliability mechanism above shares one ceiling. <strong>Once the first tok
 
 Three consequences follow.
 
-- Section 2 already noted the consequence for reliability: every mechanism in sections 9 and 12 has to act before the first token, so its window is TTFT.
-- A long-lived SSE connection pins the request to one gateway instance for its entire life, which compounds with the fact that gateway instances do not synchronize state.
+- Every mechanism in sections 9 and 12 has to act before the first token, so its window of effectiveness is, by construction, exactly TTFT. That is why section 2 singled out TTFT among the six metrics.
+- A long-lived SSE (Server-Sent Events) connection pins the request to one gateway instance for its entire life, which compounds with the fact that gateway instances do not synchronize state.
 - If you genuinely need mid-stream recovery, the application has to build it: buffer emitted tokens and, on failure, re-prompt with the already-generated prefix and ask the model to continue. No protocol layer will do this for you.
 
 ### 9.5 Reasoning models move the commitment point — and hand the router a hint
 
-Section 9.4 tied every reliability mechanism to TTFT. Reasoning models change this picture in three ways.
+Section 9.4 tied every reliability mechanism to TTFT. Reasoning models change three of the assumptions used so far.
 
-<strong>The window gets longer, not shorter.</strong> A model that thinks before answering spends its first seconds emitting reasoning tokens the user was never shown, or emitting nothing at all. Whatever is displayed arrives after that phase. So the interval during which a retry or a failover is still invisible to the user is no longer TTFT as the engine reports it; it is the time until the first <em>user-visible</em> token. Hedging, which section 9.2 called expensive because the discarded attempt still ran decode, becomes cheaper in relative terms — the duplicate can be cancelled before either attempt has produced anything the user could have seen. The cost is that both attempts have already spent their reasoning phase.
+<strong>The window gets longer.</strong> A model that thinks before answering spends its first seconds emitting reasoning tokens the user was never shown, or emitting nothing at all. Whatever is displayed arrives after that phase. So the interval during which a retry or a failover is still invisible to the user is no longer TTFT as the engine reports it; it is the time until the first <em>user-visible</em> token. Hedging, which section 9.2 called expensive because the discarded attempt still ran decode, becomes cheaper in relative terms — the duplicate can be cancelled before either attempt has produced anything the user could have seen. The cost is that both attempts have already spent their reasoning phase.
 
 <strong>Part of the cost becomes known at dispatch.</strong> This article opened by saying that per-request work is unknown at dispatch time. Reasoning models put a dent in that: `reasoning.effort` (OpenAI) and `thinking.budget_tokens` (Anthropic) are request fields, and they bound the largest and most variable component of the work. It is the only load signal in this article that arrives <em>with</em> the request rather than being scraped afterwards, which makes it worth extracting at L2 — as a rate-limit weight, as a priority class, or as a reason to send high-effort traffic to a separate pool so that it does not share a batch with interactive turns.
 
-<strong>Effort is part of the cached prefix.</strong> Both providers render the reasoning configuration into the prompt, so changing it invalidates cached message prefixes and, on some models, the system and tool caches as well ([Anthropic, what invalidates the cache](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)). Varying effort per request inside one conversation therefore does the same damage as varying the system prompt: the affinity of sections 5 and 6 is defeated by a field nobody thought of as part of the key.
+<strong>Effort is part of the cached prefix.</strong> Both providers render the reasoning configuration into the prompt, so changing it invalidates cached message prefixes and, on some models, the system and tool caches as well ([OpenAI, Prompt caching](https://platform.openai.com/docs/guides/prompt-caching); [Anthropic, what invalidates the cache](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)). Varying effort per request inside one conversation therefore does the same damage as varying the system prompt: the affinity of sections 5 and 6 is defeated by a field nobody thought of as part of the key.
 
 ## 10. Spending less — absorbing, downgrading, and deferring demand
 
@@ -574,7 +574,7 @@ Azure API Management implements it as a policy pair: `llm-semantic-cache-lookup`
 - `ignore-system-messages` (default `false`, `true` recommended).
 - `max-message-count`, plus a `<vary-by>` element to partition the cache — the documented way to keep one user's cached answers away from another's.
 
-Two notes in the documentation matter directly for load balancing. First, it recommends placing a `rate-limit` policy immediately after the cache lookup, explicitly "to help keep your backend service from getting overloaded if the cache isn't available." If you have sized capacity assuming the absorbing tier is there, the moment it fails all of that absorbed load returns at once — a textbook metastable failure. Second, because matching is similarity-based rather than exact, it "can surface responses that are incorrect, outdated, or unsafe for the current request."
+The documentation adds two cautions. First, it recommends placing a `rate-limit` policy immediately after the cache lookup, explicitly "to help keep your backend service from getting overloaded if the cache isn't available." If you have sized capacity assuming the absorbing tier is there, the moment it fails all of that absorbed load returns at once — a textbook metastable failure. Second, because matching is similarity-based rather than exact, it "can surface responses that are incorrect, outdated, or unsafe for the current request."
 
 The `ignore-system-messages` recommendation contrasts with section 13.2. Setting `ignore-system-messages="true"` excludes the system prompt from the <em>similarity comparison</em>, while section 13.2 advises keying the <em>routing hash</em> on the shared prefix. KV caching wants the common head; semantic caching wants the differing tail, so each keys on a different part of the same string.
 
@@ -584,7 +584,7 @@ The layer model in section 3 defined L2 as "model and provider choice". Provider
 
 A <strong>cascade</strong> sends the request to a small model first and escalates to a large one only when a verifier or a self-reported confidence falls below a threshold. Average cost drops substantially. From a load-balancing standpoint there is a side effect that is easy to miss.
 
-Escalated requests are selected for difficulty, so what the large pool sees is not the raw traffic. The direction of that effect is the opposite of the intuitive one, though. Escalation left-truncates the service-time distribution, so the coefficient of variation $C_s^2$ actually falls. Escalating only the top 10% of an exponential service-time distribution takes $C_s^2$ from 1.00 to 0.09 while the mean service time rises 3.3x. Looking only at the $(1+C_s^2)/2$ term of section 1.2, conditions appear to improve.
+Escalated requests are selected for difficulty, so what the large pool sees is not the raw traffic. The direction of that effect is the opposite of the intuitive one, though. Escalation left-truncates the service-time distribution, so the squared coefficient of variation $C_s^2$ actually falls. Escalating only the top 10% of an exponential service-time distribution takes $C_s^2$ from 1.00 to 0.09 while the mean service time rises 3.3x. Looking only at the $(1+C_s^2)/2$ term of section 1.2, conditions appear to improve.
 
 Three other effects do cause trouble.
 
@@ -596,11 +596,11 @@ $$
 W_q\approx\frac{\rho}{1-\rho}\cdot\frac{C_a^2+C_s^2}{2}\cdot E[S]
 $$
 
-what rises is the arrival-process variability $C_a^2$, not $C_s^2$.
+what rises is $C_a^2$, the squared coefficient of variation of interarrival times, not $C_s^2$.
 
-<strong>Third, it has the same metastable shape as section 10.1.</strong> When the cheap tier degrades, everything it was absorbing lands on the expensive tier at once — structurally identical to the semantic cache failing.
+<strong>Third, it has the same metastable shape as section 10.1.</strong> When the cheap tier degrades, everything it was absorbing lands on the expensive tier at once.
 
-The other cost is a round trip. An escalated request waits for the small model's generation (or at least for enough of it to judge) before starting again, so a cascade trades p50 cost against p95 latency. For interactive work where a user is waiting, that trade often does not pay.
+The other cost is a round trip. An escalated request waits for the small model's generation (or at least for enough of it to judge) before starting again, so a cascade trades P50 cost against P95 latency. For interactive work where a user is waiting, that trade often does not pay.
 
 ### 10.3 Cost-aware routing and budgets
 
@@ -618,11 +618,11 @@ Replica count has been treated as fixed so far. In reality a second control loop
 
 There are two failure modes here, pointing in opposite directions.
 
-<strong>Watching per-replica metrics.</strong> In a perfectly balanced pool every replica reports the same numbers. Saturation is not hidden, but something is lost: the early warning. The hottest replica used to cross the knee first and announce the problem; once balancing is good, every replica crosses simultaneously. The healthy-to-saturated transition becomes a cliff, and there is less time to react.
+<strong>Watching per-replica metrics.</strong> In a perfectly balanced pool every replica reports the same numbers. Saturation is still visible, but the early warning is lost. The hottest replica used to cross the knee first and announce the problem; once balancing is good, every replica crosses simultaneously. The healthy-to-saturated transition becomes a cliff, and there is less time to react.
 
 <strong>Watching only a pool-wide average.</strong> Now the opposite: one sick replica is buried in the mean.
 
-So where should the signal come from? GIE's roadmap phrases the item as "HPA support for autoscaling on aggregate metrics derived from the load balancer" because the load balancer is the only vantage point that observes waiting work before an endpoint is chosen. A replica's queue contains only work already sent to it; the router also sees the work it could not place anywhere.
+The load balancer is the only vantage point that observes waiting work before an endpoint is chosen. A replica's queue contains only work already sent to it; the router also sees the work it could not place anywhere. GIE's roadmap item "HPA support for autoscaling on aggregate metrics derived from the load balancer" uses that vantage point.
 
 ### 11.2 GPU utilization is the wrong scaling signal
 
@@ -641,7 +641,7 @@ Cold start for an LLM replica is measured in minutes, not seconds: image pull, w
 - <strong>Scale-to-zero is not realistic for large models.</strong> At zero replicas there is nothing to absorb anything; the request simply waits out the entire cold start.
 - Scaling out from a warm pool <em>does</em> put the control loop's dead time on the load balancer, which is why those decisions have to be predictive. A reactive threshold produces pods that become ready after the surge has passed.
 
-And the problem from section 5.6 returns here. A freshly ready replica has zero outstanding requests and a cold cache. Least-outstanding pours all traffic into it and spikes TTFT again; a prefix-aware router never picks it at all. The answer is the blackout period and slow start that Envoy already implements: treat it as median for a while, then ramp.
+And the problem from section 5.6 returns here. A freshly ready replica has zero outstanding requests and a cold cache. Least-outstanding pours all traffic into it and spikes TTFT again; a prefix-aware router rarely picks it, because its cache is empty. The answer is the blackout period and slow start that Envoy already implements: treat it as median for a while, then ramp.
 
 ## 12. Multiple providers and regions
 
@@ -654,7 +654,7 @@ Azure OpenAI spillover automatically routes requests a provisioned (PTU) deploym
 - Enabled through the deployment property `spilloverDeploymentName` or the request header `x-ms-spillover-deployment`; if both are set, the deployment property wins.
 - Triggers on 429 when PTUs are exhausted, on 400 when the context exceeds the PTU-supported length, and on server errors 500 or 503.
 - Spilled responses carry `x-ms-spillover-from-deployment` and `x-ms-spillover-error`, the latter holding the original non-200 response code.
-- The deployment that actually answered is reported in `x-ms-deployment-name`, so monitoring your spillover rate means combining the two.
+- The deployment that actually answered is reported in `x-ms-deployment-name`. The spillover rate is monitored by splitting Azure Monitor metrics by deployment.
 - Billing is hourly on the PTU side and per-token on the standard side.
 
 Read structurally, this is a priority-ordered backend pool implemented by the platform: prefer cheap and predictable reserved capacity, and let only the overflow fall through to metered capacity.
@@ -691,9 +691,13 @@ A self-hosted pool and a managed provider expose completely different signals. T
 
 Sections 5 and 6 treated prefix affinity as something you implement. With a managed provider you do not implement it, but you do not escape it either: <strong>the provider is running a similar cache-aware router, while exposing only selected controls</strong>.
 
-OpenAI states the mechanism plainly. Cached KV lives on individual machines, where traffic above roughly 15 requests per minute can overflow to another machine, and an overflowed request misses. Within an organization and processing region, routing depends on current machine load, a hash of the initial tokens, and an optional `prompt_cache_key` that influences routing without pinning a request to a machine or guaranteeing a hit ([Prompt caching](https://platform.openai.com/docs/guides/prompt-caching)). As of September 2026, GPT-5.6 and later also expose `prompt_cache_options`: implicit or explicit caching, up to four explicit cache writes, and a `ttl` whose only supported value is `30m`; cache writes are priced at 1.25x the uncached input-token rate and reads at 0.1x. Earlier models use `prompt_cache_retention` instead. Structurally, this is section 4.1's consistent hashing with bounded loads, with the load term inside the provider and only the cache key, breakpoint placement, and retention choices in your hands. The documented remedy for a hot key is familiar too: if a group receives high traffic and cache read hits decline, spread it across more keys with a stable, deterministic mapping — sharding the affinity domain, which is section 6.1's escape hatch relocated to the caller.
+OpenAI states the mechanism plainly. Cached KV lives on individual machines, where traffic above roughly 15 requests per minute can overflow to another machine, and an overflowed request misses. Within an organization and processing region, routing depends on current machine load, a hash of the initial tokens, and an optional `prompt_cache_key`. The key keeps cache reuse separate between groups of requests. On models before GPT-5.6 it also helps route related requests to the same cache, but it neither pins a request to a machine nor guarantees a hit. On GPT-5.6 and later, OpenAI handles cache routing automatically, so the key is needed only to keep cache accounting separate ([Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)). As of November 2026, GPT-5.6 and later also expose `prompt_cache_options`: implicit or explicit caching, up to four cache writes per request, and a `ttl` that sets the minimum cache lifetime — `30m` by default, or `12h` in the Responses API only. Relative to the uncached input-token rate, a write costs 1.25x at `30m` and 2.5x at `12h`, and a read costs 0.1x at either lifetime (0.05x on GPT-6.1 Sol and GPT-6.1 Terra). Earlier models use `prompt_cache_retention` instead.
 
-Anthropic exposes the same trade as explicit prices. As of September 2026, a five-minute cache write costs 1.25x the base input rate, a one-hour write costs 2x, and reads normally cost 0.1x, with lower 0.025x reads documented for Claude Fable 5.1 and Claude Mythos 5.1; the default entry lives five minutes and is refreshed on use ([Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)). Two documented details bear directly on section 13.1. First, the lifetime is measured from the <em>start</em> of the request that touches the entry, not from the end of its response, so generation time is charged against the TTL: a four-minute stream leaves about one minute to come back. For the long-lived agents of section 13.1, the cache clock keeps running while they generate. Second, a cache entry only becomes available after the first response begins, so if you need cache hits across parallel requests you must wait for the first response before sending the rest. Section 13.1's fan-out burst therefore does more than concentrate load on one prefix. On a managed provider every child misses at once, and the fix is to serialize the first call.
+Structurally, this is section 4.1's consistent hashing with bounded loads, with the load term inside the provider and only the cache key, breakpoint placement, and retention choices in your hands. For models before GPT-5.6, the documented remedy for a hot key is familiar too: if a group receives high traffic and cache read hits decline, spread it across more keys with a stable, deterministic mapping — sharding the affinity domain, which is section 6.1's escape hatch relocated to the caller.
+
+Anthropic exposes the same trade as explicit prices. As of November 2026, a five-minute cache write costs 1.25x the base input rate, a one-hour write costs 2x, and reads normally cost 0.1x, with lower reads documented at 0.05x for Claude Opus 5.5 and Claude Sonnet 5.5 and at 0.025x for Claude Fable 5.1 and Claude Mythos 5.1; the default entry lives five minutes and is refreshed on use ([Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)).
+
+Two documented details bear directly on section 13.1. First, the lifetime is measured from the <em>start</em> of the request that touches the entry, not from the end of its response, so generation time is charged against the TTL: a four-minute stream leaves about one minute to come back. For the long-lived agents of section 13.1, the cache clock keeps running while they generate. Second, a cache entry only becomes available after the first response begins, so if you need cache hits across parallel requests you must wait for the first response before sending the rest. Section 13.1's fan-out burst therefore does more than concentrate load on one prefix. On a managed provider every child misses at once, and the fix is to serialize the first call.
 
 Two consequences for the configurations in section 14.
 
@@ -712,7 +716,7 @@ The column to read is <em>Model calls</em>. One chat turn is one request; a RAG 
 
 <strong>The scheduling unit becomes a session.</strong> One unit of user-visible work is tens to hundreds of model calls. For a $k$-step sequential chain, session time is the sum of per-step latencies, so shaving 200 ms per step becomes 2 seconds over 10 steps. Optimizing the P95 of an individual call does not necessarily improve session completion time. The naïve reading is that sums average out — that the coefficient of variation would fall as $C_s/\sqrt{k}$. It does not, because agent steps are neither independent nor purely sequential; see fan-out below.
 
-<strong>Stickiness becomes a performance requirement.</strong> Classical session affinity existed because the server held session state. For agents, the state travels in the request as conversation history, so affinity is not needed for correctness. The reason to want the same replica is that the prefix cache is there. Because affinity is only a performance optimization, you can drop it the moment load skews.
+<strong>Affinity becomes a performance requirement.</strong> Classical session affinity existed because the server held session state. For agents, the state travels in the request as conversation history, so affinity is not needed for correctness. The reason to want the same replica is that the prefix cache is there. Because affinity is only a performance optimization, you can drop it the moment load skews.
 
 <strong>Fan-out creates bursts.</strong> When subagents run in parallel, one parent call spawns ten simultaneous children. Arrivals become batch arrivals rather than Poisson, so queues run deeper at the same mean rate. Worse, those children usually share a prefix, so pure cache affinity sends all of them to one replica and buries it. This is where the affinity/balance tug-of-war is sharpest.
 
@@ -722,7 +726,7 @@ The column to read is <em>Model calls</em>. One chat turn is one request; a RAG 
 
 ### 13.2 Design guidance
 
-<strong>Key the cache on the prefix, not the conversation ID.</strong> Hashing by conversation ID prevents reuse between different conversations that share a system prompt. Hashing on the prefix — system prompt plus tool definitions plus the head of the conversation — shares the cache across every conversation in a tenant.
+<strong>Key routing on the prefix, not the conversation ID.</strong> Hashing by conversation ID prevents reuse between different conversations that share a system prompt. Hashing on the prefix — system prompt plus tool definitions plus the head of the conversation — shares the cache across every conversation in a tenant.
 
 <strong>Then decide how wide that sharing domain is, because sharing has a price.</strong> The advice above is a performance decision with a security consequence: a cache hit is observable from outside as a shorter TTFT. Song et al. demonstrate this against both KV caches and semantic caches, using timing measurements and a classifier to detect hits and a token-by-token search to recover shared prefixes — including system prompts and prefixes written by other users — and confirm it by black-box testing of live online services ([arXiv:2409.20002](https://arxiv.org/abs/2409.20002), accepted to IEEE TIFS). The providers' answer is isolation: OpenAI shares caches neither across organizations nor across regional processing boundaries. Self-hosted, the equivalent has to be a deliberate choice — put the tenant identifier into the routing key and the cache key and accept the lower hit rate, unless every principal inside the sharing domain is allowed to learn what the others sent.
 
@@ -770,7 +774,7 @@ python -m sglang_router.launch_router \
     --max-tree-size 67108864
 ```
 
-Every value here is stated explicitly, but only three of them differ from the Python launcher's defaults: `--cache-threshold` (0.3), `--balance-abs-threshold` (64), and `--eviction-interval-secs` (60). `--balance-rel-threshold` and `--max-tree-size` merely restate theirs — see section 5.5 for the full default table. Raising `--cache-threshold` makes affinity more conservative; lowering `--balance-abs-threshold` switches to load balancing sooner. The flag names also differ by entry point: the Python launcher spells it `--eviction-interval-secs`, the Rust gateway binary `--eviction-interval`.
+Every value here is stated explicitly, but only three of them differ from the Python launcher's defaults: `--cache-threshold` (default 0.3), `--balance-abs-threshold` (default 64), and `--eviction-interval-secs` (default 60). `--balance-rel-threshold` and `--max-tree-size` merely restate theirs — see section 5.5 for the full default table. Raising `--cache-threshold` makes affinity more conservative; lowering `--balance-abs-threshold` switches to load balancing sooner. The flag names also differ by entry point: the Python launcher spells it `--eviction-interval-secs`, the Rust gateway binary `--eviction-interval`.
 
 ### 14.3 LiteLLM: weighted failover across regions
 
@@ -795,7 +799,7 @@ router_settings:
   num_retries: 2
 ```
 
-With `enable_weighted_failover`, a failed deployment is excluded and a new one is picked from the same model group, escalating to a different `fallbacks` group only after every peer is exhausted. That is the right shape for regional redundancy of one model. Three constraints to note: it is active only when `routing_strategy` is `simple-shuffle` (the default, and what the example above uses), it is honoured only on async entrypoints (the synchronous `router.completion()` falls through to regular fallbacks), and the number of hops is capped by `max_fallbacks`, which defaults to 5.
+With `enable_weighted_failover`, a failed deployment is excluded and a new one is picked from the same model group, escalating to a different `fallbacks` group only after every peer is exhausted. That is the right shape for regional redundancy of one model, but as section 12.4 explains, equal weights like these scatter a multi-turn conversation across regions and lose its cache. Three operational constraints to note: it is active only when `routing_strategy` is `simple-shuffle` (the default, and what the example above uses), it is honoured only on async entrypoints (the synchronous `router.completion()` falls through to regular fallbacks), and the number of hops is capped by `max_fallbacks`, which defaults to 5.
 
 ### 14.4 Azure API Management: priority pool with a breaker
 
@@ -823,9 +827,9 @@ Load-balancing changes are invisible when measured the wrong way.
 
 <strong>Measure open-loop.</strong> A fixed-concurrency (closed-loop) benchmark lowers its own arrival rate whenever the server slows, so it cannot reproduce overload. Use Poisson arrivals with a fixed rate.
 
-<strong>Plot the goodput curve.</strong> Sweep arrival rate and find the highest rate that still meets the SLO (say, TTFT P95 under 2 seconds and ITL P95 under 50 ms). That is effective capacity. Single-point throughput hides how far the SLO is being missed.
+<strong>Plot the goodput curve.</strong> Sweep arrival rate and find the highest rate that still meets the SLO (say, TTFT P95 under 2 seconds and TPOT P95 under 50 ms). That is effective capacity. Goodput counts the requests that met the SLO, so the SLO needs metrics with one value per request, such as TTFT and TPOT, rather than ITL, which pools the output gaps of all requests. Single-point throughput hides how far the SLO is being missed.
 
-<strong>Match prefix reuse to real traffic.</strong> Random prompts in a synthetic benchmark completely disable the prefix cache. Evaluation of cache-aware routing depends entirely on this ratio, so measure your own workload's reuse rate first — the ratio of `vllm:prefix_cache_hits` to `vllm:prefix_cache_queries` gives it directly.
+<strong>Match prefix reuse to real traffic.</strong> Random prompts in a synthetic benchmark completely disable the prefix cache. Evaluation of cache-aware routing depends heavily on this ratio, so measure your own workload's reuse rate first — the ratio of `vllm:prefix_cache_hits` to `vllm:prefix_cache_queries` gives it directly.
 
 <strong>Report the tail distribution.</strong> P50 and P95 are not enough; look at P99 and the maximum. The effect of hedging and admission control only appears in the tail.
 
@@ -839,14 +843,14 @@ Load-balancing changes are invisible when measured the wrong way.
 
 | Need | Flag |
 |---|---|
-| Open-loop Poisson arrivals | `--request-rate <rps>` with `--burstiness 1.0` — the shape parameter of a Gamma distribution whose CV is $1/\sqrt{\text{burstiness}}$, so 1.0 is Poisson and 0.1 is a stress burst. Left at the default `inf`, you get a closed-loop run and the failure described above |
+| Open-loop Poisson arrivals | `--request-rate <rps>` with `--burstiness 1.0` — the shape parameter of a Gamma distribution whose CV is $1/\sqrt{\text{burstiness}}$, so 1.0 is Poisson and 0.1 is a stress burst. Leaving `--request-rate` at its default `inf` gives a closed-loop run and the failure described above |
 | A controlled prefix-reuse ratio | `--dataset-name prefix_repetition` with `--prefix-repetition-prefix-len`, `--prefix-repetition-num-prefixes`, `--prefix-repetition-suffix-len` |
 | Finding the knee | `--ramp-up-strategy linear` with `--ramp-up-start-rps` and `--ramp-up-end-rps` |
 | A pinned output length | `--ignore-eos`, as section 2 warned |
 
-<strong>Use standard span names.</strong> Per-layer spans are useful only once they have agreed names. The [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) define them, and the split matches this article's layers closely: server-side time-to-first-token and time-per-output-token metrics for section 2's TTFT and ITL, client-side operation metrics measured in streamed <em>chunks</em> rather than tokens (precisely because, as section 7.4 showed, one chunk need not carry one token), and agent-level duration and call-count metrics for section 13's session completion time. Instrument both sides, and the difference between the client and server histograms is your own routing layer — the cheapest way to find out what the router costs.
+<strong>Use standard span names.</strong> Per-layer spans are useful only once they have agreed names. The [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) define them, and the split matches this article's layers closely: server-side time-to-first-token and time-per-output-token metrics for section 2's TTFT and TPOT, and agent-level duration and call-count metrics for section 13's session completion time. Client-side operation metrics are measured in streamed <em>chunks</em> rather than tokens, because, as section 7.4 showed, one chunk need not carry one token. Instrument both sides, and the difference between the client and server histograms is your own routing layer — the cheapest way to find out what the router costs.
 
-## 16. In closing — one trade under three constraints
+## 16. In closing — one trade under two constraints
 
 There are many layers, tools, and vendors here, but each one does the same thing: <strong>choose between locality and balance, on a stale signal, inside a window that is closing</strong>.
 

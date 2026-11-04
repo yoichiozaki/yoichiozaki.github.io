@@ -113,8 +113,8 @@ function tokenize(src: string): TraceStep[] {
         start,
         skipped,
         isKeyword
-          ? `英字で始まるので識別子として最長一致で読み取り、予約語表に「${upper}」があったので KEYWORD に分類`
-          : `英字で始まるので最長一致で読み取り、予約語表に無いので IDENT（列名・表名の候補）に分類`,
+          ? `英字で始まるので最長一致で読み取り、予約語表に「${upper}」があったので KEYWORD に分類`
+          : `英字で始まるので最長一致で読み取り、予約語表に無いので IDENT（列名・テーブル名の候補）に分類`,
         isKeyword
           ? `Starts with a letter, so it is read with maximal munch; "${upper}" is in the keyword table, so it becomes a KEYWORD.`
           : `Starts with a letter, read with maximal munch; not in the keyword table, so it becomes an IDENT (a column/table name candidate).`,

@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -41,7 +42,7 @@ export function TypeSystemTaxonomy({ locale = "ja" }: DiagramProps) {
       color: green,
       label: isEn ? "Dynamic Typing" : "動的型付け",
       desc: isEn ? "Checked at runtime" : "実行時にチェック",
-      langs: "Python, Ruby, JS",
+      langs: "Python, Ruby, JavaScript",
     },
     {
       x: 380,
@@ -252,7 +253,7 @@ export function StructuralVsNominal({ locale = "ja" }: DiagramProps) {
 
         {/* Compatible */}
         <text x={145} y={170} textAnchor="middle" fill={green} fontSize={10} fontWeight={600}>
-          {isEn ? "✓ Compatible (same shape)" : "✓ 互換 (同じ形状)"}
+          {isEn ? "✓ Compatible (same shape)" : "✓ 互換 (同じ構造)"}
         </text>
         <text x={145} y={186} textAnchor="middle" fill={muted} fontSize={9}>
           {isEn
@@ -455,7 +456,7 @@ export function TypeInferenceVisualizer({ locale = "ja" }: DiagramProps) {
       description={
         isEn
           ? "Watch how TypeScript infers types from expressions without explicit annotations."
-          : "TypeScript が式から型注釈なしで型を推論する過程を見てみましょう。"
+          : "TypeScript が型注釈のない式から型を推論する過程を、1 ステップずつ確認できます。"
       }
     >
       <div className="space-y-4">
@@ -505,6 +506,7 @@ export function TypeInferenceVisualizer({ locale = "ja" }: DiagramProps) {
           label={(step) =>
             `${isEn ? "Step" : "ステップ"} ${step + 1} / ${inferenceSteps.length}`
           }
+          ariaLabels={stepPlayerAriaLabels(locale)}
         />
       </div>
     </InteractiveDemo>
@@ -531,11 +533,11 @@ export function TypeSystemComparison({ locale = "ja" }: DiagramProps) {
     {
       name: "TypeScript",
       color: accent,
-      typing: isEn ? "Static (Gradual)" : "静的 (漸進的)",
+      typing: isEn ? "Static (gradual)" : "静的 (漸進的)",
       structural: true,
-      inference: isEn ? "Strong" : "強力",
+      inference: isEn ? "Extensive" : "広範",
       generics: "✓",
-      nullSafety: isEn ? "strict mode" : "strictモード",
+      nullSafety: isEn ? "strictNullChecks" : "strictNullChecks",
     },
     {
       name: "Go",
@@ -544,14 +546,14 @@ export function TypeSystemComparison({ locale = "ja" }: DiagramProps) {
       structural: true,
       inference: isEn ? "Limited (:=)" : "限定的 (:=)",
       generics: isEn ? "✓ (1.18+)" : "✓ (1.18〜)",
-      nullSafety: isEn ? "nil (no)" : "nil (なし)",
+      nullSafety: isEn ? "No (has nil)" : "なし (nil あり)",
     },
     {
       name: "Rust",
       color: amber,
       typing: isEn ? "Static" : "静的",
       structural: false,
-      inference: isEn ? "Strong" : "強力",
+      inference: isEn ? "Extensive" : "広範",
       generics: "✓",
       nullSafety: "Option<T>",
     },
@@ -561,7 +563,7 @@ export function TypeSystemComparison({ locale = "ja" }: DiagramProps) {
       typing: isEn ? "Static" : "静的",
       structural: false,
       inference: isEn ? "Limited (var)" : "限定的 (var)",
-      generics: isEn ? "✓ (erased)" : "✓ (イレイジャ)",
+      generics: isEn ? "✓ (erased)" : "✓ (型消去)",
       nullSafety: isEn ? "Optional (partial)" : "Optional (部分的)",
     },
     {
@@ -576,8 +578,8 @@ export function TypeSystemComparison({ locale = "ja" }: DiagramProps) {
   ];
 
   const headers = isEn
-    ? ["Language", "Typing", "Struct?", "Inference", "Generics", "Null Safety"]
-    : ["言語", "型付け", "構造的?", "型推論", "ジェネリクス", "null安全"];
+    ? ["Language", "Typing", "Structural?", "Inference", "Generics", "Null Safety"]
+    : ["言語", "型付け", "構造的?", "型推論", "ジェネリクス", "null 安全性"];
 
   const colX = [10, 100, 210, 280, 355, 440];
   const rowH = 28;

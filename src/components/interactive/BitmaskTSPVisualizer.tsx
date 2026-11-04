@@ -71,8 +71,8 @@ function buildSteps(): Step[] {
     snap({
       cur: { S: 1, v: 0 },
       formula: "dp[{0}][0] = 0",
-      ja: "状態は «どの都市を訪問済みか（ビット集合 S）» と «いまどこにいるか（v）» の 2 つだけ。どの順番で回ったかは、この先の最適な続け方に影響しないので捨てて構いません。これが状態圧縮の核心です。",
-      en: "A state is just “which cities are visited (bitset S)” plus “where I am now (v)”. The order in which S was visited does not affect the best way to continue, so it can be discarded — that is the whole idea of state compression.",
+      ja: "dp[S][v] は、都市 0 を出発して集合 S の都市をちょうど 1 回ずつ訪れ、いま都市 v にいるときの最小コストです。どの順番で回ったかはこの先の最適な続け方に影響しないので、状態には訪問済み集合 S（ビット列）と現在地 v だけを持ちます。",
+      en: "dp[S][v] is the minimum cost of starting at city 0, visiting exactly the cities in S once each, and ending at city v. The order in which S was visited does not affect the best way to continue, so the state keeps only the visited set S (a bitmask) and the current city v.",
     }),
   );
 
@@ -102,10 +102,10 @@ function buildSteps(): Step[] {
                 `dp[${setLabel(prevS)}][${c.u}]+D[${c.u}][${v}] = ${dp[prevS][c.u]}+${D[c.u][v]}`,
             )
             .join(", ")} ) = ${best.cost}`,
-          ja: `集合 ${setLabel(S)} を訪問して ${v} にいる状態を作ります。直前にいた都市 u の候補は ${cands
+          ja: `«${setLabel(S)} を訪問して ${v} にいる» 状態の最小コストを求めます。直前にいた都市 u の候補は ${cands
             .map((c) => c.u)
             .join(", ")}。それぞれ «${setLabel(prevS)} を訪問して u にいた» 状態から 1 手伸ばし、最小の ${best.cost}（u = ${best.u}）を採用します。`,
-          en: `Build the state “visited ${setLabel(S)}, standing on ${v}”. The possible previous cities are ${cands
+          en: `Compute dp for “visited ${setLabel(S)}, standing on ${v}”. Candidates for the previous city u: ${cands
             .map((c) => c.u)
             .join(", ")}. Extend each “visited ${setLabel(prevS)}, standing on u” state by one edge and keep the minimum, ${best.cost}, via u = ${best.u}.`,
         }),
@@ -128,7 +128,7 @@ function buildSteps(): Step[] {
         .map((f) => `dp[full][${f.v}]+D[${f.v}][0] = ${dp[FULL][f.v]}+${D[f.v][0]}`)
         .join(", ")} ) = ${bestFinal.cost}`,
       ja: `全都市を訪問した状態から出発地 0 に帰る辺を足して比較します。最小は ${bestFinal.cost}（最後の都市は ${bestFinal.v}）。`,
-      en: `Close the tour by adding the edge back to city 0 from each full-set state. The minimum is ${bestFinal.cost}, ending at city ${bestFinal.v}.`,
+      en: `Close the tour by adding the edge back to city 0 from each full-set state. The minimum is ${bestFinal.cost}, with city ${bestFinal.v} visited last.`,
     }),
   );
 
@@ -154,11 +154,11 @@ function buildSteps(): Step[] {
         ja:
           k === fullTour.length
             ? `復元完了。巡回路は ${fullTour.join(" → ")}、総距離 ${bestFinal.cost} です。par[S][v] に «直前の都市» を持たせておくと、S から v のビットを落としながら遡れます。`
-            : `par を辿って経路を復元中です（${shown.join(" → ")}）。`,
+            : `par から復元した巡回路を、出発地から順に示しています（${shown.join(" → ")}）。`,
         en:
           k === fullTour.length
             ? `Reconstruction complete: the tour is ${fullTour.join(" → ")} with total length ${bestFinal.cost}. Storing the previous city in par[S][v] lets you walk backwards, clearing one bit at a time.`
-            : `Walking the parent table backwards (${shown.join(" → ")}).`,
+            : `Showing the tour recovered from par, starting from city 0 (${shown.join(" → ")}).`,
       }),
     );
   }
@@ -211,8 +211,8 @@ export function BitmaskTSPVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "4 都市の有向 TSP。訪問順そのものではなく «訪問済み集合» を状態に取ると、(n−1)! の探索が 2ⁿ·n² に落ちます。"
-          : "A directed 4-city TSP. Taking the visited set — not the visiting order — as the state turns (n−1)! enumeration into 2ⁿ·n² work."
+          ? "4 都市の有向 TSP。訪問順そのものではなく «訪問済み集合と現在地» を状態に取ると、(n−1)! 通りの探索が 2ⁿ·n² に落ちます。"
+          : "A directed 4-city TSP. Taking the visited set and the current city — not the visiting order — as the state turns (n−1)! enumeration into 2ⁿ·n² work."
       }
     >
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4">
@@ -353,7 +353,7 @@ export function BitmaskTSPVisualizer({ locale = "ja" }: Props) {
               <table className="border-collapse text-[10px] font-mono">
                 <tbody>
                   <tr>
-                    <td className="px-1 text-muted-foreground">u＼v</td>
+                    <td className="px-1 text-muted-foreground">u\v</td>
                     {CITY.map((c) => (
                       <td key={c} className="px-1.5 text-muted-foreground">
                         {c}
@@ -426,7 +426,7 @@ export function BitmaskTSPVisualizer({ locale = "ja" }: Props) {
       <div className="mt-3 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
         <div className="rounded-lg border border-border bg-background p-3">
           <div className="text-[10px] font-semibold text-muted-foreground mb-1">
-            {isJa ? "いま適用している式" : "Recurrence applied now"}
+            {isJa ? "いま適用している式" : "Formula applied now"}
           </div>
           <code className="block text-[11px] font-mono text-foreground break-words">
             {s.formula || "—"}

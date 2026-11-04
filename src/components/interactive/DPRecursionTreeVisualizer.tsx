@@ -197,13 +197,13 @@ export function DPRecursionTreeVisualizer({ locale = "ja" }: Props) {
     }
     if (current.kind === "cacheHit") {
       return isJa
-        ? `f(${i}) は計算済み。メモから ${current.value} を返し、この枝は展開しません。ここが指数を多項式に変える瞬間です。`
-        : `f(${i}) is already memoized. Return ${current.value} from the table and prune this branch — this is exactly where exponential becomes polynomial.`;
+        ? `f(${i}) は計算済み。メモから ${current.value} を返し、この枝は展開しません。この刈り込みで、呼び出し回数が指数から線形に減ります。`
+        : `f(${i}) is already memoized. Return ${current.value} from the table and prune this branch; this pruning cuts the number of calls from exponential to linear.`;
     }
     if (current.duplicate) {
       return isJa
-        ? `f(${i}) を再び最初から計算し始めました。まったく同じ部分問題を、別の経路から重複して解いています。`
-        : `We start recomputing f(${i}) from scratch. The identical subproblem is being solved again along a different path.`;
+        ? `f(${i}) は別の枝で計算済みですが、メモ化していないので最初から計算し直します。`
+        : `f(${i}) was already computed on another branch, but without memoization it is recomputed from scratch.`;
     }
     return isJa
       ? `f(${i}) を求めるには f(${i - 1}) と f(${i - 2}) が要ります。まだ答えを知らないので再帰的に呼び出します。`
@@ -217,13 +217,13 @@ export function DPRecursionTreeVisualizer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "再帰木が DP 表になる瞬間"
-          : "The moment a recursion tree becomes a DP table"
+          ? "Frog 1 の再帰木 — メモ化で計算済みの枝を刈る"
+          : "Frog 1's recursion tree — memoization prunes computed branches"
       }
       description={
         isJa
-          ? "Frog 1（石 6 個、高さ 30 10 60 10 60 50）の f(5) を再帰で解きます。メモ化を切り替えて、同じ部分問題が何度現れるかを比べてください。"
-          : "Solving f(5) for Frog 1 (6 stones with heights 30 10 60 10 60 50) by recursion. Toggle memoization and compare how often the same subproblem reappears."
+          ? "Frog 1（石 6 個、高さ 30 10 60 10 60 50）で、石 5 までの最小コスト f(5) を再帰で求めます。メモ化を切り替えて、同じ部分問題が何度現れるかを比べてください。"
+          : "Frog 1 with 6 stones of heights 30 10 60 10 60 50: f(5), the minimum cost to reach stone 5, computed by recursion. Toggle memoization and compare how often the same subproblem reappears."
       }
     >
       <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -249,7 +249,7 @@ export function DPRecursionTreeVisualizer({ locale = "ja" }: Props) {
           {isJa ? "呼び出しノード数" : "call nodes"}:{" "}
           <span className="font-mono text-foreground">{tree.length}</span>
           {" / "}
-          {isJa ? "実際に計算した部分問題" : "subproblems actually evaluated"}:{" "}
+          {isJa ? "部分問題を計算した回数" : "subproblem evaluations"}:{" "}
           <span className="font-mono text-foreground">
             {computeCount}/{totalCompute}
           </span>

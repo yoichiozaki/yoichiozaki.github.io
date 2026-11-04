@@ -89,7 +89,7 @@ export function ConversationAxesTaxonomy({ locale = "ja" }: Props) {
       detColor: c.ref,
       rules: [
         ja
-          ? ["C1 事実正確性", "主張が真。出典に根拠づけ（hallucinationなし）"]
+          ? ["C1 事実正確性", "主張が真。出典に根拠づけ（ハルシネーションなし）"]
           : ["C1 Factual accuracy", "Claims are true & grounded; no hallucination"],
         ja
           ? ["C2 関連性", "ユーザーの実際の意図・質問に答えている"]
@@ -125,7 +125,7 @@ export function ConversationAxesTaxonomy({ locale = "ja" }: Props) {
           : ["G1 Helpfulness", "Did it actually help (perceived usefulness)"],
         ja
           ? ["G2 トーン・共感", "場にふさわしい語調・丁寧さ・共感"]
-          : ["G2 Tone & empathy", "Appropriate register, politeness, warmth"],
+          : ["G2 Tone & empathy", "Appropriate register, politeness, empathy"],
         ja
           ? ["G3 明瞭さ", "理解しやすい。構成・冗長さが適切"]
           : ["G3 Clarity", "Easy to follow; right structure and verbosity"],
@@ -159,7 +159,7 @@ export function ConversationAxesTaxonomy({ locale = "ja" }: Props) {
           ? ["H3 プライバシー", "PIIを漏らさない。権限のない情報を開示しない"]
           : ["H3 Privacy", "No PII leakage; no unauthorized disclosure"],
         ja
-          ? ["H4 インジェクション耐性", "prompt injection・脱獄で役割/方針が破られない"]
+          ? ["H4 インジェクション耐性", "プロンプトインジェクション・脱獄で役割/方針が破られない"]
           : ["H4 Injection resistance", "Role/policy survives prompt injection & jailbreaks"],
         ja
           ? ["H5 行動安全", "不可逆/高リスク行動に慎重。過剰拒否もしない"]
@@ -227,7 +227,7 @@ export function ConversationAxesTaxonomy({ locale = "ja" }: Props) {
       >
         {ja
           ? "S・C・Gは「会話の質」を測る3つの分離可能な問い。ユーザー影響には順序がある: Structure（土台）→ Correctness（価値）→ Goodness（体験）。Hは品質に直交する制約（拒否権）軸: S・C・Gが満点でも、不安全なら不可。"
-          : "S, C, G are three separable questions about conversation quality, causally ordered: Structure (substrate) → Correctness (value) → Goodness (felt quality). H is a constraint (veto) axis orthogonal to quality: perfect S·C·G is still unacceptable if unsafe."}
+          : "S, C, G are three separable questions about conversation quality, ordered by their impact on users: Structure (substrate) → Correctness (value) → Goodness (felt quality). H is a constraint (veto) axis orthogonal to quality: perfect S·C·G is still unacceptable if unsafe."}
       </p>
     </div>
   );
@@ -256,14 +256,14 @@ export function DeterminismSpectrum({ locale = "ja" }: Props) {
             "有効なJSON・スキーマ適合",
             "n-gram反復率（ループ検知）",
             "応答レイテンシー < 閾値",
-            "ツール引数の完全一致",
+            "長さ・禁止語などの制約チェック",
           ]
         : [
             "Reply present / non-empty",
             "Valid JSON / schema match",
-            "n-gram repetition (loop detect)",
+            "n-gram repetition (loop detection)",
             "Response latency < threshold",
-            "Exact tool-arg match",
+            "Constraint checks (length, banned words, etc.)",
           ],
       axes: "S · 一部のC",
       axesEn: "S · part of C",
@@ -300,24 +300,24 @@ export function DeterminismSpectrum({ locale = "ja" }: Props) {
       title: ja ? "③ 判断的" : "③ Judgmental",
       sub: ja ? "人間/LLMの判断" : "Human or LLM judgment",
       desc: ja
-        ? "人間評価かLLM-as-judgeが必要。ビット単位では再現せず、相関と一致率で品質を担保する。"
-        : "Needs human raters or LLM-as-judge. Not bit-reproducible; quality is held by correlation and agreement.",
+        ? "人間評価かLLM-as-judgeが必要。ビット単位では再現せず、人間との相関と評価者間一致率で品質を担保する。"
+        : "Needs human raters or LLM-as-judge. Not bit-reproducible; quality is held by correlation with humans and inter-rater agreement.",
       examples: ja
         ? [
             "CSAT / 5段階満足度",
-            "👍/👎 ・明示フィードバック",
+            "👍/👎・明示フィードバック",
             "LLM-as-judge（G-Eval等）",
             "自然さ MOS（音声）",
-            "離脱率・エスカレーション率（代理指標）",
+            "離脱率・エスカレーション率（①で測る代理指標）",
           ]
         : [
             "CSAT / 5-point satisfaction",
             "👍/👎 · explicit feedback",
             "LLM-as-judge (G-Eval etc.)",
             "Naturalness MOS (voice)",
-            "Drop-off / escalation rate (proxies)",
+            "Drop-off / escalation rate (proxies measured in ①)",
           ],
-      axes: "G 中心 · 開放的なC",
+      axes: "G 中心 · オープンドメインのC",
       axesEn: "Mostly G · open-ended C",
     },
   ];
@@ -412,7 +412,7 @@ export function TurnTakingLatencyDiagram({ locale = "ja" }: Props) {
       titleEn: "Naïve voice pipeline",
       total: 1900,
       segs: [
-        { label: "無音待ち / エンドポイント", labelEn: "Silence wait / endpoint", ms: 800, color: c.bad },
+        { label: "無音待ち（エンドポインティング）", labelEn: "Silence wait (endpointing)", ms: 800, color: c.bad },
         { label: "ASR 確定", labelEn: "ASR finalize", ms: 200, color: c.warn },
         { label: "LLM 最初のトークンまで", labelEn: "LLM time-to-first-token", ms: 600, color: c.structure },
         { label: "TTS 最初の音声まで", labelEn: "TTS time-to-first-audio", ms: 300, color: c.goodness },
@@ -423,17 +423,17 @@ export function TurnTakingLatencyDiagram({ locale = "ja" }: Props) {
       titleEn: "Streaming-optimized",
       total: 1050,
       segs: [
-        { label: "スマートな終話検出", labelEn: "Smart endpointing", ms: 450, color: c.warn },
-        { label: "逐次ASR（重なる）", labelEn: "Streaming ASR (overlapped)", ms: 100, color: c.ref },
-        { label: "LLM TTFT", labelEn: "LLM TTFT", ms: 350, color: c.structure },
-        { label: "TTS 先頭", labelEn: "TTS head", ms: 150, color: c.goodness },
+        { label: "意味的エンドポインティング", labelEn: "Semantic endpointing", ms: 450, color: c.warn },
+        { label: "逐次ASR（発話と重なる）", labelEn: "Streaming ASR (overlaps speech)", ms: 100, color: c.ref },
+        { label: "LLM 最初のトークンまで", labelEn: "LLM time-to-first-token", ms: 350, color: c.structure },
+        { label: "TTS 最初の音声まで", labelEn: "TTS time-to-first-audio", ms: 150, color: c.goodness },
       ],
     },
   ];
 
   const thresholds = [
-    { ms: 200, label: ja ? "人間の標準 ~200ms" : "Human norm ~200ms", color: c.det },
-    { ms: 700, label: ja ? "~700ms超は「何か変」" : ">700ms reads as 'a problem'", color: c.bad },
+    { ms: 200, label: ja ? "人間規範 ~200ms" : "Human norm ~200 ms", color: c.det },
+    { ms: 700, label: ja ? "~700ms超は問題シグナル" : ">700 ms reads as 'a problem'", color: c.bad },
   ];
 
   return (
@@ -495,8 +495,8 @@ export function TurnTakingLatencyDiagram({ locale = "ja" }: Props) {
 
       <p className="mt-2 text-xs leading-snug" style={{ color: c.textMuted }}>
         {ja
-          ? "人間は相手の発話終わりを予測して応答を先に組み立てるため、産出に600ms以上かかるのに~200msで返せる。古典的パイプラインは「無音を待ってから」直列処理するので、構造軸の応答レイテンシーが人間規範を大きく超えやすい（数値は例示）。"
-          : "Humans predict the end of a turn and pre-plan their reply, so they answer in ~200ms even though production takes 600ms+. A classic pipeline waits for silence and then runs serially, so its Structure-axis response latency easily blows past the human norm (numbers illustrative)."}
+          ? "人間は相手の発話の終わりを予測して応答を先に組み立てるため、言語産出に600ms以上かかっても~200msで返せる。素朴なパイプラインは「無音を待ってから」直列処理するので、構造軸の応答レイテンシーが人間規範を大きく超えやすい（パイプラインの数値は例示）。"
+          : "Humans predict the end of a turn and pre-plan their reply, so they answer in ~200 ms even though language production takes 600 ms or more. A naïve pipeline waits for silence and then runs serially, so its Structure-axis response latency tends to far exceed the human norm (pipeline numbers are illustrative)."}
       </p>
     </div>
   );
@@ -520,12 +520,12 @@ export function EvalMetricMatrix({ locale = "ja" }: Props) {
       color: c.structure,
       cells: ja
         ? [
-            "応答有無・スキーマ適合・ループ検知・レイテンシー・(音声)終話/バージイン/無音",
+            "応答有無・スキーマ適合・ループ検知・レイテンシー・(音声)エンドポインティング/バージイン/デッドエア",
             "—（参照不要なことが多い）",
             "「流れが自然か」の人手確認（稀）",
           ]
         : [
-            "Reply presence · schema · loop detect · latency · (voice) endpoint/barge-in/dead-air",
+            "Reply presence · schema · loop detection · latency · (voice) endpointing/barge-in/dead air",
             "— (rarely needs a reference)",
             "Human spot-check of 'flow feel' (rare)",
           ],
@@ -535,13 +535,13 @@ export function EvalMetricMatrix({ locale = "ja" }: Props) {
       color: c.correctness,
       cells: ja
         ? [
-            "ツール引数照合・制約の機械チェック・(音声)WER↔参照",
-            "タスク成功率・スロットF1・groundedness↔KB・較正(ECE)",
+            "制約の機械チェック（長さ・禁止語など）",
+            "タスク成功率・ツール引数照合・スロットF1・groundedness↔出典・較正(ECE)・(音声)WER↔参照",
             "事実性/関連性のLLM-judge・専門家レビュー",
           ]
         : [
-            "Tool-arg match · machine-checked constraints · (voice) WER vs ref",
-            "Task success · slot F1 · groundedness vs KB · calibration (ECE)",
+            "Machine-checked constraints (length, banned words, etc.)",
+            "Task success · tool-arg match · slot F1 · groundedness vs sources · calibration (ECE) · (voice) WER vs ref",
             "LLM-judge of factuality/relevance · expert review",
           ],
     },
@@ -551,12 +551,12 @@ export function EvalMetricMatrix({ locale = "ja" }: Props) {
       cells: ja
         ? [
             "代理指標: 離脱率・再質問率・エスカレーション・(音声)レイテンシー分布",
-            "—（参照しづらい）",
+            "—（参照を用意しにくい）",
             "CSAT・👍/👎・LLM-judge・(音声)自然さMOS",
           ]
         : [
-            "Proxies: drop-off · re-ask rate · escalation · (voice) latency dist.",
-            "— (hard to reference)",
+            "Proxies: drop-off · re-ask rate · escalation · (voice) latency distribution",
+            "— (references are hard to define)",
             "CSAT · 👍/👎 · LLM-judge · (voice) naturalness MOS",
           ],
     },

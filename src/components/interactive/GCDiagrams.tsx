@@ -158,7 +158,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 95,
       w: 150,
       h: 44,
-      label: ja ? "参照カウント" : "Reference Counting",
+      label: ja ? "参照カウント方式" : "Reference Counting",
       fill: c.accentBg,
       stroke: c.accent,
       labelColor: c.accent,
@@ -180,7 +180,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 185,
       w: 130,
       h: 44,
-      label: "Mark & Sweep",
+      label: ja ? "マーク & スイープ" : "Mark & Sweep",
       fill: c.secondaryBg,
       stroke: c.secondary,
       labelColor: c.secondary,
@@ -191,7 +191,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 185,
       w: 130,
       h: 44,
-      label: "Mark-Compact",
+      label: ja ? "マーク & コンパクト" : "Mark-Compact",
       fill: c.secondaryBg,
       stroke: c.secondary,
       labelColor: c.secondary,
@@ -202,7 +202,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 185,
       w: 105,
       h: 44,
-      label: ja ? "コピーGC" : "Copying GC",
+      label: ja ? "コピー GC" : "Copying GC",
       fill: c.secondaryBg,
       stroke: c.secondary,
       labelColor: c.secondary,
@@ -213,7 +213,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 275,
       w: 120,
       h: 44,
-      label: ja ? "世代別GC" : "Generational",
+      label: ja ? "世代別 GC" : "Generational",
       fill: c.purpleBg,
       stroke: c.purple,
       labelColor: c.purple,
@@ -224,7 +224,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 275,
       w: 130,
       h: 44,
-      label: ja ? "インクリメンタル" : "Incremental",
+      label: ja ? "インクリメンタル GC" : "Incremental",
       fill: c.purpleBg,
       stroke: c.purple,
       labelColor: c.purple,
@@ -235,7 +235,7 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
       y: 275,
       w: 110,
       h: 44,
-      label: ja ? "並行GC" : "Concurrent",
+      label: ja ? "並行 GC" : "Concurrent",
       fill: c.purpleBg,
       stroke: c.purple,
       labelColor: c.purple,
@@ -269,7 +269,9 @@ export function GCTaxonomy({ locale }: { locale?: string }) {
         className="w-full max-w-2xl"
         role="img"
         aria-label={
-          ja ? "GCアルゴリズムの分類図" : "GC Algorithm Taxonomy Diagram"
+          ja
+            ? "GC アルゴリズムの分類図。GC を参照カウント方式とトレース方式に分け、トレース方式の下にマーク & スイープ、マーク & コンパクト、コピー GC を、マーク & スイープの下に世代別 GC、インクリメンタル GC、並行 GC を置いている。"
+            : "GC algorithm taxonomy: GC splits into reference counting and tracing GC; tracing GC branches into mark & sweep, mark-compact, and copying GC, and mark & sweep into generational, incremental, and concurrent GC."
         }
       >
         {lines.map(([x1, y1, x2, y2], i) => (
@@ -299,7 +301,11 @@ export function CircularRefDiagram({ locale }: { locale?: string }) {
         viewBox="0 0 400 160"
         className="w-full max-w-sm"
         role="img"
-        aria-label={ja ? "循環参照の図" : "Circular Reference Diagram"}
+        aria-label={
+          ja
+            ? "循環参照の図。A と B が互いを参照しているため、外部からの参照がなくてもどちらも ref_count が 1 のまま残り、リークする。"
+            : "Circular reference: A and B reference each other, so with no external references both keep a ref_count of 1 and leak."
+        }
       >
         {/* A circle */}
         <circle
@@ -528,13 +534,13 @@ export function FragmentationDiagram({ locale }: { locale?: string }) {
         role="img"
         aria-label={
           ja
-            ? "メモリーの断片化とコンパクションの図"
-            : "Memory Fragmentation & Compaction Diagram"
+            ? "コンパクション前後のメモリー。前は A〜D の間に 3 か所の空き領域が散らばって断片化し、後は A〜D を詰めて末尾に 1 つの連続した空き領域ができる。"
+            : "Memory before and after compaction: before, three free gaps are scattered between objects A–D; after, A–D are packed together and one contiguous free region remains at the end."
         }
       >
         {/* Labels */}
         <text
-          x={24}
+          x={44}
           y={45}
           textAnchor="end"
           fill={c.textMuted}
@@ -544,7 +550,7 @@ export function FragmentationDiagram({ locale }: { locale?: string }) {
           {ja ? "前" : "Before"}
         </text>
         <text
-          x={24}
+          x={44}
           y={145}
           textAnchor="end"
           fill={c.textMuted}
@@ -577,7 +583,11 @@ export function GenerationalHeapDiagram({ locale }: { locale?: string }) {
         viewBox="0 0 560 300"
         className="w-full max-w-lg"
         role="img"
-        aria-label={ja ? "世代別ヒープの構造" : "Generational Heap Layout"}
+        aria-label={
+          ja
+            ? "世代別ヒープの構造。Young 世代（Eden と Survivor 0・1）で生き残ったオブジェクトが Old 世代（Tenured）へ昇格する。Minor GC は Young 世代だけを高頻度に、Major GC はヒープ全体を低頻度に回収する。"
+            : "Generational heap layout: objects that survive in the Young generation (Eden, Survivor 0 and 1) are promoted to the Old generation (Tenured). Minor GC collects only the Young generation, frequently; Major GC collects the full heap, infrequently."
+        }
       >
         {/* Young Generation outline */}
         <rect
@@ -711,8 +721,8 @@ export function GenerationalHeapDiagram({ locale }: { locale?: string }) {
           fontFamily="system-ui, sans-serif"
         >
           {ja
-            ? "Minor GC: Young世代のみ（高頻度・高速）/ Major GC: 全ヒープ（低頻度・低速）"
-            : "Minor GC: Young gen only (frequent, fast) / Major GC: Full heap (rare, slow)"}
+            ? "Minor GC: Young 世代のみ（高頻度・高速）/ Major GC: ヒープ全体（低頻度・低速）"
+            : "Minor GC: Young gen only (frequent, fast) / Major GC: Full heap (infrequent, slow)"}
         </text>
       </svg>
     </div>
@@ -742,71 +752,77 @@ export function ConcurrencyTimeline({ locale }: { locale?: string }) {
       segments: [
         {
           fraction: 1.0,
-          label: ja ? "全ヒープGC" : "Full Heap GC",
+          label: ja ? "ヒープ全体の GC" : "Full Heap GC",
           fill: c.dangerBg,
           textColor: c.danger,
         },
       ],
     },
     {
-      title: ja ? "インクリメンタル" : "Incremental",
+      title: ja ? "インクリメンタル GC" : "Incremental",
       segments: [
         {
           fraction: 0.18,
-          label: "Mark",
+          label: ja ? "マーク" : "Mark",
           fill: c.accentBg,
           textColor: c.accent,
         },
         {
           fraction: 0.15,
-          label: "App",
+          label: ja ? "アプリ" : "App",
           fill: c.secondaryBg,
           textColor: c.secondary,
         },
         {
           fraction: 0.18,
-          label: "Mark",
+          label: ja ? "マーク" : "Mark",
           fill: c.accentBg,
           textColor: c.accent,
         },
         {
           fraction: 0.15,
-          label: "App",
+          label: ja ? "アプリ" : "App",
           fill: c.secondaryBg,
           textColor: c.secondary,
         },
         {
           fraction: 0.18,
-          label: "Mark",
+          label: ja ? "マーク" : "Mark",
           fill: c.accentBg,
           textColor: c.accent,
         },
         {
           fraction: 0.16,
-          label: "Sweep",
+          label: ja ? "スイープ" : "Sweep",
           fill: c.purpleBg,
           textColor: c.purple,
         },
       ],
     },
     {
-      title: ja ? "並行GC" : "Concurrent",
+      title: ja ? "並行 GC" : "Concurrent",
       segments: [
         {
-          fraction: 0.6,
-          label: ja ? "App (並行マーク)" : "App (concurrent mark)",
-          fill: c.secondaryBg,
-          textColor: c.secondary,
-        },
-        {
-          fraction: 0.12,
+          fraction: 0.1,
           label: "STW",
           fill: c.dangerBg,
           textColor: c.danger,
         },
         {
-          fraction: 0.28,
-          label: ja ? "App (並行スイープ)" : "App (concurrent sweep)",
+          fraction: 0.5,
+          label: ja ? "アプリ（並行マーク）" : "App (concurrent mark)",
+          fill: c.secondaryBg,
+          textColor: c.secondary,
+        },
+        {
+          fraction: 0.1,
+          label: "STW",
+          fill: c.dangerBg,
+          textColor: c.danger,
+        },
+        {
+          fraction: 0.3,
+          label: ja ? "アプリ（並行スイープ）" : "App (concurrent sweep)",
           fill: c.secondaryBg,
           textColor: c.secondary,
         },
@@ -822,8 +838,8 @@ export function ConcurrencyTimeline({ locale }: { locale?: string }) {
         role="img"
         aria-label={
           ja
-            ? "GC方式ごとのタイムライン比較"
-            : "GC Concurrency Timeline Comparison"
+            ? "GC 方式ごとのタイムライン。Stop-The-World はアプリを止めて GC 全体を一度に行い、インクリメンタル GC はマークとアプリの実行を交互に進める。並行 GC はアプリを動かしたままマークとスイープを行い、アプリを止めるのはマーク開始時と再マーク時の短い STW だけになる。"
+            : "Timelines of three GC styles: stop-the-world GC pauses the app for the whole collection; incremental GC alternates marking steps with the app; concurrent GC marks and sweeps while the app runs and stops it only for two short STW pauses, at mark start and at the final remark."
         }
       >
         {rows.map((row, ri) => {
@@ -913,7 +929,11 @@ export function PythonHybridDiagram({ locale }: { locale?: string }) {
         viewBox="0 0 540 260"
         className="w-full max-w-lg"
         role="img"
-        aria-label={ja ? "PythonのハイブリッドGC" : "Python Hybrid GC"}
+        aria-label={
+          ja
+            ? "Python のハイブリッド GC。参照カウントが 0 になったオブジェクトは即座に解放され、カウントが 0 にならない循環参照は世代別トレース GC が定期的に検出して回収する。"
+            : "Python's hybrid GC: objects whose reference count reaches 0 are freed immediately; cycles whose counts never reach 0 are found and collected periodically by a generational tracing GC."
+        }
       >
         {/* Reference Counting box */}
         <RoundedRect
@@ -1011,8 +1031,8 @@ export function PythonHybridDiagram({ locale }: { locale?: string }) {
           h={50}
           fill={c.accentBg}
           stroke={c.accent}
-          label={ja ? "世代別トレースGC" : "Generational Tracing GC"}
-          sublabel={ja ? "循環ガベージを検出・回収" : "Detect & collect cyclic garbage"}
+          label={ja ? "世代別トレース GC" : "Generational Tracing GC"}
+          sublabel={ja ? "循環ガベージを定期的に検出・回収" : "Periodically finds & collects cyclic garbage"}
           labelColor={c.accent}
           sublabelColor={c.textMuted}
           fontSize={13}
@@ -1055,14 +1075,14 @@ export function GCTimelineDiagram({ locale }: { locale?: string }) {
     },
     {
       year: "2015",
-      event: ja ? "Go 1.5 並行GC (STW < 10ms)" : "Go 1.5 concurrent GC (STW < 10ms)",
+      event: ja ? "Go 1.5 並行 GC（STW は典型的には 10ms 未満）" : "Go 1.5 concurrent GC (STW typically < 10 ms)",
       category: "impl",
     },
     {
       year: "2017",
       event: ja
-        ? "Go 1.8 ハイブリッドバリア (STW < 1ms)"
-        : "Go 1.8 hybrid barrier (STW < 1ms)",
+        ? "Go 1.8 ハイブリッドバリア（STW は典型的には 1ms 未満）"
+        : "Go 1.8 hybrid barrier (STW typically < 1 ms)",
       category: "impl",
     },
     {
@@ -1077,7 +1097,7 @@ export function GCTimelineDiagram({ locale }: { locale?: string }) {
     },
     {
       year: "2023",
-      event: ja ? "ZGC 世代別化 (JDK 21)" : "Generational ZGC (JDK 21)",
+      event: ja ? "世代別 ZGC (JDK 21)" : "Generational ZGC (JDK 21)",
       category: "impl",
     },
   ];
@@ -1092,7 +1112,11 @@ export function GCTimelineDiagram({ locale }: { locale?: string }) {
         viewBox={`0 0 520 ${startY + entries.length * stepY + 10}`}
         className="w-full max-w-lg"
         role="img"
-        aria-label={ja ? "GC技術の年表" : "GC Technology Timeline"}
+        aria-label={
+          ja
+            ? "GC 技術の年表。1959 年のマーク & スイープから 2023 年の世代別 ZGC まで、理論と実装の主な出来事を年順に並べている。"
+            : "GC technology timeline: major theory and implementation milestones in order, from mark & sweep in 1959 to Generational ZGC in 2023."
+        }
       >
         {/* Vertical line */}
         <line

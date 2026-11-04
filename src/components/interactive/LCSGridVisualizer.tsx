@@ -73,11 +73,11 @@ function buildSteps(mode: Mode): Step[] {
       ja:
         mode === "lcs"
           ? "境界を置きます。片方が空文字列なら共通部分列の長さは 0 です。この «空の行と列» があるおかげで、本体のループで場合分けが要らなくなります。"
-          : "境界を置きます。空文字列から長さ j の文字列を作るには j 回の挿入が要ります。だから 0 行目は 0,1,2,… になります。",
+          : "境界を置きます。空文字列から t の先頭 j 文字を作るには j 回の挿入、s の先頭 i 文字を空にするには i 回の削除が要ります。",
       en:
         mode === "lcs"
           ? "Set the border. If either string is empty the common subsequence has length 0. Having this empty row and column removes special cases from the main loop."
-          : "Set the border. Turning an empty string into a prefix of length j costs j insertions, so row 0 is 0,1,2,…",
+          : "Set the border. Turning an empty string into the first j characters of t takes j insertions; emptying the first i characters of s takes i deletions.",
     }),
   );
 
@@ -127,9 +127,9 @@ function buildSteps(mode: Mode): Step[] {
             { i: i - 1, j },
             { i, j: j - 1 },
           ];
-          formula = `dp[${i}][${j}] = 1 + min(置換 ${sub}, 削除 ${del}, 挿入 ${ins}) = ${g[i][j]}`;
-          ja = `'${a}' ≠ '${b}'。置換（斜め）・削除（上）・挿入（左）の 3 通りに 1 手ぶんのコストを足し、最小を採ります。3 方向を見る、が編集距離の形です。`;
-          en = `'${a}' ≠ '${b}'. Add one operation to each of substitute (diagonal), delete (up) and insert (left), and take the minimum. Looking in three directions is what makes this edit distance.`;
+          formula = `dp[${i}][${j}] = 1 + min(↖ ${sub}, ↑ ${del}, ← ${ins}) = ${g[i][j]}`;
+          ja = `'${a}' ≠ '${b}'。置換（斜め）・削除（上）・挿入（左）の 3 通りに 1 手ぶんのコストを足し、最小を採ります。不一致でも斜め（置換）を候補に入れる点が LCS と違います。`;
+          en = `'${a}' ≠ '${b}'. Add one operation to each of substitute (diagonal), delete (up) and insert (left), and take the minimum. Unlike LCS, a mismatch can still come from the diagonal, as a substitution.`;
         }
       }
 
@@ -166,18 +166,18 @@ function buildSteps(mode: Mode): Step[] {
       if (i > 0 && j > 0 && a === b) {
         result = a + result;
         ops.unshift({ op: "match", text: a });
-        formula = `s[${i - 1}] = t[${j - 1}] = '${a}' → 採用`;
+        formula = `s[${i - 1}] = t[${j - 1}] = '${a}' → ↖`;
         ja = `斜め上から来た手。文字 '${a}' が共通部分列に入ります。`;
         en = `We arrived diagonally: character '${a}' belongs to the common subsequence.`;
         i--;
         j--;
       } else if (j === 0 || (i > 0 && g[i - 1][j] >= g[i][j - 1])) {
-        formula = `dp[${i - 1}][${j}] ≥ dp[${i}][${j - 1}] → 上へ`;
+        formula = `dp[${i - 1}][${j}] ≥ dp[${i}][${j - 1}] → ↑`;
         ja = `一致しないので、値が落ちない方向へ戻ります。ここでは上（s 側を捨てた手）。`;
         en = `No match, so we walk back in the direction that did not lose value — here upwards, meaning a character of s was dropped.`;
         i--;
       } else {
-        formula = `dp[${i}][${j - 1}] > dp[${i - 1}][${j}] → 左へ`;
+        formula = `dp[${i}][${j - 1}] > dp[${i - 1}][${j}] → ←`;
         ja = `一致しないので左へ戻ります（t 側を捨てた手）。`;
         en = `No match, so we walk left, meaning a character of t was dropped.`;
         j--;
@@ -238,11 +238,11 @@ function buildSteps(mode: Mode): Step[] {
           : `edit distance = ${g[M][NN]}`,
       ja:
         mode === "lcs"
-          ? `復元完了。LCS は "${result}"（長さ ${g[M][NN]}）。diff は «LCS に入らなかった文字» を削除・追加として表示しているだけです。`
-          : `復元完了。編集距離は ${g[M][NN]}。復元した手順の列がそのまま «変更スクリプト» になります。`,
+          ? `復元完了。LCS は "${result}"（長さ ${g[M][NN]}）。diff では、LCS に入らなかった文字が削除・追加として表示されます。`
+          : `復元完了。編集距離は ${g[M][NN]}。復元した手順の列がそのまま «編集スクリプト» になります。`,
       en:
         mode === "lcs"
-          ? `Done: the LCS is "${result}" (length ${g[M][NN]}). A diff is simply the characters that did not make it into the LCS, shown as deletions and insertions.`
+          ? `Done: the LCS is "${result}" (length ${g[M][NN]}). In a diff, the characters left out of the LCS appear as deletions and insertions.`
           : `Done: the edit distance is ${g[M][NN]}. The reconstructed sequence of moves is the edit script itself.`,
     }),
   );
@@ -283,13 +283,13 @@ export function LCSGridVisualizer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "格子の DP — LCS と編集距離は同じ表の別の遷移"
+          ? "格子 DP — LCS と編集距離は同じ表の別の遷移"
           : "The grid DP — LCS and edit distance are the same table, different transitions"
       }
       description={
         isJa
-          ? `s = "${S}"、t = "${T}"。表の形も走査順も同じで、変わるのは «あるマスに入ってくる矢印の定義» だけです。`
-          : `s = "${S}", t = "${T}". Same table, same scan order — only the definition of the arrows entering a cell changes.`
+          ? `s = "${S}"、t = "${T}"。表の形も走査順も同じで、変わるのは境界の値と «マスに入ってくる矢印» の定義だけです。`
+          : `s = "${S}", t = "${T}". Same table, same scan order; only the border values and the arrows entering each cell change.`
       }
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -376,15 +376,15 @@ export function LCSGridVisualizer({ locale = "ja" }: Props) {
           </table>
           <p className="mt-2 text-center text-[10px] text-muted-foreground">
             {isJa
-              ? "行 = s の接頭辞、列 = t の接頭辞。各マスには «そこまでの部分問題の答え» が 1 つだけ入ります。"
-              : "Rows are prefixes of s, columns are prefixes of t. Each cell holds exactly one number: the answer to that subproblem."}
+              ? "行 = s の接頭辞、列 = t の接頭辞（ε は空文字列）。各マスには «そこまでの部分問題の答え» が 1 つだけ入ります。"
+              : "Rows are prefixes of s, columns are prefixes of t (ε is the empty string). Each cell holds exactly one number: the answer to that subproblem."}
           </p>
         </div>
 
         <div className="space-y-3">
           <div className="rounded-lg border border-border bg-background p-3">
             <div className="text-[10px] font-semibold text-muted-foreground mb-1">
-              {isJa ? "いま適用している式" : "Recurrence applied now"}
+              {isJa ? "いま適用している式" : "Formula applied now"}
             </div>
             <code className="block text-[11px] font-mono text-foreground break-words">
               {s.formula || "—"}
@@ -394,7 +394,7 @@ export function LCSGridVisualizer({ locale = "ja" }: Props) {
           {mode === "lcs" ? (
             <div className="rounded-lg border border-border bg-background p-3">
               <div className="text-[10px] font-semibold text-muted-foreground mb-1">
-                {isJa ? "復元された共通部分列" : "Reconstructed subsequence"}
+                {isJa ? "復元された共通部分列" : "Reconstructed common subsequence"}
               </div>
               <div className="font-mono text-lg text-foreground tracking-widest">
                 {s.result || "—"}

@@ -1,7 +1,7 @@
 ---
 title: "Where Go Concurrency Helps in Practice — When to Choose Channels, and Production Patterns"
 date: "2026-08-31"
-description: "For developers who know goroutine and channel syntax but not when to use them at work. Covers the four motivations for concurrency, channels versus mutexes, and production patterns — fan-out, bounded concurrency, backpressure, graceful shutdown, ownership serialization, batching, and pub/sub — with code verified on Go 1.27."
+description: "In production Go servers, concurrency is mainly about overlapping wait time and controlling lifecycle, and channels mainly carry timing and ownership. For developers who know goroutine and channel syntax but not when to use them at work: the four motivations for concurrency, channels versus mutexes, and production patterns — fan-out, bounded concurrency, backpressure, graceful shutdown, ownership serialization, batching, and pub/sub — with code verified on Go 1.27."
 tags: ["Go", "Concurrency", "Backpressure", "Architecture"]
 ---
 
@@ -38,7 +38,7 @@ The rest of the article is organized as follows:
 5. A case study (Chapter 10) — building a webhook delivery worker step by step
 6. Testing and observability (Chapter 11)
 
-All code here is verified on Go 1.27 (it passes `go vet` and `go test -race`). This article covers only how application code uses concurrency. For runtime internals (the G/M/P model, work stealing, the netpoller), see the companion article "[How the Go Scheduler Works](/en/blog/go-scheduler-gmp)".
+All code here is verified on Go 1.27 (it passes `go vet` and `go test -race`). This article covers only how application code uses concurrency. For runtime internals (the G/M/P model, work stealing, the netpoller), see the companion article "[How Go's Scheduler Works](/en/blog/go-scheduler-gmp)".
 
 ## Chapter 1: A decision framework
 
@@ -63,7 +63,7 @@ Go has a famous slogan:
 
 > Don't communicate by sharing memory; share memory by communicating.
 
-The slogan states Go's design philosophy, but it <strong>does not mean "always use a channel."</strong> The official [Go Wiki: Use a sync.Mutex or a channel?](https://go.dev/wiki/MutexOrChannel) exists to correct that misreading:
+The slogan states Go's design philosophy, but it <strong>does not mean "always use a channel."</strong> The official [Go Wiki: Use a sync.Mutex or a channel?](https://go.dev/wiki/MutexOrChannel) quotes the slogan and answers which to use:
 
 > Use whichever is most expressive and/or most simple.
 
@@ -175,7 +175,7 @@ graph TD
     Cancel --> Leak["Does every goroutine have an exit?"]
 ```
 
-The bottom two nodes are checks every path must pass: did you thread `ctx` through, and does every goroutine have a way out? As Chapter 8 shows, most production incidents come from code that skipped these two checks.
+The bottom two nodes are checks for every path that starts goroutines: did you thread `ctx` through, and does every goroutine have a way out? Every goroutine-leak cause in 8.1 comes from code that skipped one of these two checks.
 
 ## Chapter 2: Pattern ① fan-out / fan-in — overlapping wait time
 
@@ -212,19 +212,19 @@ The four calls can run concurrently only because <strong>there is no data depend
 
 ```mermaid
 graph LR
-    subgraph S["Serial: 400ms"]
+    subgraph S["Serial: 400 ms"]
         direction LR
-        A1["User 100ms"] --> A2["Order 100ms"] --> A3["Reco 100ms"] --> A4["Banner 100ms"]
+        A1["User 100 ms"] --> A2["Order 100 ms"] --> A3["Reco 100 ms"] --> A4["Banner 100 ms"]
     end
 ```
 
 ```mermaid
 graph LR
-    Req["request"] --> B1["User 100ms"]
-    Req --> B2["Order 100ms"]
-    Req --> B3["Reco 100ms"]
-    Req --> B4["Banner 100ms"]
-    B1 --> Join["join = max(...) ≒ 100ms"]
+    Req["request"] --> B1["User 100 ms"]
+    Req --> B2["Order 100 ms"]
+    Req --> B3["Reco 100 ms"]
+    Req --> B4["Banner 100 ms"]
+    B1 --> Join["join = max(...) ≈ 100 ms"]
     B2 --> Join
     B3 --> Join
     B4 --> Join
@@ -274,7 +274,7 @@ The code works, but it is not ready for production, for four reasons.
 
 1. <strong>Cancellation does not propagate.</strong> If the user fetch fails at 500 ms, the order fetch still runs to completion. The user will never see the result, but the load on downstream services continues.
 2. <strong>Error meaning is lost.</strong> Bundling everything with `errors.Join` leaves the caller unable to distinguish required data from optional data.
-3. <strong>A panic kills the process.</strong> A panic inside a goroutine is not recovered unless that goroutine recovers it; the caller's `defer recover()` cannot catch it.
+3. <strong>A panic kills the process.</strong> Only a `recover` inside the panicking goroutine can stop it; the caller's `defer recover()` cannot catch it.
 4. <strong>The lock is guarding the wrong thing.</strong> `page.User` and `page.Orders` are distinct memory locations, so the page fields need no lock. What `mu` actually protects here is the `append` to `errs` (see 2.4).
 
 ### 2.3 Doing it with errgroup
@@ -334,7 +334,7 @@ func (c *Clients) BuildPage(ctx context.Context, uid string) (*Page, error) {
 }
 ```
 
-<strong>Point 1: shadowing in `g, ctx := errgroup.WithContext(ctx)` is deliberate.</strong>
+<strong>Point 1: overwriting `ctx` with `g, ctx := errgroup.WithContext(ctx)` is deliberate.</strong>
 
 Overwriting the original `ctx` prevents accidentally using the non-cancelling one further down. If you *do* have work that must not be swept up in the group's cancellation, keep the original under a different name.
 
@@ -346,9 +346,9 @@ The `error` you return to `errgroup` means "this subtask's failure is a reason t
 
 <strong>Point 3: give optional work its own, shorter timeout.</strong>
 
-A tighter deadline than the required path prevents nice-to-have data from holding up everything else. Above, recommendations are abandoned after 80 ms.
+A tighter deadline than the required path's prevents nice-to-have data from holding up everything else. Above, recommendations are abandoned after 80 ms.
 
-`errgroup` does not close hole 3 from 2.2 (panic) either. It deliberately does not propagate panics from its goroutines, so a panicking `g.Go` function still takes the process down. The reasoning and the remedy are in 3.2 and 8.7.
+Even `errgroup` leaves hole 3 from 2.2 (panic) open. It deliberately does not propagate panics from its goroutines, so a panicking `g.Go` function still takes the process down. The reasoning and the remedy are in 3.2 and 8.7.
 
 ### 2.4 Why `page` needs no lock
 
@@ -378,7 +378,7 @@ for i, in := range inputs {
 }
 ```
 
-(This loop is safe to write this way because Go 1.22 made loop variables per-iteration. On Go 1.21 and earlier, `i, in := i, in` was mandatory. Beware copy-pasting from older articles.)
+(This loop is safe to write this way because Go 1.22 made loop variables per-iteration. On Go 1.21 and earlier, `i, in := i, in` was mandatory, and modules whose `go.mod` declares `go 1.21` or earlier still need it (8.6).)
 
 ### 2.5 Fan-out amplifies tail latency
 
@@ -391,7 +391,7 @@ Countermeasures, in order of preference:
 1. <strong>Reduce the required set</strong> — must you really have all of it before responding?
 2. <strong>Give optional work a short timeout</strong> — enforce the ceiling structurally
 3. <strong>Cache away the downstream call entirely</strong> — most effective, but the most expensive to build
-4. <strong>Hedged requests</strong> (fire a second attempt after a delay) — effective, but always cap the fraction, since it adds downstream load
+4. <strong>Send hedged requests</strong> (fire a second attempt after a delay) — effective, but always cap the fraction, since it adds downstream load
 
 ### 2.6 `errgroup` versus `sync.WaitGroup`
 
@@ -423,7 +423,7 @@ func ProcessAllUnbounded(ctx context.Context, items []Item) {
 }
 ```
 
-Ten items is fine. A hundred thousand takes production down. Goroutines themselves are cheap (2 KB initial stack); the trouble is the resources each one holds.
+Ten items is fine. A hundred thousand takes production down. Goroutines themselves are cheap: the initial stack is 2 KB, and since [Go 1.19](https://go.dev/doc/go1.19#runtime) the runtime may start goroutines with a larger stack based on the average stack usage it has observed. The trouble is the resources each one holds.
 
 - <strong>Connection pool exhaustion</strong> — with `SetMaxOpenConns(20)`, 100,000 arrivals leave 99,980 blocked waiting for a connection. That wait eventually exceeds your application timeout and every request errors
 - <strong>Unintentional DoS on downstream services</strong> — even if you survive, the callee dies under 100,000 concurrent connections, and the failure cascades
@@ -450,7 +450,7 @@ func ProcessAllErrgroup(ctx context.Context, items []Item, limit int) error {
 
 After `SetLimit(n)`, `g.Go` blocks while `n` goroutines are running. You get error aggregation, cancellation, and bounding together, so this covers most cases.
 
-There is one caveat. Reading the implementation, `g.Go` waits on a plain channel send ([`errgroup.go`](https://github.com/golang/sync/blob/master/errgroup/errgroup.go)):
+There is a caveat. As the implementation shows ([`errgroup.go`](https://github.com/golang/sync/blob/master/errgroup/errgroup.go)), `g.Go` waits on a plain channel send:
 
 ```go
 func (g *Group) Go(f func() error) {
@@ -461,11 +461,11 @@ func (g *Group) Go(f func() error) {
 }
 ```
 
-So if `ctx` is cancelled while `g.Go` is blocked, <strong>`g.Go` does not return until a slot frees up</strong>. If you are feeding a large number of long-running tasks and need responsive cancellation, use `TryGo` (returns false immediately when full) or make the wait explicit with `select`, as in option 2.
+So if `ctx` is cancelled while `g.Go` is blocked, <strong>`g.Go` does not return until a slot frees up</strong>. If you are feeding a large number of long-running tasks and need responsive cancellation, use `TryGo` (returns false immediately when full) or make the wait explicit with `select`, as in Option 2.
 
 As noted in 2.3, `errgroup` does not propagate panics from its goroutines; the source comments give the reasons (delaying a panic makes bugs harder to find, it hides the stack from crash-monitoring tools, and so on). If the function you hand to `g.Go` panics, the process dies. Mitigation is in 8.7.
 
-`SetLimit` also has a precondition: it panics if called while the group has goroutines in flight. Always set it before the first `Go`.
+`SetLimit` also has a precondition: the limit must not change while goroutines in the group are active (changing an existing limit then panics). Always set it before the first `Go`.
 
 <strong>Option 2: a buffered channel as a semaphore</strong>
 
@@ -498,7 +498,7 @@ func ProcessAllSemaphoreChan(ctx context.Context, items []Item, limit int) error
 }
 ```
 
-The number of values `make(chan struct{}, limit)` can hold is the concurrency limit. Unlike option 1, `select` lets you wait for "a slot" and "cancellation" at the same time.
+The number of values `make(chan struct{}, limit)` can hold is the concurrency limit. Unlike Option 1, this version uses `select` to wait for "a slot" and "cancellation" at the same time.
 
 This idiom also shows Misconception 3 in practice: the `struct{}{}` being sent carries no data. What travels is permission to proceed.
 
@@ -525,7 +525,7 @@ func ProcessWeighted(ctx context.Context, items []Item, budgetMB int64) error {
 
 Use this when the constraint is "at most 2 GB in flight" rather than "at most 10 at once" — video transcoding, batch aggregation, any workload where per-task cost varies by orders of magnitude.
 
-The `min` clamp is a required defence. Reading [`semaphore.go`](https://github.com/golang/sync/blob/master/semaphore/semaphore.go), `Acquire(ctx, n)` with an `n` larger than the semaphore's total capacity does not return an error. It blocks on `<-ctx.Done()`, since the request can never be satisfied even when the semaphore is empty. Submit a 3 GB item against a 2 GB budget and the loop stalls until cancellation, so the caller must clamp or reject oversized items up front.
+The `min` clamp is a required defence. As [`semaphore.go`](https://github.com/golang/sync/blob/master/semaphore/semaphore.go) shows, `Acquire(ctx, n)` with an `n` larger than the semaphore's total capacity does not return an error. It blocks on `<-ctx.Done()`, since the request can never be satisfied even when the semaphore is empty. Submit a 3 GB item against a 2 GB budget and the loop stalls until cancellation, so the caller must clamp or reject oversized items up front.
 
 ### 3.3 Choosing the limit — do not guess
 
@@ -533,7 +533,7 @@ A lot of code sets `limit` to "10, I guess" or to the number of CPUs. The limit 
 
 <strong>CPU-bound: `GOMAXPROCS`</strong>
 
-Cap at `runtime.GOMAXPROCS(0)`. Beyond that you only add context switches. Since Go 1.25 the default `GOMAXPROCS` accounts for Linux cgroup CPU limits, so the value is trustworthy in containers too (see "[How the Go Scheduler Works](/en/blog/go-scheduler-gmp)").
+Cap at `runtime.GOMAXPROCS(0)`. Beyond that you only add context switches. Since Go 1.25 the default `GOMAXPROCS` accounts for Linux cgroup CPU limits, so the value is trustworthy in containers too (see "[How Go's Scheduler Works](/en/blog/go-scheduler-gmp)").
 
 <strong>I/O-bound: derive it from the downstream constraint</strong>
 
@@ -555,7 +555,7 @@ L = 200 × 0.05 = 10
 
 Concurrency 10 saturates exactly 200 req/s. Raising it to 100 just gets you rate-limited: no extra throughput, only errors and retries. Dropping it to 5 gets you 100 req/s.
 
-(Strictly, this conversion assumes `W` is constant. The opposite danger, overshooting the contracted rate when the downstream gets *faster*, is the subject of the next section.)
+(Strictly, this conversion assumes `W` is constant. Overshooting the contracted rate when the downstream gets *faster* is covered in 3.3.1.)
 
 This calculation derives the concurrency setting from a contract you must honour, so when the downstream allowance changes, you know the concurrency should change with it.
 
@@ -770,7 +770,7 @@ With these, you can answer "should I raise the concurrency?" with numbers instea
 
 ### 4.1 `<-ctx.Done()` is the channel you actually use
 
-I opened by saying that real code has nowhere to put a channel. In fact most people already use one every day: `context.Context`'s `Done()`.
+I opened by saying that you cannot find anywhere to use a channel in work code. In fact most people already use one every day: `context.Context`'s `Done()`.
 
 ```go
 type Context interface {
@@ -855,7 +855,7 @@ ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 defer cancel() // call it even when you finish early
 ```
 
-If you skip `cancel()`, the child context stays registered in the parent's `children` map, so its memory is not released while the parent lives. The timeout eventually frees it, but it leaks until then. `go vet` catches this.
+If you skip `cancel()`, the child context stays registered in the parent's `children` map, and its memory is not released until the parent is cancelled or the child's own timeout fires. It leaks until then. `go vet` catches this.
 
 ### 4.3 Layering timeouts
 
@@ -894,7 +894,7 @@ if err := db.QueryRowContext(dbCtx, q).Scan(&v); err != nil {
 
 #### 4.3.1 A cancellation error has four different meanings
 
-The sections above covered how to propagate cancellation. In production, interpreting a cancellation you observe is harder. When a handler sees `context.Canceled`, there are at least four possible causes, and each needs a different response.
+The sections above covered how to propagate cancellation. In production, interpreting a cancellation you observe is harder. When a handler sees `context.Canceled` or `context.DeadlineExceeded`, there are at least four possible causes, and each needs a different response.
 
 | Cause | How to tell | Correct response |
 | --- | --- | --- |
@@ -903,7 +903,7 @@ The sections above covered how to propagate cancellation. In production, interpr
 | ② An `errgroup` sibling failed | `context.Cause(ctx)` is not `context.Canceled` | Report the sibling's real error, not `Canceled` |
 | ③ Your own timeout budget expired | `DeadlineExceeded` + `Cause` identifies the layer (4.3) | Alert. This is your performance problem |
 
-<strong>The order of the tests matters.</strong> In 4.5's wiring, `BaseContext` supplies `workerCtx`, so `stopWorkers()` also cancels the `r.Context()` of every in-flight handler. That makes `r.Context().Err() != nil` true for both ① and ④. Test ④ first, or you will misclassify a shutdown as a client disconnect and skip the 503 you owe the caller.
+<strong>Test ④ before ①.</strong> In 4.5's wiring, `BaseContext` supplies `workerCtx`, so `stopWorkers()` also cancels the `r.Context()` of every in-flight handler. That makes `r.Context().Err() != nil` true for both ① and ④, so testing ① first misclassifies a shutdown as a client disconnect and skips the 503 you owe the caller.
 
 Confusing ① with ② and ③ is the most common mistake in practice. A user closing their browser gets counted as a server error, and the error-rate graph appears to spike on every deploy. Some of the "we implemented graceful shutdown but 5xx didn't drop" reports come down to this. A client-side disconnect is not your failure in the first place.
 
@@ -975,9 +975,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 This `go func()` is lost when the process stops. If the data must not be lost, put it in a durable queue (or the worker set assembled in 4.5) rather than a bare goroutine. Fire-and-forget is only for work you can afford to lose.
 
-### 4.5 Graceful shutdown — ordering is everything
+### 4.5 Graceful shutdown — step order and time budget
 
-On Kubernetes, pod termination sends SIGTERM and then SIGKILLs after `terminationGracePeriodSeconds` (30 by default). What must happen in between is well defined, and it comes down to the order of the steps.
+On Kubernetes, pod termination sends SIGTERM and then SIGKILLs after `terminationGracePeriodSeconds` ([30 by default](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination)). What must happen in between is well defined, and it comes down to the order of the steps.
 
 ```mermaid
 sequenceDiagram
@@ -1072,13 +1072,13 @@ terminationGracePeriodSeconds = 30s
 = 30s
 ```
 
-(Lanes drain concurrently, so the 10 s and 3 s are a maximum *across* lanes, not a sum over them.)
+(10.2's lanes drain concurrently, so the 10 s and 3 s are a maximum *across* lanes, not a sum over them.)
 
 Derive each stage's timeout from that budget. The code above uses 7 s for `shutCtx`. If `Shutdown` times out, `Close()` force-drops connections so that the process at least terminates on time.
 
 <strong>Decision 3: `srv.Shutdown` does not cancel in-flight request contexts.</strong> Many people assume it does. `Shutdown` stops accepting, closes idle connections, and waits for active ones, leaving each running handler's `r.Context()` uncancelled ([`net/http/server.go`](https://github.com/golang/go/blob/master/src/net/http/server.go)'s `Shutdown` closes listeners and idle connections, then polls until the connections go quiescent). So if a handler is stuck in an infinite loop, `Shutdown` itself keeps waiting, and in the code above only the 7-second `shutCtx` gets you out. That is why `BaseContext` supplies `workerCtx`: step 3's `stopWorkers()` then stops the background workers and also signals every in-flight handler, as a last resort when `Shutdown` does not return in time.
 
-<strong>Decision 4: worker context is not derived from `rootCtx`.</strong> If workers received `rootCtx`, they would stop the instant SIGTERM arrives, while HTTP requests are still in flight and may still enqueue jobs. Workers must stop after the entrance has fully closed, hence a separate lineage and a manual `stopWorkers()`.
+<strong>Decision 4: do not derive the worker context from `rootCtx`.</strong> If workers received `rootCtx`, they would stop the instant SIGTERM arrives, while HTTP requests are still in flight and may still enqueue jobs. Workers must stop after the entrance has fully closed, hence a separate lineage and a manual `stopWorkers()`.
 
 <strong>Decision 5: ignore `context.Canceled` from `g.Wait()`.</strong> A normal signal shutdown cancels `gctx`; treating that as an error yields exit code 1 and Kubernetes records an abnormal termination.
 
@@ -1180,7 +1180,7 @@ This is where deadlocks come from. A lock-ordering convention maintained by docu
 
 Rules like "a connection only moves `connecting → connected → draining → closed`" or "writes after close are ignored" become state checks scattered across the top of every method when expressed with a mutex.
 
-When signs 2 and 3 appear, or when sign 1 survives after you have already moved the I/O out of the lock, switch to a structure where <strong>one goroutine owns the state and everyone else touches it only through a channel</strong>: the actor model.
+When Sign 2 or Sign 3 appears, or when Sign 1 survives after you have already moved the I/O out of the lock, switch to a structure where <strong>one goroutine owns the state and everyone else touches it only through a channel</strong>: the actor model.
 
 ### 5.2 Command channels and reply channels
 
@@ -1320,11 +1320,11 @@ func (c *Cache) Get(ctx context.Context, key string) (string, bool, error) {
 
 This is the actor pattern's biggest trap. Running `c.cmds <- cmd` after the owner goroutine has exited blocks forever, since no one will ever receive. Without a timeout on `ctx`, that goroutine never comes back. A channel announcing the owner's liveness (here, `done`) is mandatory.
 
-<strong>Point 2: the non-blocking `select` before step (2) prevents a lost reply.</strong>
+<strong>Point 2: the non-blocking `select` at the start of step (2) prevents a lost reply.</strong>
 
-Omit it and you discard a correctly computed result and return `ErrCacheClosed` about half the time. The owner can complete `cmd.reply <- ...` (non-blocking, buffer 1), loop, take `<-ctx.Done()`, return, and fire `defer close(c.done)`; this is an ordinary interleaving. At that instant the caller's `select` sees both `reply` and `c.done` ready and, per 8.3, picks one uniformly at random.
+Omit it and, when shutdown races with a reply, you discard a correctly computed result and return `ErrCacheClosed` about half the time. The owner can complete `cmd.reply <- ...` (non-blocking, buffer 1), loop, take `<-ctx.Done()`, return, and fire `defer close(c.done)`; this is an ordinary interleaving. At that instant the caller's `select` sees both `reply` and `c.done` ready and, per 8.3, picks one uniformly at random.
 
-Over 400 trials on my machine, exactly 200 returned a bogus `ErrCacheClosed`. Adding the non-blocking `select` first brings that to 0. This is 8.3 applied to the actor's reply path: the `done` arm must not win over a reply that has already been delivered.
+In 400 trials on my machine, exactly 200 returned a bogus `ErrCacheClosed`. Adding the non-blocking `select` first brings that to 0. This is 8.3 applied to the actor's reply path: the `done` arm must not win over a reply that has already been delivered.
 
 <strong>Point 3: give `reply` a buffer of 1.</strong>
 
@@ -1445,7 +1445,7 @@ func (b *Batcher) Run(ctx context.Context) error {
 
 <strong>Decision 1: start the timer when the first item arrives.</strong>
 
-That is the `len(batch) == 1` condition. Naively flushing "every 100 ms" means an event arriving at the 99 ms mark is shipped alone 1 ms later. To honour "ship within T of arrival" you must measure from the batch's origin.
+That is the `len(batch) == 1` condition. Naively flushing "every 100 ms" means an event arriving at the 99 ms mark is shipped alone 1 ms later. Measuring from the batch's first item still ships every event within T of its arrival, and gives each batch the full T to fill.
 
 <strong>Decision 2: always flush on shutdown.</strong>
 
@@ -1457,7 +1457,7 @@ The `case <-ctx.Done():` branch drains the remainder. Without it, every deploy s
 
 That is what `context.WithoutCancel(ctx)` does. During the shutdown flush, `ctx` is already cancelled, so a write using it fails instantly. Always pair `WithoutCancel` with `WithTimeout`, though, because a shutdown that never finishes just gets SIGKILLed.
 
-<strong>Decision 4: give `Add` both backpressure and the owner's liveness.</strong>
+<strong>Decision 4: make `Add` respect backpressure and check the owner's liveness.</strong>
 
 ```go
 var ErrBatcherClosed = errors.New("batcher: closed")
@@ -1525,7 +1525,7 @@ The `asynctimerchan` GODEBUG (which restored the old behaviour) was removed enti
 
 ### 7.1 Channels are one-to-one
 
-<strong>One value sent to one channel reaches exactly one receiver.</strong> When several goroutines receive from the same channel, the value goes to only one of them. (The runtime keeps waiters in a FIFO queue called `recvq`, so in practice the longest-waiting goroutine is woken; the language spec leaves the order unspecified, so do not depend on it.) This is correct behaviour for work distribution.
+<strong>One value sent to one channel reaches exactly one receiver</strong>, however many goroutines receive from that channel. (The runtime keeps waiters in a FIFO queue called `recvq`, so in practice the longest-waiting goroutine is woken; the language spec leaves the order unspecified, so do not depend on it.) This is correct behaviour for work distribution.
 
 So "notify everyone" needs something else. Two options:
 
@@ -1554,7 +1554,7 @@ func (s *Signal) Fire() { s.once.Do(func() { close(s.ch) }) }
 
 The `sync.Once` wrapper is needed because closing an already-closed channel panics. In real code where shutdown can be triggered from several paths, a `close` without `Once` will eventually crash.
 
-`context` already does this, so you rarely write it yourself. Use it for one-shot events other than shutdown (initialization complete, leadership acquired).
+For shutdown, `context` already does this, so you rarely write it yourself. You need it for other one-shot events, such as initialization completing or leadership being acquired.
 
 ### 7.3 A subscription hub — SSE / WebSocket
 
@@ -1635,10 +1635,10 @@ The `default:` in `Publish` is the most consequential design decision in this co
 | --- | --- | --- |
 | Drop | `select` + `default` | Live dashboards, progress. Only the latest matters |
 | Block | plain `s.ch <- m` | Nothing may be lost — but it can deadlock (below) |
-| Disconnect | `unsubscribe()` after `RUnlock` | Chat, notifications. Cut clients that cannot keep up |
+| Disconnect | `unsub()` after `RUnlock` | Chat, notifications. Cut clients that cannot keep up |
 | Drop oldest | receive, then send | Monitoring data where only recent values matter |
 
-The disconnect strategy has a trap. Calling `unsubscribe()` directly inside `Publish`'s `default:` branch always deadlocks. `Publish` holds `h.mu.RLock()`, and `unsubscribe` asks for `Lock()` on the same `RWMutex`. Go's `sync.RWMutex` is neither reentrant nor upgradeable. Collect the subscribers to disconnect and call their `unsub` functions after `RUnlock`.
+The disconnect strategy has a trap. Calling `unsub()` directly inside `Publish`'s `default:` branch always deadlocks. `Publish` holds `h.mu.RLock()`, and `unsub` asks for `Lock()` on the same `RWMutex`. Go's `sync.RWMutex` is neither reentrant nor upgradeable. Collect the subscribers to disconnect and call their `unsub` functions after `RUnlock`.
 
 ```go
 func (h *Hub) PublishDisconnectSlow(m Message) {
@@ -1784,7 +1784,7 @@ If early return is possible, the sender needs a `ctx`-based escape too.
 
 ### 8.2 Go 1.27's goroutine leak profile
 
-Until now, those four patterns could only be caught by careful review. [Go 1.27](https://go.dev/doc/go1.27) changes that:
+Until now, the runtime could not detect those four patterns, so catching them was largely left to careful review. [Go 1.27](https://go.dev/doc/go1.27) changes that:
 
 > A new profile type that reports leaked goroutines, previously available as an experiment in Go 1.26, is now generally available. The new profile type, named `goroutineleak`, is supported in the `runtime/pprof` package. It is also available as the `net/http/pprof` endpoint `/debug/pprof/goroutineleak`.
 
@@ -1853,7 +1853,7 @@ Two caveats:
 - <strong>`Count()` returns 0 until the first `WriteTo`</strong> (see the output above). Leak detection runs at write time, so code that checks only `Count()` always sees zero. In tests, call `WriteTo` first
 - as the release notes state, leaks blocked on primitives reachable from global variables or from the locals of runnable goroutines are not detected. That is an inherent limit of the reachability approach
 
-Because of these limits, pair `goroutineleak` with `goleak` and goroutine-count monitoring.
+Because the profile cannot see every leak, pair it with 11.1's `goleak` and goroutine-count monitoring.
 
 ### 8.3 `select` randomness and priority
 
@@ -1889,7 +1889,7 @@ case job := <-jobs:
 
 Conversely, when you want to finish the remaining work at shutdown, the priority inverts (the drain loop in 6.2 does this). Decide explicitly which requirement you have.
 
-The two-stage form guarantees only that no new work starts after cancellation has been observed. It does not stop work the instant cancellation happens. If cancellation lands *between* the two `select`s, the second one is still a coin flip. The window is narrow but nonzero. If the work cannot afford even one stray item, re-check `ctx.Err()` at the top of the work itself, and on cancellation do not <em>process</em> the item: move it onto the drain budget or hand it back as unprocessed. 10.2 applies this to `deliver`.
+The two-stage form guarantees only that no new work starts after cancellation has been observed. If cancellation lands *between* the two `select`s, the second one is still a coin flip. The window is narrow but nonzero. If the work cannot afford even one stray item, re-check `ctx.Err()` at the top of the work itself, and on cancellation do not <em>process</em> the item: move it onto the drain budget or hand it back as unprocessed. 10.2 applies this to `deliver`.
 
 ### 8.4 `nil` channels — a practical idiom
 
@@ -1986,9 +1986,9 @@ func RunPipeline(parent context.Context, items []Item) error {
 }
 ```
 
-`convert(it)` is evaluated outside the `select` because the Go spec says the channel and right-hand-side expressions of send statements are evaluated exactly once, upon entering the select. So `case out <- convert(it):` runs `convert` even when the `ctx.Done()` arm is the one chosen. That is harmless for a pure function, but wasteful or wrong if `convert` is expensive or has side effects. This part of `select`'s semantics is easy to miss.
+`convert(it)` is evaluated outside the `select` because the Go spec says the channel and right-hand-side expressions of send statements are evaluated exactly once, upon entering the select. So `case out <- convert(it):` runs `convert` even when the `ctx.Done()` arm is the one chosen. That is harmless for a pure function, but wasteful or wrong if `convert` is expensive or has side effects.
 
-In a pipeline, it is the send that leaks. Many people stop worrying once the receive is written as `for v := range in`, but if a downstream stage dies, `out <- v` has no receiver and blocks forever. That is why <strong>every send must be wrapped in a `select` with a `ctx.Done()` arm</strong>. This is 8.1's cause 1 in pipeline form.
+In a pipeline, it is the send that leaks. Many people stop worrying once the receive is written as `for v := range in`, but if a downstream stage dies, `out <- v` has no receiver and blocks forever. That is why <strong>every send must be wrapped in a `select` with a `ctx.Done()` arm</strong>. This is 8.1's Cause 1 in pipeline form.
 
 Also, if `sink` returns early (the failing `write` above), the upstream stages jam because nobody reads `in`. To prevent this, `RunPipeline`, the function doing the composition, owns the `ctx`. Only when its `defer cancel()` fires can stages 1 and 2 escape through `<-ctx.Done()`. `sink` cannot cancel the context it was handed, so this responsibility has to sit with the caller.
 
@@ -1996,7 +1996,7 @@ You can check this. Remove `defer cancel()` from `RunPipeline`, make `sink` fail
 
 Finally, a pipeline's throughput is set by the slowest stage's μ (3.4). Adding stages cannot make it faster than that stage.
 
-The same idea removes closed channels from a `select`:
+The same `nil` trick removes closed channels from a `select`:
 
 ```go
 for a != nil || b != nil {
@@ -2027,7 +2027,7 @@ Three rules cover it.
 2. Never close a channel with multiple senders. If you must, signal every sender via a separate `done` channel (or `ctx`), `wg.Wait()` for all of them to exit, and only then close. Wrapping the close in `sync.Once` does not solve it: <strong>`Once` only prevents the double-`close` panic, not "send on closed channel"</strong>, and the latter is the actual multi-sender hazard (a sender parked in `ch <- v` when the close runs panics regardless of `Once`)
 3. Sending on a closed channel panics; double-close panics. Receiving from a closed channel first returns any values still buffered, and only then yields the zero value with `ok == false`
 
-The buffered-values detail in rule 3 matters in practice. When 7.3 calls `close(s.ch)` there may still be buffered messages. They are not lost; the receiver reads them all before `ok` goes false.
+The buffered-values detail in rule 3 applies to 7.3. When `unsub` calls `close(s.ch)`, there may still be buffered messages. They are not lost; the receiver reads them all before `ok` goes false.
 
 6.3 is different. There, `Add` accepts up to `cap(b.in)` items simply because the buffer has room, but nobody ever closes `b.in`, so this rule does *not* apply. That is why the `<-b.done` arm is needed to stop accepting work nobody will drain.
 
@@ -2041,7 +2041,7 @@ For catching data races, nothing beats running `-race` in CI. The detector repor
 go test -race ./...
 ```
 
-It runs 2–20× slower and uses 5–10× the memory, so keep it out of production binaries. Besides CI, a staging canary is a good place to run it.
+The [race detector documentation](https://go.dev/doc/articles/race_detector) puts the cost for a typical program at 2–20× the execution time and 5–10× the memory, so keep it out of production binaries. Besides CI, a staging canary is a good place to run it.
 
 The [Go memory model](https://go.dev/ref/mem) guarantees four things about channels (the Go 1.19 revision restructured the model around *synchronized before*; *happens before* is still defined, in terms of *synchronized before* plus program order):
 
@@ -2221,7 +2221,7 @@ If your team cannot keep to that convention, an `RWMutex` is the safer choice.
 1. a key is written once and thereafter only read (append-only caches)
 2. multiple goroutines read and write disjoint sets of keys
 
-Outside those cases the choice needs care. Go 1.24 replaced `sync.Map`'s internals with a `HashTrieMap`-based implementation, substantially improving write-heavy, delete-heavy and highly contended workloads. On Go 1.24+, the old rule of thumb that write-heavy workloads always favour `map` + `RWMutex` no longer holds as stated.
+Go 1.24 replaced `sync.Map`'s internals with a `HashTrieMap`-based implementation, substantially improving write-heavy, delete-heavy, and highly contended workloads. On Go 1.24+, the old rule of thumb that write-heavy workloads always favour `map` + `RWMutex` no longer holds as stated.
 
 The order of operations is unchanged, though: <strong>start with `map` + `RWMutex`, and reconsider only once profiling shows lock contention.</strong> Outside the two documented use cases, benchmark `sync.Map` on your own workload before choosing it for performance reasons.
 
@@ -2353,7 +2353,7 @@ func (d *Dispatcher) Enqueue(ctx context.Context, del Delivery) error {
 }
 ```
 
-8.3's priority problem applies directly to `Enqueue`. A `select` with `default` never blocks, so adding a `case <-ctx.Done():` arm is actively harmful. When the context is cancelled and there is room, both arms are ready, so cancellation is ignored half the time. When the context is cancelled and the lane is full, you return "cancelled" instead of "queue full", which under-counts `rejected` and hands the caller the wrong failure class. For non-blocking sends, check `ctx` before the `select`.
+8.3's priority problem applies directly to `Enqueue`. A `select` with `default` never blocks, so adding a `case <-ctx.Done():` arm is actively harmful. When the context is cancelled and there is room, both arms are ready, so cancellation is ignored half the time. For non-blocking sends, check `ctx` before the `select`.
 
 The `<-d.done` pre-check is also mandatory. After `Run` returns (say `Shutdown` timed out and `stopWorkers()` fired), the lanes still have room. Without this check, `Enqueue` reports success and increments `enqueued`, but that delivery is never processed and never dead-lettered. You would be creating the "events sometimes disappear" failure that 10.4 warns about. The rule imposed on the actor in 5.3 and on `Batcher` in 6.3 applies here too.
 
@@ -2441,9 +2441,9 @@ The two-stage guard in `runLane` is mandatory. With a single `select`, 8.3's pri
 
 `drain` hands off to `abandon` to keep stop time bounded. A naive version that keeps calling `deliver` after the budget expires makes stop time grow with `cap(lane)`. The dead `ctx` does make each send fail instantly, but every item still costs one `Send` attempt, one log line, and one dead-letter write. Each `d.dead` call is capped at 2 s, but nothing caps them in aggregate. With `QueuePerLane = 1000` and a 20 ms dead-letter write, you spend another 20 s after the 10 s budget. That is the failure 4.5's Decision 2 warns about: losing the very data the drain existed to save.
 
-So once the budget is gone, `abandon` stops sending and gives the dead-letter writes their own 3-second ceiling. It keeps the record and skips the send, within an explicit budget.
+So once the budget is gone, `abandon` stops sending and gives the dead-letter writes their own 3-second ceiling.
 
-The 3-second guarantee has two caveats. First, `d.dead` must honour the deadline it is handed; an implementation that ignores `ctx` silently exceeds the budget. Second, anything still in the lane when the 3 s expires is neither sent nor recorded. The conclusion is the same as in 10.4: if you cannot lose an item, you need a durable queue.
+The 3-second guarantee has two caveats. First, `d.dead` must honour the deadline it is handed; an implementation that ignores `ctx` silently exceeds the budget. Second, anything still in the lane when the 3 s expires is neither sent nor recorded.
 
 Delivery itself, with retries and backoff:
 
@@ -2510,7 +2510,7 @@ func backoff(base, maxWait time.Duration, attempt int) time.Duration {
 
 ### 10.3 The decisions, indexed
 
-The table maps each part of the code to the decision behind it and the section that explains it.
+The code is short, but it embeds almost every decision from the earlier chapters:
 
 | Where | Decision | See |
 | --- | --- | --- |
@@ -2531,9 +2531,9 @@ The table maps each part of the code to the decision behind it and the section t
 
 <strong>On not using `defer cancel()`.</strong> `deliver` is a loop, so deferring would stack one un-cancelled context per retry until the function returns. Ten retries leave ten unreleased contexts. Inside a loop, call `cancel()` in place. `go vet`'s `lostcancel` check does not catch this leak.
 
-<strong>On the deadline-bearing `context.WithoutCancel` around `d.dead`.</strong> The dead-letter write is the record you least want to lose, because it says "we gave up on delivering this". Both call sites are reachable mid-shutdown with an already-cancelled `ctx`, so both detach cancellation. But the context `context.WithoutCancel` returns has no deadline (`Deadline()` reports `ok == false`). Pass that straight through and your shutdown ceiling disappears, so always layer a `WithTimeout` on top.
+<strong>On `WithoutCancel` plus a deadline around `d.dead`.</strong> The dead-letter write is the record you least want to lose, because it says "we gave up on delivering this". Both call sites are reachable mid-shutdown with an already-cancelled `ctx`, so both detach cancellation. But the context `context.WithoutCancel` returns has no deadline (`Deadline()` reports `ok == false`). Pass that straight through and your shutdown ceiling disappears, so always layer a `WithTimeout` on top.
 
-<strong>On full jitter.</strong> `rand.Int64N(int64(d)) + 1` returns a value in `[1, d]`. With fixed backoff, all retries arrive at the same moment, so a downstream that has just recovered is knocked over again. Jitter spreads retries across time.
+<strong>On full jitter.</strong> `rand.Int64N(int64(d)) + 1` returns a value in `[1, d]`. Without jitter, all retries arrive at the same moment, so a downstream that has just recovered is knocked over again. Jitter spreads retries across time.
 
 ### 10.4 The remaining limits — in-process queues
 
@@ -2555,7 +2555,7 @@ If "never lose an item" or "strict ordering" is a requirement, an in-process cha
 go test -race ./...
 ```
 
-`go.uber.org/goleak` detects goroutines still alive at the end of a test. Where 8.2's `goroutineleak` profile finds goroutines that are *provably* unreachable, `goleak` finds goroutines that are *still running at test end*. The two complement each other.
+`go.uber.org/goleak` detects goroutines still alive at the end of a test. 8.2's `goroutineleak` profile detects only goroutines that are *provably* unreachable, so the two complement each other.
 
 ```go
 func TestCacheNoLeak(t *testing.T) {
@@ -2571,7 +2571,7 @@ func TestCacheNoLeak(t *testing.T) {
 }
 ```
 
-The important line is `<-c.Done()`. `goleak.VerifyNone` does retry (a dozen-plus attempts with backoff), so it will not fail on a goroutine that lingers for a microsecond after `cancel()`. Without `<-c.Done()`, though, the test's outcome depends on whether shutdown fits inside goleak's retry budget. Add a drain and a final flush and it will not fit, and you have a flaky test.
+Do not omit `<-c.Done()`. `goleak.VerifyNone` does retry, by default up to 20 times with backoff ([`options.go`](https://github.com/uber-go/goleak/blob/master/options.go)), so it will not fail on a goroutine that lingers for a microsecond after `cancel()`. Without `<-c.Done()`, though, the test's outcome depends on whether shutdown fits inside goleak's retry budget. Add a drain and a final flush and it will not fit, and you have a flaky test.
 
 More generally, signalling a stop and waiting for the stop are different operations. <strong>Any testable component must offer the second as public API.</strong> That is why `Cache` has a `Done()` method in 5.2 (a test poking at `c.done` directly only compiles inside the same package).
 
@@ -2589,7 +2589,7 @@ This package was introduced experimentally in Go 1.24 and stabilized in Go 1.25.
 
 Check your Go version. Go 1.25 shipped only `Test` and `Wait`; the `Sleep` used in the example below was added in Go 1.27 (`api/go1.25.txt` lists `Test` / `Wait`, `api/go1.27.txt` lists `Sleep`). On Go 1.25 and 1.26, write `time.Sleep(d)` followed by `synctest.Wait()` instead; `Sleep` is equivalent to those two calls.
 
-Inside `synctest.Test`, time runs on a <strong>virtual clock</strong>. When every goroutine in the bubble is durably blocked (unblockable only by another goroutine in the same bubble), time jumps instantly to the next event.
+`synctest.Test` runs the function it is given in an isolated *bubble*, and time inside the bubble runs on a <strong>virtual clock</strong>. When every goroutine in the bubble is durably blocked (unblockable only by another goroutine in the same bubble), time jumps instantly to the next event.
 
 Testing the batcher from 6.2:
 
@@ -2644,7 +2644,7 @@ The main API is three functions:
 | `synctest.Wait()` | Block until all other goroutines are durably blocked | Go 1.25 |
 | `synctest.Sleep(d)` | `time.Sleep(d)` + `Wait()`: advance virtual time and settle | Go 1.27 |
 
-There are constraints. "Durably blocked" covers sends and receives on channels created inside the bubble, `time.Sleep`, `sync.WaitGroup.Wait`, `sync.Cond.Wait` and similar operations, but not real network I/O, system calls, or mutex acquisition. Code doing real I/O needs that part replaced with a fake.
+There are constraints. "Durably blocked" covers sends and receives on channels created inside the bubble, `time.Sleep`, `sync.WaitGroup.Wait`, `sync.Cond.Wait`, and similar operations, but not real network I/O, system calls, or mutex acquisition. Code doing real I/O needs that part replaced with a fake.
 
 <strong>`synctest` does not synchronize memory.</strong>
 
@@ -2764,7 +2764,7 @@ A channel is called for in three specific situations: joining several event sour
 
 <strong>Related reading</strong>
 
-- [How the Go Scheduler Works — the G/M/P model in motion](/en/blog/go-scheduler-gmp) — the runtime internals this article skips
+- [How Go's Scheduler Works — Understanding the G, M, P Model Visually](/en/blog/go-scheduler-gmp) — the runtime internals this article skips
 
 <strong>Verification environment</strong>
 

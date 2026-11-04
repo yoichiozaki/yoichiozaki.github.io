@@ -28,7 +28,7 @@ Create `src/components/interactive/MyVisualizer.tsx`:
 ```tsx
 "use client";
 
-import { InteractiveDemo, StepPlayerControls, useStepPlayer } from "@/components/interactive";
+import { InteractiveDemo, StepPlayerControls, stepPlayerAriaLabels, useStepPlayer } from "@/components/interactive";
 
 type MyVisualizerProps = { locale?: string };
 
@@ -41,7 +41,7 @@ export function MyVisualizer({ locale = "ja" }: MyVisualizerProps) {
     <InteractiveDemo title="Demo Title" description="Description text">
       {/* Your visualization */}
       <div>{current.label}</div>
-      <StepPlayerControls {...player} />
+      <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }
@@ -102,6 +102,8 @@ Returns: `{ step, playing, isFirst, isLast, play, pause, reset, stepForward, ste
 UI component that renders play/pause, step, reset buttons, a progress bar, and optional step dots (shown when ≤20 steps). Spread `useStepPlayer()` return value as props.
 
 Optional prop: `label?: (step: number) => string` — shows step description text.
+
+Always pass `ariaLabels={stepPlayerAriaLabels(locale)}`. Without it, the buttons' accessible names fall back to English on Japanese pages.
 
 ## MDX Gotchas
 

@@ -1,13 +1,13 @@
 ---
 title: "The Lineage of Consensus Algorithms — From 2PC to Paxos, Raft, and PBFT"
 date: "2025-05-15"
-description: "How 2PC, Paxos, Raft, and PBFT each address a weakness of the earlier approach, and why each reaches agreement safely, with simulators that step through the messages."
+description: "Unlike 2PC, Paxos has no single point of failure. Raft kept Paxos's safety while making understandability a design goal, and PBFT reaches agreement even when some nodes lie, at the cost of more nodes and messages. Simulators step through each protocol's messages."
 tags: ["Distributed Systems", "Consensus", "Paxos", "Raft", "PBFT"]
 ---
 
 Database replication, cross-service transactions, and blockchain ledgers all require several nodes to agree on a single value. This is the **consensus problem**.
 
-This article covers 2PC, Paxos, Raft, and PBFT in the order they appeared, explaining which weakness of the earlier approach each one addresses and why its steps lead to safe agreement. Paxos, Raft, and PBFT each come with a simulator that lets you step through their messages.
+Unlike 2PC, Paxos has no single point of failure, and Raft kept Paxos's safety while making understandability a design goal. PBFT showed that nodes can reach agreement with practical performance even when some of them send false messages. Tolerating stronger faults costs more nodes and more messages. This article explains why each algorithm's steps lead to safe agreement. Paxos, Raft, and PBFT each come with a simulator that lets you step through their messages.
 
 <ArticleVideo slug="consensus-algorithms" />
 
@@ -15,7 +15,7 @@ This article covers 2PC, Paxos, Raft, and PBFT in the order they appeared, expla
 
 <ConsensusTimeline />
 
-2PC appeared in 1978, the Byzantine Generals Problem was formulated in 1982, and Paxos, PBFT, and Raft followed. The left side of the timeline shows algorithms that tolerate crash faults; the right side shows those that tolerate Byzantine faults.
+2PC appeared in 1978, the Byzantine Generals Problem was formulated in 1982, and Paxos, PBFT, and Raft followed. Paxos, PBFT, and Raft, right of the dashed line in the timeline, keep reaching agreement despite failures: Paxos and Raft tolerate crash faults, and PBFT tolerates Byzantine faults.
 
 ## Fault Models — Crash Faults vs Byzantine Faults
 
@@ -35,9 +35,9 @@ Crash faults are a special case of Byzantine faults, so an algorithm that tolera
 
 In 1985, Fischer, Lynch, and Paterson proved the following theorem.
 
-<FLPDiagram />
-
 > **FLP Impossibility Theorem**: In an asynchronous model where even one node can crash, no deterministic algorithm can simultaneously guarantee Safety, Liveness, and Fault Tolerance.
+
+<FLPDiagram />
 
 Practical algorithms reach consensus by relaxing one of the theorem's assumptions:
 
@@ -78,12 +78,12 @@ Paxos operates in two phases. 2PC also has two phases, but Paxos moves forward o
 
 **Phase 1 — Prepare/Promise:**
 
-1. Proposer selects a proposal number `n` and sends `Prepare(n)` to all Acceptors
+1. A Proposer selects a proposal number `n` and sends `Prepare(n)` to all Acceptors
 2. If `n` is the highest seen, an Acceptor replies with `Promise(n, previously accepted value)`
 
 **Phase 2 — Accept/Accepted:**
 
-3. After receiving a majority of Promises, Proposer sends `Accept(n, v)`
+3. After receiving a majority of Promises, the Proposer sends `Accept(n, v)`
    - If any Promise includes a previously accepted value, it must choose the value with the highest proposal number
    - Otherwise, it proposes its own value
 4. If the Acceptor hasn't made a Promise for a higher number, it replies `Accepted(n, v)`
@@ -105,7 +105,7 @@ Paxos is correct, but hard to understand and implement.
 
 1. **Hard to Understand**: Lamport's original paper ["The Part-Time Parliament"](https://lamport.azurewebsites.net/pubs/lamport-paxos.pdf) is written as an allegory about an ancient Greek parliament, and many researchers struggled with it. Lamport later explained the algorithm again in ["Paxos Made Simple"](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf).
 2. **Non-Obvious Extension to Multi-Paxos**: Single-Decree Paxos decides only one value. The paper does not specify how to extend it to practical log replication (Multi-Paxos), so each implementation developed its own optimizations.
-3. **Liveness Issues (Livelock)**: Two Proposers that keep outbidding each other with higher proposal numbers can prevent agreement indefinitely (the "Proposer Conflict" scenario in the simulator reproduces this).
+3. **Liveness Issues (Livelock)**: Two Proposers that keep outbidding each other with higher proposal numbers can prevent agreement indefinitely (the "Proposer Conflict" scenario in the simulator shows one such preemption, where a Prepare with a higher proposal number displaces an earlier proposal).
 
 ## Raft — Redesigned for Understandability
 
@@ -138,13 +138,15 @@ Each node has three states: Follower, Candidate, and Leader.
 
 1. The Leader appends client writes to its log
 2. The Leader sends log entries to all Followers via `AppendEntries` RPC
-3. For entries from the leader's current term, once a majority responds → commit (apply to state machine)
+3. For entries from the Leader's current term, once a majority responds → commit (apply to state machine)
 
-A leader <strong>must not</strong> commit an entry from a previous term merely by counting replicas. Older entries become committed only indirectly, when the leader commits at least one entry from its current term on a majority.
+A Leader <strong>must not</strong> commit an entry from a previous term merely by counting replicas. Older entries become committed only indirectly, when the Leader commits at least one entry from its current term on a majority.
 
-`AppendEntries` keeps logs consistent through its `prevLogIndex` / `prevLogTerm` checks (Log Matching): if two logs contain an entry with the same index and term, all preceding entries are identical. Membership changes use overlapping majorities so that the old and new configurations cannot choose different leaders. The paper uses joint consensus; some implementations use the later one-server-at-a-time variant.
+`AppendEntries` keeps logs consistent through its `prevLogIndex` / `prevLogTerm` checks (Log Matching): if two logs contain an entry with the same index and term, all preceding entries are identical.
 
 These rules preserve the **Leader Completeness Property**: once committed, an entry appears in the log of every future Leader.
+
+Membership changes use overlapping majorities so that the old and new configurations cannot choose different Leaders. The paper uses joint consensus; some implementations use the later one-server-at-a-time variant.
 
 <RaftSimulator />
 
@@ -168,11 +170,11 @@ In 1999, Miguel Castro and Barbara Liskov proposed [PBFT (Practical Byzantine Fa
 
 PBFT operates in three phases.
 
-1. **Pre-prepare**: The Primary (equivalent to a leader) assigns a sequence number to the request and sends it to all Replicas
-2. **Prepare**: Each node sends a Prepare message to all other nodes (all-to-all communication)
-3. **Commit**: Once a node collects $2f+1$ Prepare messages, it sends a Commit message to all other nodes
+1. **Pre-prepare**: The Primary (equivalent to a leader) assigns a sequence number to the request and sends it to all other nodes
+2. **Prepare**: Each backup (every node except the Primary) that receives the Pre-Prepare sends a Prepare message to all other nodes (all-to-all communication)
+3. **Commit**: Once a node, the Primary included, holds the Pre-Prepare and $2f$ matching Prepare messages ($2f+1$ in total), it sends a Commit message to all other nodes
 
-The Prepare and Commit phases each collect $2f+1$ messages. With $n = 3f + 1$, any two such quorums share at least $f+1$ replicas, so even if $f$ replicas are Byzantine, at least one shared replica is correct.
+The Prepare phase (counting the Pre-Prepare) and the Commit phase each collect $2f+1$ matching messages. With $n = 3f + 1$, any two such quorums share at least $f+1$ nodes, so even if $f$ nodes are Byzantine, at least one shared node is correct.
 
 ### Why 3f+1 Is Required
 
@@ -199,7 +201,7 @@ With 4 nodes, the system tolerates $f=1$; with 7 nodes, $f=2$ Byzantine failures
 ### Paxos Family
 - **Google Chubby**: Distributed lock service using Multi-Paxos.
 - **Google Spanner**: Globally distributed database using Paxos for replication.
-- **Apache ZooKeeper**: Uses Zab protocol (a Paxos variant).
+- **Apache ZooKeeper**: Uses the Zab protocol (a Paxos variant).
 
 ### Raft Family
 - **etcd**: Kubernetes backend store. Uses Raft for consistency.
@@ -208,7 +210,7 @@ With 4 nodes, the system tolerates $f=1$; with 7 nodes, $f=2$ Byzantine failures
 - **Consul**: Service mesh control plane. Uses Raft for consensus.
 
 ### PBFT Family
-- **Hyperledger Fabric**: Enterprise blockchain. Early versions used PBFT; since v1.4.1 uses Raft, and since v3.0 uses SmartBFT (based on BFT-SMART).
+- **Hyperledger Fabric**: Enterprise blockchain. Versions up to [v0.6 used PBFT](https://arxiv.org/abs/1801.10228). From v1.0, Fabric moved to a crash-fault-tolerant ordering service built on Kafka, and v1.4.1 added Raft. [v3.0](https://github.com/hyperledger/fabric/blob/main/release_notes/v3.0.0.md) also offers a BFT ordering service built on the [SmartBFT library, which is based on the BFT-SMaRt protocol](https://arxiv.org/abs/2107.06922); Raft remains available.
 - **Tendermint**: Blockchain consensus engine. A PBFT variant.
 
 ## Summary

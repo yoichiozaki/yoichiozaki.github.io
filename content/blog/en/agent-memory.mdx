@@ -1,7 +1,7 @@
 ---
 title: "Designing Agent Memory — A Practical Guide to Short-Term and Long-Term Memory with Microsoft Agent Framework"
 date: "2026-06-11"
-description: "What agent 'memory' is, organized with frameworks from cognitive science and recent research surveys, and how to design and implement short-term and long-term memory with Microsoft Agent Framework's AgentSession, ContextProvider, and ChatHistoryProvider, with Python and C# code."
+description: "Agent memory is an architecture the application designs, not a capability of the model. This guide classifies it using cognitive science and two research surveys, then implements short-term and long-term memory in Python and C# with Microsoft Agent Framework's AgentSession, ContextProvider, and ChatHistoryProvider."
 tags: ["AI", "Agent", "Memory", "Microsoft Agent Framework", "Python", "C#", "LLM"]
 ---
 
@@ -15,7 +15,7 @@ LLM APIs are stateless: each call is independent, and the model remembers nothin
 
 This article first uses cognitive science and research on LLM-agent memory to classify kinds of memory and the operations a memory system combines. It then implements short-term and long-term memory in Python and C# with [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)'s `AgentSession`, `ContextProvider`, and `ChatHistoryProvider`. The last part covers production concerns: multi-user isolation, forgetting, privacy, and evaluation.
 
-> This article is a companion to [Microsoft Agent Framework Deep Dive](/en/blog/agent-framework), which covers the framework's overall architecture and agent execution model.
+> This article is a companion to [Microsoft Agent Framework Internals](/en/blog/agent-framework), which covers the framework's overall architecture and agent execution model.
 
 ## What Memory Is — Mapping from Cognitive Science
 
@@ -63,7 +63,7 @@ Each of these concepts has a counterpart in an LLM agent.
 | Long-term (procedural) | Learned procedures, successful patterns, tool usage |
 | Rehearsal → consolidation | Extraction, summarization, and persistence from conversation |
 
-The LLM's context window, however, is finite. Just as human working memory is classically estimated at around "7±2 chunks" (Miller, 1956), an agent's short-term memory has a ceiling measured in tokens. A long conversation cannot all fit into the prompt.
+The LLM's context window, however, is finite. Just as human working memory is classically estimated at around "7±2 chunks" (Miller, 1956), an agent's short-term memory has a ceiling measured in tokens. A long conversation cannot fit into the prompt in full.
 
 The central question of agent memory design is therefore:
 
@@ -94,7 +94,7 @@ graph TB
 - <strong>Parametric memory</strong> — Knowledge implicitly encoded in the model's weights. Acquired through pretraining or fine-tuning. Updating it requires retraining, which is costly, and you cannot directly inspect what is stored.
 - <strong>Contextual memory</strong> — Memory held as explicit data outside the model. It further splits into structured (knowledge graphs, tables) and unstructured (text, embeddings).
 
-The memory that application developers design and implement is almost always contextual memory, and that is what Agent Framework handles. Parametric memory (fine-tuning) requires retraining to update, so it is ill-suited to frequent updates and cannot serve memory that differs per user. The rest of this article deals with contextual memory.
+The memory that application developers design and implement is almost always contextual memory, and that is what Agent Framework handles. Parametric memory (fine-tuning) requires retraining to update, so it is ill-suited both to frequent updates and to memory that differs per user. The rest of this article deals with contextual memory.
 
 ### The Six Atomic Operations
 
@@ -109,7 +109,7 @@ Du et al. define six atomic operations on memory. In their framing, any memory s
 | Retrieval | Recall memory relevant to the current context |
 | Condensation | Summarize and compress memory to reduce token volume |
 
-The six operations work as a checklist when designing a long-term memory pipeline. Checking which operations your system implements, and how, reveals the ones that are missing. For example, a system with consolidation and retrieval but no forgetting keeps accumulating stale and contradictory memories and will eventually break down.
+The six operations work as a checklist when designing a long-term memory pipeline. Checking which operations your system implements, and how, reveals the ones that are missing. For example, a system with consolidation and retrieval but no forgetting keeps accumulating stale and contradictory memories, and they start turning up in retrieval results.
 
 ### Positioning the Major Research Systems
 
@@ -176,7 +176,7 @@ sequenceDiagram
     Agent->>User: response
 ```
 
-In this diagram, steps 1 (retrieve) and 2 (load history) are reads, while steps 4 (append history) and 5 (consolidate) are writes. In Agent Framework, you implement these reads and writes by plugging into an extension point called the ContextProvider.
+In this diagram, steps 1 (retrieve) and 2 (load history) are reads, while steps 4 (append history) and 5 (consolidate) are writes. In Agent Framework, a history provider handles the history reads and writes (2 and 4), and a context provider handles retrieval and consolidation (1 and 5).
 
 ## Agent Framework's Memory Primitives
 
@@ -193,7 +193,7 @@ graph TB
     SESSION -.holds state.-> HIST
     SESSION -.holds state.-> CTX
     CTX --> STORE[(External memory store<br/>DB / vector store)]
-    HIST --> STORE2[(History store<br/>memory / Cosmos DB etc.)]
+    HIST --> STORE2[(History store<br/>in-memory / Cosmos DB etc.)]
 ```
 
 ### Division of Roles Among the Three Abstractions
@@ -201,7 +201,7 @@ graph TB
 | Abstraction | Role | Position in memory |
 |------|------|--------------|
 | `AgentSession` | A container holding the state of a single conversation. Can be serialized to persist and restore. | The "vessel" of short-term memory. All session-specific state (history, memory IDs, etc.) is stored here. |
-| `ChatHistoryProvider` (Python: `HistoryProvider`) | A provider specialized in loading and saving conversation history. | Short-term memory itself. The built-in `InMemoryHistoryProvider` is the representative. |
+| `ChatHistoryProvider` (Python: `HistoryProvider`) | A provider specialized in loading and saving conversation history. | Short-term memory itself. The built-in `InMemoryHistoryProvider` is a typical example. |
 | `AIContextProvider` (Python: `ContextProvider`) | Hooks around each run, injecting context (instructions, messages, tools) and extracting information afterward. | The entry to long-term memory. Handles injecting retrieved memories and extracting / storing new information. |
 
 <strong>Implement short-term memory with `ChatHistoryProvider` and long-term memory with `AIContextProvider`.</strong> Both attach to the same agent, and each one's hooks are called within a single run.
@@ -299,7 +299,7 @@ Summarization-based compaction can be implemented by swapping in a different red
 
 ### Persisting Sessions
 
-Short-term memory is confined within a session, so it vanishes when the process ends. To resume a conversation later, serialize the `AgentSession` and save it to durable storage.
+Short-term memory is held in a session object inside the process, so it vanishes when the process ends. To resume a conversation later, serialize the `AgentSession` and save it to durable storage.
 
 ```python
 # Save: serialize the whole session to a dict and store it
@@ -322,6 +322,63 @@ AgentSession resumed = await agent.DeserializeSessionAsync(serialized);
 
 Treat `AgentSession` as an opaque state object and save and restore the whole session, not just message text. Also, <strong>restore it with the same agent and provider configuration that created it.</strong> With a different configuration, providers cannot correctly interpret the state they stored in the session (such as memory IDs).
 
+### Persisting to a Durable Backend with a Custom History Provider (Python)
+
+To persist the conversation history itself to a DB or Redis, inherit from `HistoryProvider`. Use this when a conversation must resume after a process restart or on another instance. It still handles short-term memory, but the history is kept as long as long-term memory would be.
+
+```python
+from collections.abc import Sequence
+from typing import Any
+from agent_framework import HistoryProvider, Message
+
+
+class DatabaseHistoryProvider(HistoryProvider):
+    def __init__(self, db: Any) -> None:
+        super().__init__("db-history", load_messages=True)
+        self._db = db
+
+    async def get_messages(
+        self,
+        session_id: str | None,
+        *,
+        state: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> list[Message]:
+        key = (state or {}).get("history_key", session_id or "default")
+        rows = await self._db.load_messages(key)
+        return [Message.from_dict(row) for row in rows]
+
+    async def save_messages(
+        self,
+        session_id: str | None,
+        messages: Sequence[Message],
+        *,
+        state: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if not messages:
+            return
+        if state is not None:
+            key = state.setdefault("history_key", session_id or "default")
+        else:
+            key = session_id or "default"
+        await self._db.save_messages(key, [m.to_dict() for m in messages])
+```
+
+The only thing this provider puts in the session's `state` is `history_key`, the key for looking up the history in the database.
+
+In Python, <strong>you can attach multiple history providers, but only one may have `load_messages=True`.</strong> Give additional providers for diagnostics or evaluation `load_messages=False` so they don't interfere with loading the primary history, and `store_context_messages=True` so they also record context injected by other providers.
+
+```python
+primary = DatabaseHistoryProvider(db)
+# For audit / eval: don't load history, but record context
+audit = InMemoryHistoryProvider("audit", load_messages=False, store_context_messages=True)
+
+agent = OpenAIChatClient().as_agent(context_providers=[primary, audit])
+```
+
+> Note: The base classes to inherit from are `ContextProvider` and `HistoryProvider`. The `BaseContextProvider` / `BaseHistoryProvider` aliases that once existed for compatibility were removed in a breaking change.
+
 ### Service-Managed Storage
 
 Some services (such as the OpenAI Responses API or Microsoft Foundry Agents) persist conversation history on the service side. In that case, Agent Framework holds no local history, and the session stores only a remote conversation ID. The model is still stateless; the service takes over the job of packing prior context back into the prompt.
@@ -339,7 +396,7 @@ ChatClientAgentSession typedSession = (ChatClientAgentSession)session;
 Console.WriteLine(typedSession.ConversationId);
 ```
 
-With service-managed storage, the service handles history size, but the service also determines how history is reduced. Which to use depends on your model provider and persistence requirements.
+With service-managed storage, the service handles history size, but the service also determines how history is reduced. Whether to manage history locally or leave it to the service depends on your model provider and persistence requirements.
 
 ## Implementing Long-Term Memory
 
@@ -430,7 +487,7 @@ agent = OpenAIChatClient().as_agent(
 
 Short-term memory (`InMemoryHistoryProvider`) and long-term memory (`UserPreferenceProvider`) go side by side in the same `context_providers` list.
 
-### Integrating with an External Memory Service (Python)
+### A Provider Backed by an External Memory Service (Python)
 
 The example above extracts the preference with string matching; real systems use LLM-based extraction or semantic search over a vector store. The next example delegates retrieval and storage to an external memory service such as Mem0. It inherits from `ContextProvider`, not `HistoryProvider`.
 
@@ -490,61 +547,6 @@ class ServiceMemoryProvider(ContextProvider):
 ```
 
 The service's `add` handles extraction, consolidation, and updating. A system like Mem0 turns raw messages into structured facts such as "the user is vegan" and updates existing memory when the new facts contradict it. The provider only builds the search query and hands over the messages to store.
-
-### Persisting to a Durable Backend with a Custom History Provider (Python)
-
-To persist the conversation history itself to a DB or Redis, inherit from `HistoryProvider`. Use this when a conversation must resume after a process restart or on another instance. It still handles short-term memory, but the history is kept as long as long-term memory would be.
-
-```python
-from collections.abc import Sequence
-from typing import Any
-from agent_framework import HistoryProvider, Message
-
-
-class DatabaseHistoryProvider(HistoryProvider):
-    def __init__(self, db: Any) -> None:
-        super().__init__("db-history", load_messages=True)
-        self._db = db
-
-    async def get_messages(
-        self,
-        session_id: str | None,
-        *,
-        state: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> list[Message]:
-        key = (state or {}).get("history_key", session_id or "default")
-        rows = await self._db.load_messages(key)
-        return [Message.from_dict(row) for row in rows]
-
-    async def save_messages(
-        self,
-        session_id: str | None,
-        messages: Sequence[Message],
-        *,
-        state: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        if not messages:
-            return
-        if state is not None:
-            key = state.setdefault("history_key", session_id or "default")
-        else:
-            key = session_id or "default"
-        await self._db.save_messages(key, [m.to_dict() for m in messages])
-```
-
-In Python, <strong>you can attach multiple history providers, but only one may have `load_messages=True`.</strong> Give additional providers for diagnostics or evaluation `load_messages=False` and `store_context_messages=True` so they don't interfere with loading the primary history.
-
-```python
-primary = DatabaseHistoryProvider(db)
-# For audit / eval: don't load history, but record context
-audit = InMemoryHistoryProvider("audit", load_messages=False, store_context_messages=True)
-
-agent = OpenAIChatClient().as_agent(context_providers=[primary, audit])
-```
-
-> Note: The base classes to inherit from are `ContextProvider` and `HistoryProvider`. The `BaseContextProvider` / `BaseHistoryProvider` aliases that once existed for compatibility were removed in a breaking change.
 
 ### A Custom Long-Term Memory Provider in .NET
 
@@ -642,7 +644,7 @@ await this._client.StoreMemoriesAsync(
     cancellationToken);
 ```
 
-Use the source to control what gets stored as memory. The default is to store only the user's raw input and the agent's response, excluding memories injected by retrieval and messages from history.
+Use the source to control what gets stored as memory. As a rule, store only the user's raw input and the agent's response, and exclude memories injected by retrieval and messages from history.
 
 ### Built-in Memory and Retrieval Providers
 
@@ -690,13 +692,13 @@ A memory system going to production needs four more things in its design: isolat
 
 ### Multi-User Isolation
 
-The most serious failure is <strong>memory leaking between users</strong>, such as one user's preference reaching another, which directly damages users' trust. On the provider side, the fix is the rule from "Keep State in the Session, Not the Provider": always store session-specific values in the `AgentSession` (its `state` / `ProviderSessionState`), never in the provider's fields.
+The most serious failure is <strong>memory leaking between users</strong>, such as one user's preference reaching another; it directly damages users' trust. On the provider side, the fix is the rule from "Keep State in the Session, Not the Provider": always store session-specific values in the `AgentSession` (its `state` / `ProviderSessionState`), never in the provider's fields.
 
 When using an external memory store, isolate memories by using the user ID (or session ID) as the partition key. Always attach a per-user filter to search queries so that other users' memories cannot appear in the results.
 
 ### Designing Forgetting
 
-Of the six operations, the one most easily left out of an implementation is forgetting. A system without forgetting accumulates stale, contradictory, and incorrect memories, and retrieval quality eventually degrades. Four main strategies are:
+Of the six operations, the one most easily left out of an implementation is forgetting. A system without forgetting accumulates stale, contradictory, and incorrect memories, and retrieval quality eventually degrades. There are four main strategies:
 
 | Strategy | Description | Inspiration |
 |------|------|--------|
@@ -720,10 +722,10 @@ The last point is especially easy to overlook. Treat memory as something that <s
 
 ### Evaluating and Observing the Memory System
 
-Measure continuously whether memory is helping. Applied to operations, Zhang et al.'s evaluation axes give four metrics to observe.
+Measure continuously whether memory is helping. Applied to a production system, Zhang et al.'s evaluation axes give four metrics to observe.
 
-- <strong>Retrieval accuracy</strong> — Were the injected memories truly relevant to the situation? (Injecting irrelevant memories hurts both accuracy and token efficiency.)
-- <strong>Token cost</strong> — How much did memory injection increase the per-turn token volume? Compared with a full-context approach, Mem0 reports token-cost savings of over 90% on LOCOMO.
+- <strong>Retrieval accuracy</strong> — Were the injected memories truly relevant to the situation? (Injecting irrelevant memories hurts both response accuracy and token efficiency.)
+- <strong>Token cost</strong> — How much did memory injection increase the per-turn token volume? Compared with a full-context approach, the Mem0 paper reports token-cost savings of over 90% on LOCOMO.
 - <strong>Latency</strong> — The impact of retrieval and consolidation on response time. Synchronous retrieval before the run adds its full duration to the user's wait.
 - <strong>Consistency</strong> — Across multiple sessions, are the user's constraints (preferences, etc.) honored?
 
@@ -733,7 +735,7 @@ To collect evaluation data for retrieval accuracy, use the audit provider shown 
 
 An agent's memory is not a capability of the model but an architecture the application developer designs. Cognitive science supplies a framework for that design: the distinction between short-term and long-term memory, and the episodic, semantic, and procedural categories of long-term memory. Du et al.'s six atomic operations (consolidation, updating, indexing, forgetting, retrieval, condensation) serve as a checklist for what the system does with memory.
 
-In Microsoft Agent Framework, `AgentSession` holds the state, `ChatHistoryProvider` implements short-term memory, and the retrieve-and-consolidate hooks of `AIContextProvider` implement long-term memory. The core of the design is connecting finite short-term memory and unbounded long-term memory through compaction (condensation) and consolidation. When long-term memory catches what overflows from short-term memory, long conversations are less likely to break down.
+In Microsoft Agent Framework, `AgentSession` holds the state, `ChatHistoryProvider` implements short-term memory, and the retrieve-and-consolidate hooks of `AIContextProvider` implement long-term memory. The core of the design is connecting finite short-term memory and unbounded long-term memory through compaction (condensation) and consolidation. When long-term memory catches what overflows from short-term memory, long conversations are less likely to lose old but important information such as "I'm vegan."
 
 In production, isolation of memory between users, forgetting (especially conflict resolution and explicit deletion), privacy (the right to be forgotten and injection defenses), and continuous observation of whether memory is helping are essential. Without them, memory can leak information between users or drive responses based on stale or contradictory information.
 

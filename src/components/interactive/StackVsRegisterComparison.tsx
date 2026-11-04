@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -46,9 +47,9 @@ function buildScenario(): MachineState[] {
       regRegisters: { a: "2", b: "3", c: "4", R0: "-", R1: "-" },
       regHighlight: -1,
       description:
-        "初期状態: a=2, b=3, c=4 として a + b * c を計算します。左がスタックマシン、右がレジスターマシンです。",
+        "初期状態: a=2, b=3, c=4 として、a + b × c をスタックマシンとレジスターマシンで計算します。",
       descriptionEn:
-        "Initial: Computing a + b * c where a=2, b=3, c=4. Left is a stack machine, right is a register machine.",
+        "Initial state: Computing a + b × c with a=2, b=3, c=4 on a stack machine and a register machine.",
     },
     // Step 1: Stack: LOAD a / Reg: MUL R1, b, c
     {
@@ -59,9 +60,9 @@ function buildScenario(): MachineState[] {
       regRegisters: { a: "2", b: "3", c: "4", R0: "-", R1: "12" },
       regHighlight: 0,
       description:
-        "スタック: LOAD a → a(2)をプッシュ。レジスター: MUL R1, b, c → R1 = 3 × 4 = 12。レジスターマシンは1命令で乗算完了！",
+        "スタック: LOAD a → a(2)をプッシュ。レジスター: MUL R1, b, c → R1 = 3 × 4 = 12。レジスターマシンは1命令で乗算を終えます。",
       descriptionEn:
-        "Stack: LOAD a → push a(2). Register: MUL R1, b, c → R1 = 3 × 4 = 12. Register machine completes multiply in 1 instruction!",
+        "Stack: LOAD a → push a(2). Register: MUL R1, b, c → R1 = 3 × 4 = 12. The register machine finishes the multiplication in 1 instruction.",
     },
     // Step 2: Stack: LOAD b / Reg: ADD R0, a, R1
     {
@@ -74,7 +75,7 @@ function buildScenario(): MachineState[] {
       description:
         "スタック: LOAD b → b(3)をプッシュ。レジスター: ADD R0, a, R1 → R0 = 2 + 12 = 14。レジスターマシンはもう計算完了です。",
       descriptionEn:
-        "Stack: LOAD b → push b(3). Register: ADD R0, a, R1 → R0 = 2 + 12 = 14. Register machine has already finished computation.",
+        "Stack: LOAD b → push b(3). Register: ADD R0, a, R1 → R0 = 2 + 12 = 14. The register machine has already finished computing.",
     },
     // Step 3: Stack: LOAD c / Reg: MOV result
     {
@@ -92,9 +93,9 @@ function buildScenario(): MachineState[] {
       },
       regHighlight: 2,
       description:
-        "スタック: LOAD c → c(4)をプッシュ（まだ計算していない）。レジスター: MOV result, R0 → 結果を格納。3命令で完了！",
+        "スタック: LOAD c → c(4)をプッシュ（まだ計算していない）。レジスター: MOV result, R0 → 結果を格納。3命令で完了。",
       descriptionEn:
-        "Stack: LOAD c → push c(4) (hasn't computed yet). Register: MOV result, R0 → store result. Done in 3 instructions!",
+        "Stack: LOAD c → push c(4) (hasn't computed yet). Register: MOV result, R0 → store result. Done in 3 instructions.",
     },
     // Step 4: Stack: MUL
     {
@@ -134,7 +135,7 @@ function buildScenario(): MachineState[] {
       description:
         "スタック: ADD → 2 + 12 = 14 をプッシュ。ようやく計算結果が出ました。",
       descriptionEn:
-        "Stack: ADD → 2 + 12 = 14 pushed. Finally got the computation result.",
+        "Stack: ADD → 2 + 12 = 14 pushed. The stack machine finally has the result.",
     },
     // Step 6: Stack: STORE result
     {
@@ -152,9 +153,9 @@ function buildScenario(): MachineState[] {
       },
       regHighlight: -1,
       description:
-        "スタック: STORE result → 結果を格納。6命令で完了。レジスターマシンは3命令でした。命令ディスパッチ回数が半分に！",
+        "スタック: STORE result → 結果を格納。6命令で完了。レジスターマシンは3命令だったので、この例ではディスパッチ回数が半分です。",
       descriptionEn:
-        "Stack: STORE result → store result. Done in 6 instructions. Register machine took only 3. Dispatch count halved!",
+        "Stack: STORE result → store result. Done in 6 instructions. The register machine took 3, so in this example it needs half as many dispatches.",
     },
   ];
 }
@@ -184,8 +185,8 @@ export function StackVsRegisterComparison({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "a + b × c を計算する過程を、スタックマシンとレジスターマシンで同時に実行比較します。"
-          : "Compare stack and register machine execution side by side, computing a + b × c."
+          ? "同じ式 a + b × c を、スタックマシンとレジスターマシンで1命令ずつ並べて実行し、命令数を比べます。"
+          : "Step through a + b × c on a stack machine and a register machine side by side, one instruction per step, and compare their instruction counts."
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -217,7 +218,7 @@ export function StackVsRegisterComparison({ locale = "ja" }: Props) {
           </div>
           {/* Stack */}
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-            Stack
+            {isJa ? "スタック" : "Stack"}
           </div>
           <div className="border rounded p-2 min-h-[60px] bg-blue-500/5">
             {current.stackStack.length === 0 ? (
@@ -272,7 +273,7 @@ export function StackVsRegisterComparison({ locale = "ja" }: Props) {
           </div>
           {/* Registers */}
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-            Registers
+            {isJa ? "レジスター" : "Registers"}
           </div>
           <div className="border rounded p-2 min-h-[60px] bg-emerald-500/5">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -298,7 +299,7 @@ export function StackVsRegisterComparison({ locale = "ja" }: Props) {
         </div>
       </div>
 
-      <StepPlayerControls {...player} label={labelFn} />
+      <StepPlayerControls {...player} label={labelFn} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }

@@ -9,7 +9,7 @@ tags: [".NET Aspire", ".NET", "Cloud Native", "Distributed Systems", "Observabil
 
 ### The Challenges of Distributed Application Development
 
-Before writing any business logic for a set of microservices, developers have to start Redis and PostgreSQL locally, pass connection strings between services, and wire in health checks, telemetry, and retry policies. This **accidental complexity** takes up much of the development effort.
+Before writing any business logic for a set of microservices, developers have to start Redis and PostgreSQL locally, pass connection strings between services, and wire in health checks, telemetry, and retry policies. This **accidental complexity** eats into development time.
 
 The usual approach is to define infrastructure in `docker-compose.yml`, hardcode port numbers, set up a telemetry SDK in each service, and write retry logic by hand. As a project grows, these separate configurations drift apart, and the familiar problems follow: "it works on my machine but not in the cloud," or "Service A's configuration is out of date."
 
@@ -90,11 +90,11 @@ The AppHost's `.csproj` has a `ProjectReference` for every orchestrated project.
 
 ### What Is the App Model?
 
-At the core of .NET Aspire is the **App Model**, a **directed acyclic graph (DAG)** of all resources (projects, containers, executables, external services) and their dependencies. The `Add*()` and `WithReference()` calls in the AppHost's `Program.cs` build this graph.
+At the core of .NET Aspire is the **App Model**, a directed acyclic graph (DAG) of all resources (projects, containers, executables, external services) and their dependencies. The `Add*()` and `WithReference()` calls in the AppHost's `Program.cs` build this graph.
 
-A DAG has directed edges and no cycles. In Aspire, each resource (Redis, PostgreSQL, an API service, and so on) is a node, and each `WithReference()` dependency is an edge. `WithReference()` passes connection information but does not set startup order; adding `WaitFor()` to the same dependencies makes Aspire start resources in an order such as "PostgreSQL → database migration → API service."
+A DAG has directed edges and no cycles. In Aspire, each resource (Redis, PostgreSQL, an API service, and so on) is a node, and each `WithReference()` dependency is an edge. `WithReference()` passes connection information but does not set startup order; adding `WaitFor()` (Chapter 2) to the same dependencies makes Aspire start resources in an order such as "PostgreSQL → database migration → API service."
 
-Below is a typical AppHost `Program.cs` and the resource graph it builds.
+Here is a typical AppHost `Program.cs`:
 
 ```csharp
 // AppHost Program.cs
@@ -299,7 +299,7 @@ sequenceDiagram
 
 ### DCP Internal Architecture
 
-DCP is a lightweight control plane written in Go. It uses the same declarative resource model as Kubernetes custom resource definitions (CRDs). Instead of an imperative command such as "start a Redis container on port 6379," DCP receives a **desired state** ("a Redis container should exist") and runs a **reconciliation loop** that moves the current state toward it.
+DCP is a lightweight control plane written in Go. It uses a declarative resource model similar to Kubernetes custom resource definitions (CRDs). Instead of an imperative command such as "start a Redis container on port 6379," DCP receives a **desired state** ("a Redis container should exist") and runs a **reconciliation loop** that moves the current state toward it.
 
 Because DCP works from the desired state, it restarts a container that crashes and updates the proxy configuration when an endpoint changes. DCP does not need a Kubernetes cluster: it runs as a local process and needs only Docker Desktop.
 
@@ -335,9 +335,9 @@ DCP resource model:
 
 ### Startup Order and Dependency Resolution
 
-By default, resources start in parallel: `WithReference()` passes connection information but does not make one resource wait for another. `WaitFor()` sets the order: a resource that waits for another starts only after that resource is ready. If every dependency in the App Model also has `WaitFor()`, startup follows a **topological order** of the DAG, an order in which u comes before v for every edge u → v.
+By default, resources start in parallel: `WithReference()` passes connection information but does not make one resource wait for another. `WaitFor()` sets the order: a resource that waits for another starts only after that resource is ready. If every dependency in the App Model also has `WaitFor()`, startup follows a **topological order** of the dependency graph shown below, an order in which u comes before v for every edge u → v.
 
-With `WaitFor()` on every dependency in the example, resources with no dependencies (Redis, PostgreSQL, RabbitMQ) start first, then the resources that depend on them (the API and worker), and finally the frontend. Resources in the same phase still start in parallel, which shortens total startup time.
+In the example, resources with no dependencies (Redis, PostgreSQL, RabbitMQ) start first, then the resources that depend on them (the API and worker), and finally the frontend. Resources in the same phase still start in parallel, which shortens total startup time.
 
 ```mermaid
 graph TD
@@ -481,9 +481,9 @@ var api = builder.AddProject<Projects.Api>("api")
 
 ### Component Philosophy
 
-Connecting to Redis normally means installing a NuGet package, reading the connection string, registering `IConnectionMultiplexer` with DI, adding a health check, configuring OpenTelemetry instrumentation, and setting up a retry policy. Every project repeats this boilerplate, and forgetting one step leaves part of the system unmonitored.
+Connecting to Redis normally means installing a NuGet package, reading the connection string, registering `IConnectionMultiplexer` with DI, adding a health check, configuring OpenTelemetry instrumentation, and setting up a retry policy. Every project repeats this boilerplate, and forgetting the health check or the instrumentation leaves part of the system unmonitored.
 
-A .NET Aspire component is a NuGet package that reduces this work to a single method call: `builder.AddRedisClient("cache")` configures all of it in a standard way. This is where the opinionated design is most concrete. The recommended settings are the defaults, so following them takes no extra effort. A component gives a client connection these features:
+A .NET Aspire component is a NuGet package that reduces this work to a single method call: `builder.AddRedisClient("cache")` configures all of it in a standard way. Here the opinionated design becomes concrete: the recommended settings are the defaults, so following them takes no extra effort. A component gives a client connection these features:
 
 ```mermaid
 graph TD
@@ -704,15 +704,20 @@ graph TD
         App2["Service 2"]
     end
 
-    subgraph AppHostProc["AppHost"]
+    subgraph AppHostProc["AppHost process"]
+        AppHost["AppHost"]
         ResourceServer["Resource Service<br/>(gRPC)"]
     end
 
+    DCP["DCP"]
+
     App1 -->|OTLP| OTLPReceiver
     App2 -->|OTLP| OTLPReceiver
+    DCP -->|Resource state| AppHost
+    AppHost -->|Resource state| ResourceServer
     OTLPReceiver --> Storage
     Storage --> UI
-    ResourceServer -->|Resource state| UI
+    ResourceServer -->|gRPC| UI
 ```
 
 | Feature | Description |
@@ -741,9 +746,9 @@ In this mode, the Dashboard receives telemetry from any OTLP-compatible applicat
 
 ### Health Check Hierarchy
 
-In a distributed system, a running process is not necessarily one that can handle requests: the process can be alive while its database connection is down.
+In a distributed system, a process can be running yet unable to handle requests, for example when its database connection is down.
 
-.NET Aspire separates the two with **liveness** and **readiness** checks. Liveness (`/alive`) checks only whether the process responds, which detects deadlocks and memory exhaustion. Readiness (`/health`) also checks the database, Redis, and other dependencies to decide whether the service can safely accept traffic.
+.NET Aspire distinguishes these two states with **liveness** and **readiness** checks. Liveness (`/alive`) checks only whether the process responds, which detects deadlocks and memory exhaustion. Readiness (`/health`) also checks the database, Redis, and other dependencies to decide whether the service can safely accept traffic.
 
 The two checks map directly to Kubernetes's `livenessProbe` and `readinessProbe`, so the same health check definitions work in local development and in a Kubernetes deployment. In the AppHost, `WaitFor()` holds back a downstream resource until the health checks that the AppHost runs for the resource it waits for report healthy; DCP does not poll the service's `/health` endpoint.
 
@@ -825,7 +830,7 @@ sequenceDiagram
 
 In a distributed system, network latency, transient failures, and service restarts happen all the time. If client code does nothing about them, a brief slowdown in one service sets off a wave of retries and cascading timeouts that can take down the whole system.
 
-`AddStandardResilienceHandler()` in ServiceDefaults uses `Microsoft.Extensions.Http.Resilience` (built on [Polly v8](https://github.com/App-vNext/Polly)) to apply a five-layer resilience pipeline to every `HttpClient`. The layers wrap each request from the outside in, and each handles a different kind of failure.
+`AddStandardResilienceHandler()` in ServiceDefaults uses `Microsoft.Extensions.Http.Resilience` (built on [Polly v8](https://github.com/App-vNext/Polly)) to apply a [five-layer resilience pipeline](https://learn.microsoft.com/dotnet/core/resilience/http-resilience#standard-resilience-handler-defaults) to every `HttpClient`. The layers wrap each request from the outside in, and each handles a different kind of failure.
 
 ```mermaid
 graph LR
@@ -841,8 +846,8 @@ graph LR
 |-------|---------|-------------|
 | **Rate Limiter** | 1,000 concurrent requests | Limit concurrent requests to downstream services |
 | **Total Request Timeout** | 30 seconds | Timeout for entire request including retries |
-| **Retry** | Max 3 attempts, exponential backoff | Recovery from transient failures |
-| **Circuit Breaker** | 10% failure ratio, 30s sampling | Prevent failure cascading |
+| **Retry** | Max 3 retries, exponential backoff | Recovery from transient failures |
+| **Circuit Breaker** | 10% failure ratio, 30-second sampling | Prevent failure cascading |
 | **Attempt Timeout** | 10 seconds | Timeout for individual request attempts |
 
 ```csharp
@@ -1120,7 +1125,7 @@ appHost.Services.ConfigureHttpClientDefaults(http =>
 
 Aspire 9, released alongside .NET 9, brought many improvements based on community feedback, mostly aimed at the development workflow. (Releases have come faster since then and the version is now in the 13.x range, so treat this section as a snapshot of the 9 generation.)
 
-`WaitFor` and `WaitForCompletion`, the declarative startup-order APIs used in Chapter 2, were added in Aspire 9. `Persistent Containers` removes the wait for containers to be recreated every time `dotnet run` restarts the AppHost. `Resource Commands` and `Custom Resource States` extend the Dashboard so that custom resources can be operated from it. The `Eventing Model` hooks into resource lifecycles, so you can declare handlers such as "run this when Redis has started."
+`WaitFor` and `WaitForCompletion`, the declarative startup-order APIs used in Chapter 2, were added in Aspire 9. `Persistent Containers` removes the wait for containers to be recreated every time `dotnet run` restarts the AppHost. `Resource Commands` and `Custom Resource States` extend the Dashboard so that custom resources can be operated from it and show their own states there. The `Eventing Model` hooks into resource lifecycles, so you can declare handlers such as "run this when Redis has started."
 
 | Feature | Description |
 |---------|-------------|
@@ -1167,7 +1172,7 @@ var postgres = builder.AddPostgres("pg")
 
 ## Complete Aspire Architecture
 
-The following diagram puts the whole .NET Aspire architecture together:
+At development time, the AppHost has DCP start the services and infrastructure, and each service sends telemetry to the Dashboard over OTLP. At deployment time, azd reads the manifest that the AppHost writes and deploys the application to Azure Container Apps.
 
 ```mermaid
 graph TD

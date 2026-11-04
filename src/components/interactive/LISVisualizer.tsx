@@ -80,9 +80,9 @@ function buildN2(): Step[] {
 
   steps.push(
     snap({
-      formula: "dp[i] = a[i] を末尾とする最長増加部分列の長さ",
-      ja: "状態を «i 番目で終わる» と決めるのが出発点です。«i 番目まで見た» では、次に伸ばせるかどうかを判定できません（末尾の値が分からないため）。",
-      en: "The key modelling choice is “longest increasing subsequence ending exactly at i”. “Best among the first i elements” would not work, because you could not tell whether the next element can extend it — the tail value is missing.",
+      formula: "dp[i] = 1 + max{ dp[j] | j < i, a[j] < a[i] }",
+      ja: "dp[i] は a[i] で終わる最長増加部分列の長さです。«i 番目まで見た» と定義すると末尾の値が分からず、次の要素で伸ばせるか判定できません。",
+      en: "dp[i] is the length of the longest increasing subsequence ending exactly at a[i]. With “best among the first i elements”, the tail value would be unknown, so you could not tell whether the next element extends it.",
     }),
   );
 
@@ -111,11 +111,11 @@ function buildN2(): Step[] {
         ja:
           arg === -1
             ? `a[${i}] = ${A[i]}。左側に «自分より小さい値で終わる列» がないので、自分ひとりの長さ 1 です。`
-            : `a[${i}] = ${A[i]}。左側の j を全部見て、a[j] < ${A[i]} を満たす中で dp[j] が最大の j=${arg}（a=${A[arg]}, dp=${dp[arg]}）に接ぎ木します。`,
+            : `a[${i}] = ${A[i]}。左側の j を全部見て、a[j] < ${A[i]} を満たす中で dp[j] が最大の j=${arg}（a=${A[arg]}, dp=${dp[arg]}）の列を a[${i}] で伸ばします。`,
         en:
           arg === -1
             ? `a[${i}] = ${A[i]}. No earlier element is smaller, so the best we can do is the length-1 subsequence consisting of a[${i}] alone.`
-            : `a[${i}] = ${A[i]}. Scan every j to the left, keep those with a[j] < ${A[i]}, and graft onto the one with the largest dp — here j=${arg} (a=${A[arg]}, dp=${dp[arg]}).`,
+            : `a[${i}] = ${A[i]}. Scan every j to the left, keep those with a[j] < ${A[i]}, and extend the one with the largest dp — here j=${arg} (a=${A[arg]}, dp=${dp[arg]}).`,
       }),
     );
   }
@@ -137,10 +137,10 @@ function buildN2(): Step[] {
         ja:
           k === 0
             ? `復元完了。LIS は ${path.map((p) => A[p]).join(" < ")}（長さ ${dp[bestI]}）。dp の最大値を持つ位置から prev を辿るだけです。`
-            : `dp[${path[k]}] を作った直前の要素は index ${path[k - 1]}（値 ${A[path[k - 1]]}）です。`,
+            : `dp[${path[k]}] を作った直前の要素は添字 ${path[k - 1]}（値 ${A[path[k - 1]]}）です。`,
         en:
           k === 0
-            ? `Reconstruction complete: the LIS is ${path.map((p) => A[p]).join(" < ")} of length ${dp[bestI]}. Start from the position holding the maximum dp and follow the parent pointers.`
+            ? `Reconstruction complete: the LIS is ${path.map((p) => A[p]).join(" < ")} of length ${dp[bestI]}. Start from the position holding the maximum dp and follow prev[] back.`
             : `dp[${path[k]}] was built from index ${path[k - 1]} (value ${A[path[k - 1]]}).`,
       }),
     );
@@ -175,9 +175,9 @@ function buildNLogN(): Step[] {
 
   steps.push(
     snap({
-      formula: "tails[k] = 長さ k+1 の増加列を作れる «末尾の最小値»",
-      ja: "dp の «値» と «添字» を入れ替えます。長さごとに «達成できる末尾の最小値» だけを覚えれば十分で、この配列は常に狭義単調増加になります。だから二分探索が使えます。",
-      en: "Swap the roles of value and index in the DP. For each length we only need the smallest achievable tail value; that array is always strictly increasing, which is exactly why binary search applies.",
+      formula: "tails = []",
+      ja: "dp の «値» と «添字» を入れ替え、tails[k] に «長さ k+1 の増加列の末尾として達成できる最小値» だけを覚えます。この配列は常に狭義単調増加なので、二分探索が使えます。",
+      en: "Swap the roles of value and index in the DP: tails[k] keeps only the smallest value that can end an increasing subsequence of length k+1. That array is always strictly increasing, so binary search applies.",
     }),
   );
 
@@ -204,10 +204,10 @@ function buildNLogN(): Step[] {
           : `lower_bound(tails, ${A[i]}) = ${idx} → tails[${idx}] = ${A[i]}`,
         ja: appended
           ? `a[${i}] = ${A[i]} は現在の tails の全要素より大きいので、最長記録が ${tails.length} に伸びます。`
-          : `a[${i}] = ${A[i]} 以上である最初の位置 tails[${idx}] を上書きします。長さは伸びませんが、«長さ ${idx + 1} の増加列の末尾» をより小さくできたので、将来伸ばせる可能性が上がります。`,
+          : `tails のうち ${A[i]} 以上で最初の要素 tails[${idx}] を a[${i}] = ${A[i]} で上書きします。長さは伸びませんが、«長さ ${idx + 1} の増加列の末尾» は小さくなるか変わらないので、後の要素で伸ばせる可能性は下がりません。`,
         en: appended
           ? `a[${i}] = ${A[i]} exceeds every entry in tails, so the record length grows to ${tails.length}.`
-          : `a[${i}] = ${A[i]} overwrites the first entry that is ≥ it. The length does not grow, but the tail of a length-${idx + 1} subsequence just got smaller, which can only help later.`,
+          : `a[${i}] = ${A[i]} overwrites tails[${idx}], the first entry that is ≥ it. The length does not grow, but the best tail for length ${idx + 1} gets smaller or stays the same, so later elements can extend it at least as easily.`,
       }),
     );
   }
@@ -224,7 +224,7 @@ function buildNLogN(): Step[] {
   steps.push(
     snap({
       formula: `tails = [${tails.join(", ")}]`,
-      ja: `注意：この tails = [${tails.join(", ")}] は «長さ» は正しいのに、そのままでは部分列になっていません（各スロットの持ち主は上の i= 表示のとおり index ${tailsIdx.join(", ")} で、単調増加になっていません）。長さだけが欲しいなら tails で十分ですが、列そのものが欲しいなら別に親を記録する必要があります。`,
+      ja: `注意：この tails = [${tails.join(", ")}] は «長さ» は正しいのに、そのままでは部分列になっていません（各スロットの持ち主は上の i= 表示のとおり添字 ${tailsIdx.join(", ")} で、単調増加になっていません）。長さだけが欲しいなら tails で十分ですが、列そのものが欲しいなら別に親を記録する必要があります。`,
       en: `Careful: tails = [${tails.join(", ")}] has the right length but is not a subsequence of the input — its entries come from indices ${tailsIdx.join(", ")} (see the i= labels above), which are not increasing. tails answers “how long”; recovering “which elements” needs separate parent pointers.`,
     }),
   );
@@ -237,8 +237,8 @@ function buildNLogN(): Step[] {
         formula: `prev[${path[k]}] = ${k > 0 ? path[k - 1] : -1}`,
         ja:
           k === 0
-            ? `正しい復元結果は ${path.map((p) => A[p]).join(" < ")}（index ${path.join(", ")}）。要素を tails に置いた瞬間の «ひとつ左の持ち主» を親として記録しておけば、こうして復元できます。`
-            : `index ${path[k]}（値 ${A[path[k]]}）を置いたとき、tails[${k - 1}] を持っていたのは index ${path[k - 1]}（値 ${A[path[k - 1]]}）でした。`,
+            ? `正しい復元結果は ${path.map((p) => A[p]).join(" < ")}（添字 ${path.join(", ")}）。要素を tails に置いた瞬間の «ひとつ左の持ち主» を親として記録しておけば、こうして復元できます。`
+            : `添字 ${path[k]}（値 ${A[path[k]]}）を置いたとき、tails[${k - 1}] を持っていたのは添字 ${path[k - 1]}（値 ${A[path[k - 1]]}）でした。`,
         en:
           k === 0
             ? `The correct reconstruction is ${path.map((p) => A[p]).join(" < ")} at indices ${path.join(", ")}. Recording, at insertion time, who owned the slot immediately to the left is all you need.`
@@ -276,8 +276,8 @@ export function LISVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? `a = [${A.join(", ")}]（狭義単調増加）。素朴 DP と、tails 配列を使う高速版を切り替えて比べてください。`
-          : `a = [${A.join(", ")}], strictly increasing. Toggle between the naive DP and the tails-array version.`
+          ? `a = [${A.join(", ")}] から、狭義単調増加の部分列のうち最長のものを求めます。素朴 DP と、tails 配列を使う高速版を切り替えて比べてください。`
+          : `a = [${A.join(", ")}]; find the longest strictly increasing subsequence. Toggle between the naive DP and the tails-array version.`
       }
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -363,7 +363,7 @@ export function LISVisualizer({ locale = "ja" }: Props) {
                 s.tails.map((v, k) => (
                   <div key={k} className="min-w-[42px] text-center">
                     <div className="text-[9px] text-muted-foreground font-mono">
-                      {isJa ? `長さ${k + 1}` : `len ${k + 1}`}
+                      {isJa ? `長さ ${k + 1}` : `len ${k + 1}`}
                     </div>
                     <div
                       className={`rounded border py-1.5 text-[13px] font-mono ${

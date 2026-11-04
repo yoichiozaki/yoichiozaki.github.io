@@ -40,6 +40,8 @@ type Op = {
   title: string;
   titleEn: string;
   code: string;
+  /** English version of the code panel, when it contains Japanese text. */
+  codeEn?: string;
   note: string;
   noteEn: string;
   touched: string[]; // ids of highlighted regions
@@ -77,10 +79,10 @@ class SlottedPage {
     this.tuples.push({ id, off: this.upper, len, dead: false });
 
     if (reuse >= 0) {
-      this.lps[reuse] = { off: this.upper, len, flags: "LP_NORMAL" };
+      this.lps[reuse] = { off: this.upper, len: rawLen, flags: "LP_NORMAL" };
       return reuse;
     }
-    this.lps.push({ off: this.upper, len, flags: "LP_NORMAL" });
+    this.lps.push({ off: this.upper, len: rawLen, flags: "LP_NORMAL" });
     this.lower += LP_SIZE;
     return this.lps.length - 1;
   }
@@ -142,6 +144,9 @@ function buildFrames(): Frame[] {
     code: `PageInit(page, 256, 0)
   pd_lower = 24    // ヘッダー直後
   pd_upper = 256   // ページ末尾`,
+    codeEn: `PageInit(page, 256, 0)
+  pd_lower = 24    // right after the header
+  pd_upper = 256   // end of the page`,
     note: "ページはヘッダーから始まり、ラインポインター配列が前から、タプル本体が後ろから伸びていきます。pd_lower と pd_upper に挟まれた領域が空き領域です。",
     noteEn:
       "A page starts with its header. The line-pointer array grows forward and tuple bodies grow backward; the region between pd_lower and pd_upper is free space.",
@@ -153,11 +158,11 @@ function buildFrames(): Frame[] {
     title: "1行目を挿入（30 → 32 バイトに整列）",
     titleEn: "Insert row 1 (30 bytes → aligned to 32)",
     code: `pd_upper -= MAXALIGN(30) = 32   → 224
-ItemIdData[0] = (off=224, len=32, LP_NORMAL)
+ItemIdData[0] = (off=224, len=30, LP_NORMAL)
 pd_lower += 4                   → 28`,
-    note: "タプルはページ末尾から下向きに置かれ、その位置を指すラインポインターが前から追加されます。長さは MAXALIGN（8バイト境界）に切り上げられます。",
+    note: "タプルは空き領域の後ろ端（ページ末尾側）に置かれ、それを指すラインポインターが前から追加されます。タプルが占める領域は MAXALIGN（8バイト境界）に切り上げられます。",
     noteEn:
-      "The tuple is placed downward from the end of the page, and a line pointer pointing at it is appended at the front. Lengths are rounded up to MAXALIGN (an 8-byte boundary).",
+      "The tuple is placed at the back end of the free space, and a line pointer to it is added to the array at the front of the page. The space the tuple occupies is rounded up to MAXALIGN (an 8-byte boundary).",
     touched: ["lp0", "t1"],
   });
 
@@ -184,7 +189,7 @@ pd_lower += 4                   → 36
 free space = 160 - 36 = 124`,
     note: "空き領域は pd_upper − pd_lower で求まります。次の挿入では「タプル長 + ラインポインター4バイト」がこの空き領域に収まるかを確認します。",
     noteEn:
-      "Free space is pd_upper − pd_lower. Before the next insert, the page checks whether the tuple length plus a 4-byte line pointer still fits.",
+      "Free space is pd_upper − pd_lower. The next insert checks whether the tuple length plus a 4-byte line pointer fits in it.",
     touched: ["lp2", "t3", "free"],
   });
 
@@ -194,6 +199,8 @@ free space = 160 - 36 = 124`,
     titleEn: "Delete row 2 (DELETE)",
     code: `ItemIdData[1].lp_flags = LP_DEAD
 // タプルのバイトはまだページ上に残っている`,
+    codeEn: `ItemIdData[1].lp_flags = LP_DEAD
+// the tuple's bytes are still on the page`,
     note: "DELETE はバイトを消しません。MVCC のもとでは、まだそのバージョンを見ているトランザクションがいるかもしれないからです。まず t_xmax が書かれ、誰からも見えなくなって初めてラインポインターが LP_DEAD になります。",
     noteEn:
       "DELETE does not erase bytes: under MVCC another transaction may still be looking at that version. First t_xmax is stamped, and only once the version is invisible to everyone does the line pointer become LP_DEAD.",
@@ -211,9 +218,16 @@ free space = 160 - 36 = 124`,
   ItemIdData[2].lp_off = 200
   ItemIdData[1].lp_flags = LP_UNUSED
   pd_upper = 200`,
+    codeEn: `PageRepairFragmentation(page)
+  repack the live tuples against the end of the page
+  t1: 224 → 224   (not moved)
+  t3: 160 → 200
+  ItemIdData[2].lp_off = 200
+  ItemIdData[1].lp_flags = LP_UNUSED
+  pd_upper = 200`,
     note: "詰め直しでタプルは移動しますが、ラインポインター番号は変わりません。だからインデックスに記録された TID を書き換えずに済みます。これが間接参照を1段挟む最大の理由です。",
     noteEn:
-      "Compaction moves tuples, but line-pointer numbers stay the same — which is why TIDs recorded in indexes never have to be rewritten. That is the whole reason for the extra level of indirection.",
+      "Compaction moves tuples, but line-pointer numbers stay the same, so TIDs recorded in indexes do not have to be rewritten. That is the main reason for the extra level of indirection.",
     touched: ["t3", "lp1", "lp2", "free"],
   });
 
@@ -226,9 +240,14 @@ pd_upper -= 32                  → 168
 ItemIdData[1] = (off=168, len=32, LP_NORMAL)
 pd_lower は 36 のまま（配列は伸びない）
 free space = 168 - 36 = 132`,
-    note: "空いているラインポインターがあれば配列は伸びません。だから pd_lower は据え置きです。逆に言えば、削除と挿入を繰り返してもラインポインター番号は再利用されるため、TID は世界で一意な識別子ではありません。",
+    codeEn: `reuse slot 1 (LP_UNUSED)
+pd_upper -= 32                  → 168
+ItemIdData[1] = (off=168, len=32, LP_NORMAL)
+pd_lower stays at 36 (the array does not grow)
+free space = 168 - 36 = 132`,
+    note: "空いているラインポインターがあれば配列は伸びません。だから pd_lower は据え置きです。削除と挿入を繰り返すとラインポインター番号が再利用されるので、TID は1つの行を恒久的に指す識別子ではありません。",
     noteEn:
-      "When a free line pointer exists the array does not grow, so pd_lower stays put. Conversely, because slot numbers are recycled across delete/insert cycles, a TID is not a globally unique row identifier.",
+      "When a free line pointer exists the array does not grow, so pd_lower stays put. Because line-pointer numbers are recycled across delete/insert cycles, a TID does not permanently identify one row.",
     touched: ["lp1", "t4"],
   });
 
@@ -304,7 +323,7 @@ export function SlottedPageVisualizer({ locale = "ja" }: Props) {
       title={
         isJa
           ? "スロット付きページ — 行がバイトとして置かれる場所"
-          : "The Slotted Page — Where a Row Actually Lives as Bytes"
+          : "The Slotted Page — Where a Row Lives as Bytes"
       }
       description={
         isJa
@@ -427,7 +446,7 @@ export function SlottedPageVisualizer({ locale = "ja" }: Props) {
               {isJa ? f.title : f.titleEn}
             </div>
             <pre className="overflow-x-auto rounded-lg border border-border bg-background p-2.5 font-mono text-[10.5px] leading-relaxed text-foreground">
-              {f.code}
+              {isJa ? f.code : f.codeEn ?? f.code}
             </pre>
           </div>
         </div>

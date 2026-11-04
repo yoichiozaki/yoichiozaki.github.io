@@ -100,17 +100,17 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "Product Quantization を触ってみる" : "Play with Product Quantization"}
+      title={isJa ? "Product Quantization: 部分空間ごとのコードで距離を近似する" : "Product Quantization: approximating distance from subspace codes"}
       description={
         isJa
-          ? "たとえるなら住所の圧縮です。『東京都渋谷区神南1-2-3』を丸ごと覚えるのではなく、『東京都→コード3、渋谷区→コード1、神南→コード5』と辞書引きに置き換える。このデモでは、本物の PQより小さなパラメーター (8 次元ベクトルを 4 つの部分空間に分け、各部分空間の代表点は 4 個) を使っています — 本物は通常 m=64、k*=256です。"
-          : "Think of it as address compression. Instead of memorising '1-2-3 Jinnan, Shibuya, Tokyo' verbatim, you replace each segment with a dictionary code ('Tokyo→3', 'Shibuya→1', 'Jinnan→5'). This demo uses shrunk parameters (an 8-dim vector split into 4 sub-spaces, each with 4 centroids) so every moving part is visible — real PQ typically runs m=64, k*=256."
+          ? "PQ は部分空間ごとに、最も近いセントロイドの ID（コード）だけを保存します。部分空間ごとの図は、セントロイド（灰色の点）、DB ベクトルの部分ベクトル（青い点）、コードに選ばれたセントロイド（大きい点）を示します。このデモは、8 次元を 4 つの部分空間に分け、それぞれ 4 個のセントロイドを使う縮小版です。本文の例（d=1024）では m=64、k*=256 です。"
+          : "PQ stores only the ID (code) of the nearest centroid in each subspace. Each subspace panel shows the centroids (gray dots), the DB vector's subvector (blue dot), and the centroid chosen as the code (large dot). This scaled-down demo splits 8 dimensions into 4 subspaces with 4 centroids each; the article's example (d=1024) uses m=64, k*=256."
       }
     >
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <div className="mb-2 text-sm font-semibold text-foreground">
-            {isJa ? `クエリーベクトル (8 次元 = ${rawBytes} byte float32)` : `Query vector (8-dim = ${rawBytes} B float32)`}
+            {isJa ? `クエリーベクトル (8 次元の float32 = ${rawBytes} バイト)` : `Query vector (8-dim float32 = ${rawBytes} B)`}
           </div>
           <div className="space-y-1.5">
             {query.map((v, i) => (
@@ -137,7 +137,7 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
 
         <div>
           <div className="mb-2 text-sm font-semibold text-foreground">
-            {isJa ? `DB ベクトル (PQ で ${totalBits} bit に圧縮)` : `DB vector (PQ-compressed to ${totalBits} bits)`}
+            {isJa ? `DB ベクトル (PQ で ${totalBits} ビットに圧縮)` : `DB vector (PQ-compressed to ${totalBits} bits)`}
           </div>
           <div className="space-y-2">
             {CODEBOOKS.map((cb, m) => {
@@ -149,7 +149,7 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
                   className="rounded-md border border-border bg-background p-2"
                 >
                   <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-muted-foreground">sub-space m={m}</span>
+                    <span className="text-muted-foreground">subspace i={m}</span>
                     <span className="rounded bg-accent/20 px-1.5 py-0.5 text-accent">
                       code={code}
                     </span>
@@ -204,7 +204,7 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
       <div className="mt-4 grid gap-2 sm:grid-cols-2 text-sm">
         <div className="rounded-md border border-border bg-background p-3">
           <div className="text-xs text-muted-foreground">
-            {isJa ? `真の距離 (${rawBytes} B 比較)` : `True distance (${rawBytes} B compare)`}
+            {isJa ? `真の距離の二乗 (${rawBytes} バイトで比較)` : `True squared distance (${rawBytes} B vectors)`}
           </div>
           <div className="font-mono text-lg text-foreground">
             {trueD.toFixed(4)}
@@ -212,12 +212,12 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
         </div>
         <div className="rounded-md border border-accent bg-accent/10 p-3">
           <div className="text-xs text-muted-foreground">
-            {isJa ? `PQ 近似距離 (${totalBits} bit 比較)` : `PQ approx distance (${totalBits} bit compare)`}
+            {isJa ? `PQ 近似距離の二乗 (${totalBits} ビットのコードで比較)` : `PQ approx. squared distance (${totalBits}-bit code)`}
           </div>
           <div className="font-mono text-lg text-accent">
             {approxD.toFixed(4)}{" "}
             <span className="text-xs">
-              (err {((approxD - trueD) / Math.max(trueD, 1e-6)).toFixed(2)})
+              (rel. err {((approxD - trueD) / Math.max(trueD, 1e-6)).toFixed(2)})
             </span>
           </div>
         </div>
@@ -225,8 +225,8 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
 
       <p className="mt-3 text-xs text-muted-foreground">
         {isJa
-          ? "スライダーを動かしてみてください。PQ 近似が真の距離をなぞる様子と、部分空間ごとに一番近い代表点が切り替わる瞬間が観察できます。"
-          : "Move the sliders. Watch the PQ approximation track the true distance, and notice when a sub-space switches to a different centroid."}
+          ? "スライダーでクエリーを動かすと、PQ の近似値が真の値をどこまでなぞるかが分かります。DB ベクトルのコードは固定で、クエリーは圧縮しません（ADC）。"
+          : "Move the sliders to change the query and see how closely the PQ approximation tracks the true value. The DB vector's codes stay fixed, and the query is never compressed (ADC)."}
       </p>
     </InteractiveDemo>
   );

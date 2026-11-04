@@ -74,7 +74,7 @@ export function ResidencyMatchVisualizer({ locale = "ja" }: Props) {
   const narration = (() => {
     if (!step) {
       return isJa
-        ? "研修医 A〜F が、病院 X・Y・Z（定員は各 2）に希望順位どおりに応募します。病院は «定員までの順番待ちリスト» を持ち、リストにない応募者は即座に断ります。"
+        ? "研修医 A〜F が、病院 X・Y・Z（定員は各 2）に希望順位どおりに応募します。病院は «定員までの順番待ちリスト» を持ち、順位表にない応募者は即座に断ります。"
         : "Residents A–F apply to hospitals X, Y and Z (two positions each) in order of preference. Each hospital keeps a waiting list up to its capacity and turns away anyone not on its rank list.";
     }
     const list = step.proposals.map((p) => `${A(p.p)}→${H(p.r)}`).join(", ");
@@ -95,7 +95,7 @@ export function ResidencyMatchVisualizer({ locale = "ja" }: Props) {
         parts.push(`${s}。`);
       } else {
         let s = `${H(h)}: `;
-        if (unacc.length) s += `${names(unacc)} ${unacc.length > 1 ? "are" : "is"} not on ${H(h)}'s rank list and is turned away. `;
+        if (unacc.length) s += `${names(unacc)} ${unacc.length > 1 ? "are" : "is"} not on ${H(h)}'s rank list and is turned away; `;
         s += `holds [${names(keep)}]`;
         if (dropped.length) s += `, bumping ${names(dropped)}`;
         if (rejected.length) s += `; ${names(rejected)} miss${rejected.length > 1 ? "" : "es"} the cut`;
@@ -208,7 +208,7 @@ export function ResidencyMatchVisualizer({ locale = "ja" }: Props) {
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1 pl-8">
-                    <span className={`text-[10px] ${sideText.right}`}>{isJa ? "順位表:" : "ranks:"}</span>
+                    <span className={`text-[10px] ${sideText.right}`}>{isJa ? "順位表:" : "rank list:"}</span>
                     {list.map((a) => (
                       <PrefChip key={a} name={A(a)} state={hospitalChip(h, a)} />
                     ))}
@@ -243,7 +243,7 @@ export function ResidencyMatchVisualizer({ locale = "ja" }: Props) {
                 <span className="text-muted-foreground">
                   {isJa
                     ? `（${names(differs)} の配属先が変わる）`
-                    : ` (${names(differs)} move)`}
+                    : ` (${names(differs)} placed differently)`}
                 </span>
               )}
             </div>
@@ -268,7 +268,7 @@ export function ResidencyMatchVisualizer({ locale = "ja" }: Props) {
           <div className="mt-3 border-t border-border pt-2">
             <div className="mb-1 text-[11px] font-semibold text-foreground">
               {isJa
-                ? "カットオフで説明する: «もっと好きな病院に入れなかった理由»"
+                ? "境界（カットオフ）で説明する: «もっと好きな病院に入れなかった理由»"
                 : "Explained by cutoffs: why each resident missed the hospitals they prefer"}
             </div>
             <div className="mb-1.5 flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">

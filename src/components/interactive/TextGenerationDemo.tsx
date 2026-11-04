@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type Props = { locale?: string };
@@ -39,8 +40,8 @@ const steps: Step[] = [
     ],
     phase: "logits",
     desc: {
-      ja: 'コンテキスト "The cat" を入力。モデルの最終層が次トークンの生ロジット（スコア）を出力する。',
-      en: 'Input context "The cat". The model\'s final layer outputs raw logits (scores) for the next token.',
+      ja: 'コンテキスト "The cat" を入力すると、モデルの最終層が次のトークンの候補ごとにロジット（softmax 前のスコア）を出力する。',
+      en: 'Given the context "The cat", the model\'s final layer outputs a logit (a score before softmax) for each candidate next token.',
     },
   },
   /* 1 */ {
@@ -54,8 +55,8 @@ const steps: Step[] = [
     ],
     phase: "logits",
     desc: {
-      ja: "softmax を適用してロジットを確率分布に変換。温度 T=1.0（デフォルト）では元のロジット分布がそのまま反映される。",
-      en: "Apply softmax to convert logits to probabilities. With temperature T=1.0 (default), the original logit distribution is preserved.",
+      ja: "softmax でロジットを確率分布に変換する。温度 T = 1.0（デフォルト）では、ロジットを T で割っても値は変わらない。",
+      en: "Softmax converts the logits into probabilities. At temperature T = 1.0 (the default), dividing the logits by T leaves them unchanged.",
     },
   },
   /* 2 */ {
@@ -70,8 +71,8 @@ const steps: Step[] = [
     temperature: 0.5,
     phase: "temperature",
     desc: {
-      ja: "温度 T=0.5 に下げると分布が鋭くなる（logit/T で割る）。高確率トークンがさらに支配的になり、出力がより決定的になる。",
-      en: "Lower temperature T=0.5 sharpens the distribution (divide logits by T). High-probability tokens become more dominant — output becomes more deterministic.",
+      ja: "温度を T = 0.5 に下げると、ロジットを 0.5 で割るので分布が鋭くなる。確率の高いトークンがさらに選ばれやすくなり、出力がより決定的になる。",
+      en: "Lowering the temperature to T = 0.5 divides the logits by 0.5, which sharpens the distribution. Likely tokens become even more likely, and the output becomes more deterministic.",
     },
   },
   /* 3 */ {
@@ -86,8 +87,8 @@ const steps: Step[] = [
     temperature: 2.0,
     phase: "temperature",
     desc: {
-      ja: "温度 T=2.0 に上げると分布がなだらかなる。低確率トークンも選ばれやすくなり、出力が多様（創造的）になるが、不自然な文も生成しやすい。",
-      en: "Higher temperature T=2.0 flattens the distribution. Low-probability tokens become more likely — output is more diverse (creative) but may be less coherent.",
+      ja: "温度を T = 2.0 に上げると分布がなだらかになる。確率の低いトークンも選ばれやすくなり、出力が多様（創造的）になるが、不自然な文も出やすくなる。",
+      en: "Raising the temperature to T = 2.0 flattens the distribution. Less likely tokens are chosen more often, so the output becomes more diverse (creative) but also more likely to be incoherent.",
     },
   },
   /* 4 */ {
@@ -102,8 +103,8 @@ const steps: Step[] = [
     topK: 3,
     phase: "topk",
     desc: {
-      ja: "Top-k サンプリング（k=3）: 確率上位 3 トークンだけを残し、残りを排除する。次のステップで再正規化してサンプリングする。",
-      en: "Top-k sampling (k=3): Keep only the top 3 tokens by probability and eliminate the rest. The remaining probabilities will be renormalized in the next step.",
+      ja: "Top-k サンプリング（k = 3）: 確率上位 3 トークンだけを残し、残りの確率を 0 にする。次のステップで再正規化してサンプリングする。",
+      en: "Top-k sampling (k = 3): only the 3 most probable tokens are kept, and the rest are set to zero. The next step renormalizes the remaining probabilities and samples from them.",
     },
   },
   /* 5 */ {
@@ -118,38 +119,38 @@ const steps: Step[] = [
     topK: 3,
     phase: "sample",
     desc: {
-      ja: '残った確率分布からサンプリング → "sat" が選ばれた！Greedy ではなく確率的に選ぶので、同じ入力でも毎回異なる結果になりうる。',
-      en: 'Sample from the remaining distribution → "sat" was selected! Since sampling is stochastic (not greedy), the same input can produce different outputs.',
+      ja: '再正規化した分布（0.54、0.36、0.10）からサンプリングし、"sat" が選ばれた。greedy decoding と違って確率的に選ぶので、同じ入力でも 36% の確率で "is" が選ばれる。',
+      en: 'A token is sampled from the renormalized distribution (0.54, 0.36, 0.10), and "sat" is chosen. Unlike greedy decoding, sampling is random: with the same input, "is" is chosen 36% of the time.',
     },
   },
   /* 6 */ {
     context: ["The", "cat", "sat"],
     candidates: [
-      { token: "on", logit: 4.1, prob: 0.52 },
-      { token: "down", logit: 2.3, prob: 0.18 },
-      { token: "quietly", logit: 1.8, prob: 0.10 },
-      { token: "in", logit: 1.2, prob: 0.06 },
-      { token: "and", logit: 0.8, prob: 0.04 },
+      { token: "on", logit: 4.1, prob: 0.74 },
+      { token: "down", logit: 2.3, prob: 0.12 },
+      { token: "quietly", logit: 1.8, prob: 0.07 },
+      { token: "in", logit: 1.2, prob: 0.04 },
+      { token: "and", logit: 0.8, prob: 0.03 },
     ],
     phase: "append",
     desc: {
-      ja: '"sat" がコンテキストに追加され、"The cat sat" が新しい入力に。このプロセスを繰り返すのが自己回帰生成。1トークンずつ文を構築していく。',
-      en: '"sat" is appended to context, making "The cat sat" the new input. Repeating this process is autoregressive generation — building the sentence one token at a time.',
+      ja: '"sat" をコンテキストに追加し、"The cat sat" を新しい入力として次のトークンの分布を計算する。これを繰り返すのが自己回帰生成だ。',
+      en: '"sat" is appended to the context, and the distribution over the next token is computed from the new input "The cat sat". Repeating this is autoregressive generation.',
     },
   },
   /* 7 */ {
     context: ["The", "cat", "sat"],
     candidates: [
-      { token: "on", logit: 4.1, prob: 0.52, selected: true },
-      { token: "down", logit: 2.3, prob: 0.18 },
-      { token: "quietly", logit: 1.8, prob: 0.10 },
-      { token: "in", logit: 1.2, prob: 0.06 },
-      { token: "and", logit: 0.8, prob: 0.04 },
+      { token: "on", logit: 4.1, prob: 0.74, selected: true },
+      { token: "down", logit: 2.3, prob: 0.12 },
+      { token: "quietly", logit: 1.8, prob: 0.07 },
+      { token: "in", logit: 1.2, prob: 0.04 },
+      { token: "and", logit: 0.8, prob: 0.03 },
     ],
     phase: "sample",
     desc: {
-      ja: '"on" を選択 → "The cat sat on" ... このように左から右へ1トークンずつ生成し、停止トークン（EOS）が出るまで繰り返す。これがLLMのテキスト生成の全体像。',
-      en: 'Select "on" → "The cat sat on" ... Generation proceeds left-to-right, one token at a time, until a stop token (EOS) is produced. This is the complete LLM text generation loop.',
+      ja: '次は "on" が選ばれ、"The cat sat on" になる。こうして左から右へ 1 トークンずつ生成し、停止トークン（EOS）が出るまで繰り返す。',
+      en: 'Next, "on" is chosen, giving "The cat sat on". Generation continues left to right, one token at a time, until a stop token (EOS) is produced.',
     },
   },
 ];
@@ -168,8 +169,8 @@ export function TextGenerationDemo({ locale = "ja" }: Props) {
       title={lang === "en" ? "Text Generation Demo" : "テキスト生成デモ"}
       description={
         lang === "en"
-          ? "Watch how LLMs generate text one token at a time using temperature and top-k sampling."
-          : "LLMが温度とtop-kサンプリングで1トークンずつテキストを生成する過程を見てみましょう。"
+          ? "Text generated one token at a time with temperature and top-k sampling (top five candidates shown, illustrative values)."
+          : "温度と top-k サンプリングで、LLM が 1 トークンずつテキストを生成する過程を示す（表示は上位 5 候補、値は説明用）。"
       }
     >
       <div className="space-y-4">
@@ -262,7 +263,10 @@ export function TextGenerationDemo({ locale = "ja" }: Props) {
           })}
         </div>
 
-        <StepPlayerControls {...player} label={(s) => steps[s].desc[lang]} />
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {current.desc[lang]}
+        </p>
+        <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

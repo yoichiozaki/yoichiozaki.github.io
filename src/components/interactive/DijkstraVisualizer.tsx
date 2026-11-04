@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type DijkstraVisualizerProps = { locale?: string };
@@ -84,7 +85,7 @@ function generateSteps(): DijkstraStep[] {
     distances: d0,
     priorityQueue: [{ node: "A", dist: 0 }],
     description: {
-      ja: "Dijkstraのアルゴリズムを頂点 A から開始します。始点 A の距離を 0 に、それ以外を ∞ に初期化します。優先度付きキューに A(距離0) を入れます。",
+      ja: "Dijkstra 法を頂点 A から開始します。始点 A の距離を 0 に、それ以外を ∞ に初期化します。優先度付きキューに A(距離 0) を入れます。",
       en: "Start Dijkstra's algorithm from vertex A. Initialize distance to A as 0, all others as ∞. Insert A(dist=0) into the priority queue.",
     },
   });
@@ -103,8 +104,8 @@ function generateSteps(): DijkstraStep[] {
     ],
     highlightEdge: ["A", "B"],
     description: {
-      ja: "優先度付きキューから最小距離の A(0) を取り出し、確定します。A から出る辺を緩和: A→B(0+4=4), A→C(0+2=2)。既知の ∞ より小さいので距離を更新。",
-      en: "Extract min A(0) from PQ and finalize it. Relax edges: A→B(0+4=4), A→C(0+2=2). Both improve upon ∞, so update distances.",
+      ja: "優先度付きキューから最小距離の A(0) を取り出し、確定します。A から出る辺を緩和: A→B(0+4=4), A→C(0+2=2)。どちらも ∞ より小さいので距離を更新。",
+      en: "Extract the minimum, A(0), from the priority queue and finalize it. Relax edges: A→B(0+4=4), A→C(0+2=2). Both improve upon ∞, so update distances.",
     },
   });
 
@@ -144,8 +145,8 @@ function generateSteps(): DijkstraStep[] {
     ],
     highlightEdge: ["C", "B"],
     description: {
-      ja: "C(2) を取り出して緩和。C→B: 2+1=3 < 4（更新！ A→B直行より A→C→B 経由の方が近い）。C→D: 2+5=7 < ∞（更新）。これが「緩和」の本質 — より良い経路が見つかったら更新します。",
-      en: "Extract C(2) and relax. C→B: 2+1=3 < 4 (improvement! Going A→C→B is shorter than A→B). C→D: 2+5=7 < ∞ (update). This is the essence of 'relaxation' — update when a better path is found.",
+      ja: "C(2) を取り出して緩和。C→B: 2+1=3 < 4（更新。直行の A→B より A→C→B 経由の方が近い）。C→D: 2+5=7 < ∞（更新）。このように、より短い経路が見つかったら距離を更新するのが緩和です。",
+      en: "Extract C(2) and relax. C→B: 2+1=3 < 4 (update: A→C→B is shorter than the direct A→B). C→D: 2+5=7 < ∞ (update). This is relaxation: updating a distance whenever a shorter path is found.",
     },
   });
 
@@ -168,7 +169,7 @@ function generateSteps(): DijkstraStep[] {
     ],
     description: {
       ja: "C を確定。優先度付きキュー: [B(3), D(7)]。次は B(3)。",
-      en: "C is finalized. PQ: [B(3), D(7)]. Next: B(3).",
+      en: "C is finalized. Priority queue: [B(3), D(7)]. Next: B(3).",
     },
   });
 
@@ -192,8 +193,8 @@ function generateSteps(): DijkstraStep[] {
     ],
     highlightEdge: ["B", "D"],
     description: {
-      ja: "B(3) を取り出して緩和。B→D: 3+3=6 < 7（改善！C経由よりB経由の方が近い）。B→E: 3+1=4 < ∞。距離の更新が連鎖していく様子がわかりますか？",
-      en: "Extract B(3) and relax. B→D: 3+3=6 < 7 (improved! Via B is shorter than via C). B→E: 3+1=4 < ∞. Notice how distance updates cascade as we discover better paths.",
+      ja: "B(3) を取り出して緩和。B→D: 3+3=6 < 7（更新。C 経由より B 経由の方が近い）。B→E: 3+1=4 < ∞（更新）。B の距離が 4 から 3 に縮んだので、B の先にある D の距離も縮みました。",
+      en: "Extract B(3) and relax. B→D: 3+3=6 < 7 (update: via B is shorter than via C). B→E: 3+1=4 < ∞ (update). Because B's distance dropped from 4 to 3, the distance to D beyond it dropped too.",
     },
   });
 
@@ -216,8 +217,8 @@ function generateSteps(): DijkstraStep[] {
       { node: "D", dist: 6 },
     ],
     description: {
-      ja: "B を確定。PQ: [E(4), D(6)]。次は E(4)。",
-      en: "B finalized. PQ: [E(4), D(6)]. Next: E(4).",
+      ja: "B を確定。優先度付きキュー: [E(4), D(6)]。次は E(4)。",
+      en: "B is finalized. Priority queue: [E(4), D(6)]. Next: E(4).",
     },
   });
 
@@ -241,8 +242,8 @@ function generateSteps(): DijkstraStep[] {
     ],
     highlightEdge: ["E", "F"],
     description: {
-      ja: "E(4) を取り出して緩和。E→F: 4+4=8 < ∞（更新）。E→B は確定済みなのでスキップ。",
-      en: "Extract E(4) and relax. E→F: 4+4=8 < ∞ (update). E→B is already finalized — skip.",
+      ja: "E(4) を取り出して緩和。E から出る辺は E→F だけです。E→F: 4+4=8 < ∞（更新）。",
+      en: "Extract E(4) and relax. E's only outgoing edge is E→F: 4+4=8 < ∞ (update).",
     },
   });
 
@@ -265,8 +266,8 @@ function generateSteps(): DijkstraStep[] {
       { node: "F", dist: 8 },
     ],
     description: {
-      ja: "E 確定。PQ: [D(6), F(8)]。次は D(6)。",
-      en: "E finalized. PQ: [D(6), F(8)]. Next: D(6).",
+      ja: "E を確定。優先度付きキュー: [D(6), F(8)]。次は D(6)。",
+      en: "E is finalized. Priority queue: [D(6), F(8)]. Next: D(6).",
     },
   });
 
@@ -286,8 +287,8 @@ function generateSteps(): DijkstraStep[] {
     priorityQueue: [{ node: "F", dist: 8 }],
     highlightEdge: ["D", "F"],
     description: {
-      ja: "D(6) を取り出して緩和。D→F: 6+2=8 = 現在の距離8（改善なし！E経由ですでに同じ距離に到達済み）。距離が同じなので更新は不要です。",
-      en: "Extract D(6) and relax. D→F: 6+2=8 = current distance 8 (no improvement! Already reachable via E at the same cost). No update needed.",
+      ja: "D(6) を取り出して緩和。D→F: 6+2=8 は現在の距離 8 と同じです。E 経由で同じ距離に到達済みなので、更新しません。",
+      en: "Extract D(6) and relax. D→F: 6+2=8 equals the current distance 8, already reached via E, so there is no update.",
     },
   });
 
@@ -306,8 +307,8 @@ function generateSteps(): DijkstraStep[] {
     distances: d10,
     priorityQueue: [{ node: "F", dist: 8 }],
     description: {
-      ja: "D 確定。PQ: [F(8)]。最後の頂点です。",
-      en: "D finalized. PQ: [F(8)]. Last vertex remaining.",
+      ja: "D を確定。優先度付きキュー: [F(8)]。残りは F だけです。",
+      en: "D is finalized. Priority queue: [F(8)]. Only F remains.",
     },
   });
 
@@ -325,8 +326,8 @@ function generateSteps(): DijkstraStep[] {
     distances: d10,
     priorityQueue: [],
     description: {
-      ja: "F(8) を取り出し。F から出る辺の先はすべて確定済み。キューが空になりました。",
-      en: "Extract F(8). All of F's neighbors are finalized. The queue is now empty.",
+      ja: "F(8) を取り出します。F から出る辺はないので、緩和する辺はありません。キューが空になりました。",
+      en: "Extract F(8). F has no outgoing edges, so there is nothing to relax. The queue is now empty.",
     },
   });
 
@@ -343,8 +344,8 @@ function generateSteps(): DijkstraStep[] {
     distances: d10,
     priorityQueue: [],
     description: {
-      ja: "Dijkstra 完了！ A からの最短距離: B=3(A→C→B), C=2(A→C), D=6(A→C→B→D), E=4(A→C→B→E), F=8(A→C→B→E→F)。貪欲に「今わかっている最短距離の頂点」を確定させていくことで、全頂点への最短経路が得られました。",
-      en: "Dijkstra complete! Shortest distances from A: B=3(A→C→B), C=2(A→C), D=6(A→C→B→D), E=4(A→C→B→E), F=8(A→C→B→E→F). By greedily finalizing the vertex with the smallest known distance, we found shortest paths to all vertices.",
+      ja: "Dijkstra 完了。A からの最短距離: B=3(A→C→B), C=2(A→C), D=6(A→C→B→D), E=4(A→C→B→E), F=8(A→C→B→E→F)。貪欲に「今わかっている最短距離の頂点」を確定させていくことで、全頂点への最短経路が得られました。",
+      en: "Dijkstra complete. Shortest distances from A: B=3(A→C→B), C=2(A→C), D=6(A→C→B→D), E=4(A→C→B→E), F=8(A→C→B→E→F). By greedily finalizing the vertex with the smallest known distance, we found shortest paths to all vertices.",
     },
   });
 
@@ -386,12 +387,12 @@ export function DijkstraVisualizer({
     <InteractiveDemo
       title={
         locale === "ja"
-          ? "Dijkstra のアルゴリズム ビジュアライザー"
+          ? "Dijkstra 法ビジュアライザー"
           : "Dijkstra's Algorithm Visualizer"
       }
       description={
         locale === "ja"
-          ? "重み付きグラフで最短経路を求める過程をステップごとに追います。"
+          ? "重み付き有向グラフで最短経路を求める過程をステップごとに追います。"
           : "Step through Dijkstra's algorithm on a weighted directed graph."
       }
     >
@@ -564,7 +565,7 @@ export function DijkstraVisualizer({
                       {entry.dist === null ? "∞" : entry.dist}
                     </span>
                     <span className="font-mono text-right py-0.5 text-muted-foreground">
-                      {entry.prev ? `via ${entry.prev}` : "−"}
+                      {entry.prev ? `prev: ${entry.prev}` : "−"}
                     </span>
                   </div>
                 );
@@ -628,6 +629,7 @@ export function DijkstraVisualizer({
               ? `ステップ ${s}/${steps.length - 1}`
               : `Step ${s}/${steps.length - 1}`
           }
+          ariaLabels={stepPlayerAriaLabels(locale)}
         />
       </div>
     </InteractiveDemo>

@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { InteractiveDemo } from "./InteractiveDemo";
 import { StepPlayerControls } from "./StepPlayerControls";
+import { stepPlayerAriaLabels } from "./stepPlayerAriaLabels";
 import { useStepPlayer } from "./useStepPlayer";
 
 type ExecutionStep = {
@@ -45,31 +46,31 @@ const steps: ExecutionStep[] = [
     imperative: { line: 1, state: { numbers: "[1,2,3,4,5,6]", result: "[]" } },
     declarative: { line: 2, state: { numbers: "[1,2,3,4,5,6]" } },
     description: "命令型: 空の配列を用意（ミュータブルな状態）。宣言型: メソッドチェーンを開始。",
-    descriptionEn: "Imperative: prepare empty array (mutable state). Declarative: begin method chain.",
+    descriptionEn: "Imperative: create an empty array (mutable state). Declarative: start the method chain.",
   },
   {
     imperative: { line: 2, state: { numbers: "[1,2,3,4,5,6]", result: "[]", i: "0" } },
     declarative: { line: 3, state: { numbers: "[1,2,3,4,5,6]", filtered: "[2,4,6]" } },
-    description: "命令型: ループ変数 i=0 で反復開始。宣言型: filter で偶数を抽出（一度に！）。",
-    descriptionEn: "Imperative: loop starts at i=0. Declarative: filter extracts evens (all at once!).",
+    description: "命令型: ループ変数 i=0 で反復開始。宣言型: filter が偶数を取り出す（反復は filter の内部で行われる）。",
+    descriptionEn: "Imperative: the loop starts at i=0. Declarative: filter keeps the even numbers (the iteration happens inside filter).",
   },
   {
     imperative: { line: 3, state: { numbers: "[1,2,3,4,5,6]", result: "[]", i: "0", "1%2===0": "false" } },
     declarative: { line: 4, state: { filtered: "[2,4,6]", result: "[4,8,12]" } },
-    description: "命令型: 1 は奇数 → スキップ。宣言型: map で各要素を2倍（一度に！）。",
-    descriptionEn: "Imperative: 1 is odd → skip. Declarative: map doubles each element (all at once!).",
+    description: "命令型: 1 は奇数 → スキップ。宣言型: map が各要素を 2 倍にする（反復は map の内部）。",
+    descriptionEn: "Imperative: 1 is odd → skip. Declarative: map doubles each element (again iterating internally).",
   },
   {
     imperative: { line: 3, state: { result: "[]", i: "1", "2%2===0": "true" } },
     declarative: { line: 4, state: { result: "[4,8,12]" } },
-    description: "命令型: 2 は偶数 → 条件分岐へ。宣言型: 完了。「何を」だけ記述して処理系に任せた。",
-    descriptionEn: "Imperative: 2 is even → enter branch. Declarative: done. Described 'what', left 'how' to runtime.",
+    description: "命令型: 2 は偶数 → 条件分岐へ。宣言型: 完了。「何を」だけを書き、「どうやるか」は処理系に任せた。",
+    descriptionEn: "Imperative: 2 is even → enter the branch. Declarative: done. Only the 'what' was written; the 'how' was left to the runtime.",
   },
   {
     imperative: { line: 4, state: { result: "[4]", i: "1" } },
     declarative: { line: 7, state: { result: "[4,8,12]" }, output: "[4, 8, 12]" },
     description: "命令型: result に 2*2=4 を push。宣言型: 結果が得られた。",
-    descriptionEn: "Imperative: push 2*2=4 to result. Declarative: result obtained.",
+    descriptionEn: "Imperative: push 2*2=4 onto result. Declarative: the result is ready.",
   },
   {
     imperative: { line: 3, state: { result: "[4]", i: "2", "3%2===0": "false" } },
@@ -87,13 +88,13 @@ const steps: ExecutionStep[] = [
     imperative: { line: 4, state: { result: "[4,8,12]", i: "5" } },
     declarative: { line: 7, state: { result: "[4,8,12]" }, output: "[4, 8, 12]" },
     description: "命令型: 5 をスキップし、6 は偶数 → 6*2=12 を push。",
-    descriptionEn: "Imperative: skip 5, 6 is even → push 6*2=12.",
+    descriptionEn: "Imperative: skip 5; 6 is even → push 6*2=12.",
   },
   {
     imperative: { line: 7, state: { result: "[4,8,12]" }, output: "[4, 8, 12]" },
     declarative: { line: 7, state: { result: "[4,8,12]" }, output: "[4, 8, 12]" },
-    description: "両方とも同じ結果。命令型は「どうやるか」を10ステップで記述。宣言型は「何がほしいか」を2行で記述。",
-    descriptionEn: "Both produce the same result. Imperative: 10 steps describing 'how'. Declarative: 2 lines describing 'what'.",
+    description: "両方とも同じ結果。命令型はループ変数・条件分岐・push という「どうやるか」を書き、宣言型は filter と map で「何がほしいか」だけを書いた。",
+    descriptionEn: "Both produce the same result. The imperative code spells out the 'how' (loop variable, branch, push); the declarative code states only the 'what' with filter and map.",
   },
 ];
 
@@ -103,12 +104,14 @@ function CodePanel({
   activeLine,
   state,
   output,
+  stateLabel,
 }: {
   title: string;
   code: string[];
   activeLine: number;
   state: Record<string, string>;
   output?: string;
+  stateLabel: string;
 }) {
   return (
     <div className="flex-1 min-w-[260px]">
@@ -133,7 +136,7 @@ function CodePanel({
         </div>
         {/* State panel */}
         <div className="border-t border-border px-3 py-2 bg-muted/30">
-          <div className="text-[10px] text-muted-foreground mb-1">State:</div>
+          <div className="text-[10px] text-muted-foreground mb-1">{stateLabel}</div>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5">
             {Object.entries(state).map(([k, v]) => (
               <span key={k} className="text-[11px]">
@@ -179,8 +182,8 @@ export function ImperativeVsDeclarative({ locale = "ja" }: ImperativeVsDeclarati
       title={isEn ? "Imperative vs Declarative Execution" : "命令型 vs 宣言型の実行比較"}
       description={
         isEn
-          ? "Step through the same task in imperative and declarative styles side by side."
-          : "同じタスクを命令型と宣言型で並べてステップ実行します。"
+          ? "Step through the same task in imperative and declarative style side by side: keep the even numbers and double them."
+          : "偶数を取り出して 2 倍する同じ処理を、命令型と宣言型で並べてステップ実行します。"
       }
     >
       <div className="flex flex-col gap-4">
@@ -191,6 +194,7 @@ export function ImperativeVsDeclarative({ locale = "ja" }: ImperativeVsDeclarati
             activeLine={current.imperative.line}
             state={current.imperative.state}
             output={current.imperative.output}
+            stateLabel={isEn ? "State:" : "状態:"}
           />
           <CodePanel
             title={isEn ? "Declarative (What)" : "宣言型（What）"}
@@ -198,6 +202,7 @@ export function ImperativeVsDeclarative({ locale = "ja" }: ImperativeVsDeclarati
             activeLine={current.declarative.line}
             state={current.declarative.state}
             output={current.declarative.output}
+            stateLabel={isEn ? "State:" : "状態:"}
           />
         </div>
 
@@ -205,7 +210,7 @@ export function ImperativeVsDeclarative({ locale = "ja" }: ImperativeVsDeclarati
           {isEn ? current.descriptionEn : current.description}
         </div>
 
-        <StepPlayerControls {...player} label={getLabel} />
+        <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

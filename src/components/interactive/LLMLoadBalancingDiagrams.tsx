@@ -19,7 +19,7 @@ const LAYERS = [
     ],
     decisionsEn: [
       "timeout, retry count, backoff",
-      "hedging (speculative duplicate issue)",
+      "hedging (issuing a speculative duplicate)",
       "streaming or not",
     ],
     color: "#3b82f6",
@@ -47,12 +47,12 @@ const LAYERS = [
     unitJa: "1 リクエスト → 1 レプリカ",
     unitEn: "one request to one replica",
     decisionsJa: [
-      "最小未完了数、P2C、KV 使用量",
+      "最小未完了数、2 択のべき乗（P2C）、KV 使用量",
       "プレフィックスキャッシュ親和性",
       "プレフィル用とデコード用の振り分け",
     ],
     decisionsEn: [
-      "least outstanding, P2C, KV usage",
+      "least outstanding, power of two choices, KV usage",
       "prefix-cache affinity",
       "prefill-worker vs decode-worker split",
     ],
@@ -67,11 +67,13 @@ const LAYERS = [
       "連続バッチ処理での投入順序",
       "チャンク化プレフィルの計算予算配分",
       "KV 不足時のプリエンプションと再計算",
+      "投機的デコードで 1 反復に下書きするトークン数",
     ],
     decisionsEn: [
       "admission order under continuous batching",
       "compute budget split for chunked prefill",
       "preemption and recompute under KV pressure",
+      "tokens drafted per iteration under speculative decoding",
     ],
     color: "#10b981",
   },
@@ -83,12 +85,10 @@ const LAYERS = [
     decisionsJa: [
       "テンソル並列・パイプライン並列・エキスパート並列",
       "KV キャッシュの階層配置（HBM / ホスト / ディスク）",
-      "投機的デコードの採択率",
     ],
     decisionsEn: [
       "tensor, pipeline, and expert parallelism",
       "KV cache tiering (HBM / host / disk)",
-      "speculative decoding acceptance rate",
     ],
     color: "#f59e0b",
   },
@@ -152,13 +152,13 @@ const METRICS = [
     leverEn: "endpoint selection, prefix cache, admission control",
   },
   {
-    ja: "ITL / TPOT（トークン間遅延）",
-    en: "ITL / TPOT (inter-token latency)",
-    defJa: "2 番目以降のトークンの平均間隔",
-    defEn: "mean gap between subsequent tokens",
+    ja: "ITL（トークン間遅延）/ TPOT（出力トークンあたりの時間）",
+    en: "ITL (inter-token latency) / TPOT (time per output token)",
+    defJa: "TPOT はリクエストごとに、最初のトークン以降の時間を 2 番目以降の出力トークン数で割った値。ITL は連続するストリーム出力の間隔で、全リクエスト分をまとめて集計する。通常のデコードでは両者は近い値になる（vLLM の定義）",
+    defEn: "TPOT: per request, time after the first token divided by the output tokens after the first. ITL: every gap between consecutive streamed outputs, pooled across requests. Typically similar under standard decoding (vLLM's definitions)",
     drivenJa: "同居バッチの大きさとプレフィル割り込み",
     drivenEn: "co-resident batch size and prefill interference",
-    leverJa: "バッチ上限、チャンク化プレフィル、PD 分離",
+    leverJa: "バッチ上限、チャンク化プレフィル、プレフィルとデコードの分離",
     leverEn: "batch cap, chunked prefill, prefill/decode disaggregation",
   },
   {
@@ -166,8 +166,8 @@ const METRICS = [
     en: "End-to-end latency",
     defJa: "到着から最後のトークンまで",
     defEn: "arrival to last token",
-    drivenJa: "TTFT + 出力長 × ITL",
-    drivenEn: "TTFT + output length × ITL",
+    drivenJa: "TTFT + 出力長 × TPOT",
+    drivenEn: "TTFT + output length × TPOT",
     leverJa: "出力長の制御、モデル選択",
     leverEn: "output length control, model selection",
   },
@@ -176,8 +176,8 @@ const METRICS = [
     en: "Normalized latency",
     defJa: "E2E ÷ 出力トークン数",
     defEn: "E2E divided by output tokens",
-    drivenJa: "出力長の違いを取り除いた比較",
-    drivenEn: "comparison with output length factored out",
+    drivenJa: "TTFT ÷ 出力長 + TPOT",
+    drivenEn: "TTFT ÷ output length + TPOT",
     leverJa: "負荷水準の異なる系の比較に使う",
     leverEn: "used to compare systems at different load levels",
   },
@@ -186,8 +186,8 @@ const METRICS = [
     en: "Goodput",
     defJa: "SLO を満たした完了リクエストの割合または率",
     defEn: "share or rate of completions that met the SLO",
-    drivenJa: "テールを含めた全体の質",
-    drivenEn: "overall quality including the tail",
+    drivenJa: "裾を含めたレイテンシー分布全体",
+    drivenEn: "the whole latency distribution, tail included",
     leverJa: "容量計画の主指標。スループット単独より有用",
     leverEn: "the primary capacity metric; more useful than raw throughput",
   },
@@ -198,8 +198,8 @@ const METRICS = [
     defEn: "used KV blocks divided by total blocks",
     drivenJa: "同居シーケンス数と文脈長",
     drivenEn: "resident sequence count and context length",
-    leverJa: "飽和するとプリエンプションが発生し ITL が跳ねる",
-    leverEn: "saturation triggers preemption and spikes ITL",
+    leverJa: "受付制御、容量追加（飽和するとプリエンプションで ITL が跳ねる）",
+    leverEn: "admission control, added capacity (saturation triggers preemption and spikes ITL)",
   },
 ];
 
@@ -290,7 +290,7 @@ const POLICIES = [
     costJa: "O(n)",
     costEn: "O(n)",
     failJa: "件数は仕事量の代理でしかない。分散環境では観測がずれる",
-    failEn: "count only proxies work; observations skew in distributed routers",
+    failEn: "count only proxies work; with distributed routers, observations drift",
   },
   {
     ja: "2 択のべき乗（P2C）",
@@ -299,14 +299,14 @@ const POLICIES = [
     signalEn: "outstanding count of two samples",
     costJa: "O(1)",
     costEn: "O(1)",
-    failJa: "単独最小より僅かに劣るが、群れ現象を避けやすい",
+    failJa: "全台走査より僅かに劣るが、群れ現象を避けやすい",
     failEn: "slightly worse than a full scan, but avoids herding",
   },
   {
     ja: "レイテンシー加重（EWMA）",
     en: "Latency weighted (EWMA)",
     signalJa: "観測レイテンシーの指数移動平均",
-    signalEn: "exponentially weighted latency",
+    signalEn: "exponentially weighted moving average of observed latency",
     costJa: "O(n)",
     costEn: "O(n)",
     failJa: "ストリーミングでは完了時刻が遅れて届き、信号が古くなる",
@@ -320,7 +320,7 @@ const POLICIES = [
     costJa: "O(log n)",
     costEn: "O(log n)",
     failJa: "キー分布が偏るとホットスポット。有界負荷版で緩和する",
-    failEn: "hot spots under skewed keys; bounded-load variants mitigate",
+    failEn: "hot spots under skewed keys; bounded-load variants mitigate this",
   },
   {
     ja: "KV / キュー考慮",
@@ -335,8 +335,8 @@ const POLICIES = [
   {
     ja: "プレフィックス考慮",
     en: "Prefix aware",
-    signalJa: "上の全部 + プレフィックス重なり",
-    signalEn: "all of the above plus prefix overlap",
+    signalJa: "件数・KV の負荷信号 + プレフィックスの重なり",
+    signalEn: "load signals (counts, KV) plus prefix overlap",
     costJa: "O(n) + 索引",
     costEn: "O(n) + index",
     failJa: "親和性を強くしすぎると負荷が偏る。閾値での切り替えが要る",
@@ -457,8 +457,8 @@ export function QueueingKneeCurve({ locale = "ja" }: Props) {
       title={isJa ? "稼働率と待ち時間の膝" : "The utilization / waiting-time knee"}
       description={
         isJa
-          ? "Pollaczek–Khinchine の式による、単一待ち行列の平均待ち時間（サービス時間で正規化）"
-          : "Mean waiting time of a single queue, normalized by service time, from the Pollaczek–Khinchine formula"
+          ? "Pollaczek–Khinchine の式による、M/G/1 待ち行列の平均待ち時間（平均サービス時間で正規化）"
+          : "Mean waiting time of an M/G/1 queue, normalized by mean service time, from the Pollaczek–Khinchine formula"
       }
     >
       <div className="overflow-x-auto">
@@ -570,8 +570,8 @@ export function QueueingKneeCurve({ locale = "ja" }: Props) {
       </div>
       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
         {isJa
-          ? "LLM のリクエストはプロンプト長と出力長のばらつきが大きく、CV² が 1 を大きく超えます。同じ稼働率でも待ち時間が跳ね上がるため、稼働率を上げ切る運用は成立しません。"
-          : "LLM request sizes vary enough that CV² sits well above 1. At the same utilization the queue is far deeper, which is why running an LLM pool near full utilization does not work."}
+          ? "CV² はサービス時間の変動係数の 2 乗です。点線は、プロンプト長と出力長のばらつきが大きい LLM のリクエストを想定し、CV² = 4 と仮定した曲線です。同じ稼働率でも待ち時間が跳ね上がるため、稼働率を上げ切る運用は成立しません。"
+          : "CV² is the squared coefficient of variation of service time. The dotted curve assumes CV² = 4 for LLM requests, whose prompt and output lengths vary widely. At the same utilization the queue is far deeper, which is why running an LLM pool near full utilization does not work."}
       </p>
     </InteractiveDemo>
   );
@@ -598,8 +598,8 @@ export function RetryAmplificationDiagram({ locale = "ja" }: Props) {
       title={isJa ? "リトライの多層増幅" : "Retry amplification across layers"}
       description={
         isJa
-          ? "各層が独立にリトライすると、上流から見た試行回数は積になります"
-          : "When every layer retries independently, upstream attempts multiply"
+          ? "各層が独立にリトライすると、上流から見た試行回数は積になります（括弧内は各層のリトライ回数）"
+          : "When every layer retries independently, upstream attempts multiply (parentheses show each layer's retries)"
       }
     >
       <div className="space-y-1.5">
@@ -627,8 +627,8 @@ export function RetryAmplificationDiagram({ locale = "ja" }: Props) {
       </div>
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
         {isJa
-          ? `1 回のユーザー操作が最悪 ${computed[computed.length - 1].cumulative} 回のモデル呼び出しになります。各層の試行回数は足し算ではなく掛け算で効くため、どの層も「自分は 2、3 回しかリトライしていない」と正しく主張できてしまうのがこの障害の厄介なところです。`
-          : `One user action can become ${computed[computed.length - 1].cumulative} model calls in the worst case. The per-layer attempt counts multiply rather than add, which is why every layer can truthfully say it only retried two or three times.`}
+          ? `1 回のユーザー操作が、最悪の場合 ${computed[computed.length - 1].cumulative} 回のモデル呼び出しになります。厄介なのは、どの層も「自分は 2、3 回しかリトライしていない」と正しく主張できることです。各層の試行回数は、足し算ではなく掛け算で効きます。`
+          : `One user action can become ${computed[computed.length - 1].cumulative} model calls in the worst case. The tricky part is that every layer can truthfully say it retried only two or three times: the per-layer attempt counts multiply rather than add.`}
       </p>
     </InteractiveDemo>
   );
@@ -639,8 +639,9 @@ export function RetryAmplificationDiagram({ locale = "ja" }: Props) {
 export function HedgingTimeline({ locale = "ja" }: Props) {
   const isJa = locale === "ja";
   // One unit = 10 ms. Replica A draws a slow 920 ms; replica B is a typical
-  // 300 ms. Both numbers stay fixed across all three rows — only the dispatch
-  // policy changes, so the rows are actually comparable.
+  // 300 ms, below the 400 ms P95 at which the hedge fires. Both numbers stay
+  // fixed across all three rows — only the dispatch policy changes, so the
+  // rows are actually comparable.
   const scenarios = [
     {
       ja: "ヘッジなし・運が悪い場合",
@@ -658,29 +659,29 @@ export function HedgingTimeline({ locale = "ja" }: Props) {
       resultEn: "920 ms, no extra load",
     },
     {
-      ja: "P95（240 ms）でヘッジ",
-      en: "Hedge at P95 (240 ms)",
+      ja: "P95（400 ms）でヘッジ",
+      en: "Hedge at P95 (400 ms)",
       bars: [
         {
           start: 0,
-          width: 54,
+          width: 70,
           ja: "レプリカ A（B の応答時に中断）",
           en: "Replica A (cancelled when B returns)",
           color: "#b91c1c",
         },
         {
-          start: 24,
+          start: 40,
           width: 30,
-          ja: "レプリカ B（ヘッジ・300 ms・採用）",
-          en: "Replica B (hedge, 300 ms, kept)",
+          ja: "レプリカ B（ヘッジ・300 ms で応答）",
+          en: "Replica B (hedge, replies in 300 ms)",
           color: "#047857",
         },
       ],
-      resultJa: "540 ms・追加負荷は約 5%",
-      resultEn: "540 ms, about 5% extra load",
+      resultJa: "700 ms・追加負荷は約 5%",
+      resultEn: "700 ms, about 5% extra load",
     },
     {
-      ja: "常時 2 重発行",
+      ja: "常時二重発行",
       en: "Always duplicate",
       bars: [
         {
@@ -708,7 +709,7 @@ export function HedgingTimeline({ locale = "ja" }: Props) {
       title={isJa ? "ヘッジ（投機的二重発行）の損得" : "The hedging trade-off"}
       description={
         isJa
-          ? "P95 を超えたときだけ二重発行すると、追加負荷を数 % に抑えつつテールを削れます"
+          ? "P95 を超えたときだけ二重発行すると、追加負荷を数 % に抑えつつ裾を削れます"
           : "Issuing a duplicate only after the P95 threshold trims the tail while adding only a few percent of load"
       }
     >
@@ -749,8 +750,8 @@ export function HedgingTimeline({ locale = "ja" }: Props) {
       </div>
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
         {isJa
-          ? "この図の比較対象はミリ秒ではなく追加負荷です。P95 でヘッジすれば、定義上 5% のリクエストしか二重発行されないので、定常状態の追加負荷はおよそ 5% です。常時 2 重発行は 100% 。ミリ秒の数字ではなくこの比が、閾値が存在する理由です。"
-          : "What this figure is really comparing is not milliseconds but added load. Hedging at P95 duplicates 5% of requests by construction, so steady-state extra load is about 5%. Always-duplicate is 100%. That ratio, not the millisecond numbers, is why the threshold exists."}
+          ? "ミリ秒の値は 1 回分の例で、比べるべきは追加負荷です。P95 でヘッジすると、二重発行されるのは定義上 5% のリクエストだけなので、定常状態の追加負荷はおよそ 5% です。常時二重発行では 100% です。閾値を置く理由は、この差にあります。"
+          : "The millisecond values are a single example; the comparison that matters is added load. Hedging at P95 duplicates 5% of requests by construction, so steady-state extra load is about 5%, against 100% for always duplicating. That difference is why the threshold exists."}
       </p>
     </InteractiveDemo>
   );
@@ -795,21 +796,21 @@ export function AgentTrafficShape({ locale = "ja" }: Props) {
       shapeEn: "long sequential chain",
     },
     {
-      ja: "サブエージェント並列",
+      ja: "並列サブエージェント",
       en: "Parallel subagents",
       calls: 40,
       spanJa: "数分",
       spanEn: "minutes",
       stateJa: "共有プレフィックス + 枝ごとの差分",
       stateEn: "shared prefix plus per-branch deltas",
-      shapeJa: "扇形の突発負荷",
+      shapeJa: "ファンアウトの突発負荷",
       shapeEn: "fan-out burst",
     },
     {
-      ja: "常駐エージェント",
+      ja: "長時間走るエージェント",
       en: "Long-running agent",
       calls: 300,
-      spanJa: "時間単位",
+      spanJa: "数時間",
       spanEn: "hours",
       stateJa: "圧縮・要約を挟む長期文脈",
       stateEn: "long-lived context with compaction",
@@ -824,14 +825,14 @@ export function AgentTrafficShape({ locale = "ja" }: Props) {
       title={isJa ? "エージェント化で変わる負荷の形" : "How agents change the traffic shape"}
       description={
         isJa
-          ? "スケジューリングの単位が「1 リクエスト」から「1 セッション」へ移ります"
-          : "The scheduling unit shifts from one request to one session"
+          ? "スケジューリングの単位が「1 リクエスト」から「1 セッション」へ移ります（呼び出し数は目安）"
+          : "The scheduling unit shifts from one request to one session (call counts are approximate)"
       }
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-left text-sm">
           <caption className="sr-only">
-            {isJa ? "呼び出し形状の比較" : "Call-shape comparison"}
+            {isJa ? "作業単位ごとの負荷の形" : "Traffic shape by unit of work"}
           </caption>
           <thead className="text-xs text-muted-foreground">
             <tr className="border-b border-border">

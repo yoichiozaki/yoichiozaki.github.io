@@ -71,7 +71,7 @@ export function OntologyInterpretationMap({ locale = "ja" }: Props) {
       description={
         isJa
           ? "行を選ぶと、その成果物が何を持ち、何を持たないかを表示します。●＝持つ、◐＝一部、○＝持たない。評価は議論のための粗い目安です。"
-          : "Select a row to see what each artefact has and lacks. ● = yes, ◐ = partly, ○ = no. The ratings are coarse, meant to support the discussion."
+          : "Select a row to see what each artefact has and lacks. ● = yes, ◐ = partly, ○ = no. The ratings are a rough guide for this discussion."
       }
     >
       <div className="space-y-4">
@@ -189,7 +189,7 @@ const STEPS: Step[] = [
     title: { ja: "語を概念に解決する", en: "Resolve words to concepts" },
     body: {
       ja: "「顧客」は営業の取引先（sales:Account）にも、受注・請求の得意先（billing:Customer）にも当たりうる。受注の金額を問うている以上、ここでは billing:Customer だ。名前空間・説明文・同義語が、この曖昧さを解く材料になる。「温度逸脱」は自然言語の規則に、「受注の金額」はセマンティックモデルが所有する指標に解決される。",
-      en: "“Customers” could mean the sales account (sales:Account) or the order-to-cash sold-to party (billing:Customer). Because the question asks about order amounts, it is billing:Customer here. Namespaces, descriptions and synonyms are what make this disambiguation possible. “Temperature excursion” resolves to a natural-language rule, and the order amount to a metric owned by a semantic model.",
+      en: "“Customers” could mean the sales account (sales:Account) or the order-to-cash sold-to party (billing:Customer). Because the question asks about order amounts, it is billing:Customer here. Namespaces, descriptions and synonyms provide the material for resolving this ambiguity. “Temperature excursion” resolves to a natural-language rule, and “amount of the affected orders” to a metric owned by a semantic model.",
     },
   },
   {
@@ -203,7 +203,7 @@ const STEPS: Step[] = [
     title: { ja: "経路を束縛に展開する", en: "Expand the path into bindings" },
     body: {
       ja: "各エンティティー型を、それを所有するシステムの表へ展開する。Fabric では 1 つのエンティティー型が持てる静的な束縛は 1 つまでなので、CRM の取引先と ERP の得意先を 1 つの型に合流させず、別の型として関係で結んでいる。Container は TMS の静的データに加えて、IoT の時系列を device_id で束縛している。",
-      en: "Each entity type expands to a table in the system that owns it. In Fabric an entity type can have only one static binding, so the CRM account and the ERP sold-to party are not merged into one type; they are separate types joined by a relationship. Container combines static TMS data with an IoT time series bound through device_id.",
+      en: "Each entity type expands to a table in the system that owns it. In Fabric an entity type can have at most one static binding, so the CRM account and the ERP sold-to party are not merged into one type; they are separate types joined by a relationship. Container combines static TMS data with an IoT time series bound through device_id.",
     },
   },
   {
@@ -216,8 +216,8 @@ const STEPS: Step[] = [
   {
     title: { ja: "エンジンごとに実行する", en: "Execute per engine" },
     body: {
-      ja: "オントロジー自体は問い合わせエンジンではない。消費側のエージェントが束縛先に応じて KQL・SQL・DAX を選び、結果を組み合わせる。温度逸脱の規則をクエリーに翻訳するのもエージェントの仕事で、どう解釈したかは生成されたクエリーで確かめたい（執筆時点では、組み込みのオントロジーエージェントが回答時に規則を考慮しないという既知の問題があり、規則を効かせるには、MCP の list_ontology_rules などで規則を取り出して使う消費者が要る）。",
-      en: "The ontology is not a query engine. The consuming agent picks KQL, SQL or DAX according to each binding and combines the results. Translating the excursion rule into a query is also the agent’s job, so check the generated queries to see how it interpreted the rule (at the time of writing, a known issue means the built-in ontology agent does not consider rules when answering; to apply them, you need a consumer that fetches rules itself, e.g. through the MCP list_ontology_rules tool).",
+      ja: "オントロジー自体は汎用の問い合わせエンジンではない。消費側のエージェントが束縛先に応じて KQL・SQL・DAX を選び、結果を組み合わせる。温度逸脱の規則をクエリーに翻訳するのもエージェントの仕事で、どう解釈したかは生成されたクエリーで確かめる必要がある（執筆時点では、組み込みのオントロジーエージェントが回答時に規則を考慮しないという既知の問題があり、規則を効かせるには、MCP の list_ontology_rules などで規則を取り出して使う消費者が要る）。",
+      en: "The ontology itself is not a general-purpose query engine. The consuming agent picks KQL, SQL or DAX according to each binding and combines the results. Translating the excursion rule into a query is also the agent’s job, so check the generated queries to see how it interpreted the rule (at the time of writing, a known issue means the built-in ontology agent does not consider rules when answering; to apply them, you need a consumer that fetches rules itself, e.g. through the MCP list_ontology_rules tool).",
     },
   },
   {
@@ -329,7 +329,7 @@ export function SemanticViewWalkthrough({ locale = "ja" }: Props) {
     dynamicNotes.push(
       isJa
         ? "order_ref が「SO-000123」、order_no が「123」のように表記が違うと、等値の結合は 1 件も一致しない。上流で正規化したビューを作り、そちらを束縛し直す必要がある。"
-        : "If order_ref looks like “SO-000123” while order_no is “123”, an equality join matches nothing. You need a normalised view upstream and must bind to that instead.",
+        : "If order_ref looks like “SO-000123” while order_no is “123”, an equality join matches nothing. You need to build a normalised view upstream and rebind to it.",
     );
   }
   if (step >= 6 && result.rows.length > 0) {

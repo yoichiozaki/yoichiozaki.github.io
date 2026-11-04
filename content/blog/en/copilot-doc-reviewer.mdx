@@ -1,7 +1,7 @@
 ---
 title: "Letting Go of Orchestration — Building a Document Review Agent by Just Adding Tools with the GitHub Copilot SDK"
 date: "2026-06-11"
-description: "Instead of writing the agent's planning and tool-calling loop (its orchestration) yourself, hand it to the GitHub Copilot SDK. We build a document review agent by passing in the operations a review needs as tools, implement custom tools, permission control, an SSE server, and a UI, and discuss the pros and cons of the design."
+description: "Instead of writing the agent's planning and tool-calling loop (its orchestration) yourself, hand it to the GitHub Copilot SDK. We build a document review agent by passing in the operations a review needs as tools, and add permission control, an SSE server, and a UI. In exchange, the runtime decides the procedure: the steps aren't guaranteed, testing and cost prediction get harder, and you have to design the defenses against untrusted documents yourself."
 tags: ["AI", "Agent", "GitHub Copilot", "SDK", "TypeScript", "Tools"]
 ---
 
@@ -17,13 +17,13 @@ This article takes the opposite approach: <strong>don't write the orchestration 
 
 The [GitHub Copilot SDK](https://github.com/github/copilot-sdk) documentation describes the same idea this way:
 
-> "No need to build your own orchestration — you define agent behavior (tools), and Copilot handles planning, tool invocation, file edits, and more."
+> "No need to build your own orchestration—you define agent behavior, Copilot handles planning, tool invocation, file edits, and more."
 
-The example is a document review agent. We pass in listing documents, reading their contents, checking for broken links, checking terminology consistency, and saving the review as separate tools, and Copilot carries out the review without us writing its steps. We implement the server, the UI, and the sample repository layout as well.
+The example is a document review agent. We pass in listing documents, reading their contents, checking for broken links, checking terminology consistency, and saving the review as separate tools, and Copilot carries out the review without us coding its steps. We also implement the server and the UI and show the layout of the sample repository.
 
-The implementation gets easier, but the design isn't right for everything. The second half lists the pros and cons and discusses where it works and where it breaks down.
+The implementation gets easier, but the runtime decides which tools to call and in what order, so the procedure isn't guaranteed, and testing and cost prediction get harder. If the runtime reads untrusted documents, defending against them is also up to you. The second half weighs these costs against the benefits and shows where the approach fits and where it doesn't.
 
-> The same "just add tools" idea can also be realized with Microsoft Agent Framework's Agent Harness (`HarnessAgent`). That implementation is covered in the companion article, "[Building a Review Agent by Just Adding Tools with the Agent Harness](/en/blog/agent-harness-doc-reviewer)."
+> The same "just add tools" idea can also be realized with Microsoft Agent Framework's Agent Harness (`HarnessAgent`). That implementation is covered in the companion article, "[The Same Idea with Microsoft Agent Framework — Building a Document Review Agent by Just Adding Tools with the Agent Harness](/en/blog/agent-harness-doc-reviewer)."
 
 ## The Shift in Thinking — "Delegating" Orchestration
 
@@ -45,7 +45,7 @@ loop:
 
 Explicit orchestration means <strong>implementing, testing, and operating this loop yourself</strong>: querying the model, dispatching tool calls, feeding results back, and deciding when to stop. Building state transitions as a graph (as with `LangGraph`) does the same job in a more structured way. You get fine-grained control over the flow, and in exchange the code grows.
 
-### Delegating Orchestration
+### Delegated Orchestration
 
 With the "just add tools" approach, you don't write this loop at all. You delegate the whole loop to the agent runtime used by the Copilot CLI and only declare what tools exist.
 
@@ -67,9 +67,9 @@ graph LR
     end
 ```
 
-The planning, choosing, executing, evaluating, and stopping on the left all happen inside the Copilot runtime (`CO`) on the right. What the developer writes is just the declaration of the tools.
+The planning, choosing, executing, evaluating, and stopping on the left all happen inside the Copilot runtime on the right.
 
-This idea builds on the design of autonomous CLIs like Claude Code, which wrap the model in a thin "harness" (operational scaffolding); see [The Design Space of Production AI Agents](/en/blog/claude-code-design-space). The difference is that here you don't own that harness; you borrow it through the SDK.
+This idea builds on the design of autonomous CLIs like Claude Code, which wrap the model in a thin "harness" (operational scaffolding); see [The Design Space of a Production AI Agent](/en/blog/claude-code-design-space). The difference is that here you don't own that harness; you borrow it through the SDK.
 
 ## What the GitHub Copilot SDK Is
 
@@ -96,7 +96,7 @@ Planning, the tool loop, and context management all live on the CLI runtime side
 - A GitHub Copilot subscription (or bring your own model via BYOM/BYOK, below)
 - Authentication via the signed-in user, or the environment variables `GH_TOKEN` / `GITHUB_TOKEN` / `COPILOT_GITHUB_TOKEN`
 
-Billing, like the Copilot CLI, is usage-based. In 2026, GitHub moved from the former premium-request model (which counted prompts) to GitHub AI Credits, metered by the tokens you consume, priced per model and converted to credits (1 credit = $0.01, with a monthly allowance per plan). This billing model comes up again in the cost discussion later.
+Billing is usage-based, as with the Copilot CLI.
 
 ### Minimal Setup
 
@@ -119,7 +119,7 @@ await client.stop();
 
 ### Bring Your Own Model (BYOM)
 
-You can use models other than the ones GitHub hosts. The SDK supports bringing your own model (BYOM) via BYOK (Bring Your Own Key): point a session at your own OpenAI-compatible provider (OpenAI, Azure OpenAI / AI Foundry, Anthropic, or a local runtime like Ollama), and the agent runs on the model you bring instead of a Copilot-hosted one.
+You can use models other than the ones GitHub hosts. The SDK supports bringing your own model (BYOM) via BYOK (Bring Your Own Key): point a session at your own model provider (OpenAI, Azure OpenAI / Microsoft Foundry, Anthropic, or a local runtime like Ollama), and the agent runs on the model you bring instead of a Copilot-hosted one.
 
 ```typescript
 // Azure OpenAI as your own model
@@ -127,7 +127,7 @@ const session = await client.createSession({
     model: "gpt-5",                 // required when using a custom provider
     provider: {
         type: "azure",              // use "azure" for *.openai.azure.com endpoints
-        baseUrl: "https://my-resource.openai.azure.com", // host only — no path
+        baseUrl: "https://my-resource.openai.azure.com", // resource host, without the /openai/... path
         apiKey: process.env.AZURE_OPENAI_KEY,
         azure: { apiVersion: "2024-10-21" },
     },
@@ -140,7 +140,7 @@ const local = await client.createSession({
 });
 ```
 
-A few caveats. The `model` parameter is <strong>required</strong> when you use a custom provider. Azure endpoints need `type: "azure"` (not `"openai"`), with `baseUrl` set to the host only. BYOK accepts not only `apiKey` but also `bearerToken` and `bearerTokenProvider`; for Azure, the official guide shows returning Microsoft Entra ID / Managed Identity tokens acquired with `DefaultAzureCredential` from `bearerTokenProvider`. Because BYOM keeps the model from being tied to GitHub's hosted models, it also bears on the lock-in discussion later.
+The `model` parameter is <strong>required</strong> when you use a custom provider. A native Azure OpenAI endpoint (`*.openai.azure.com`) needs `type: "azure"` (not `"openai"`), and `baseUrl` takes the resource host; the runtime adds the `/openai/...` path itself. Since September 2026, the BYOK guide also allows a full Microsoft Foundry project URL (`https://<host>/api/projects/<project>`) as `baseUrl`, which needs an up-to-date Copilot CLI runtime. If you call the OpenAI-compatible `/openai/v1/` endpoint instead, use `type: "openai"` and include that path in `baseUrl`. BYOK accepts not only `apiKey` but also `bearerToken` and `bearerTokenProvider`; for Azure, the official guide shows returning Microsoft Entra ID / Managed Identity tokens acquired with `DefaultAzureCredential` from `bearerTokenProvider`.
 
 ## Design — Decomposing a Review into "a Set of Tools"
 
@@ -154,7 +154,7 @@ Breaking down a reviewer's work gives these five tools.
 4. Check that terminology is consistent (no spelling variants) → `check_terminology`
 5. Write the review out to a file → `save_review`
 
-You don't write the procedure, such as "first get the list, then read, then check links." Copilot puts the procedure together on the spot, based on what the user asked for.
+You don't code a procedure such as "first get the list, then read, then check links." Copilot puts the procedure together on the spot, based on what the user asked for.
 
 ```mermaid
 sequenceDiagram
@@ -363,7 +363,9 @@ export function reviewPermissionHandler(
 
 Now, even if a document hides an injection, the runtime's attempt to run a shell is rejected. The `feedback` goes back to the model, so Copilot learns the operation isn't available and tries another way.
 
-Note, though, that the permission kinds only gate the runtime's built-in tools (shell, file write, URL fetch, and so on). Your own tools are approved as one group under `custom-tool`. Once approved, what they do inside, such as the `fetch` in `check_links` or the `fs.writeFile` in `save_review`, is plain Node code that the `write` / `url` kinds do not intercept. <strong>The permission handler doesn't sandbox your custom tools</strong>, so their defenses have to live inside the tools. Tools that handle files use the path-traversal check to keep paths under `docs/` and `reviews/`. Tools that reach the outside world, like `check_links`, get a timeout and (if needed) an allowlist of domains to curb SSRF (server-side request forgery). When the review target is untrusted, don't let URLs in the documents lead the agent into your internal network.
+The permission kinds, however, gate only the runtime's built-in tools (shell, file write, URL fetch, and so on). Your own tools are approved as one group under `custom-tool`. Once approved, what they do inside, such as the `fetch` in `check_links` or the `fs.writeFile` in `save_review`, is plain Node code that the `write` / `url` kinds do not intercept. <strong>The permission handler doesn't sandbox your custom tools</strong>, so their defenses have to live inside the tools.
+
+Tools that handle files use the path-traversal check to keep paths under `docs/` and `reviews/`. Tools that reach the outside world, like `check_links`, get a timeout and (if needed) an allowlist of domains to curb SSRF (server-side request forgery). When the review target is untrusted, don't let URLs in the documents lead the agent into your internal network.
 
 ### The Server and Streaming
 
@@ -436,7 +438,7 @@ The SDK does have tool-execution events (`tool.execution_start`, etc.), but this
 
 ### Steering the Output with a System Message
 
-We don't write the workflow, but we do steer what kind of review to perform and in what format to report through the system message. In the delegation approach, this is where most of the design work goes.
+We don't code the workflow, but the system message steers what to review, how to proceed, and how to format the report. In the delegation approach, this is where most of the design work goes.
 
 ```typescript
 // src/prompts.ts
@@ -572,33 +574,35 @@ The biggest value is that you don't have to own the boring, dangerous plumbing t
 
 On the other hand, the delegation approach has structural costs.
 
-### Non-determinism — You Can't Guarantee a Fixed Procedure
+### Non-determinism
 
 The biggest trade-off is that the runtime (the model) ultimately decides the order of tool calls and whether they happen at all. <strong>There's no guarantee that "all documents are always checked" or "link verification always happens."</strong> If the model decides a file needn't be read, that file is skipped. If you need a deterministic pipeline, this approach isn't a good fit.
 
-### Testing and Reproducibility Are Hard
+### Testing and Reproducibility
 
-The same input won't necessarily produce the same output and the same sequence of tool calls every time. It's hard to pin down in a unit test that "this input calls these tools in this order," so regression tests are hard to design. Individual tools can be unit-tested on their own, but verifying the agent's overall behavior is a separate problem.
+The same input can produce a different output and a different sequence of tool calls on each run. It's hard to pin down in a unit test that "this input calls these tools in this order," so regression tests are hard to design. Individual tools can be unit-tested on their own, but verifying the agent's overall behavior is a separate problem.
 
 ### Cost, Latency, and Usage
 
-Billing is in GitHub AI Credits, metered by the tokens you consume, so cost scales with how much work the runtime does. The more tools the model calls just to be safe, the more input and output tokens it uses, and the more credits it spends. When the runtime takes several passes at something explicit orchestration would do in one, the extra passes show up in the cost. How many tokens the delegated loop will consume is harder to predict than with a homegrown loop. Under the older premium-request model, autonomous tool calls weren't billed and only your prompts were counted. The move to usage-based billing makes the runtime's workload show up more directly in the cost.
+In 2026, GitHub moved Copilot billing from premium requests to [GitHub AI Credits](https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-individuals). The old model counted your prompts and didn't bill the tool calls an agent made on its own. The new model prices the tokens you consume per model and converts them to credits (1 credit = $0.01, with a monthly allowance per plan), so cost scales with how much work the runtime does.
+
+The more tools the model calls just to be safe, the more input and output tokens it uses, and the more credits it spends. When the runtime takes several passes at something explicit orchestration would do in one, the extra passes add to both cost and latency. How many tokens the delegated loop will consume is harder to predict than with a homegrown loop.
 
 ### Runtime Dependence and Lock-in
 
 You depend on the Copilot CLI runtime and, unless you use BYOM/BYOK, on a GitHub Copilot subscription. A homegrown loop can connect directly to any LLM API, whereas the delegation approach is exposed to the runtime's spec changes and availability. BYOM does loosen the model side of this lock-in: you still depend on the runtime, but not on GitHub's hosted models.
 
-### Security — the Most Important Point
+### Security
 
-The delegation approach has a runtime that can run shell commands and write files read untrusted input (the documents under review). That makes the attack surface wide.
+Security is the most important of these points. In the delegation approach, a runtime that can run shell commands and write files reads untrusted input (the documents under review), which makes the attack surface wide.
 
 - <strong>Prompt injection</strong> — malicious instructions inside a document can hijack the agent. Strict least privilege via the permission handler above is essential.
 - <strong>Overly broad built-in tools</strong> — shell, file writes, and URL fetching are available by default. Explicitly reject anything the review doesn't need in the permission handler.
 - <strong>SSRF</strong> — outbound access like `check_links` can become a stepping stone into internal networks. Consider timeouts, domain allowlists, and blocking private IPs.
 
-The more the runtime you delegate to can do, the more attention input trust boundaries and permission design need.
+The more the delegated runtime can do, the more carefully you need to draw trust boundaries for input and design permissions.
 
-### Structured Output Needs Steering
+### Steering the Report Format
 
 Since you don't write the workflow, you have to steer the report format carefully through the system message. If the instructions are vague, the report's structure shifts from run to run. Design doesn't go away; <strong>it moves from code to the prompt.</strong>
 
@@ -606,11 +610,11 @@ Since you don't write the workflow, you have to steer the report format carefull
 
 The delegation approach fits cases like these:
 
-- Exploratory, non-routine tasks (review, investigation, summarization, and other work whose steps are hard to fix)
-- Products where you want to keep adding capabilities (it grows just by adding tools)
+- When the task is exploratory and non-routine (review, investigation, summarization, and other work whose steps are hard to fix)
+- When you want to keep adding capabilities to a product (it grows just by adding tools)
 - When you don't want to pay the implementation and maintenance cost of orchestration
 
-Conversely, choose explicit orchestration (or the workflow engines of [Agentic Workflow](/en/blog/agentic-workflow) or [Microsoft Agent Framework](/en/blog/agent-framework)) in cases like these:
+Conversely, choose explicit orchestration (for example, [Agentic Workflow](/en/blog/agentic-workflow) patterns or the workflow engine of [Microsoft Agent Framework](/en/blog/agent-framework)) in cases like these:
 
 - When a deterministic, guaranteed procedure is a requirement (compliance, auditing, billing, etc.)
 - When reproducibility and testability are the top priority
@@ -618,15 +622,15 @@ Conversely, choose explicit orchestration (or the workflow engines of [Agentic W
 
 In practice, <strong>using both</strong> works well. Lock down the routine parts with an explicit workflow and delegate only the parts that need exploratory judgment to the agent runtime, and you get both control and flexibility.
 
-The same delegation approach can also be built with Microsoft Agent Framework's Agent Harness, under different design decisions. That implementation and a comparison of the two are covered in the companion article, "[Building a Review Agent by Just Adding Tools with the Agent Harness](/en/blog/agent-harness-doc-reviewer)."
+The companion article, "[The Same Idea with Microsoft Agent Framework — Building a Document Review Agent by Just Adding Tools with the Agent Harness](/en/blog/agent-harness-doc-reviewer)," compares this design with delegating to Microsoft Agent Framework's Agent Harness and shows when to choose which.
 
 ## Conclusion
 
-The document review agent took only five tools, a permission handler, an SSE server, and a vanilla JS UI, and we wrote no review procedure at all. When you delegate orchestration to the GitHub Copilot SDK, what the developer writes is the tool declarations and a system message that conveys the review aspects and report format.
+The document review agent took only five tools, a permission handler, an SSE server, and a vanilla JS UI, and we wrote no review procedure in code. When you delegate orchestration to the GitHub Copilot SDK, what the developer writes is the tool declarations and a system message that conveys the review aspects and report format.
 
 In exchange, the procedure isn't guaranteed, testing and reproduction get harder, and cost is harder to predict. You also hand untrusted documents to a runtime that can run shell commands and write files, so you have to design the permission handler and the defenses inside your tools yourself.
 
-Building an agent just by adding tools feels like magic, and it's fun. That convenience, though, comes from giving up control. In agent design from here on, the central question is where to delegate and where to keep control in your own code.
+Building an agent just by adding tools feels like magic, and it's fun. That convenience, though, comes from giving up control. I expect the central question in agent design from here on to be where to delegate and where to keep control in your own code.
 
 ### References
 

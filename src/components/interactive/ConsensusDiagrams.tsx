@@ -23,10 +23,10 @@ export function ConsensusTimeline({ locale = "ja" }: DiagramProps) {
 
   const milestones = [
     { year: "1978", name: "2PC", color: "#6366f1", desc: isEn ? "Gray" : "Gray" },
-    { year: "1982", name: isEn ? "BGP" : "BGP", color: "#ef4444", desc: "Lamport+" },
+    { year: "1982", name: isEn ? "Byzantine Generals" : "ビザンチン将軍問題", color: "#ef4444", desc: "Lamport et al." },
     { year: "1989", name: "Paxos", color: "#3b82f6", desc: "Lamport" },
-    { year: "1999", name: "PBFT", color: "#f59e0b", desc: "Castro+Liskov" },
-    { year: "2014", name: "Raft", color: "#22c55e", desc: "Ongaro+Ousterhout" },
+    { year: "1999", name: "PBFT", color: "#f59e0b", desc: "Castro & Liskov" },
+    { year: "2014", name: "Raft", color: "#22c55e", desc: "Ongaro & Ousterhout" },
   ];
 
   const w = 600;
@@ -66,10 +66,10 @@ export function ConsensusTimeline({ locale = "ja" }: DiagramProps) {
 
         {/* Labels for regions */}
         <text x={startX + gap * 0.5} y={h - 8} textAnchor="middle" fill={muted} fontSize={8}>
-          {isEn ? "Crash fault tolerance" : "クラッシュ障害耐性"}
+          {isEn ? "Basic protocol and problem statement" : "基本プロトコルと問題の定式化"}
         </text>
         <text x={startX + gap * 3} y={h - 8} textAnchor="middle" fill={muted} fontSize={8}>
-          {isEn ? "Byzantine fault tolerance" : "ビザンチン障害耐性"}
+          {isEn ? "Fault-tolerant consensus algorithms" : "障害に耐える合意アルゴリズム"}
         </text>
 
         {/* Divider */}
@@ -177,29 +177,29 @@ export function ConsensusComparisonTable({ locale = "ja" }: DiagramProps) {
   const isEn = locale === "en";
 
   const headers = isEn
-    ? ["Algorithm", "Fault Model", "Tolerance", "Msg Complexity", "Latency", "Use Case"]
-    : ["アルゴリズム", "障害モデル", "耐性", "メッセージ計算量", "レイテンシー", "用途"];
+    ? ["Algorithm", "Fault Model", "Fault Tolerance", "Message Complexity", "Latency (communication steps to commit)", "Use Case"]
+    : ["アルゴリズム", "障害モデル", "障害耐性", "メッセージ量", "レイテンシー（コミットまでの通信ステップ数）", "用途"];
 
   const rows = [
     {
       name: "2PC",
       color: "#6366f1",
-      cols: [isEn ? "Crash" : "クラッシュ", "0", "O(n)", isEn ? "2 rounds" : "2ラウンド", isEn ? "Databases" : "データベース"],
+      cols: [isEn ? "Crash" : "クラッシュ", "0", "O(n)", isEn ? "2 (Prepare → Vote)" : "2（Prepare → Vote）", isEn ? "Databases" : "データベース"],
     },
     {
       name: "Paxos",
       color: "#3b82f6",
-      cols: [isEn ? "Crash" : "クラッシュ", "f < n/2", "O(n)", isEn ? "2 rounds" : "2ラウンド", isEn ? "Chubby, Spanner" : "Chubby, Spanner"],
+      cols: [isEn ? "Crash" : "クラッシュ", "f < n/2", "O(n)", isEn ? "4 (Prepare → Promise → Accept → Accepted); 2 for Multi-Paxos with a stable Leader, since only Phase 2 runs" : "4（Prepare → Promise → Accept → Accepted）。Leader が安定した Multi-Paxos では Phase 2 だけを実行するので2", isEn ? "Chubby, Spanner" : "Chubby, Spanner"],
     },
     {
       name: "Raft",
       color: "#22c55e",
-      cols: [isEn ? "Crash" : "クラッシュ", "f < n/2", "O(n)", isEn ? "2 rounds" : "2ラウンド", isEn ? "etcd, CockroachDB" : "etcd, CockroachDB"],
+      cols: [isEn ? "Crash" : "クラッシュ", "f < n/2", "O(n)", isEn ? "2 (AppendEntries → response)" : "2（AppendEntries → 応答）", isEn ? "etcd, CockroachDB" : "etcd, CockroachDB"],
     },
     {
       name: "PBFT",
       color: "#f59e0b",
-      cols: [isEn ? "Byzantine" : "ビザンチン", "f < n/3", "O(n²)", isEn ? "3 rounds" : "3ラウンド", isEn ? "Blockchain" : "ブロックチェーン"],
+      cols: [isEn ? "Byzantine" : "ビザンチン", "f < n/3", "O(n²)", isEn ? "3 (Pre-prepare → Prepare → Commit)" : "3（Pre-prepare → Prepare → Commit）", isEn ? "Blockchain" : "ブロックチェーン"],
     },
   ];
 
@@ -224,6 +224,11 @@ export function ConsensusComparisonTable({ locale = "ja" }: DiagramProps) {
           ))}
         </tbody>
       </table>
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        {isEn
+          ? "A step is one one-way message delay; messages sent in parallel count as one step. With no failures, steps run from the first message sent by the Coordinator (2PC), Proposer (Paxos), Leader (Raft), or Primary (PBFT) until that node knows the request is committed. Client requests and replies are excluded, and Raft and PBFT assume an established Leader or Primary."
+          : "1ステップは片道のメッセージ1回分の遅延で、並行して送るメッセージはまとめて1ステップと数えます。障害がない場合に、Coordinator（2PC）・Proposer（Paxos）・Leader（Raft）・Primary（PBFT）が最初のメッセージを送ってから、そのノードがコミットの確定を知るまでを数えます。クライアントとのやり取りは含めず、Raft と PBFT は Leader・Primary が選出済みの状態を仮定しています。"}
+      </p>
     </div>
   );
 }
@@ -273,7 +278,7 @@ export function FLPDiagram({ locale = "ja" }: DiagramProps) {
           {isEn ? "Cannot have all 3" : "3つ同時は不可能"}
         </text>
         <text x={220} y={185} textAnchor="middle" fill={muted} fontSize={8}>
-          {isEn ? "in async model with even 1 crash" : "非同期モデルで1台でもクラッシュがあると"}
+          {isEn ? "deterministic, async, 1 node may crash" : "決定性・非同期で1台でもクラッシュしうると"}
         </text>
       </svg>
     </div>

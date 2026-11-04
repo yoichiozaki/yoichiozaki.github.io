@@ -7,7 +7,7 @@ tags: ["Database", "Index", "B+ Tree", "LSM-Tree", "Data Structures"]
 
 ## Why Indexes Matter
 
-A full table scan checks $O(n)$ rows. Finding a single row in a million-row table does not usually take a million disk reads, because rows are packed into pages, but it can still mean reading thousands of pages and checking every row.
+A full table scan checks $O(n)$ rows. Rows are packed into pages; at a few hundred rows per page, a million-row table occupies thousands of pages, and finding a single row means reading all of them and checking every row.
 
 With a suitable index, a lookup takes $O(\log n)$. Each B+ tree node has many children (high fan-out), so even in a million-row table a lookup reaches the target row in about 3–4 disk accesses.
 
@@ -21,7 +21,7 @@ The two core data structures behind database indexes are the B+ tree, which favo
 
 ### From B-Tree to B+ Tree
 
-The B-tree was invented in 1972 by Rudolf Bayer and Edward McCreight as a self-balancing search tree. Because each node holds multiple keys, one disk read lets a search compare many keys, which suits data stored on disk.
+The B-tree is a self-balancing search tree that Rudolf Bayer and Edward McCreight [presented in 1970](https://dblp.org/db/conf/sigmod/sigmod70). Because each node holds multiple keys, one disk read lets a search compare many keys, which suits data stored on disk.
 
 The B+ tree changes the B-tree in two ways:
 
@@ -59,7 +59,7 @@ Search(node, key):
 
 Keys within each node are sorted, so binary search finds the next child in $O(\log m)$. The tree height is $O(\log_m n)$, giving an overall complexity of $O(\log_m n \cdot \log_2 m) = O(\log n)$.
 
-In practice, $m$ is in the hundreds (a node is one disk page, 4KB–16KB), so even a million-row table needs a tree of height only 3–4.
+In practice, $m$ is in the hundreds (a node is one disk page, 4–16 KB), so even a million-row table needs a tree of height only 3–4.
 
 ### Insertion and Splits
 
@@ -67,11 +67,11 @@ Insertion follows these steps:
 
 1. Use the search algorithm to find the leaf where the key belongs
 2. Insert the key into the leaf (maintaining sorted order)
-3. If the leaf overflows (keys > $m-1$), a <strong>split</strong> occurs:
-   - The leaf is divided into two
-   - A separator key (for a leaf split, the first key of the new right leaf) is copied into the parent node
-   - If the parent also overflows, the split propagates upward recursively
-4. When the root splits, the tree height increases by one
+3. If the leaf overflows (keys > $m-1$), <strong>split</strong> it:
+   - Divide the leaf into two
+   - Copy a separator key (for a leaf split, the first key of the new right leaf) into the parent node
+   - If the parent also overflows, split the parent too (splits propagate upward recursively)
+4. If the root splits, create a new root above it (the tree height increases by one)
 
 The demo below runs this process one step at a time:
 
@@ -160,7 +160,7 @@ CREATE TABLE users (
 
 ### Non-Clustered Index
 
-PostgreSQL stores table rows in a <strong>heap</strong> (an unordered sequence of pages). Its default B-tree indexes resemble B+ trees in that table tuples are reached from leaf entries, and those leaves hold row pointers (TID: tuple ID) into the heap.
+PostgreSQL stores table rows in a <strong>heap</strong> (pages that hold rows in no particular order). Its default B-tree indexes are structured much like B+ trees, and their leaf entries hold row pointers (TID: tuple ID) into the heap.
 
 ```text
 PostgreSQL index structure:
@@ -168,13 +168,13 @@ PostgreSQL index structure:
   Heap page:    [row data stored within pages]
 ```
 
-With this design, each read of a row from the heap causes random I/O. Whether a query can use an <strong>Index-Only Scan</strong>, which answers from the index alone, therefore has a large effect on performance.
+With this design, each read of a row from the heap can cause random I/O. Whether a query can use an <strong>Index-Only Scan</strong>, which answers from the index alone, therefore has a large effect on performance.
 
 ## Disk I/O and Page Structure
 
 ### Why Node Size = Page Size
 
-Disk I/O reads and writes whole pages (blocks). When a B+ tree node is the size of a page (typically 4KB–16KB), one I/O reads all the keys in a node and nothing it reads is wasted.
+Disk I/O reads and writes whole pages (blocks). When a B+ tree node is the size of a page (typically 4–16 KB), one I/O reads all the keys in a node and nothing it reads is wasted.
 
 ```text
 Page size = 16KB, key size = 8B, pointer size = 8B:
@@ -253,22 +253,24 @@ The two main compaction strategies are:
 
 | Strategy | Characteristics | Used by |
 |----------|----------------|---------|
-| Size-Tiered | Merges similarly-sized SSTables. Faster writes | Cassandra (default) |
+| Size-Tiered | Merges similarly sized SSTables. Faster writes | Cassandra (default) |
 | Leveled | Fixed size ratio between levels (typically 10×). Faster reads | RocksDB, LevelDB |
 
 ### Write Amplification in LSM-Trees and B+ Trees
 
-In LSM-Trees, compaction causes write amplification. With leveled compaction, a key may be merged and rewritten as it moves across levels, so write amplification grows with the number of levels and the size ratio (often summarized as $O(L \times T)$ in the worst case). With a size ratio of 10 and 4 levels, tens of rewrites are possible depending on compaction policy and workload.
+In LSM-Trees, compaction causes write amplification. With leveled compaction, each time data moves down a level, the overlapping data already in the lower level is rewritten with it. Each level is $T$ times larger than the one above (the size ratio), so the rewritten data is roughly $T$ times the data moved down. Because this repeats at every level, write amplification grows with the number of levels $L$ and the size ratio $T$, and is often summarized as $O(L \times T)$ in the worst case. With a size ratio of 10 and 4 levels, a key can be rewritten tens of times in the worst case.
 
-B+ tree write amplification comes from updating whole pages for small logical changes. An isolated 100B change can dirty a 16KB page, but the actual amplification depends on the WAL format, page flushing, group commit, and buffer pool batching, so it varies with the workload.
+B+ tree write amplification comes from updating whole pages for small logical changes. An isolated 100-byte change can dirty a 16 KB page, but the actual amplification depends on the WAL format, page flushing, group commit, and buffer pool batching, so it varies with the workload.
 
 ## B+ Tree vs LSM-Tree — When to Use Which
 
 <DiskIOComparison />
 
+The speed ratings in the table below are relative: each compares the two structures on the same operation.
+
 | Aspect | B+ Tree | LSM-Tree |
 |--------|---------|----------|
-| Point read | $O(\log_m n)$, fast | Must search multiple levels, slower |
+| Point read | $O(\log_m n)$, fast | Must search multiple levels, slightly slower |
 | Range scan | Follows the linked leaves, fast | Requires merge reads, slower |
 | Write | Random I/O, split cost | Sequential I/O, fast |
 | Space efficiency | Page fill ~50–70% | Temporary space needed during compaction |
@@ -286,7 +288,7 @@ B+ tree write amplification comes from updating whole pages for small logical ch
 
 ### MySQL (InnoDB)
 
-Because InnoDB's primary key B+ tree is the table itself, a lookup through a secondary index fetches the row again from the clustered index using the primary key it found. `EXPLAIN` shows this as follows:
+Because InnoDB's primary key B+ tree is the table itself, a lookup through a secondary index must then search the clustered index with the primary key value it found. The `EXPLAIN` output for such a query looks like this:
 
 ```sql
 -- Check the query plan with EXPLAIN
@@ -305,15 +307,15 @@ Besides its default B-tree, PostgreSQL offers other index types, including GiST 
 
 RocksDB is an LSM-Tree–based storage engine developed by Meta (Facebook), forked from LevelDB and optimized for production use.
 
-- Leveled Compaction by default
+- Leveled compaction by default
 - Column Families for logical data separation
-- Bloom Filters to optimize read paths
+- Bloom filters to optimize read paths
 
 TiKV (TiDB), MyRocks, and other systems use RocksDB as their internal storage engine. CockroachDB also used RocksDB in the past but has since moved to Pebble, a Go storage engine modeled on RocksDB.
 
 ### SQLite
 
-SQLite uses two types of B-trees internally. <strong>Table B-trees</strong>, which store rows, keep all data in leaf nodes, much like a B+ tree. <strong>Index B-trees</strong>, used for indexes, hold keys in both interior and leaf nodes, closer to a traditional B-tree. `WITHOUT ROWID` tables store rows in index B-trees, which gives them a structure close to a clustered index.
+SQLite uses two types of B-trees internally. <strong>Table B-trees</strong>, which store rows, keep all data in leaf nodes, much like a B+ tree. <strong>Index B-trees</strong>, used for indexes, hold keys in both internal and leaf nodes, closer to a traditional B-tree. [`WITHOUT ROWID` tables](https://www.sqlite.org/withoutrowid.html) store rows in index B-trees and use a clustered index for the primary key.
 
 ## Advanced Topics
 

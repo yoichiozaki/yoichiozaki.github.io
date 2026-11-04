@@ -29,7 +29,7 @@ const events: TimelineEvent[] = [
     paradigm: "imperative",
     color: "#3b82f6",
     description: "Alan Turing がチューリングマシンを発表。状態遷移と逐次実行の概念は命令型プログラミングの基盤。",
-    descriptionEn: "Alan Turing introduces the Turing Machine. State transitions and sequential execution form the basis of imperative programming.",
+    descriptionEn: "Alan Turing introduces the Turing machine. State transitions and sequential execution form the basis of imperative programming.",
   },
   {
     year: 1957,
@@ -37,8 +37,8 @@ const events: TimelineEvent[] = [
     nameEn: "FORTRAN",
     paradigm: "imperative",
     color: "#3b82f6",
-    description: "John Backus が開発。最初の高水準命令型言語。手続き型プログラミングの幕開け。",
-    descriptionEn: "Developed by John Backus. The first high-level imperative language, marking the dawn of procedural programming.",
+    description: "John Backus のチームが IBM で開発。最初に広く普及した高水準言語で、代表的な手続き型言語。",
+    descriptionEn: "Developed by John Backus's team at IBM. The first widely adopted high-level language and a typical procedural language.",
   },
   {
     year: 1958,
@@ -46,8 +46,8 @@ const events: TimelineEvent[] = [
     nameEn: "LISP",
     paradigm: "functional",
     color: "#8b5cf6",
-    description: "John McCarthy が開発。ラムダ計算を実装した最初の関数型言語。S式、ガベージコレクション、再帰を導入。",
-    descriptionEn: "Created by John McCarthy. The first functional language implementing lambda calculus. Introduced S-expressions, GC, and recursion.",
+    description: "John McCarthy が開発。ラムダ計算の λ記法を取り入れた最初の関数型言語。S式、ガベージコレクション、再帰を導入。",
+    descriptionEn: "Created by John McCarthy. The first functional language, borrowing the λ-notation of lambda calculus. Introduced S-expressions, garbage collection, and recursion.",
   },
   {
     year: 1967,
@@ -55,8 +55,8 @@ const events: TimelineEvent[] = [
     nameEn: "Simula 67",
     paradigm: "oop",
     color: "#10b981",
-    description: "Ole-Johan Dahl と Kristen Nygaard が開発。クラス・継承・仮想手続きを導入した OOP の祖。（初期の Simula I は 1962 年に遡る）",
-    descriptionEn: "Created by Dahl & Nygaard. Introduced classes, inheritance, and virtual procedures — the ancestor of OOP. (The earlier Simula I dates back to 1962.)",
+    description: "Ole-Johan Dahl と Kristen Nygaard が開発。クラス・継承・仮想手続きを導入した OOP の祖。（初期の Simula I は 1962年に遡る）",
+    descriptionEn: "Created by Ole-Johan Dahl and Kristen Nygaard. Introduced classes, inheritance, and virtual procedures — the ancestor of OOP. (The earlier Simula I dates back to 1962.)",
   },
   {
     year: 1972,
@@ -64,8 +64,8 @@ const events: TimelineEvent[] = [
     nameEn: "Prolog",
     paradigm: "logic",
     color: "#f59e0b",
-    description: "Alain Colmerauer が開発。述語論理に基づく論理型プログラミング言語。",
-    descriptionEn: "Created by Colmerauer. A logic programming language based on predicate logic.",
+    description: "Alain Colmerauer らが開発。述語論理に基づく論理型プログラミング言語。",
+    descriptionEn: "Created by Alain Colmerauer and colleagues. A logic programming language based on predicate logic.",
   },
   {
     year: 1972,
@@ -74,7 +74,7 @@ const events: TimelineEvent[] = [
     paradigm: "oop",
     color: "#10b981",
     description: "Alan Kay らが Xerox PARC で開発。「すべてがオブジェクト」「メッセージパッシング」を徹底した純粋 OOP 言語。",
-    descriptionEn: "Developed by Alan Kay et al. at Xerox PARC. A pure OOP language where 'everything is an object' via message passing.",
+    descriptionEn: "Developed by Alan Kay et al. at Xerox PARC. A pure OOP language built on 'everything is an object' and message passing.",
   },
   {
     year: 1973,
@@ -82,8 +82,8 @@ const events: TimelineEvent[] = [
     nameEn: "ML",
     paradigm: "functional",
     color: "#8b5cf6",
-    description: "Robin Milner が Edinburgh 大学で開発。型推論（Hindley-Milner）とパターンマッチングを導入した静的型付き関数型言語。",
-    descriptionEn: "Created by Robin Milner at the University of Edinburgh. A statically-typed functional language introducing type inference (Hindley-Milner) and pattern matching.",
+    description: "Robin Milner らが Edinburgh 大学で開発。型推論（Hindley–Milner）を導入した静的型付き関数型言語。後の ML 系言語が代数的データ型を普及させた。",
+    descriptionEn: "Created by Robin Milner's group at the University of Edinburgh. A statically typed functional language that introduced type inference (Hindley–Milner); later ML-family languages popularized algebraic data types.",
   },
   {
     year: 1986,
@@ -100,8 +100,8 @@ const events: TimelineEvent[] = [
     nameEn: "Haskell",
     paradigm: "functional",
     color: "#8b5cf6",
-    description: "純粋関数型言語の標準として設計。遅延評価、型クラス、モナドによる副作用の管理。",
-    descriptionEn: "Designed as a standard for pure functional programming. Lazy evaluation, type classes, and monadic side-effect management.",
+    description: "純粋関数型言語の標準として設計。遅延評価と型クラスを備え、後にモナドで副作用を扱うようになった。",
+    descriptionEn: "Designed as a standard for pure functional programming, with lazy evaluation and type classes; monads were later adopted for side effects.",
   },
   {
     year: 1995,
@@ -119,7 +119,7 @@ const events: TimelineEvent[] = [
     paradigm: "multi",
     color: "#ec4899",
     description: "Martin Odersky が開発。OOP と関数型を融合したマルチパラダイム言語。JVM 上で動作。",
-    descriptionEn: "Created by Odersky. A multi-paradigm language fusing OOP and FP on the JVM.",
+    descriptionEn: "Created by Martin Odersky. A multi-paradigm language that unifies OOP and functional programming; runs on the JVM.",
   },
   {
     year: 2010,
@@ -159,8 +159,8 @@ export function ParadigmTimeline({ locale = "ja" }: ParadigmTimelineProps) {
       title={isEn ? "Programming Paradigm Timeline" : "プログラミングパラダイム年表"}
       description={
         isEn
-          ? "A chronological overview of key languages and paradigms from 1936 to today."
-          : "1936年から現在まで、主要言語とパラダイムの年表。"
+          ? "Key theories and languages from 1936 to 2012, colored by paradigm."
+          : "1936年から2012年までに登場した主要な理論と言語。色はパラダイムを表す。"
       }
     >
       {/* Legend */}

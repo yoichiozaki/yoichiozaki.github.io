@@ -1,7 +1,7 @@
 ---
 title: "ORM Internals — Building an Object-Relational Mapper from Scratch in Python"
 date: "2026-04-06"
-description: "Build a small ORM in Python — metadata definitions, SQL expression trees, Identity Map, Unit of Work, and lazy loading — to see how SQLAlchemy, Django ORM, and EF Core turn Python code into SQL and where their performance pitfalls come from."
+description: "Build a small ORM in Python — metadata definitions, SQL expression trees, Identity Map, Unit of Work, and lazy loading — to see how SQLAlchemy, Django ORM, and EF Core generate SQL and where their performance pitfalls come from."
 tags: ["ORM", "Design Patterns", "Python", "Database", "Architecture"]
 ---
 
@@ -44,7 +44,7 @@ The ORM layer consists of five components, each corresponding to a PoEAA pattern
 | SQL Expression Tree / Query Builder | Build SQL statements from Python expressions | Query Object |
 | Identity Map | Map the same row to the same object instance | Identity Map |
 | Unit of Work | Track changes and batch-write them to the DB | Unit of Work |
-| Relationship Loading | Lazy or eager loading of related objects | Lazy Load / Eager Load |
+| Relationship Loading | Lazy or eager loading of related objects | Lazy Load |
 
 ## Chapter 1: Active Record vs Data Mapper
 
@@ -151,9 +151,11 @@ user.name = "Bob"
 mapper.update(user)   # mapper executes the UPDATE
 ```
 
-Data Mapper separates persistence from the domain model. Because the domain model does not depend on the database schema, table structure and object structure can evolve independently. SQLAlchemy (Classical Mapping), Hibernate, and Entity Framework Core are built on this pattern.
+Data Mapper separates persistence from the domain model. Because the domain model does not depend on the database schema, table structure and object structure can evolve independently. SQLAlchemy (with imperative mapping), Hibernate, and Entity Framework Core are built on this pattern.
 
 ### Comparing the Two
+
+The learning-curve and testability rows compare the two patterns with each other, based on whether database operations live in the object itself or in a separate mapper.
 
 | Aspect | Active Record | Data Mapper |
 |---|---|---|
@@ -266,7 +268,7 @@ class User:
 registry.map_class(User, users_table)
 ```
 
-Registering each class explicitly like this is close to SQLAlchemy's "Classical Mapping." Declarative Mapping has been the mainstream approach since SQLAlchemy 2.0, but it builds the same kind of registry internally.
+Registering each class explicitly like this is close to SQLAlchemy's imperative mapping (called "classical" mapping before version 1.4). Declarative mapping is the usual style in SQLAlchemy, but since version 1.4 both styles build their mappings from a `registry` object that records the mapped classes ([SQLAlchemy Documentation — ORM Mapped Class Overview](https://docs.sqlalchemy.org/en/20/orm/mapping_styles.html)).
 
 ### 2.3 Declarative Mapping (Automatic Registration via Metaclass)
 
@@ -321,7 +323,7 @@ print(table.create_table_sql())
 # => CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)
 ```
 
-SQLAlchemy's `DeclarativeBase` and Django ORM's `models.Model` work the same way: they use a metaclass (or `__init_subclass__`, available since Python 3.6) to collect metadata when a class is defined.
+SQLAlchemy's `DeclarativeBase` and Django ORM's `models.Model` work in essentially the same way: they use a metaclass (or `__init_subclass__`, available since Python 3.6) to collect metadata when a class is defined.
 
 ## Chapter 3: SQL Expression Trees and the Query Builder
 
@@ -691,7 +693,7 @@ user.name = "Bob"       # UPDATE users SET name = 'Bob' WHERE id = 1
 user.email = "b@x.com"  # UPDATE users SET email = 'b@x.com' WHERE id = 1
 ```
 
-Two attribute changes produce two statements where a single `UPDATE` would do. Applications also often need changes to several objects to be committed in one database transaction.
+Two attribute changes produce two statements where a single `UPDATE` would do. Applications may also need changes to several objects to be committed in one database transaction.
 
 A Unit of Work therefore records object changes in memory and issues SQL only at an explicit "flush."
 
@@ -922,7 +924,7 @@ In SQLAlchemy, `session.add(obj)` followed by `session.commit()` corresponds to 
 
 In real ORMs, foreign key constraints dictate write ordering. For example, if the `posts` table references `users`, INSERTs must execute in `users` → `posts` order, and DELETEs in `posts` → `users` order.
 
-SQLAlchemy's Unit of Work constructs a directed graph of foreign key dependencies between tables and uses <strong>topological sort</strong> to determine the correct INSERT/DELETE execution order.
+SQLAlchemy's Unit of Work constructs a directed graph of foreign key dependencies between tables and uses a topological sort to determine the correct INSERT/DELETE execution order.
 
 ```python
 from collections import defaultdict
@@ -1088,7 +1090,7 @@ With 100 users, that is 101 SQL queries. Because the query count grows with the 
 
 ### 6.4 Eager Loading
 
-Eager loading solves the N+1 problem by loading the related objects together with their parents. It takes one of two forms.
+Eager loading solves the N+1 problem by loading the related objects together with their parents. There are two main approaches.
 
 <strong>Approach 1: JOIN-based</strong>
 
@@ -1149,13 +1151,15 @@ users = User.objects.select_related("profile").all()  # For ForeignKey/OneToOne
 
 ### 6.5 Choosing the Right Loading Strategy
 
+The query counts are for loading N parent objects; memory usage ranks the three strategies relative to each other.
+
 | Strategy | Query count | Memory usage | Best for |
 |---|---|---|---|
 | Lazy loading | 1 + N (worst case) | Minimal | When related objects are never accessed |
 | JOIN eager loading | 1 | High (duplicate rows) | One-to-one relations, small datasets |
 | Subquery eager loading | 2 | Medium | One-to-many relations, large datasets |
 
-The right strategy depends on how the code uses the related objects, so neither "always eager load" nor "always lazy load" works as a rule. Profiling and the query log show which relationships are actually accessed and how many queries they cost.
+The right strategy depends on whether the code accesses the related objects, on the kind of relationship, and on the amount of data, so neither "always eager load" nor "always lazy load" works as a rule. Profiling and the query log show which relationships are actually accessed and how many queries they cost.
 
 ## Chapter 7: Session — Putting It All Together
 
@@ -1358,11 +1362,11 @@ SQLAlchemy is the most widely used Python ORM, built on the Data Mapper pattern.
 | `Session` | `Session` |
 | Topological sort | Dependency sort in `unitofwork.py` |
 
-SQLAlchemy 2.0 shifted the query syntax from `session.query(User)` to `session.execute(select(User))`. The SQL expression tree belongs to the shared Core layer, and the ORM layer adds the Identity Map and Unit of Work on top of it.
+SQLAlchemy 2.0 changed the recommended query syntax from `session.query(User)` to `session.execute(select(User))` ([SQLAlchemy 2.0 - Major Migration Guide](https://docs.sqlalchemy.org/en/20/changelog/migration_20.html#orm-query-unified-with-core-select)). The SQL expression tree belongs to the shared Core layer, and the ORM layer adds the Identity Map and Unit of Work on top of it.
 
 ### Django ORM
 
-Django ORM adopts the Active Record pattern, though it contains Data Mapper-like mechanisms internally.
+Django ORM adopts the Active Record pattern. SQL construction and execution, however, are handled by objects separate from the model, such as `QuerySet`, and this part of its design resembles a Data Mapper.
 
 | Our Implementation | Django ORM Equivalent |
 |---|---|
@@ -1375,7 +1379,7 @@ Django ORM adopts the Active Record pattern, though it contains Data Mapper-like
 | Lazy loading | Default `ForeignKey` behavior |
 | Eager loading | `select_related()`, `prefetch_related()` |
 
-Django ORM <strong>has neither an Identity Map nor a Unit of Work</strong>: calling `Model.save()` issues SQL immediately. This is a deliberate Active Record design choice that keeps the ORM simple and gives up batched flushes like SQLAlchemy's.
+Django ORM <strong>has neither an Identity Map nor a Unit of Work</strong>: calling `Model.save()` issues SQL immediately. This is an Active Record design choice that keeps the ORM simple and gives up batched flushes like SQLAlchemy's.
 
 Django's `QuerySet` is evaluated lazily: chaining `.filter().exclude().order_by()` does not issue SQL. SQL is only executed when data is actually needed (iteration, `len()`, slicing, etc.).
 
@@ -1422,7 +1426,7 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 <strong>Solutions:</strong>
 
 1. <strong>Explicitly specify eager loading</strong> — SQLAlchemy's `joinedload()` / `selectinload()`, Django's `select_related()` / `prefetch_related()`
-2. <strong>Fetch only needed columns</strong> — `session.query(User.name, User.email)` leaves out the columns you don't use
+2. <strong>Fetch only the needed columns in one joined query</strong> — `session.execute(select(User.name, Post.title).join(User.posts))` returns the rows in a single query, and because it builds no ORM objects, no lazy load can fire
 3. <strong>Fall back to raw SQL</strong> — Write SQL directly for complex queries that don't map well to ORM abstractions
 
 ### 9.2 Identity Map and Memory Leaks
@@ -1489,12 +1493,14 @@ graph TB
 | Relationships | Descriptors for lazy loading / JOIN or IN for eager loading |
 | Session | Unified API integrating all of the above |
 
-What looks like magic is a composition of well-known design patterns: Identity Map, Unit of Work, Data Mapper, and Active Record. Knowing how these patterns behave and where they fall short lets you predict the SQL your ORM generates and avoid pitfalls such as the N+1 problem and memory leaks.
+What looks like magic is a composition of well-known design patterns: an ORM builds on either Data Mapper or Active Record and adds patterns such as Identity Map and Unit of Work. Knowing how these patterns behave and where they fall short lets you predict the SQL your ORM generates and avoid pitfalls such as the N+1 problem and memory leaks.
 
 ## References
 
 - Martin Fowler, *Patterns of Enterprise Application Architecture* (Addison-Wesley, 2002) — [Identity Map](https://martinfowler.com/eaaCatalog/identityMap.html), [Unit of Work](https://martinfowler.com/eaaCatalog/unitOfWork.html), [Data Mapper](https://martinfowler.com/eaaCatalog/dataMapper.html), [Active Record](https://martinfowler.com/eaaCatalog/activeRecord.html)
 - [SQLAlchemy Documentation — Session Basics](https://docs.sqlalchemy.org/en/20/orm/session_basics.html)
+- [SQLAlchemy Documentation — ORM Mapped Class Overview](https://docs.sqlalchemy.org/en/20/orm/mapping_styles.html)
+- [SQLAlchemy 2.0 - Major Migration Guide](https://docs.sqlalchemy.org/en/20/changelog/migration_20.html)
 - [SQLAlchemy Documentation — Relationship Loading Techniques](https://docs.sqlalchemy.org/en/20/orm/queryguide/relationships.html)
 - [Django Documentation — Making queries](https://docs.djangoproject.com/en/5.2/topics/db/queries/)
 - [Entity Framework Core Documentation — How EF Core Change Tracking Works](https://learn.microsoft.com/en-us/ef/core/change-tracking/)

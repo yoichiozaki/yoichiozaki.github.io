@@ -1,7 +1,7 @@
 ---
 title: "Inside Test Frameworks — Designing and Building a Test Runner from Scratch"
 date: "2026-04-04"
-description: "What do test frameworks like pytest and unittest do between finding your tests and reporting the results? We build a small test runner in Python and explain how discovery, collection, lifecycle hooks, assertions, mocking, and reporting work."
+description: "What do test frameworks like pytest and unittest do between finding your tests and reporting the results? A small test runner built in Python shows each step: discovery by filename patterns, collection by importing modules, setup and teardown hooks, assertions that raise exceptions, mocks that replace attributes, and swappable reporters."
 tags: ["Testing", "Python", "Software Engineering", "Architecture", "Interactive"]
 ---
 
@@ -104,7 +104,7 @@ python_functions = ["test_*"]
 
 ---
 
-## Phase 2: Test Collection — Gathering Functions and Classes
+## Phase 2: Test Collection — Gathering Test Functions from Modules
 
 Once test files are found, the next step is to collect the test cases inside them.
 
@@ -168,7 +168,7 @@ def collect_from_file(path: Path) -> TestSuite:
     return suite
 ```
 
-### The Key to Collection: Module Import
+### Separating Collection from Execution
 
 Calling `exec_module()` executes the module's top-level code. The test functions themselves do not run at this point; `inspect.getmembers()` only collects them by name.
 
@@ -192,7 +192,7 @@ def helper_function():
     pass
 ```
 
-Importing the module collects the tests, and running the test functions is deferred. This separation is the foundation of pytest-style frameworks. It allows a runner to:
+The runner imports the module to collect the tests and runs the test functions later. This separation is the foundation of pytest-style frameworks. It allows a runner to:
 
 1. Know the total number of tests before running them (for progress bars)
 2. Filter (`-k` option) and reorder tests before running them
@@ -335,7 +335,7 @@ except Exception as exc:
 
 This works because assertions do nothing more than raise exceptions. `assert 1 == 2` internally executes `raise AssertionError`. A test passes if it finishes without raising and fails if an exception is raised.
 
-`except Exception` catches assertion failures and also unexpected ordinary exceptions such as `TypeError` and `KeyError`. When a test raises one of these, the runner records the test as failed and continues with the remaining tests. `BaseException` subclasses such as `KeyboardInterrupt` and `SystemExit` are usually handled separately as interruption or termination signals.
+`except Exception` catches assertion failures and also unexpected ordinary exceptions such as `TypeError` and `KeyError`. When a test raises one of these, the runner records the test as failed and continues with the remaining tests. `KeyboardInterrupt` and `SystemExit` do not inherit from `Exception`, so this `except` clause does not catch them, and the whole run stops. pytest and unittest stop the run on a `KeyboardInterrupt` from Ctrl+C, but treat a `SystemExit` raised inside a test like any other exception from that test.
 
 ---
 
@@ -359,7 +359,7 @@ However, a plain `assert` reports almost nothing when it fails. For example, whe
 
 ### pytest's Assert Rewriting
 
-pytest rewrites the AST (Abstract Syntax Tree) of `assert` statements at import time so that a failure reports details such as the compared values.
+pytest rewrites the AST (abstract syntax tree) of `assert` statements at import time so that a failure reports details such as the compared values.
 
 ```python
 # What the user writes
@@ -379,7 +379,7 @@ def test_greeting():
         )
 ```
 
-Here is a simplified implementation. It handles only `assert` statements with a single comparison operator: it stores the left and right operands in temporary variables and, if the comparison is false, raises an `AssertionError` whose message includes both values.
+Here is a simplified implementation. It handles only `assert` statements with a single comparison operator. Each one is replaced with code that stores the left and right operands in temporary variables and, if the comparison is false, raises an `AssertionError` whose message includes both values.
 
 ```python
 # mini_test/assertion_rewrite.py
@@ -559,7 +559,9 @@ assert 1 is 1        # ✅ CPython implementation detail (-5 to 256 are cached)
 assert 1000 is 1000  # ⚠️ may happen to be True in CPython
 ```
 
-### The not Modifier Pattern
+### assert with not
+
+`not` has lower precedence than comparison operators such as `==`, so `assert not 1 == 2` evaluates `not (1 == 2)`.
 
 ```text
 assert 1 == 2       → 1 == 2 is False → AssertionError
@@ -577,7 +579,7 @@ Tests often run into external dependencies such as API calls, database connectio
 
 ### Implementing a Spy
 
-A <strong>spy</strong> wraps the original function and records the arguments and return value of each call.
+A <strong>spy</strong> wraps the original function and records the arguments and return value of each call. The `Spy` below can also replace the return value or the implementation, so it doubles as a mock.
 
 ```python
 # mini_test/spy.py
@@ -666,9 +668,9 @@ def test_spy_mock_return():
     assert user["name"] == "Alice"
 ```
 
-### Patching Object Methods
+### Patching Object Attributes
 
-In Python, `unittest.mock.patch` is widely used, and its mechanism is attribute replacement. The `Patch` class below is implemented as a context manager (`with` statement). `__enter__` replaces the attribute and `__exit__` restores it, so the original is always restored when the `with` block exits. If restoration were forgotten, the replaced attribute would remain for later tests and break test isolation.
+In Python, the widely used `unittest.mock.patch` works by replacing attributes. The `Patch` class below is implemented as a context manager for use in a `with` statement. `__enter__` replaces the attribute and `__exit__` restores it, so the original is always restored when the `with` block exits. If restoration were forgotten, the replaced attribute would remain for later tests and break test isolation.
 
 ```python
 # mini_test/patch.py
@@ -864,7 +866,7 @@ Found 2 test file(s)
 
 ---
 
-## Comparison with Real Frameworks
+## Features Real Frameworks Add
 
 We have now implemented the core features of a test framework. On top of this core, real frameworks add parallelization to shorten run time, snapshot testing to detect output regressions, coverage measurement to find untested code, and watch mode to rerun tests when files change.
 
@@ -903,7 +905,7 @@ def run_in_parallel(files: list[Path], num_workers: int = 4) -> list[TestResult]
 
 ### Snapshot Testing
 
-Snapshot testing saves output to a file and compares later runs against the saved content (in pytest, plugins such as syrupy provide this). It suits cases where the output is complex and writing the expected value by hand would be tedious, such as UI components or API responses. The first run saves a baseline snapshot, and later runs detect differences from it, which catches unintended regressions.
+Snapshot testing saves the output of the first run to a file and compares later runs against the saved content to catch unintended regressions (in pytest, plugins such as syrupy provide this). It suits cases where the output is complex and writing the expected value by hand would be tedious, such as UI components or API responses.
 
 ```python
 # Conceptual implementation
@@ -996,70 +998,9 @@ The key difference:
   self.assertEqual(a, b).
 ```
 
-### Go's testing Package
-
-Go provides testing through the standard library's `testing` package and the `go test` command.
-
-```go
-// Go: tests are identified by function signature conventions
-func TestAdd(t *testing.T) {
-    result := Add(1, 1)
-    if result != 2 {
-        t.Errorf("Add(1, 1) = %d, want 2", result)
-    }
-}
-
-// Subtests — hierarchical structure similar to describe/it
-func TestMath(t *testing.T) {
-    t.Run("addition", func(t *testing.T) {
-        if Add(1, 1) != 2 {
-            t.Fatal("1+1 should be 2")
-        }
-    })
-    t.Run("division by zero", func(t *testing.T) {
-        defer func() {
-            if r := recover(); r == nil {
-                t.Fatal("expected panic")
-            }
-        }()
-        Divide(1, 0)
-    })
-}
-```
-
-```text
-Go testing characteristics:
-  - Discovery: `cmd/go` generates a test binary from `Test*` / `Benchmark*` / `Fuzz*` functions
-  - Assertions: none in standard library (if + t.Error is the norm)
-  - Parallelization: opt-in via t.Parallel()
-  - Benchmarking: integrated via Benchmark* functions
-  - Fuzzing: integrated via Fuzz* functions (Go 1.18+)
-  - Testing concurrent code: virtual time via testing/synctest (Go 1.25+)
-```
-
-That last entry, [`testing/synctest`](https://go.dev/pkg/testing/synctest), addresses a common problem with concurrency tests: waiting with `time.Sleep` makes them slow and flaky. `synctest.Test` runs the test function inside an isolated "bubble" where the `time` package uses a fake clock. When every goroutine in the bubble is blocked, the clock advances immediately, so a "one hour later" timeout can be tested deterministically in zero wall-clock time. It first appeared behind `GOEXPERIMENT=synctest` in Go 1.24 and graduated to general availability in Go 1.25.
-
-### Jest / Vitest
-
-Jest and Vitest are the major test frameworks in the JavaScript / TypeScript ecosystem.
-
-```text
-Jest:
-  - Discovery: defaults equivalent to `**/__tests__/**/*.[jt]s?(x)` and `**/?(*.)+(spec|test).[tj]s?(x)` patterns
-  - Collection: describe/it callback registration pattern
-  - Assertions: expect().toBe() Fluent API
-  - Mocking: jest.mock() automatic module mocking
-  - Parallelization: child_process (fork) by default
-
-Vitest:
-  - Jest-compatible API but leverages the Vite ecosystem
-  - Native ESM support
-  - parallelization through worker threads / child processes depending on pool configuration
-```
-
 ### pytest Fixtures — Dependency Injection by Argument Name
 
-In pytest, the <strong>argument names</strong> of a test function are matched against fixture names, and the matching fixtures are injected automatically. The idea is similar to DI containers in web frameworks, implemented for testing. In a fixture that uses `yield`, the code before `yield` is setup and the code after it is teardown, so resource creation and cleanup are written in one place.
+pytest fixtures are functions that prepare the data or environment a test needs. pytest matches the <strong>argument names</strong> of a test function against fixture names and injects the matching fixtures automatically. This applies the idea behind dependency injection (DI) containers in web frameworks to tests. In a fixture that uses `yield`, the code before `yield` is setup and the code after it is teardown, so resource creation and cleanup are written in one place.
 
 ```python
 # pytest: fixtures are dependency injection
@@ -1103,6 +1044,67 @@ pytest fixture resolution:
   3. Build a dependency graph (fixtures can depend on other fixtures)
   4. Determine execution order via topological sort
   5. Cache based on scope (function / class / module / session)
+```
+
+### Go's testing Package
+
+Go provides testing through the standard library's `testing` package and the `go test` command.
+
+```go
+// Go: tests are identified by function signature conventions
+func TestAdd(t *testing.T) {
+    result := Add(1, 1)
+    if result != 2 {
+        t.Errorf("Add(1, 1) = %d, want 2", result)
+    }
+}
+
+// Subtests — hierarchical structure similar to describe/it
+func TestMath(t *testing.T) {
+    t.Run("addition", func(t *testing.T) {
+        if Add(1, 1) != 2 {
+            t.Fatal("1+1 should be 2")
+        }
+    })
+    t.Run("division by zero", func(t *testing.T) {
+        defer func() {
+            if r := recover(); r == nil {
+                t.Fatal("expected panic")
+            }
+        }()
+        Divide(1, 0)
+    })
+}
+```
+
+```text
+Go testing characteristics:
+  - Discovery: `cmd/go` generates a test binary from `Test*` / `Benchmark*` / `Fuzz*` functions
+  - Assertions: none in standard library (if + t.Error is the norm)
+  - Parallelization: opt-in via t.Parallel()
+  - Benchmarking: integrated via Benchmark* functions
+  - Fuzzing: integrated via Fuzz* functions (Go 1.18+)
+  - Testing concurrent code: virtual time via testing/synctest (Go 1.25+)
+```
+
+That last entry, [`testing/synctest`](https://go.dev/pkg/testing/synctest), addresses a common problem with concurrency tests: waiting with `time.Sleep` makes them slow and flaky. `synctest.Test` runs the test function inside an isolated "bubble" where the `time` package uses a fake clock. When every goroutine in the bubble is blocked, the clock advances immediately, so a "one hour later" timeout can be tested deterministically in zero wall-clock time. It first appeared behind `GOEXPERIMENT=synctest` in Go 1.24 and [graduated to general availability in Go 1.25](https://go.dev/doc/go1.25#new-testingsynctest-package).
+
+### Jest / Vitest
+
+Jest and Vitest are two major test frameworks in the JavaScript / TypeScript ecosystem.
+
+```text
+Jest:
+  - Discovery: defaults equivalent to `**/__tests__/**/*.[jt]s?(x)` and `**/?(*.)+(spec|test).[tj]s?(x)` patterns
+  - Collection: describe/it callback registration pattern
+  - Assertions: expect().toBe() Fluent API
+  - Mocking: jest.mock() automatic module mocking
+  - Parallelization: child_process (fork) by default
+
+Vitest:
+  - Jest-compatible API but leverages the Vite ecosystem
+  - Native ESM support
+  - parallelization through worker threads / child processes depending on pool configuration
 ```
 
 ---

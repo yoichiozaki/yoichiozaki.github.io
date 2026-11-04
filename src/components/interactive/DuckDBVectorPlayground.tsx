@@ -82,16 +82,16 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
       en: "One logical row = one physical entry. The plainest layout, and the only writable one. `Flatten()` lowers every other type into this shape.",
     },
     CONSTANT: {
-      ja: "全行が同じ値。`WHERE x = 'ap'` の 'ap' 側や、`SELECT 1` の定数、NULL 埋めのカラムがこれになります。演算子は「1 要素だけ計算して全行に配る」最適化ができます。",
-      en: "Every row shares one value. Literals like the 'ap' in `WHERE x = 'ap'`, `SELECT 1`, or an all-NULL column. Operators can compute once and broadcast.",
+      ja: "全行が同じ値。`WHERE x = 'ap'` の 'ap' 側や、`SELECT 1` の定数、全行 NULL の列がこれになります。演算子は「1 要素だけ計算して全行に配る」最適化ができます。",
+      en: "Every row shares one value. Produced by literals such as the 'ap' in `WHERE x = 'ap'` or `SELECT 1`, and by all-NULL columns. Operators can compute once and broadcast.",
     },
     DICTIONARY: {
-      ja: "辞書 + 選択ベクトル。低カーディナリティー列のスキャンや、フィルター後の行の絞り込みで現れます。データをコピーせず「見え方」だけ変えるのがポイント。",
-      en: "Dictionary + selection vector. Produced by low-cardinality column scans and by filters. The key property: it changes the view without copying data.",
+      ja: "辞書 + 選択ベクトル。低カーディナリティー列のスキャンや、フィルターで行を絞り込んだときに現れます。データをコピーせず、見え方だけを変えます。",
+      en: "Dictionary + selection vector. Produced by low-cardinality column scans and by filters. It changes the view without copying data.",
     },
     SEQUENCE: {
-      ja: "start と increment の 2 つの数値だけ。`range(0, 1000000)` や rowid 列がこれ。`ToUnifiedFormat()` は SEQUENCE を扱えないため、事前に `Flatten()` されます。",
-      en: "Just start and increment. Used by `range(0, 1000000)` and rowid columns. `ToUnifiedFormat()` cannot handle SEQUENCE, so it is flattened first.",
+      ja: "値を決めるのは start と increment の 2 つの整数だけです（count は行数）。`range(0, 1000000)` や rowid 列がこれです。",
+      en: "Only two integers, start and increment, define the values (count is the row count). Used by `range(0, 1000000)` and rowid columns.",
     },
   };
 
@@ -102,8 +102,8 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
       title={isJa ? "Vector の 4 つの姿を触ってみる" : "Play with the four faces of a Vector"}
       description={
         isJa
-          ? "DuckDB の Vector は「2048 行ぶんの配列」ではなく、同じ論理データを表す複数の物理表現を持ちます。タブを切り替えて、論理ビュー・物理バッファー・UnifiedVectorFormat の対応を見比べてください。"
-          : "A DuckDB Vector is not simply an array of 2048 values — it is one of several physical encodings of the same logical data. Switch tabs to compare the logical view, the physical buffer, and the UnifiedVectorFormat mapping."
+          ? "同じ論理データ（8 行）を、Vector の 4 つの物理表現で持たせています。タブを切り替えて、論理ビュー・物理バッファー・UnifiedVectorFormat の対応を見比べてください。"
+          : "Each tab holds the same eight logical rows in a different physical Vector encoding. Switch tabs to compare the logical view, the physical buffer, and the UnifiedVectorFormat mapping."
       }
     >
       <div className="flex flex-col gap-4">
@@ -149,7 +149,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
         {/* Logical view */}
         <div>
           <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
-            {isJa ? "論理ビュー（オペレータから見える 8 行）" : "Logical view (8 rows as operators see them)"}
+            {isJa ? "論理ビュー（演算子から見える 8 行）" : "Logical view (8 rows as operators see them)"}
           </div>
           <div className="flex flex-wrap gap-1">
             {[...Array(ROWS).keys()].map((i) => {
@@ -198,14 +198,14 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
         <div>
           <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
             {isJa
-              ? "UnifiedVectorFormat.sel（論理行 → data 添字）"
+              ? "UnifiedVectorFormat.sel（論理行 → data の添字）"
               : "UnifiedVectorFormat.sel (logical row → index into data)"}
           </div>
           {vtype === "SEQUENCE" ? (
             <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
               {isJa
-                ? "SEQUENCE は ToUnifiedFormat() が直接扱えません。Vector::ToUnifiedFormat() は FLAT / CONSTANT / DICTIONARY 以外を検出すると、まず Flatten() してベクター内の全値を実体化します。"
-                : "ToUnifiedFormat() cannot read a SEQUENCE directly. Vector::ToUnifiedFormat() detects anything other than FLAT / CONSTANT / DICTIONARY and calls Flatten() first, materialising every value in the vector."}
+                ? "SEQUENCE は ToUnifiedFormat() が直接扱えません。Vector::ToUnifiedFormat() は FLAT / CONSTANT / DICTIONARY 以外を検出すると、まず Flatten() して Vector の全値を実体化します。"
+                : "ToUnifiedFormat() cannot read a SEQUENCE directly. Vector::ToUnifiedFormat() detects anything other than FLAT / CONSTANT / DICTIONARY and calls Flatten() first, materializing every value in the vector."}
             </div>
           ) : (
             <div className="flex flex-wrap gap-1">
@@ -230,7 +230,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
                   vtype === "FLAT"
                     ? "FLAT はここで DICTIONARY になります。"
                     : vtype === "DICTIONARY"
-                      ? "DICTIONARY は選択ベクトル同士が合成され、DICTIONARY のままです（辞書を積み重ねません）。"
+                      ? "DICTIONARY では選択ベクトル同士が合成され、DICTIONARY のままです（辞書を積み重ねません）。"
                       : vtype === "CONSTANT"
                         ? "ただし CONSTANT は Slice しても CONSTANT のまま — VectorBuffer::Slice() が ConstantSlice() に短絡し、count だけ更新します。"
                         : "ただし SEQUENCE には SliceInternal の実装がないため FlattenSlice に落ち、結果は DICTIONARY ではなく FLAT になります。"

@@ -21,20 +21,20 @@ export function DPDesignSteps({ locale = "ja" }: DiagramProps) {
         {
           n: "2",
           title: "続きに必要な情報だけを残す",
-          q: "ここまでの決定のうち、この先の最適な選び方に影響するのは何か？",
+          q: "ここまでの決定のうち、この先の最適な決め方に影響するのは何か？",
           bad: "「何を覚えれば十分か」が言えない＝状態が未定義",
         },
         {
           n: "3",
           title: "状態を «関数の引数» として書き下す",
-          q: "f(引数) = 残りを最適に決めたときの値、と一文で言えるか？",
+          q: "f(引数) が何の最適値なのかを一文で言えるか？",
           bad: "引数に «経路そのもの» が入っている＝圧縮できていない",
         },
         {
           n: "4",
           title: "遷移と基底を書く",
           q: "次の 1 手の選択肢は何通りで、それぞれどの状態に移るか？",
-          bad: "遷移先が自分と同じか、より «進んでいない» 状態を指している",
+          bad: "遷移先が自分自身か、基底に近づかない状態を指している",
         },
         {
           n: "5",
@@ -44,9 +44,9 @@ export function DPDesignSteps({ locale = "ja" }: DiagramProps) {
         },
         {
           n: "6",
-          title: "評価順序を決める（メモ化 or ループ）",
+          title: "評価順序を決める（メモ化再帰かループか）",
           q: "依存が DAG になっているか？ ループなら添字はどの向きに回すか？",
-          bad: "依存に循環がある（＝そのままでは DP にならない）",
+          bad: "依存に閉路がある（＝そのままでは DP にならない）",
         },
       ]
     : [
@@ -65,14 +65,14 @@ export function DPDesignSteps({ locale = "ja" }: DiagramProps) {
         {
           n: "3",
           title: "Write the state as function arguments",
-          q: "Can you say in one sentence: f(args) = best value for the rest?",
+          q: "Can you say in one sentence what optimal value f(args) stands for?",
           bad: "An argument is the path itself — nothing has been compressed",
         },
         {
           n: "4",
           title: "Write the transitions and the base cases",
           q: "How many choices does the next decision have, and where does each lead?",
-          bad: "A transition points to itself or to a state that is not further along",
+          bad: "A transition points to itself or to a state no closer to a base case",
         },
         {
           n: "5",
@@ -82,7 +82,7 @@ export function DPDesignSteps({ locale = "ja" }: DiagramProps) {
         },
         {
           n: "6",
-          title: "Choose an evaluation order (memo or loop)",
+          title: "Choose an evaluation order (memoized recursion or loop)",
           q: "Is the dependency graph a DAG? If looping, in which direction?",
           bad: "The dependencies contain a cycle — it is not a DP as written",
         },
@@ -160,14 +160,14 @@ export function DPPatternTable({ locale = "ja" }: DiagramProps) {
           state: "dp[v][…] = v を根とする部分木の最適値",
           trans: "子の結果をマージ",
           cost: "O(n × 状態)",
-          ex: "部分木の最大独立集合、木の直径、全方位木 DP",
+          ex: "木の最大重み独立集合、木の直径、全方位木 DP",
         },
         {
           name: "bit DP（状態圧縮）",
-          state: "dp[S][v] = 訪問済み集合 S、現在地 v",
+          state: "dp[S][v] = 訪問済み集合 S、現在地 v のときの最適値",
           trans: "未訪問の 1 要素を追加",
           cost: "O(2ⁿ n²)",
-          ex: "TSP、二部マッチングの数え上げ、集合分割",
+          ex: "TSP、二部グラフの完全マッチングの数え上げ、集合分割",
         },
         {
           name: "桁 DP",
@@ -184,17 +184,17 @@ export function DPPatternTable({ locale = "ja" }: DiagramProps) {
           ex: "サイコロ、ランダムウォーク、ゲームの勝率",
         },
         {
-          name: "部分集合の畳み込み（SOS DP）",
+          name: "SOS DP（高速ゼータ変換）",
           state: "dp[S] = S のすべての部分集合にわたる集約",
           trans: "ビットを 1 本ずつ処理",
           cost: "O(2ⁿ n)（素朴には O(3ⁿ)）",
-          ex: "ゼータ／メビウス変換、条件を満たす集合の数え上げ",
+          ex: "メビウス変換、条件を満たす集合の数え上げ",
         },
       ]
     : [
         {
           name: "Linear DP",
-          state: "dp[i] = best value ending at / considering the first i items",
+          state: "dp[i] = best value ending at i, or over the first i elements",
           trans: "choose among the previous k positions",
           cost: "O(nk)",
           ex: "Frog, stair climbing, naive LIS",
@@ -211,28 +211,28 @@ export function DPPatternTable({ locale = "ja" }: DiagramProps) {
           state: "dp[i][j] = best value for prefixes (i, j) of two sequences",
           trans: "diagonal, up, left",
           cost: "O(nm)",
-          ex: "LCS, edit distance, diff, DTW",
+          ex: "LCS, edit distance, diff, dynamic time warping",
         },
         {
           name: "Interval DP",
-          state: "dp[l][r] = best value for the interval [l, r)",
+          state: "dp[l][r] = best value for combining [l, r) into one",
           trans: "enumerate the split point k",
           cost: "O(n³), or O(n²) under the quadrangle inequality",
-          ex: "matrix chain multiplication, optimal BST, slime merging",
+          ex: "matrix chain multiplication, optimal binary search trees, slime merging",
         },
         {
           name: "Tree DP",
           state: "dp[v][…] = best value for the subtree rooted at v",
           trans: "merge the children's results",
           cost: "O(n × states)",
-          ex: "maximum independent set on a tree, diameter, rerooting",
+          ex: "maximum-weight independent set on a tree, diameter, rerooting",
         },
         {
           name: "Bitmask DP",
-          state: "dp[S][v] = visited set S, currently at v",
+          state: "dp[S][v] = best value with visited set S, currently at v",
           trans: "add one unvisited element",
           cost: "O(2ⁿ n²)",
-          ex: "TSP, counting perfect matchings, set partitioning",
+          ex: "TSP, counting perfect matchings in a bipartite graph, set partitioning",
         },
         {
           name: "Digit DP",
@@ -249,11 +249,11 @@ export function DPPatternTable({ locale = "ja" }: DiagramProps) {
           ex: "dice games, random walks, win probabilities",
         },
         {
-          name: "Subset convolution (SOS DP)",
+          name: "SOS DP (fast zeta transform)",
           state: "dp[S] = aggregate over every subset of S",
           trans: "process one bit at a time",
           cost: "O(2ⁿ n), versus O(3ⁿ) naively",
-          ex: "zeta / Möbius transforms, counting qualifying sets",
+          ex: "Möbius transform, counting qualifying sets",
         },
       ];
 
@@ -320,14 +320,14 @@ export function DPOptimizationTable({ locale = "ja" }: DiagramProps) {
         {
           symptom: "dp[i] = min_j ( dp[j] + a_j · x_i ) の形",
           tech: "Convex Hull Trick / Li Chao 木",
-          gain: "O(n²) → O(n log n)（条件次第で O(n)）",
+          gain: "O(n²) → O(n log n)（傾きと問い合わせが単調なら O(n)）",
           cond: "遷移が «直線の族の下側包絡線»",
         },
         {
           symptom: "区間 DP で分割点を全探索している",
           tech: "Knuth–Yao 高速化 / 分割統治最適化",
           gain: "O(n³) → O(n²)、O(n²) → O(n log n)",
-          cond: "四角不等式（コストの凸性）と最適分割点の単調性",
+          cond: "四角不等式と最適分割点の単調性",
         },
         {
           symptom: "「ちょうど k 個選ぶ」の次元が重い",
@@ -343,7 +343,7 @@ export function DPOptimizationTable({ locale = "ja" }: DiagramProps) {
         },
         {
           symptom: "同じ品物が最大 c 個まで使える",
-          tech: "二進法分割、またはスライド最小値",
+          tech: "二進分割、またはスライド最小値",
           gain: "O(nWc) → O(nW log c) / O(nW)",
           cond: "個数制限ナップサック",
         },
@@ -370,7 +370,7 @@ export function DPOptimizationTable({ locale = "ja" }: DiagramProps) {
         {
           symptom: "dp[i] = min_j ( dp[j] + a_j · x_i )",
           tech: "Convex hull trick / Li Chao tree",
-          gain: "O(n²) → O(n log n), sometimes O(n)",
+          gain: "O(n²) → O(n log n); O(n) if slopes and queries are monotone",
           cond: "The transition is a lower envelope of lines",
         },
         {
@@ -450,10 +450,10 @@ export function MemoVsTabulation({ locale = "ja" }: DiagramProps) {
         ["評価される状態", "必要な状態だけ（遅延評価）", "定義域すべて"],
         ["評価順序", "呼び出し順に自動で決まる", "自分で正しい順序を書く"],
         ["疎な状態空間", "強い。到達不能な状態は触らない", "無駄が出る（添字圧縮が要る）"],
-        ["定数倍", "再帰・ハッシュ表のぶん遅い", "配列を順に舐めるので速い"],
+        ["定数倍", "再帰・ハッシュ表のぶん遅い", "配列を順に走査するので速い"],
         ["メモリー", "再帰スタック（深さに比例）", "ローリング配列で次元を落とせる"],
         ["スタック溢れ", "深さ 10⁵ 超で危険", "起きない"],
-        ["最適化との相性", "しづらい", "累積和・スライド最小値などを載せやすい"],
+        ["高速化の載せやすさ", "載せにくい", "累積和・スライド最小値などを載せやすい"],
         ["書きやすさ", "漸化式をほぼそのまま書ける", "順序と境界を自分で詰める必要がある"],
       ]
     : [
@@ -462,8 +462,8 @@ export function MemoVsTabulation({ locale = "ja" }: DiagramProps) {
         ["Sparse state spaces", "Strong — unreachable states cost nothing", "Wasteful; needs index compression"],
         ["Constant factor", "Slower: recursion and hash lookups", "Fast: a linear sweep over an array"],
         ["Memory", "Recursion stack proportional to depth", "Rolling arrays can drop a dimension"],
-        ["Stack overflow", "A real risk beyond depth ~10⁵", "Cannot happen"],
-        ["Amenable to speedups", "Harder", "Prefix sums, monotonic deques, CHT slot in naturally"],
+        ["Stack overflow", "Risky beyond depth ~10⁵", "Cannot happen"],
+        ["Amenable to speedups", "Harder", "Prefix sums, sliding-window minimum, etc. fit in easily"],
         ["Ease of writing", "Almost a transcription of the recurrence", "You own the order and the boundaries"],
       ];
 
@@ -476,7 +476,7 @@ export function MemoVsTabulation({ locale = "ja" }: DiagramProps) {
               {isJa ? "観点" : "Aspect"}
             </th>
             <th scope="col" className="px-2 py-2 font-semibold text-foreground">
-              {isJa ? "メモ化再帰（トップダウン）" : "Memoised recursion (top-down)"}
+              {isJa ? "メモ化再帰（トップダウン）" : "Memoized recursion (top-down)"}
             </th>
             <th scope="col" className="px-2 py-2 font-semibold text-foreground">
               {isJa ? "配列ループ（ボトムアップ）" : "Tabulation (bottom-up)"}
@@ -552,13 +552,13 @@ export function GreedyFailureDiagram({ locale = "ja" }: DiagramProps) {
     <div className="not-prose my-6 rounded-lg border border-border bg-muted/40 p-4">
       <div className="text-sm font-semibold text-foreground">
         {isJa
-          ? `硬貨 {${coins.join(", ")}} で ${target} を作る`
-          : `Making ${target} from coins {${coins.join(", ")}}`}
+          ? `硬貨 {${coins.join(", ")}} で ${target} を作る最少枚数`
+          : `Fewest coins from {${coins.join(", ")}} that make ${target}`}
       </div>
       <p className="mt-1 mb-3 text-xs text-muted-foreground">
         {isJa
-          ? "「いま使える最大の硬貨を取る」という貪欲法は、この硬貨系では最適になりません。局所的な最良手が、大域的な最適解の一部とは限らないからです。"
-          : "“Always take the largest usable coin” is not optimal for this coin system: a locally best move need not belong to any globally optimal solution."}
+          ? "「いま使える最大の硬貨を取る」という貪欲法は、この硬貨系では最適になりません。最初に取る 4 が、最適解 3 + 3 に含まれないからです。"
+          : "“Always take the largest usable coin” is not optimal for this coin system: its first coin, 4, is not part of the optimal 3 + 3."}
       </p>
       <div className="space-y-2">
         <CoinPickRow
@@ -576,8 +576,8 @@ export function GreedyFailureDiagram({ locale = "ja" }: DiagramProps) {
       </div>
       <p className="mt-3 text-xs text-muted-foreground">
         {isJa
-          ? "DP は «最初の 1 手を全通り試し、残りは同じ問題に帰着する» ので、この落とし穴にそもそもはまりません。逆に、交換論法などで «貪欲が最適» を証明できる問題では、DP は過剰です。"
-          : "DP tries every first move and reduces the remainder to the same problem, so it avoids this trap structurally. Conversely, when an exchange argument proves greedy optimal, DP is overkill."}
+          ? "DP は «最初の 1 手を全通り試し、残りは同じ問題に帰着する» ので、この落とし穴にはまりません。逆に、交換論法などで貪欲法が最適だと証明できる問題に DP を使うと、計算量とコード量が無駄に増えます。"
+          : "DP tries every first move and reduces the remainder to the same problem, so it cannot fall into this trap. Conversely, where greedy can be proved optimal (by an exchange argument, for example), DP wastes running time and code."}
       </p>
     </div>
   );

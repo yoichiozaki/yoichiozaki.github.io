@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type GraphTraversalVisualizerProps = { locale?: string };
@@ -74,8 +75,8 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: [],
     visitOrder: [],
     description: {
-      ja: "BFS（幅優先探索）を頂点 A から開始します。キューを使って「近い頂点から順に」探索します。水面に石を落としたときの波紋のように、同心円状に広がっていくイメージです。",
-      en: "Starting BFS (Breadth-First Search) from vertex A. Using a queue to explore vertices level by level — like ripples spreading outward from where a stone hits water.",
+      ja: "BFS（幅優先探索）を頂点 A から開始します。キューを使って「近い頂点から順に」探索するので、探索範囲は水面の波紋のように同心円状に広がります。",
+      en: "Start BFS (Breadth-First Search) from vertex A. The queue makes it explore vertices nearest-first, so the search spreads outward like ripples on water.",
     },
   });
 
@@ -85,8 +86,8 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["A"],
     visitOrder: [],
     description: {
-      ja: "始点 A をキューに追加します。キュー: [A]。BFS ではキュー（先入れ先出し: FIFO）を使うのがポイントです。",
-      en: "Enqueue the starting vertex A. Queue: [A]. The key insight of BFS is using a queue (First-In-First-Out).",
+      ja: "始点 A をキューに追加します。キュー: [A]。キューは、先に入れた頂点から順に取り出します（FIFO: 先入れ先出し）。",
+      en: "Enqueue the starting vertex A. Queue: [A]. A queue removes vertices in the order they were added (FIFO: first in, first out).",
     },
   });
 
@@ -108,8 +109,8 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["B", "C"],
     visitOrder: ["A"],
     description: {
-      ja: "A の隣接頂点 B, C をキューに追加。キュー: [B, C]。これが「距離1」の頂点たちです。A は訪問済みになります。",
-      en: "Enqueue A's neighbors B and C. Queue: [B, C]. These are all vertices at distance 1 from A. A is now fully visited.",
+      ja: "A の隣接頂点 B, C をキューに追加。キュー: [B, C]。A から距離 1 の頂点は B と C です。A は訪問済みになります。",
+      en: "Enqueue A's neighbors B and C. Queue: [B, C]. These are all vertices at distance 1 from A. A is now visited.",
     },
   });
 
@@ -138,8 +139,8 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["C", "D", "E"],
     visitOrder: ["A", "B"],
     description: {
-      ja: "D, E をキューに追加。キュー: [C, D, E]。大事なポイント: C は B より先にキューにいるので、B の「子」である D, E より先に処理されます。これが「幅優先」の本質です。",
-      en: "Enqueue D and E. Queue: [C, D, E]. Key insight: C was enqueued before D and E, so it will be processed first. This is the essence of 'breadth-first' — older entries go first.",
+      ja: "D, E をキューに追加。キュー: [C, D, E]。C は D, E より先にキューに入ったので、先に処理されます。距離 1 の頂点が距離 2 の頂点より先に処理されるのは、この順序のためです。",
+      en: "Enqueue D and E. Queue: [C, D, E]. C was enqueued before D and E, so it will be processed first. This is why distance-1 vertices are processed before distance-2 vertices.",
     },
   });
 
@@ -174,7 +175,7 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["D", "E"],
     visitOrder: ["A", "B", "C"],
     description: {
-      ja: "C 完了。キュー: [D, E]。ここまでで距離1の頂点をすべて訪問しました。次は距離2の頂点たちです。",
+      ja: "C 完了。キュー: [D, E]。ここまでで距離 1 の頂点をすべて訪問しました。次は距離 2 の頂点です。",
       en: "C is done. Queue: [D, E]. We've now visited all vertices at distance 1. Next up: distance-2 vertices.",
     },
   });
@@ -212,7 +213,7 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["E", "F"],
     visitOrder: ["A", "B", "C", "D"],
     description: {
-      ja: "F をキューに追加。キュー: [E, F]。E は D より先にキューにいるので、先に処理されます。",
+      ja: "F をキューに追加。キュー: [E, F]。E は F より先にキューに入ったので、先に処理されます。",
       en: "Enqueue F. Queue: [E, F]. E was enqueued before F, so it will be processed first.",
     },
   });
@@ -231,8 +232,8 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["F"],
     visitOrder: ["A", "B", "C", "D", "E"],
     description: {
-      ja: "E を取り出して訪問。E の隣接頂点 [B, F] はすべて処理済み。",
-      en: "Dequeue E and visit it. E's neighbors [B, F] are all processed.",
+      ja: "E を取り出して訪問。E の隣接頂点 [B, F] は訪問済みかキュー内なので、追加はありません。",
+      en: "Dequeue E and visit it. E's neighbors [B, F] are already visited or queued, so nothing is added.",
     },
   });
 
@@ -250,7 +251,7 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: ["F"],
     visitOrder: ["A", "B", "C", "D", "E"],
     description: {
-      ja: "E 完了。キュー: [F]。残り1頂点。",
+      ja: "E 完了。キュー: [F]。残り 1 頂点。",
       en: "E is done. Queue: [F]. One vertex remaining.",
     },
   });
@@ -287,8 +288,8 @@ function generateBFSSteps(): TraversalStep[] {
     dataStructure: [],
     visitOrder: ["A", "B", "C", "D", "E", "F"],
     description: {
-      ja: "BFS 完了！ 訪問順序: A → B → C → D → E → F。同じ距離の頂点をまとめて処理してから、次の距離に進んでいきました。BFS が最短経路を保証するのは、このレベルごとの探索のおかげです。",
-      en: "BFS complete! Visit order: A → B → C → D → E → F. We processed all vertices at each distance level before moving to the next. This level-by-level exploration is why BFS guarantees the shortest path in unweighted graphs.",
+      ja: "BFS 完了。訪問順序: A → B → C → D → E → F。同じ距離の頂点をまとめて処理してから、次の距離に進んでいきました。無重みグラフで BFS が最短経路を保証するのは、このレベルごとの探索のおかげです。",
+      en: "BFS complete. Visit order: A → B → C → D → E → F. We processed all vertices at each distance level before moving to the next. This level-by-level exploration is why BFS guarantees the shortest path in unweighted graphs.",
     },
   });
 
@@ -315,8 +316,8 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: [],
     visitOrder: [],
     description: {
-      ja: "DFS（深さ優先探索）を頂点 A から開始します。再帰（コールスタック）を使って「行けるところまで深く」探索します。迷路で壁にぶつかるまでまっすぐ進み、行き止まりで引き返すイメージです。",
-      en: "Starting DFS (Depth-First Search) from vertex A. Using recursion (call stack) to explore as deeply as possible. Think of navigating a maze — go straight until you hit a dead end, then backtrack.",
+      ja: "DFS（深さ優先探索）を頂点 A から開始します。再帰（コールスタック）を使って「行けるところまで深く」探索します。迷路を歩くときのように、行き止まりまで進んでから引き返します。",
+      en: "Start DFS (Depth-First Search) from vertex A. Recursion (the call stack) makes it go as deep as possible first. As in a maze, it walks to a dead end, then backtracks.",
     },
   });
 
@@ -353,8 +354,8 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A", "B", "C"],
     visitOrder: ["A", "B", "C"],
     description: {
-      ja: "dfs(C) を呼び出し、C を訪問。コールスタック: [A, B, C]。C の隣接頂点は [A, B, D]。A, B は訪問済みなので D へ。どんどん深く潜っています！",
-      en: "Call dfs(C), visit C. Call stack: [A, B, C]. C's neighbors are [A, B, D]. A and B are visited, so recurse into D. We keep going deeper!",
+      ja: "dfs(C) を呼び出し、C を訪問。コールスタック: [A, B, C]。C の隣接頂点は [A, B, D]。A, B は訪問済みなので D へ。呼び出しのたびにコールスタックが 1 段深くなります。",
+      en: "Call dfs(C), visit C. Call stack: [A, B, C]. C's neighbors are [A, B, D]. A and B are visited, so recurse into D. Each call adds one level to the call stack.",
     },
   });
 
@@ -372,8 +373,8 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A", "B", "C", "D"],
     visitOrder: ["A", "B", "C", "D"],
     description: {
-      ja: "dfs(D) を呼び出し、D を訪問。コールスタック: [A, B, C, D]（深さ4！）。D の隣接頂点 [B, C, F] のうち、F だけが未訪問。",
-      en: "Call dfs(D), visit D. Call stack: [A, B, C, D] (depth 4!). Among D's neighbors [B, C, F], only F is unvisited.",
+      ja: "dfs(D) を呼び出し、D を訪問。コールスタック: [A, B, C, D]（深さ 4）。D の隣接頂点 [B, C, F] のうち、F だけが未訪問。",
+      en: "Call dfs(D), visit D. Call stack: [A, B, C, D] (depth 4). Among D's neighbors [B, C, F], only F is unvisited.",
     },
   });
 
@@ -412,8 +413,8 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A", "B", "C", "D", "F", "E"],
     visitOrder: ["A", "B", "C", "D", "F", "E"],
     description: {
-      ja: "dfs(E) を呼び出し、E を訪問。E の隣接頂点 [B, F] はすべて訪問済み。ここが「最深部」— 行き止まりです！ここからバックトラック（巻き戻し）が始まります。",
-      en: "Call dfs(E), visit E. E's neighbors [B, F] are all visited. This is the deepest point — a dead end! Backtracking begins here.",
+      ja: "dfs(E) を呼び出し、E を訪問。E の隣接頂点 [B, F] はすべて訪問済みなので、ここが最深部の行き止まりです。ここからバックトラック（引き返し）が始まります。",
+      en: "Call dfs(E), visit E. E's neighbors [B, F] are all visited, so this is the deepest point and a dead end. Backtracking begins here.",
     },
   });
 
@@ -450,7 +451,7 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A", "B", "C", "D"],
     visitOrder: ["A", "B", "C", "D", "F", "E"],
     description: {
-      ja: "dfs(D) に戻る。D の未訪問隣接頂点もなし。さらに戻ります。",
+      ja: "dfs(D) に戻ります。D の未訪問隣接頂点もなし。さらに戻ります。",
       en: "Return to dfs(D). D has no more unvisited neighbors. Continue backtracking.",
     },
   });
@@ -469,7 +470,7 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A", "B", "C"],
     visitOrder: ["A", "B", "C", "D", "F", "E"],
     description: {
-      ja: "dfs(C) に戻る。C の未訪問隣接頂点もなし。再帰が巻き戻っています。",
+      ja: "dfs(C) に戻ります。C の未訪問隣接頂点もなし。再帰が巻き戻っています。",
       en: "Return to dfs(C). No unvisited neighbors left. The recursion keeps unwinding.",
     },
   });
@@ -488,7 +489,7 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A", "B"],
     visitOrder: ["A", "B", "C", "D", "F", "E"],
     description: {
-      ja: "dfs(B) に戻る。B の隣接頂点 [A, C, D, E] はすべて訪問済み。B からの探索も完了です。",
+      ja: "dfs(B) に戻ります。B の隣接頂点 [A, C, D, E] はすべて訪問済み。B からの探索も完了です。",
       en: "Return to dfs(B). B's neighbors [A, C, D, E] are all visited. B's exploration is complete.",
     },
   });
@@ -507,8 +508,8 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: ["A"],
     visitOrder: ["A", "B", "C", "D", "F", "E"],
     description: {
-      ja: "dfs(A) に戻る。A の隣接頂点 C は訪問済み（B 側からすでに到達済み）。すべての頂点を訪問できたのでここで終了。",
-      en: "Return to dfs(A). A's other neighbor C is already visited (reached via B's path). All vertices explored — done!",
+      ja: "dfs(A) に戻ります。A のもう 1 つの隣接頂点 C は、B から先の探索ですでに訪問済みです。未訪問の隣接頂点がないので、dfs(A) も終了します。",
+      en: "Return to dfs(A). A's other neighbor C was already visited via B. With no unvisited neighbors left, dfs(A) returns as well.",
     },
   });
 
@@ -526,8 +527,8 @@ function generateDFSSteps(): TraversalStep[] {
     callStack: [],
     visitOrder: ["A", "B", "C", "D", "F", "E"],
     description: {
-      ja: "DFS 完了！ 訪問順序: A → B → C → D → F → E。BFS (A→B→C→D→E→F) と比べてみてください。DFS はまず A→B→C→D→F→E と一本道を深く進み、行き止まりで引き返しています。この「深く潜って戻る」動きがDFS の本質です。",
-      en: "DFS complete! Visit order: A → B → C → D → F → E. Compare with BFS (A→B→C→D→E→F). DFS dove deep along A→B→C→D→F→E, backtracking at dead ends. This 'go deep then backtrack' behavior is the essence of DFS.",
+      ja: "DFS 完了。訪問順序: A → B → C → D → F → E。BFS（A → B → C → D → E → F）と違い、距離 3 の F を距離 2 の E より先に訪問しています。一本道を行き止まりまで進んでから引き返したためです。",
+      en: "DFS complete. Visit order: A → B → C → D → F → E. Unlike BFS (A → B → C → D → E → F), it visits F (distance 3) before E (distance 2), because it follows one path to a dead end before backtracking.",
     },
   });
 
@@ -578,7 +579,7 @@ export function GraphTraversalVisualizer({
   const dsLabel =
     mode === "bfs"
       ? locale === "ja"
-        ? "キュー (FIFO)"
+        ? "キュー（FIFO）"
         : "Queue (FIFO)"
       : locale === "ja"
         ? "コールスタック"
@@ -593,7 +594,7 @@ export function GraphTraversalVisualizer({
       }
       description={
         locale === "ja"
-          ? "同じグラフで BFS と DFS の動きを見比べてみましょう。再生ボタンを押すか、ステップを手動で送ってください。"
+          ? "同じグラフに対する BFS と DFS の探索順序を比較できます。再生ボタンを押すか、ステップを手動で送ってください。"
           : "Compare how BFS and DFS traverse the same graph. Press play or step manually."
       }
     >
@@ -712,16 +713,12 @@ export function GraphTraversalVisualizer({
               <span className="inline-block w-3 h-3 rounded-full bg-gray-200 dark:bg-gray-600 border border-gray-400" />
               {locale === "ja" ? "未訪問" : "Unvisited"}
             </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded-full bg-blue-200 dark:bg-blue-900 border border-blue-500" />
-              {locale === "ja"
-                ? mode === "bfs"
-                  ? "キュー内"
-                  : "スタック内"
-                : mode === "bfs"
-                  ? "In Queue"
-                  : "In Stack"}
-            </span>
+            {mode === "bfs" && (
+              <span className="flex items-center gap-1">
+                <span className="inline-block w-3 h-3 rounded-full bg-blue-200 dark:bg-blue-900 border border-blue-500" />
+                {locale === "ja" ? "キュー内" : "In Queue"}
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <span className="inline-block w-3 h-3 rounded-full bg-amber-200 dark:bg-amber-900 border border-amber-500" />
               {locale === "ja" ? "処理中" : "Current"}
@@ -770,7 +767,7 @@ export function GraphTraversalVisualizer({
                     ? "← 先頭から取り出す（FIFO）"
                     : "← Dequeue from front (FIFO)"
                   : locale === "ja"
-                    ? "末尾が現在の再帰先 →"
+                    ? "末尾が実行中の呼び出し →"
                     : "Top of stack = current call →"}
               </div>
             )}
@@ -823,6 +820,7 @@ export function GraphTraversalVisualizer({
               ? `ステップ ${s}/${steps.length - 1}`
               : `Step ${s}/${steps.length - 1}`
           }
+          ariaLabels={stepPlayerAriaLabels(locale)}
         />
       </div>
     </InteractiveDemo>

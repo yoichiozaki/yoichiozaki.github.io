@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -55,9 +56,9 @@ function buildScenario(): VMState[] {
       stack: [],
       locals: {},
       description:
-        "VM起動: RESUME 命令でフレームを初期化します。IP(命令ポインター)はバイトコード先頭を指しています。",
+        "関数の開始: RESUME 0 は関数の先頭を示す命令で、スタックとローカル変数は変えません。IP（命令ポインター）は先頭の命令を指しています。",
       descriptionEn:
-        "VM start: RESUME initializes the frame. The IP (instruction pointer) points to the beginning of bytecode.",
+        "Function start: RESUME 0 marks the start of the function and leaves the stack and locals unchanged. The IP (instruction pointer) points to the first instruction.",
       highlight: "ip",
     },
     // Step 1: LOAD_CONST 0
@@ -101,7 +102,7 @@ function buildScenario(): VMState[] {
       description:
         "STORE_FAST 1 (i): スタックから値をポップし、ローカル変数 i に格納します。i=1 でループ開始。",
       descriptionEn:
-        "STORE_FAST 1 (i): Pops value from stack and stores into local variable i. Loop starts with i=1.",
+        "STORE_FAST 1 (i): Pops the value from the stack and stores it in local variable i. The loop starts with i=1.",
       highlight: "locals",
     },
     // ── Loop iteration 1 (i=1) ──────────────────
@@ -113,7 +114,7 @@ function buildScenario(): VMState[] {
       description:
         "【ループ1回目 i=1】LOAD_FAST 0 (total): ローカル変数 total の値「0」をスタックにプッシュ。",
       descriptionEn:
-        "[Loop iter 1, i=1] LOAD_FAST 0 (total): Pushes local variable total (0) onto stack.",
+        "[Iteration 1, i=1] LOAD_FAST 0 (total): Pushes local variable total (0) onto the stack.",
       highlight: "stack",
     },
     // Step 6: LOAD_FAST i
@@ -122,7 +123,7 @@ function buildScenario(): VMState[] {
       stack: ["0", "1"],
       locals: { total: "0", i: "1" },
       description:
-        "LOAD_FAST 1 (i): ローカル変数 i の値「1」をスタックにプッシュ。スタックに [0, 1] の2値が積まれました。",
+        "LOAD_FAST 1 (i): ローカル変数 i の値「1」をスタックにプッシュ。スタックに [0, 1] の2つの値が積まれました。",
       descriptionEn:
         "LOAD_FAST 1 (i): Pushes local variable i (1) onto stack. Stack now holds [0, 1].",
       highlight: "stack",
@@ -133,7 +134,7 @@ function buildScenario(): VMState[] {
       stack: ["1"],
       locals: { total: "0", i: "1" },
       description:
-        "BINARY_OP +=: スタックから 2 値をポップ (0, 1)、加算して結果「1」をプッシュ。0 + 1 = 1。",
+        "BINARY_OP +=: スタックから2つの値（0, 1）をポップし、加算した結果「1」をプッシュ。0 + 1 = 1。",
       descriptionEn:
         "BINARY_OP +=: Pops 2 values (0, 1), adds them, pushes result '1'. 0 + 1 = 1.",
       highlight: "stack",
@@ -232,9 +233,9 @@ function buildScenario(): VMState[] {
       stack: [],
       locals: { total: "1", i: "2" },
       description:
-        "POP_JUMP_IF_TRUE 5: True なのでオフセット 5（ループ先頭）にジャンプ！IP が巻き戻ります。",
+        "POP_JUMP_IF_TRUE 5: True なのでオフセット 5（ループ先頭）にジャンプ。IP が巻き戻ります。",
       descriptionEn:
-        "POP_JUMP_IF_TRUE 5: True, so jump to offset 5 (loop start)! IP rewinds.",
+        "POP_JUMP_IF_TRUE 5: True, so jump to offset 5 (loop start). The IP moves back.",
       highlight: "ip",
     },
     // ── Loop iteration 2 (i=2) ──────────────────
@@ -246,7 +247,7 @@ function buildScenario(): VMState[] {
       description:
         "【ループ2回目 i=2】LOAD_FAST 0 (total): total=1 をプッシュ。",
       descriptionEn:
-        "[Loop iter 2, i=2] LOAD_FAST 0 (total): Pushes total=1.",
+        "[Iteration 2, i=2] LOAD_FAST 0 (total): Pushes total=1.",
       highlight: "stack",
     },
     // Step 18: LOAD_FAST i
@@ -299,9 +300,9 @@ function buildScenario(): VMState[] {
       stack: ["False"],
       locals: { total: "3", i: "3" },
       description:
-        "COMPARE_OP <: 3 < 3 → False。ループ終了条件に到達しました！",
+        "COMPARE_OP <: 3 < 3 → False。ループ終了条件に到達しました（直前の LOAD_FAST と LOAD_CONST は表示を省略）。",
       descriptionEn:
-        "COMPARE_OP <: 3 < 3 → False. Loop termination condition reached!",
+        "COMPARE_OP <: 3 < 3 → False. Loop termination condition reached (the LOAD_FAST and LOAD_CONST before it are not shown).",
       highlight: "stack",
     },
     // Step 23: POP_JUMP_IF_TRUE → falls through
@@ -332,9 +333,9 @@ function buildScenario(): VMState[] {
       stack: [],
       locals: { total: "3", i: "3" },
       description:
-        "RETURN_VALUE: スタックトップの値「3」を呼び出し元に返します。関数の実行が完了しました！ total = 1 + 2 = 3。",
+        "RETURN_VALUE: スタックトップの値「3」を呼び出し元に返し、関数の実行が終わります。total = 1 + 2 = 3。",
       descriptionEn:
-        "RETURN_VALUE: Returns stack top value '3' to the caller. Function execution complete! total = 1 + 2 = 3.",
+        "RETURN_VALUE: Returns the stack top value '3' to the caller, and the function finishes. total = 1 + 2 = 3.",
       highlight: "ip",
     },
   ];
@@ -365,8 +366,8 @@ export function BytecodeExecutionVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "total = 0; i = 1 から始めて total += i; i += 1 を i < 3 の間繰り返す関数のバイトコード実行を1命令ずつ追いかけます。"
-          : "Step through bytecode execution of a function that starts with total=0, i=1 and repeats total += i; i += 1 while i < 3."
+          ? "total = 0; i = 1 から始めて total += i; i += 1 を i < 3 の間繰り返す関数を、CPython のバイトコードを簡略化した命令列で1命令ずつ実行します。"
+          : "Step through a simplified version of CPython bytecode for a function that starts with total=0, i=1 and repeats total += i; i += 1 while i < 3."
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4">
@@ -436,7 +437,7 @@ export function BytecodeExecutionVisualizer({ locale = "ja" }: Props) {
                       {val}
                       {i === current.stack.length - 1 && (
                         <span className="text-[10px] ml-1 opacity-60">
-                          ← TOS
+                          ← top
                         </span>
                       )}
                     </div>
@@ -498,7 +499,7 @@ export function BytecodeExecutionVisualizer({ locale = "ja" }: Props) {
         </div>
       </div>
 
-      <StepPlayerControls {...player} label={labelFn} />
+      <StepPlayerControls {...player} label={labelFn} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }

@@ -28,7 +28,7 @@ This article goes through `select → poll → epoll → io_uring` in order and 
 With plain blocking I/O, `read(fd, buf, n)` puts the calling thread to sleep until data arrives. `fd` stands for file descriptor, an integer handle that refers to a resource the kernel has opened, such as a socket, file, or pipe. If each connection gets its own thread, these costs grow with the number of connections:
 
 - <strong>Thread stacks</strong>: the Linux default is 8 MB (`ulimit -s`), so 10k connections use 80 GB of virtual address space.
-- <strong>Context switches</strong>: a typical switch takes 1–3 µs. A main-memory access takes tens of nanoseconds and a syscall less than a microsecond, so a switch is one of the most expensive things a thread does. At hundreds of thousands of switches per second, much of the CPU time goes to switching.
+- <strong>Context switches</strong>: a typical switch takes 1–3 µs (direct cost only, excluding cache effects; Eli Bendersky measured 1.2–2.2 µs<sup>[8]</sup>). A main-memory access takes tens of nanoseconds and a syscall less than a microsecond, so a switch is one of the most expensive things a thread does. At hundreds of thousands of switches per second, much of the CPU time goes to switching.
 - <strong>Kernel thread structures</strong>: each thread keeps a `task_struct` of several KB in the kernel.
 
 To avoid these costs, one thread has to multiplex many I/Os. There are three ways to do it:
@@ -46,7 +46,7 @@ For a long time Linux was optimized around (1). Since `io_uring` arrived in 2019
 | Readiness | `select`, `poll`, `epoll`, `kqueue` (BSD) | The kernel reports that an fd is ready, then the user performs the I/O | 2 (notify + read/write) |
 | Completion | Windows IOCP, POSIX `aio`, `io_uring` | The user submits the I/O to the kernel and receives only the completion | 0–1 |
 
-A syscall (system call) is how a user-space program calls into the kernel, switching the CPU into privileged mode. Because it involves a trap instruction and a CPU mode transition, it costs orders of magnitude more than a normal function call. Figures such as 200–500 ns for a simple syscall and under 10 ns for a normal call are only rough orders of magnitude; the real cost varies a lot with the CPU, kernel, vulnerability mitigations, and cache and TLB state. KPTI, covered later, can make it more expensive still.
+A syscall (system call) is how a user-space program calls into the kernel, switching the CPU into privileged mode. Because it involves a trap instruction and a CPU mode transition, it costs orders of magnitude more than a normal function call. As a rough guide, a simple syscall costs about 200–500 ns and a normal function call less than 10 ns. Ren et al. measured 344 ns for a short `read` on a 2.4 GHz Xeon<sup>[9]</sup>, while a call with few arguments takes about 15–30 cycles<sup>[10]</sup>, which is under 10 ns on a CPU running at a few GHz. KPTI, covered later, makes syscalls more expensive still.
 
 Linux treats regular files as always readable, so the readiness model doesn't work for file I/O (`epoll` refuses to register regular files). Async file I/O needs a completion-based API, and that was a major reason `io_uring` was created.
 
@@ -86,7 +86,7 @@ The 1024-fd limit is gone, but every call still copies the array and scans all o
 
 ### 2.3 C10K and `epoll` — 2002, Linux 2.5.44
 
-In 1999 Dan Kegel's essay "The C10K problem" posed the challenge of handling 10k connections in one process. Davide Libenzi's `epoll` answered it with two changes:
+In 1999 Dan Kegel's essay "The C10K problem" posed the challenge of handling 10,000 clients simultaneously on one server. Davide Libenzi's `epoll` answered it with two changes:
 
 - It keeps the watch set in the kernel instead of copying it on every call.
 - It returns only the fds that are ready instead of scanning all of them.
@@ -143,7 +143,7 @@ struct eppoll_entry {
 };
 ```
 
-Each field does the following:
+The main pieces work as follows:
 
 - <strong>Red-black tree `rbr`</strong>: a self-balancing binary search tree that holds every watched fd, with $O(\log N)$ insert, delete, and lookup.
 - <strong>Ready list `rdllist`</strong>: a doubly linked list holding only the `epitem`s that have pending events. `epoll_wait` just takes items off it, so each ready fd costs $O(1)$ to return.
@@ -216,7 +216,7 @@ Some problems epoll can't solve:
 
 1. <strong>It doesn't work for file I/O</strong>: regular files always report as readable, so epoll can't stop a thread from blocking on a disk read.
 2. <strong>Each I/O needs two syscalls</strong>: `epoll_wait` and `read/write`. Neither can be replaced by the vDSO.
-3. <strong>Higher syscall cost after Spectre/Meltdown</strong>: KPTI (Kernel Page-Table Isolation, the Meltdown mitigation that gives user space and the kernel separate page tables) adds TLB flushes that bring each syscall to 0.1–1 µs. At 1M IOPS, syscalls alone would use 10–100% of one CPU core, and that sets the performance ceiling.
+3. <strong>Higher syscall cost after Spectre/Meltdown</strong>: KPTI (Kernel Page-Table Isolation, the Meltdown mitigation that gives user space and the kernel separate page tables) switches page tables on every kernel entry and exit. Ren et al.<sup>[9]</sup> measured a fixed cost of 400–500 cycles per entry and exit for this switch alone (under 100 cycles without KPTI), with additional TLB misses on top. With an estimated 0.1–1 µs per syscall in total, 1M IOPS with even one syscall per I/O adds up to 0.1–1 s of CPU time every second, or 10–100% of one core, and that sets the performance ceiling.
 4. <strong>A chain of I/Os can't be submitted at once</strong>: a sequence like `accept → read → parse → write` can't be handed to the kernel in one go.
 
 These are the reasons `io_uring` was created.
@@ -243,18 +243,19 @@ On Linux, a common approach has been to represent various subsystems as fds and 
 
 ### 5.1 Design goals
 
-Jens Axboe's document "Efficient IO with io_uring"<sup>[1]</sup> describes design aims that are roughly these four:
+Jens Axboe's document "Efficient IO with io_uring"<sup>[1]</sup> lists the design goals in rough ascending order of importance:
 
-1. <strong>Truly asynchronous</strong>: any I/O operation can be submitted without blocking.
-2. <strong>No copy, no allocation</strong>: no syscall and no memory allocation on the hot path.
-3. <strong>Unified</strong>: one API for network, file, and block-device I/O.
-4. <strong>Extensible</strong>: new operations (opcodes) are easy to add.
+1. Easy to use, hard to misuse.
+2. Extendable: usable for more than block-oriented storage I/O, such as networking.
+3. Feature rich: covers what applications need, whereas Linux AIO serves only a subset of applications.
+4. Efficient: low per-request overhead.
+5. Scalable: peak performance exposed all the way to applications.
 
-This is achieved with <strong>ring buffers</strong> shared with the kernel.
+The initial design centered on efficiency, aiming for no memory copies for either submissions or completions. This is achieved with <strong>ring buffers</strong> shared with the kernel.
 
 ### 5.2 Architecture: SQ and CQ
 
-`io_uring` shares two ring buffers between kernel and userspace.
+`io_uring` shares two ring buffers between the kernel and user space.
 
 ```mermaid
 graph LR
@@ -328,7 +329,7 @@ User space goes through these steps (usually hidden by `liburing`):
 2. `mmap` maps the SQ ring, the CQ ring, and the SQE array into the process. Since Linux 5.4, `IORING_FEAT_SINGLE_MMAP` lets the SQ and CQ share one mapping, so two mmap calls are enough in total (three on older kernels).
 3. The positions of `sq_head`/`sq_tail`/`cq_head`/`cq_tail` are read from the ring headers.
 
-Typical sizes are 128–4096 entries for the SQ and twice that for the CQ.
+The SQ gets `entries` rounded up to a power of two (at most 32768), and by default the CQ is twice that size; `IORING_SETUP_CQSIZE` sets a different CQ size<sup>[5]</sup>.
 
 ### 5.5 Submission and completion in C
 
@@ -349,7 +350,7 @@ process_completion(cqe);
 io_uring_cqe_seen(&ring, cqe);     /* head++ */
 ```
 
-Many SQEs can be submitted with a single `io_uring_enter`, so 1000 reads can go out in one syscall and the syscall cost is divided across them. An epoll-style loop pays two syscalls per I/O, while io_uring can fold 1000 requests into one submit.
+Many SQEs can be submitted with a single `io_uring_enter`, so 1000 reads can go out in one syscall and the syscall cost is divided across them. An epoll-style loop, by contrast, pays two syscalls per I/O.
 
 ### 5.6 Memory ordering
 
@@ -364,7 +365,7 @@ Because `head` and `tail` are managed in shared memory, memory barriers are need
 
 ## 6. Advanced modes
 
-SQPOLL, IOPOLL, linked SQEs, registered files/buffers, and multishot, covered below, are options that cut syscall and setup costs further. They are for cases where the basic API isn't enough, and you don't need to use them all.
+SQPOLL, IOPOLL, linked SQEs, registered files/buffers, multishot, and provided buffers, covered below, are options for cutting syscall and setup costs further when the basic API isn't enough.
 
 ### 6.1 `IORING_SETUP_SQPOLL` — kernel-side polling thread
 
@@ -402,14 +403,14 @@ sqe2 = io_uring_get_sqe(); io_uring_prep_write(sqe2, fd, buf, len, 0);
 io_uring_submit(&ring);
 ```
 
-If an earlier operation fails (`res < 0`), the later ones are canceled automatically. `IOSQE_IO_LINK` only guarantees execution order; there is no mechanism that passes the result fd of one SQE to the next. To run something like `accept → read`, which uses the fd returned by accept, in one submit, use <strong>direct descriptors</strong> (`IORING_FILE_INDEX_ALLOC` and `IOSQE_FIXED_FILE`, plus deferred fd resolution via `IORING_FEAT_LINKED_FILE` on 5.17+).
+If an earlier operation fails (`res < 0`), the later ones are canceled automatically. `IOSQE_IO_LINK` itself only guarantees execution order; it does not pass the result of one SQE to the next. To run something like `accept → read`, which uses the fd returned by accept, in one submit, use <strong>direct descriptors</strong> (`IORING_FILE_INDEX_ALLOC` and `IOSQE_FIXED_FILE`, plus deferred fd resolution via `IORING_FEAT_LINKED_FILE` on 5.17+).
 
 ### 6.4 Registered files / buffers
 
 - <strong>`io_uring_register_files()`</strong>: preregisters an array of fds with the kernel. If an SQE specifies an index instead of an fd, the `fget()/fput()` reference counting is skipped.
 - <strong>`io_uring_register_buffers()`</strong>: pins user buffers in advance and registers them, skipping `get_user_pages` on every I/O. `get_user_pages` is the kernel function that pins the physical pages behind a user-space virtual address so the kernel or a device can safely DMA to or from them.
 
-This is the standard optimization when you need high IOPS. ScyllaDB has reported 20–40% speedups from it.
+This is the standard optimization when you need high IOPS. In a fio benchmark published by ScyllaDB<sup>[11]</sup> (1 KB random reads with direct I/O, CPU-bound), io_uring using advanced features such as buffer and file registration delivered 4.9% more IOPS than basic io_uring.
 
 ### 6.5 Multishot (`IORING_ACCEPT_MULTISHOT`, Linux 5.19+)
 
@@ -419,7 +420,7 @@ A single SQE can produce multiple completions: with `accept` or `recv`, it keeps
 
 This lets the kernel choose the receive buffer. The kernel picks a free buffer from a pool when data arrives, so you don't have to allocate a buffer ahead of time for each of thousands of connections. It helps HTTP servers with many connections.
 
-### 6.7 Opcode catalogue (selection)
+### 6.7 Opcode catalog (selection)
 
 | Category | Example opcodes |
 | --- | --- |
@@ -436,7 +437,7 @@ The kernel has an implementation file for each kind of opcode (`io_uring/net.c`,
 
 Inside the kernel, each SQE becomes a request struct called `io_kiocb`. If it can run right away, it runs inline; if it might block, it is handed to a dedicated thread pool, `io-wq`. When it completes, the result is written to the shared CQ ring and the waiting task is woken.
 
-In Linux 5.19 the implementation, previously the single file `fs/io_uring.c`, was split into a top-level `io_uring/` directory. The main files are:
+In Linux 6.0 the implementation, previously the single file `fs/io_uring.c`, was split into a top-level `io_uring/` directory. The main files are:
 
 ```text
 io_uring/
@@ -477,7 +478,7 @@ It is allocated from a slab cache (`req_cachep`) and reused after completion. To
 
 Operations that can actually block, such as a disk `read` that misses the page cache, are handed to a kernel thread pool called `io-wq`. Since Linux 5.12, `io-wq` is created per submitting task rather than per ring, and it has two kinds of workers: `bounded` for disk and `unbounded` for network. Idle workers exit, so if `ps` shows many `iou-wrk` threads under heavy load, the number drops again once the load goes down.
 
-io_uring has its own pool instead of using the generic kernel `workqueue` because `io-wq` workers must inherit the submitting task's credentials (uid/gid, cgroup, nsproxy, and so on), and io_uring also wants control over NUMA locality and priority. Generic workqueues don't meet these requirements.
+io_uring has its own pool instead of using the generic kernel `workqueue` because `io-wq` workers must inherit the submitting task's credentials (uid/gid, cgroup, nsproxy, and so on), and io_uring also wants control over NUMA locality and priority.
 
 None of this is visible to the user. Operations that can't complete asynchronously wait in a worker thread, so the submitter never blocks, whatever the opcode. epoll avoids blocking by only notifying about operations that won't block. io_uring takes on blocking operations too, in background threads, and that is a different approach from epoll's.
 
@@ -543,15 +544,15 @@ Under light load there is little difference between epoll and io_uring. io_uring
 
 ### 9.1 Benchmark shapes
 
-Published reports show roughly the following trends. Measurement conditions differ between reports.
+In the table below, the multipliers in the network and DB rows are illustrative values that show where the gap tends to appear; they are not measurements. Real differences depend heavily on the kernel, the CPU, and how the program uses io_uring, and for echo servers there are reports of epoll being faster<sup>[12]</sup>. The NVMe row gives the values Axboe measured in 2019 for 4 KB random reads driven from a single CPU core<sup>[1]</sup>.
 
 | Workload | epoll | io_uring (no polling) | io_uring (SQPOLL + registered) |
 | --- | --- | --- | --- |
 | Network echo, 1M conn | baseline | ~1.2× | ~2–3× |
-| NVMe random read, 4 KB | ~800k IOPS | ~1.5–2M IOPS | ~3–5M IOPS |
+| NVMe random read, 4 KB | — (not usable for regular files) | ~1.2M IOPS | ~1.7M IOPS (IOPOLL) |
 | DB commit (fsync-heavy) | baseline | ~1.1× | ~1.3–1.5× |
 
-The gap is largest where IOPS are high and latency is low. Under light load the difference from epoll is very small and often not worth the effort of switching.
+The rightmost NVMe value was measured with completion polling (`IORING_SETUP_IOPOLL`), not SQPOLL; libaio reached 608K IOPS in the same test. The gap is largest where IOPS are high and latency is low; under light load, switching is often not worth the effort.
 
 ### 9.2 When to actually choose `io_uring`
 
@@ -590,5 +591,10 @@ If you know which cost each interface was built to reduce (data copies, full sca
 3. D. Kegel, "The C10K problem", 1999.
 4. [Linux kernel source: `fs/eventpoll.c`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/fs/eventpoll.c)
 5. [Linux kernel source: `io_uring/`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/io_uring)
-6. [`liburing`](https://github.com/axboe/liburing) — userspace helpers and official docs.
+6. [`liburing`](https://github.com/axboe/liburing) — user-space helpers and official docs.
 7. LWN: "The rapid growth of io_uring" (2020), "Security considerations for io_uring" (2023).
+8. E. Bendersky, "Measuring context switching and memory overheads for Linux threads", 2018. [eli.thegreenplace.net](https://eli.thegreenplace.net/2018/measuring-context-switching-and-memory-overheads-for-linux-threads/)
+9. X. Ren et al., "An Analysis of Performance Evolution of Linux's Core Operations", *SOSP*, 2019. [doi:10.1145/3341301.3359640](https://doi.org/10.1145/3341301.3359640)
+10. ITHare, "Infographics: Operation Costs in CPU Clock Cycles", 2016. [ithare.com](http://ithare.com/infographics-operation-costs-in-cpu-clock-cycles/)
+11. G. Costa, "How io_uring and eBPF Will Revolutionize Programming in Linux", ScyllaDB blog, 2020. [scylladb.com](https://www.scylladb.com/2020/05/05/how-io_uring-and-ebpf-will-revolutionize-programming-in-linux/)
+12. axboe/liburing issue #189, "io_uring is slower than epoll", 2020. [github.com](https://github.com/axboe/liburing/issues/189)

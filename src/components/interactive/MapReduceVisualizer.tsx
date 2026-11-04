@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -51,7 +52,7 @@ function buildScenario(): MapReduceState[] {
       shuffled: [],
       reduceOutputs: [],
       description:
-        "入力データ: 3つのドキュメントがあります。これらのドキュメントに含まれる各単語の出現回数を数える（Word Count）のが今回のタスクです。",
+        "入力データ: 3 つのドキュメントがあります。これらのドキュメントに含まれる各単語の出現回数を数える（Word Count）のが今回のタスクです。",
       descriptionEn:
         "Input data: We have 3 documents. Our task is to count the occurrences of each word across all documents (Word Count).",
     },
@@ -72,9 +73,9 @@ function buildScenario(): MapReduceState[] {
       shuffled: [],
       reduceOutputs: [],
       description:
-        "Split フェーズ: 入力データが InputSplit に分割され、各 Mapper に割り当てられます。GFS/HDFS では 64MB (または 128MB) のブロック単位で分割されます。ここでは各ドキュメントが 1 つの Split になります。",
+        "分割フェーズ: 入力データをスプリットに分け、各スプリットを 1 つの Map タスクが処理します。実際のスプリットは通常 16〜64 MB です。ここでは各ドキュメントを 1 つのスプリットとします。",
       descriptionEn:
-        "Split phase: Input data is divided into InputSplits and assigned to each Mapper. In GFS/HDFS, data is split into 64MB (or 128MB) blocks. Here each document becomes one split.",
+        "Split phase: The input is divided into splits, and each split is processed by one Map task. In practice, splits are typically 16–64 MB. Here each document is one split.",
     },
     // Step 2: Map — Mapper 1 processes
     {
@@ -103,9 +104,9 @@ function buildScenario(): MapReduceState[] {
       shuffled: [],
       reduceOutputs: [],
       description:
-        "Map フェーズ (1/3): Mapper 1 が Split 1 を処理します。map(key, value) 関数が各単語に対して (word, 1) のペアを出力します。「hello world hello」→ (hello,1), (world,1), (hello,1)",
+        "Map フェーズ (1/3): Map タスク 1 が Split 1 を処理します。map(key, value) 関数が各単語に対して (word, 1) のペアを出力します。「hello world hello」→ (hello,1), (world,1), (hello,1)",
       descriptionEn:
-        'Map phase (1/3): Mapper 1 processes Split 1. The map(key, value) function emits (word, 1) for each word. "hello world hello" → (hello,1), (world,1), (hello,1)',
+        'Map phase (1/3): Map task 1 processes Split 1. The map(key, value) function emits (word, 1) for each word. "hello world hello" → (hello,1), (world,1), (hello,1)',
     },
     // Step 3: Map — Mapper 2 processes
     {
@@ -143,9 +144,9 @@ function buildScenario(): MapReduceState[] {
       shuffled: [],
       reduceOutputs: [],
       description:
-        "Map フェーズ (2/3): Mapper 2 が Split 2 を処理。「world foo bar」→ (world,1), (foo,1), (bar,1)。各 Mapper は独立・並列に実行されます。",
+        "Map フェーズ (2/3): Map タスク 2 が Split 2 を処理。「world foo bar」→ (world,1), (foo,1), (bar,1)。各 Map タスクは独立に並列実行されます。",
       descriptionEn:
-        'Map phase (2/3): Mapper 2 processes Split 2. "world foo bar" → (world,1), (foo,1), (bar,1). Each Mapper runs independently in parallel.',
+        'Map phase (2/3): Map task 2 processes Split 2. "world foo bar" → (world,1), (foo,1), (bar,1). Each Map task runs independently, in parallel.',
     },
     // Step 4: Map — Mapper 3 processes
     {
@@ -192,9 +193,9 @@ function buildScenario(): MapReduceState[] {
       shuffled: [],
       reduceOutputs: [],
       description:
-        "Map フェーズ (3/3): Mapper 3 が Split 3 を処理。「hello foo hello」→ (hello,1), (foo,1), (hello,1)。全 Mapper の処理が完了しました。",
+        "Map フェーズ (3/3): Map タスク 3 が Split 3 を処理。「hello foo hello」→ (hello,1), (foo,1), (hello,1)。すべての Map タスクが完了しました。",
       descriptionEn:
-        'Map phase (3/3): Mapper 3 processes Split 3. "hello foo hello" → (hello,1), (foo,1), (hello,1). All Mappers have finished processing.',
+        'Map phase (3/3): Map task 3 processes Split 3. "hello foo hello" → (hello,1), (foo,1), (hello,1). All Map tasks have finished.',
     },
     // Step 5: Shuffle & Sort — grouping by key
     {
@@ -242,9 +243,9 @@ function buildScenario(): MapReduceState[] {
       ],
       reduceOutputs: [],
       description:
-        "Shuffle & Sort フェーズ: フレームワークが全 Mapper の出力をキーでソートし、同じキーの値をグループ化します。これがMapReduceの「隠れた心臓部」です。ネットワーク越しにデータが転送され（この通信量がボトルネックになりやすい）、Reducer に届けられます。",
+        "Shuffle & Sort フェーズ: フレームワークが全 Map タスクの出力をネットワーク越しに Reduce タスクへ転送し、キーでソートして同じキーの値をまとめます。全 Map タスクから全 Reduce タスクへデータが動くため、転送量がボトルネックになりやすい段階です。",
       descriptionEn:
-        'Shuffle & Sort phase: The framework sorts all Mapper outputs by key and groups values with the same key. This is the "hidden heart" of MapReduce. Data is transferred over the network (this transfer volume often becomes a bottleneck) and delivered to Reducers.',
+        "Shuffle & Sort phase: The framework transfers all Map task outputs over the network to the Reduce tasks, then sorts them by key and groups values with the same key. Because data moves from every Map task to every Reduce task, this transfer volume often becomes the bottleneck.",
     },
     // Step 6: Reduce — bar
     {
@@ -264,9 +265,9 @@ function buildScenario(): MapReduceState[] {
       ],
       reduceOutputs: [{ key: "bar", value: 1 }],
       description:
-        'Reduce フェーズ (1/4): reduce("bar", [1]) を実行。値のリストを合計して bar → 1。Reducer は各キーについて集約関数を適用します。',
+        'Reduce フェーズ (1/4): reduce("bar", [1]) を実行。値のリストを合計して bar → 1。Reduce タスクは、キーごとに reduce 関数を呼び出します。',
       descriptionEn:
-        'Reduce phase (1/4): Execute reduce("bar", [1]). Sum the list of values: bar → 1. The Reducer applies an aggregation function for each key.',
+        'Reduce phase (1/4): Execute reduce("bar", [1]). Sum the list of values: bar → 1. The Reduce task calls reduce once for each key.',
     },
     // Step 7: Reduce — foo
     {
@@ -289,9 +290,9 @@ function buildScenario(): MapReduceState[] {
         { key: "foo", value: 2 },
       ],
       description:
-        'Reduce フェーズ (2/4): reduce("foo", [1, 1]) → foo = 1 + 1 = 2。同じキーの全ての値が 1 つの Reducer に集約されます。',
+        'Reduce フェーズ (2/4): reduce("foo", [1, 1]) → foo = 1 + 1 = 2。同じキーの値は、すべて同じ Reduce タスクに集まります。',
       descriptionEn:
-        'Reduce phase (2/4): reduce("foo", [1, 1]) → foo = 1 + 1 = 2. All values for the same key are aggregated by a single Reducer.',
+        'Reduce phase (2/4): reduce("foo", [1, 1]) → foo = 1 + 1 = 2. All values for a given key go to the same Reduce task.',
     },
     // Step 8: Reduce — hello
     {
@@ -315,9 +316,9 @@ function buildScenario(): MapReduceState[] {
         { key: "hello", value: 4 },
       ],
       description:
-        'Reduce フェーズ (3/4): reduce("hello", [1, 1, 1, 1]) → hello = 4。3つの Mapper にまたがっていた "hello" が 1 つの結果に集約されました。',
+        'Reduce フェーズ (3/4): reduce("hello", [1, 1, 1, 1]) → hello = 4。2 つの Map タスクにまたがっていた "hello" が 1 つの結果に集約されました。',
       descriptionEn:
-        'Reduce phase (3/4): reduce("hello", [1, 1, 1, 1]) → hello = 4. The word "hello" scattered across 3 Mappers is aggregated into a single result.',
+        'Reduce phase (3/4): reduce("hello", [1, 1, 1, 1]) → hello = 4. The word "hello", spread across 2 Map tasks, is aggregated into a single result.',
     },
     // Step 9: Reduce — world
     {
@@ -342,7 +343,7 @@ function buildScenario(): MapReduceState[] {
         { key: "world", value: 2 },
       ],
       description:
-        'Reduce フェーズ (4/4): reduce("world", [1, 1]) → world = 2。全てのキーの Reduce が完了しました。',
+        'Reduce フェーズ (4/4): reduce("world", [1, 1]) → world = 2。すべてのキーの Reduce が完了しました。',
       descriptionEn:
         'Reduce phase (4/4): reduce("world", [1, 1]) → world = 2. Reduce is complete for all keys.',
     },
@@ -366,7 +367,7 @@ function buildScenario(): MapReduceState[] {
       description:
         "完了: 最終結果が分散ファイルシステム (GFS/HDFS) に書き出されます。bar=1, foo=2, hello=4, world=2。プログラマーが書いたのは map() と reduce() の 2 つの関数だけ — 分散処理・障害復旧・データ転送はすべてフレームワークが担当しました。",
       descriptionEn:
-        "Done: Final results are written to the distributed file system (GFS/HDFS). bar=1, foo=2, hello=4, world=2. The programmer only wrote two functions — map() and reduce() — the framework handled all distribution, fault recovery, and data transfer.",
+        "Done: Final results are written to the distributed file system (GFS/HDFS). bar=1, foo=2, hello=4, world=2. The programmer wrote only two functions, map() and reduce(); the framework handled all distribution, fault recovery, and data transfer.",
     },
   ];
 }
@@ -413,7 +414,7 @@ export function MapReduceVisualizer({
       title={isJa ? "MapReduce 実行フロー" : "MapReduce Execution Flow"}
       description={
         isJa
-          ? "Word Count の例で MapReduce の各フェーズを追体験します"
+          ? "Word Count を例に、MapReduce の各フェーズを順にたどります"
           : "Walk through each MapReduce phase using a Word Count example"
       }
     >
@@ -635,7 +636,7 @@ export function MapReduceVisualizer({
       </div>
 
       <div className="mt-4">
-        <StepPlayerControls {...player} label={phaseLabel} />
+        <StepPlayerControls {...player} label={phaseLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

@@ -115,8 +115,8 @@ export function WireFormatLab({ locale = "ja" }: Props) {
       title={isJa ? "同じデータ、違うワイヤー表現" : "Same data, different wire formats"}
       description={
         isJa
-          ? "ユーザー一覧レスポンスを JSON と Protobuf で符号化したときのバイト数を、実際に符号化規則を適用して数えています (推定値ではありません)。"
-          : "Byte counts for a user-list response encoded as JSON and as protobuf, computed by actually applying the encoding rules — not estimates."
+          ? "ユーザー一覧レスポンスを JSON と Protobuf で符号化したときのバイト数を、それぞれの符号化規則を適用して正確に数えています。"
+          : "Exact byte counts for a user-list response encoded as JSON and as protobuf, computed by applying each format's encoding rules."
       }
     >
       <div className="flex flex-col gap-4">
@@ -176,11 +176,11 @@ export function WireFormatLab({ locale = "ja" }: Props) {
 
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat
-            label={isJa ? "Protobuf / JSON" : "protobuf / JSON"}
+            label={isJa ? "Protobuf / JSON (最小化)" : "protobuf / JSON (minified)"}
             value={`${(ratio * 100).toFixed(0)}%`}
           />
           <Stat
-            label={isJa ? "1 レコードあたり (JSON)" : "per record (JSON)"}
+            label={isJa ? "1 レコードあたり (最小化した JSON)" : "per record (minified JSON)"}
             value={`${(stats.compact / count).toFixed(1)} B`}
           />
           <Stat
@@ -202,8 +202,8 @@ export function WireFormatLab({ locale = "ja" }: Props) {
 
         <p className="text-xs leading-relaxed text-muted-foreground">
           {isJa
-            ? "注意: この比較は「本体のバイト数」だけです。実運用では gzip / brotli が効くため差は大きく縮みます — JSON の繰り返しキー名は圧縮率が非常に高いからです。ネットワーク帯域だけが理由なら、Protobuf に移る前にまず圧縮を有効にしてください。逆に圧縮しても消えないのは CPU コスト (パース時間) と、スキーマがもたらす型安全性です。"
-            : "Caveat: this compares body bytes only. In production gzip/brotli narrows the gap sharply, because JSON's repeated key names compress extremely well. If bandwidth is your only concern, turn on compression before reaching for protobuf. What compression does not remove is CPU cost (parse time) and the type safety a schema gives you."}
+            ? "注意: この比較は「ボディーのバイト数」だけです。gzip / brotli で圧縮すると差は大きく縮みます — JSON で繰り返されるキー名はよく圧縮できるからです。ネットワーク帯域だけが理由なら、Protobuf に移る前にまず圧縮を有効にしてください。一方、圧縮しても残る差は、CPU コスト (パース時間) と、スキーマがもたらす保証 (型・プレゼンス・後方互換性のチェック) です。"
+            : "Caveat: this compares body bytes only. With gzip or brotli the gap narrows sharply, because JSON's repeated key names compress extremely well. If bandwidth is your only concern, turn on compression before reaching for protobuf. Compression does not remove the CPU cost of parsing or the guarantees a schema provides (types, presence, compatibility checks)."}
         </p>
       </div>
     </InteractiveDemo>

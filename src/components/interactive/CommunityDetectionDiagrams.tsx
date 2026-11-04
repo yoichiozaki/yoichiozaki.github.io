@@ -8,13 +8,13 @@ type Props = { locale?: string };
 
 const timelineData = [
   {
-    year: "1927",
+    year: "1933",
     titleJa: "社会ネットワーク分析の萌芽",
     titleEn: "Social Network Analysis Begins",
     descJa:
-      "Moreno がソシオグラムを考案。人間関係を「グラフ」として可視化する試みが始まる。",
+      "Moreno がソシオグラムを発表。人間関係をグラフとして描いた最初期の例。",
     descEn:
-      "Moreno invents the sociogram — the first attempt to visualize human relationships as graphs.",
+      "Moreno presents the sociogram, one of the earliest drawings of human relationships as a graph.",
     color: "#94a3b8",
   },
   {
@@ -22,9 +22,9 @@ const timelineData = [
     titleJa: "グラフ分割問題",
     titleEn: "Graph Partitioning",
     descJa:
-      "Kernighan-Lin アルゴリズム (1970)。回路設計の最適化のためにグラフの 2 分割を反復改善する手法。均等分割が前提。",
+      "Kernighan-Lin アルゴリズム。回路設計のため、グラフを同じ大きさの 2 つに分け、カット辺が減るようにノードの交換を繰り返す。",
     descEn:
-      "Kernighan-Lin algorithm (1970). Iteratively improves a bisection of a graph for circuit design. Assumes balanced partition.",
+      "Kernighan-Lin algorithm. For circuit design, splits a graph into two equal-sized halves and swaps nodes to reduce the cut edges.",
     color: "#64748b",
   },
   {
@@ -32,9 +32,9 @@ const timelineData = [
     titleJa: "Girvan-Newman",
     titleEn: "Girvan-Newman",
     descJa:
-      "辺媒介中心性（Edge Betweenness）に基づくトップダウン法。社会ネットワーク分析に革命をもたらした手法。",
+      "辺媒介中心性（Edge Betweenness）が最大の辺（多くはコミュニティー間の橋）を順に取り除いてグラフを分けるトップダウン法。",
     descEn:
-      "Top-down method based on edge betweenness centrality. Revolutionized social network analysis.",
+      "Top-down method that splits the graph by repeatedly removing the edge with the highest edge betweenness, typically a bridge between communities.",
     color: "#3b82f6",
   },
   {
@@ -42,49 +42,49 @@ const timelineData = [
     titleJa: "Modularity Q の定式化",
     titleEn: "Modularity Q Formalized",
     descJa:
-      "Newman & Girvan がモジュラリティー Q を定義。「良いコミュニティー分割」の定量的基準が確立。",
+      "Newman & Girvan が Modularity Q を定義。コミュニティー分割の良さを測る定量的な基準になる。",
     descEn:
-      "Newman & Girvan define Modularity Q — establishing a quantitative criterion for good community structure.",
+      "Newman & Girvan define Modularity Q, a quantitative criterion for how good a community partition is.",
     color: "#10b981",
-  },
-  {
-    year: "2008",
-    titleJa: "NP困難性の証明",
-    titleEn: "NP-Hardness Proved",
-    descJa:
-      "Brandes らがモジュラリティー最大化の NP 困難性を証明（IEEE TKDE掲載）。厳密解は大規模グラフでは事実上不可能に。",
-    descEn:
-      "Brandes et al. prove modularity maximization is NP-hard (published in IEEE TKDE). Exact solutions intractable for large graphs.",
-    color: "#ef4444",
   },
   {
     year: "2007",
     titleJa: "Resolution Limit 発見",
     titleEn: "Resolution Limit Discovered",
     descJa:
-      "Fortunato & Barthélemy がモジュラリティーの解像度限界を発見。グラフのサイズに依存して小さなコミュニティーが検出不能になる根本的問題。",
+      "Fortunato & Barthélemy が Modularity の Resolution Limit を発見。大きなグラフでは、小さなコミュニティーが Modularity 最適化で隣のコミュニティーと統合され得る。",
     descEn:
-      "Fortunato & Barthélemy discover the resolution limit. Small communities become undetectable depending on graph size.",
+      "Fortunato & Barthélemy discover the resolution limit: in a large graph, Modularity optimization can merge small communities with their neighbors.",
     color: "#f59e0b",
+  },
+  {
+    year: "2008",
+    titleJa: "NP 困難性の証明",
+    titleEn: "NP-Hardness Proved",
+    descJa:
+      "Brandes らが Modularity 最大化の NP 困難性を証明（IEEE TKDE 掲載）。P ≠ NP なら、最適解を効率的に求めるアルゴリズムはない。",
+    descEn:
+      "Brandes et al. prove that Modularity maximization is NP-hard (published in IEEE TKDE). Assuming P ≠ NP, no efficient algorithm finds the optimum.",
+    color: "#ef4444",
   },
   {
     year: "2008",
     titleJa: "Louvain アルゴリズム",
     titleEn: "Louvain Algorithm",
     descJa:
-      "Blondel らが提案した貪欲法。局所移動と集約を繰り返し、数百万ノード規模のグラフに適用可能。事実上のスタンダードに。",
+      "Blondel らが提案した貪欲法。局所移動と集約を繰り返す。原論文では 1 億 1800 万ノードの Web グラフに適用。事実上の標準に。",
     descEn:
-      "Blondel et al.'s greedy method. Alternates local moving and aggregation, scaling to millions of nodes. Became the de facto standard.",
+      "Blondel et al.'s greedy method. Alternates local moving and aggregation; the original paper applied it to a web graph with 118 million nodes. Became the de facto standard.",
     color: "#8b5cf6",
   },
   {
-    year: "2009",
+    year: "2008",
     titleJa: "LFR ベンチマーク",
     titleEn: "LFR Benchmark",
     descJa:
-      "Lancichinetti-Fortunato-Radicchi ベンチマーク。コミュニティー構造を持つ合成グラフの生成器。アルゴリズム評価の標準ツールに。",
+      "Lancichinetti-Fortunato-Radicchi ベンチマーク。次数とコミュニティーサイズがべき乗則に従う合成グラフを生成し、アルゴリズム評価の標準になる。",
     descEn:
-      "Lancichinetti-Fortunato-Radicchi benchmark. Generates synthetic graphs with planted community structure for algorithm evaluation.",
+      "Lancichinetti-Fortunato-Radicchi benchmark. Generates synthetic graphs whose degrees and community sizes follow power laws; became a standard for evaluating algorithms.",
     color: "#06b6d4",
   },
   {
@@ -94,7 +94,7 @@ const timelineData = [
     descJa:
       "Karrer & Newman が Degree-Corrected SBM を提案。統計的推論に基づくコミュニティー検出が盛んに。",
     descEn:
-      "Karrer & Newman propose Degree-Corrected SBM. Statistical inference-based detection gains momentum.",
+      "Karrer & Newman propose the Degree-Corrected SBM. Statistical inference-based detection gains momentum.",
     color: "#ec4899",
   },
   {
@@ -102,9 +102,9 @@ const timelineData = [
     titleJa: "検出限界の導出",
     titleEn: "Detectability Threshold",
     descJa:
-      "Decelle らが cavity 法により検出限界の閾値を導出。コミュニティーが原理的に検出不可能になる相転移の存在を示す（厳密証明は 2013–2015 年）。",
+      "Decelle らが cavity 法で検出限界の閾値を導き、コミュニティーが原理的に検出できなくなる相転移を予想（証明は 2014–2018 年に発表）。",
     descEn:
-      "Decelle et al. derive the detectability threshold via the cavity method, showing a phase transition below which communities are fundamentally undetectable (rigorous proofs followed in 2013–2015).",
+      "Decelle et al. derive the detectability threshold with the cavity method, conjecturing a phase transition below which communities cannot be detected (proofs were published in 2014–2018).",
     color: "#f97316",
   },
   {
@@ -112,9 +112,9 @@ const timelineData = [
     titleJa: "Leiden アルゴリズム",
     titleEn: "Leiden Algorithm",
     descJa:
-      "Traag らが Louvain の欠陥（disconnected communities）を修正。品質保証付きの改良版。",
+      "Traag らが Louvain の欠陥（非連結なコミュニティー）を修正。各反復後のコミュニティーが内部で連結であることを保証。",
     descEn:
-      "Traag et al. fix Louvain's flaw (disconnected communities). An improved version with quality guarantees.",
+      "Traag et al. fix Louvain's flaw (disconnected communities). Guarantees that communities are internally connected after each iteration.",
     color: "#3b82f6",
   },
 ];
@@ -126,8 +126,8 @@ export function CommunityDetectionTimeline({ locale = "ja" }: Props) {
       title={isJa ? "Community Detection 研究の歴史" : "History of Community Detection Research"}
       description={
         isJa
-          ? "1927 年のソシオグラムから 2019 年の Leiden アルゴリズムまでの主要なマイルストーン"
-          : "Key milestones from Moreno's sociogram (1927) to the Leiden algorithm (2019)"
+          ? "1933 年のソシオグラムから 2019 年の Leiden アルゴリズムまでの主要なマイルストーン"
+          : "Key milestones from Moreno's sociogram (1933) to the Leiden algorithm (2019)"
       }
     >
       <div className="relative">
@@ -184,8 +184,8 @@ const algorithms = [
   {
     name: "Louvain",
     year: 2008,
-    approach: { ja: "貪欲モジュラリティー最適化", en: "Greedy modularity optimization" },
-    complexity: "O(n log n)",
+    approach: { ja: "貪欲な Modularity 最適化", en: "Greedy Modularity optimization" },
+    complexity: "≈ O(m)",
     scalability: "★★★★★",
     overlapping: false,
     strengths: { ja: "高速、大規模グラフ対応", en: "Fast, scales to large graphs" },
@@ -195,10 +195,10 @@ const algorithms = [
     name: "Leiden",
     year: 2019,
     approach: { ja: "改良 Louvain + 精錬フェーズ", en: "Improved Louvain + refinement" },
-    complexity: "O(n log n)",
+    complexity: "≈ O(m)",
     scalability: "★★★★★",
     overlapping: false,
-    strengths: { ja: "連結保証、高品質", en: "Connectivity guarantee, high quality" },
+    strengths: { ja: "連結性を保証、Modularity も高い", en: "Guaranteed connectivity, high Modularity" },
     weaknesses: { ja: "実装が複雑", en: "More complex implementation" },
   },
   {
@@ -214,11 +214,11 @@ const algorithms = [
   {
     name: "Infomap",
     year: 2008,
-    approach: { ja: "ランダムウォーク圧縮", en: "Random walk compression (map equation)" },
+    approach: { ja: "ランダムウォークの圧縮（Map Equation）", en: "Random walk compression (Map Equation)" },
     complexity: "O(m)",
     scalability: "★★★★☆",
     overlapping: false,
-    strengths: { ja: "情報量基準、フロー構造を捉える", en: "Information-theoretic, captures flow" },
+    strengths: { ja: "情報理論に基づく、フロー構造を捉える", en: "Information-theoretic, captures flow" },
     weaknesses: { ja: "有向グラフ前提が強い", en: "Strongly favors directed flow" },
   },
   {
@@ -232,13 +232,13 @@ const algorithms = [
     weaknesses: { ja: "k の事前指定が必要", en: "Requires pre-specified k" },
   },
   {
-    name: "SBM (統計的推論)",
+    name: "SBM",
     year: 2011,
     approach: { ja: "確率的ブロックモデル推論", en: "Stochastic Block Model inference" },
     complexity: "O(n log²n)",
     scalability: "★★★☆☆",
     overlapping: false,
-    strengths: { ja: "モデル選択、検出限界を尊重", en: "Model selection, respects detectability" },
+    strengths: { ja: "モデル選択で k や構造の有無も推論", en: "Model selection infers k and whether structure exists" },
     weaknesses: { ja: "モデル仮定に依存", en: "Depends on model assumptions" },
   },
 ];
@@ -266,7 +266,7 @@ export function AlgorithmComparisonTable({ locale = "ja" }: Props) {
                 {isJa ? "計算量" : "Complexity"}
               </th>
               <th className="text-left py-2 px-2 font-semibold text-foreground">
-                {isJa ? "大規模対応" : "Scale"}
+                {isJa ? "大規模対応" : "Scalability"}
               </th>
               <th className="text-left py-2 px-2 font-semibold text-foreground">
                 {isJa ? "強み" : "Strengths"}
@@ -385,15 +385,13 @@ export function ModularityConceptDiagram({ locale = "ja" }: Props) {
       <div className="mt-4 p-3 rounded-lg bg-muted/80 text-xs text-muted-foreground leading-relaxed">
         {isJa ? (
           <>
-            <strong>Modularity Q</strong> = (コミュニティー内辺の割合) − (ランダム帰無モデルでの期待値)。
-            Q が高いほど、ランダムに比べて「コミュニティー内のつながりが異常に密」であることを意味します。
-            範囲は [-0.5, 1] で、0.3〜0.7 が実ネットワークで典型的な値です。
+            <strong>Modularity Q</strong> = (コミュニティー内辺の割合) − (ランダムに辺を張った場合の期待割合)。Q が高いほど、コミュニティー内の結合がランダムな場合より密であることを示します。理論上の範囲は [-0.5, 1] で、コミュニティー構造がはっきりしたネットワークでは 0.3〜0.7 が典型的です（Newman &amp; Girvan, 2004）。
           </>
         ) : (
           <>
-            <strong>Modularity Q</strong> = (fraction of intra-community edges) − (expected fraction under a random null model).
-            Higher Q means intra-community connectivity is denser than random.
-            Range is [-0.5, 1]; real networks typically yield 0.3–0.7.
+            <strong>Modularity Q</strong> = (fraction of intra-community edges) − (expected fraction under random rewiring).
+            Higher Q means the connections inside communities are denser than random wiring would make them.
+            The theoretical range is [-0.5, 1]; networks with strong community structure typically score 0.3–0.7 (Newman &amp; Girvan, 2004).
           </>
         )}
       </div>
@@ -411,8 +409,8 @@ export function ResolutionLimitDiagram({ locale = "ja" }: Props) {
       title={isJa ? "Resolution Limit（解像度限界）" : "The Resolution Limit"}
       description={
         isJa
-          ? "Fortunato & Barthélemy (2007): モジュラリティー最大化は小さなコミュニティーを見落とす"
-          : "Fortunato & Barthélemy (2007): Modularity maximization misses small communities"
+          ? "Fortunato & Barthélemy (2007): Modularity 最大化は小さなコミュニティーを見落とすことがある"
+          : "Fortunato & Barthélemy (2007): Modularity maximization can miss small communities"
       }
     >
       <div className="space-y-4">
@@ -461,24 +459,23 @@ export function ResolutionLimitDiagram({ locale = "ja" }: Props) {
           {/* Merged (wrong) */}
           <ellipse cx="430" cy="135" rx="70" ry="20" fill="#ef4444" fillOpacity={0.1} stroke="#ef4444" strokeWidth={1.5} strokeDasharray="3,2" />
           <text x="430" y="140" textAnchor="middle" fill="#ef4444" fontSize="9" fontWeight={600}>
-            {isJa ? "誤って統合!" : "Incorrectly merged!"}
+            {isJa ? "誤って統合" : "Incorrectly merged"}
           </text>
         </svg>
 
         <div className="p-3 rounded-lg bg-muted/80 text-xs text-muted-foreground leading-relaxed">
           {isJa ? (
             <>
-              グラフ全体の辺数 <em>m</em> が大きくなると、モジュラリティー Q の最適解は
-              辺数 &lt; √(2m) 程度の小さなクリークを統合してしまいます。
-              つまり、<strong>グラフが大きくなるほど小さな真のコミュニティーが「見えなく」なる</strong>
-              という根本的な限界があります。これが Resolution Limit です。
+              グラフ全体の辺数 <em>m</em> が大きいと、Modularity Q の最適解では、内部辺が約 √(m/2)
+              本未満の小さなクリークが、明確なコミュニティーであっても隣のクリークと統合され得ます。
+              <strong>グラフが大きいほど小さなコミュニティーを区別しにくくなる</strong>のが
+              Resolution Limit です。
             </>
           ) : (
             <>
-              As total edges <em>m</em> grows, the modularity-optimal partition merges
-              small cliques with fewer than ~√(2m) edges.
-              In other words, <strong>the larger the graph, the more small true communities become invisible</strong>.
-              This is the Resolution Limit.
+              When the total number of edges <em>m</em> is large, the Modularity-optimal partition can merge
+              a small clique with fewer than about √(m/2) internal edges into a neighboring clique, even though each clique is a clear community.{" "}
+              <strong>The larger the graph, the harder it is to separate small communities</strong>: this is the resolution limit.
             </>
           )}
         </div>
@@ -508,12 +505,12 @@ export function DetectabilityThresholdDiagram({ locale = "ja" }: Props) {
 
         {/* X-axis label */}
         <text x="260" y="210" textAnchor="middle" fill="currentColor" fontSize="11">
-          {isJa ? "コミュニティー内外の辺密度の差 (c_in - c_out)" : "Difference in edge density (c_in - c_out)"}
+          {isJa ? "コミュニティー内外の辺確率の差 (c_in − c_out)" : "Difference in edge probability (c_in − c_out)"}
         </text>
 
         {/* Y-axis label */}
         <text x="20" y="100" textAnchor="middle" fill="currentColor" fontSize="11" transform="rotate(-90, 20, 100)">
-          {isJa ? "検出精度" : "Detection accuracy"}
+          {isJa ? "ランダムを上回る精度" : "Accuracy above chance"}
         </text>
 
         {/* Threshold line */}
@@ -551,19 +548,19 @@ export function DetectabilityThresholdDiagram({ locale = "ja" }: Props) {
       <div className="mt-3 p-3 rounded-lg bg-muted/80 text-xs text-muted-foreground leading-relaxed">
         {isJa ? (
           <>
-            SBM において、コミュニティー内の平均次数を <em>c<sub>in</sub></em>、
-            コミュニティー間の平均次数を <em>c<sub>out</sub></em> とすると、
-            (c<sub>in</sub> − c<sub>out</sub>)² &lt; 2(c<sub>in</sub> + c<sub>out</sub>) のとき、
-            <strong>いかなるアルゴリズムでもコミュニティーをランダムよりうまく検出できない</strong>ことが
-            証明されています（Decelle et al., 2011）。これは物理学の「相転移」と深い関係があります。
+            同じ大きさの 2 コミュニティーからなる SBM で、コミュニティー内・間の辺確率をそれぞれ{" "}
+            <em>c<sub>in</sub></em>/<em>n</em>、<em>c<sub>out</sub></em>/<em>n</em> とします。<em>n</em> が十分大きく
+            (c<sub>in</sub> − c<sub>out</sub>)² &lt; 2(c<sub>in</sub> + c<sub>out</sub>) のとき、<strong>どのアルゴリズムでもランダムな割り当てよりうまく検出できません</strong>。この閾値は
+            Decelle ら (2011) が cavity 法で予想し、Mossel, Neeman &amp; Sly (2015, 2018) と Massoulié (2014) が証明しました。曲線は、平均次数を固定したときに閾値で起こる相転移の模式図です。
           </>
         ) : (
           <>
-            In the SBM, let <em>c<sub>in</sub></em> be the average intra-community degree and{" "}
-            <em>c<sub>out</sub></em> the inter-community degree. When
-            (c<sub>in</sub> − c<sub>out</sub>)² &lt; 2(c<sub>in</sub> + c<sub>out</sub>),{" "}
-            <strong>no algorithm can detect communities better than random</strong>{" "}
-            (Decelle et al., 2011). This is deeply connected to phase transitions in physics.
+            Take an SBM with two equal-sized communities and edge probabilities{" "}
+            <em>c<sub>in</sub></em>/<em>n</em> within and <em>c<sub>out</sub></em>/<em>n</em> between communities.
+            For large <em>n</em>, when (c<sub>in</sub> − c<sub>out</sub>)² &lt; 2(c<sub>in</sub> + c<sub>out</sub>),{" "}
+            <strong>no algorithm can detect the communities better than a random assignment</strong>.
+            Decelle et al. (2011) conjectured this threshold with the cavity method; Mossel, Neeman &amp; Sly (2015, 2018)
+            and Massoulié (2014) proved it. The curve sketches the resulting phase transition at a fixed average degree.
           </>
         )}
       </div>

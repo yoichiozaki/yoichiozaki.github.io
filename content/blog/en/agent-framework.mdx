@@ -11,7 +11,7 @@ Since around 2025, AI agents have been a major topic among developers: LLMs that
 
 Agent Framework is positioned as the direct successor to Microsoft's [Semantic Kernel](https://github.com/microsoft/semantic-kernel) and [AutoGen](https://github.com/microsoft/autogen). It combines Semantic Kernel's enterprise features (session management, type safety, middleware, telemetry) with AutoGen's simple agent abstractions, and adds a graph-based workflow engine.
 
-The framework has two pillars: Agent, for building individual agents, and Workflow, for connecting multiple agents and functions. This article first looks at the overall structure, then walks through the agent side (the `run()` execution flow, tools, middleware, and sessions) using the Python source code. After that it covers the workflow engine, integration and deployment, and observability.
+The framework has two pillars: Agent, for building individual agents, and Workflow, for connecting multiple agents and functions. An agent's `run()` executes a single pipeline—message normalization, ContextProviders, the Chat Client, and response post-processing—and tools, middleware, and sessions plug into that pipeline. A workflow runs as a directed graph of Executors connected by Edges. The sections below trace these mechanisms through the Python source code and then cover integration, deployment, and observability.
 
 ## Overall Architecture
 
@@ -89,7 +89,7 @@ async def main():
 asyncio.run(main())
 ```
 
-In this code, `FoundryChatClient` handles the connection to models on Azure AI Foundry, and `AzureCliCredential()` provides local development authentication. Passing `instructions` to the `Agent` constructor sends them as a system prompt to the LLM, and calling `run()` with a user message calls the configured chat/model provider and returns the response. The code is short, but behind it runs the pipeline described in the next section: message normalization → ContextProvider → Chat Client → response post-processing.
+In this code, `FoundryChatClient` handles the connection to models on Microsoft Foundry, and `AzureCliCredential()` provides local development authentication. Passing `instructions` to the `Agent` constructor sends them as a system prompt to the LLM, and calling `run()` with a user message calls the configured chat/model provider and returns the response. The code is short, but behind it runs the pipeline described in the next section: message normalization → ContextProvider → Chat Client → response post-processing.
 
 In .NET it looks like this:
 
@@ -109,7 +109,7 @@ var agent = new AIProjectClient(
 Console.WriteLine(await agent.RunAsync("Write a haiku about Agent Framework."));
 ```
 
-The .NET version uses the `AsAIAgent()` extension method on `AIProjectClient` to create an agent directly from the project client. While the API styles differ between Python and .NET, the three core building blocks — Agent + ChatClient + instructions — are the same.
+The .NET version uses the `AsAIAgent()` extension method on `AIProjectClient` to create an agent directly from the project client. The API style differs from Python's, but the same three pieces appear: a client that connects to the model, instructions, and a run method (`RunAsync()`).
 
 ## Agent Execution Model — Inside `run()`
 
@@ -173,14 +173,16 @@ When you call `Agent.run()`, processing proceeds in this order:
 ```mermaid
 sequenceDiagram
     participant User as User Code
-    participant Agent as Agent.run()
-    participant Middleware as Middleware
+    participant Middleware as Agent Run Middleware
+    participant Agent as RawAgent.run()
     participant Context as ContextProvider
     participant Client as ChatClient
     participant LLM as LLM Provider
     participant Tools as Tools
     
-    User->>Agent: run(messages, session)
+    User->>Middleware: agent.run(messages, session)
+    Note over Middleware: AgentMiddlewareLayer wraps<br/>the whole run
+    Middleware->>Agent: run(messages, session)
     Agent->>Agent: _prepare_run_context()
     
     Note over Agent: 1. Normalize messages
@@ -192,9 +194,7 @@ sequenceDiagram
     Note over Agent: 4. Resolve tools (including MCP)
     Note over Agent: 5. Merge options
     
-    Agent->>Middleware: Agent Run Middleware
-    Middleware->>Agent: _call_chat_client(context)
-    
+    Agent->>Agent: _call_chat_client(context)
     Agent->>Client: get_response(messages, options)
     Client->>LLM: API Call
     LLM-->>Client: Response (with tool calls)
@@ -211,18 +211,19 @@ sequenceDiagram
     Note over Agent: 6. Set author_name
     Note over Agent: 7. Propagate conversation_id
     Agent->>Context: after_run(agent, session, context)
-    Agent-->>User: AgentResponse
+    Agent-->>Middleware: AgentResponse
+    Middleware-->>User: AgentResponse
 ```
 
 #### Step 1: `_prepare_run_context()`
 
 `_prepare_run_context()` does all the preparation before the Chat Client is called. In the source code ([`_agents.py`](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/_agents.py)), it performs five steps:
 
-1. <strong>Message normalization</strong>: `normalize_messages()` converts input into a list of `Message` objects. If a string is passed, it becomes a `user`-role `Message`
-2. <strong>Automatic history provider</strong>: If `session` is provided but no `context_providers` are set (and there is no service-side session ID or `store` flag), an `InMemoryHistoryProvider` is automatically added
-3. <strong>ContextProvider execution</strong>: `before_run()` runs in forward order. History messages and system prompts are added to `SessionContext`
-4. <strong>Tool resolution</strong>: Default tools + runtime tools + MCP server tools are unified. Unconnected MCP servers are connected via `AsyncExitStack`
-5. <strong>Options merging</strong>: `_merge_options()` merges default and runtime options. Tools are merged by unique name; `instructions` are concatenated; `logit_bias` and `metadata` are dict-merged
+1. Message normalization: `normalize_messages()` converts input into a list of `Message` objects. If a string is passed, it becomes a `user`-role `Message`
+2. Automatic history provider: If `session` is provided, no `HistoryProvider` that loads messages is registered, and nothing hands history to the service (such as a conversation ID or the `store` option), an `InMemoryHistoryProvider` is automatically added
+3. ContextProvider execution: `before_run()` runs in forward order. History messages and system prompts are added to `SessionContext`
+4. Tool resolution: Default tools + runtime tools + MCP server tools are unified. Unconnected MCP servers are connected via `AsyncExitStack`
+5. Options merging: `_merge_options()` merges default and runtime options. Tools are merged by unique name; `instructions` are concatenated; `logit_bias` and `metadata` are dict-merged
 
 ```python
 # Simplified _merge_options() behavior
@@ -269,7 +270,7 @@ Inside the Chat Client, the <strong>tool invocation loop</strong> executes. When
 
 #### Step 3: Response Post-processing
 
-`_finalize_response()` does the following:
+In the non-streaming path, `_parse_non_streaming_response()` does the following:
 
 - Setting `author_name` (attaching the agent name to each message)
 - Propagating `conversation_id` to the session
@@ -467,7 +468,7 @@ Inside middleware, `await call_next()` hands processing to the next middleware. 
 
 ### .NET Middleware Implementation
 
-In .NET, you use the Builder pattern to create a new agent that wraps an existing one with middleware. `AsBuilder()` creates a copy of the existing agent, `Use()` chains middlewares, and `Build()` produces a new agent. The original agent is left unchanged.
+In .NET, you use the Builder pattern to create a new agent that wraps an existing one with middleware. `AsBuilder()` creates a builder with the existing agent as its inner agent, `Use()` chains middlewares, and `Build()` produces a new agent. The original agent is left unchanged.
 
 ```csharp
 var middlewareAgent = originalAgent
@@ -550,7 +551,7 @@ class CustomContextProvider(ContextProvider):
             state["last_response"] = context.response.text
 ```
 
-The main built-in provider is `InMemoryHistoryProvider`, which keeps the conversation history. As noted earlier, if you pass a session and no providers are configured, the Agent adds one automatically, so passing `session` is enough for multi-turn conversation, as in the AgentSession example above.
+The main built-in provider is `InMemoryHistoryProvider`, which keeps the conversation history. As noted earlier, if you pass a session and no history provider is configured, the Agent adds one automatically, so passing `session` is enough for multi-turn conversation, as in the AgentSession example above.
 
 ### CompactionStrategy
 
@@ -746,13 +747,13 @@ builder.AddFanInBarrierEdge(
 
 Workflows execute in a <strong>superstep</strong> fashion. In each superstep, active executors run concurrently, and output messages route along edges to the next superstep's executors.
 
-`WorkflowEvent` types include:
+`WorkflowEvent` types include the following. The names are the .NET class names; Python distinguishes the same events by the `type` of a `WorkflowEvent` (`"output"`, `"executor_invoked"`, and so on).
 
 | Event | Description |
 |-------|-------------|
-| `WorkflowOutputEvent` | Final output |
-| `ExecutorStartEvent` / `ExecutorEndEvent` | Executor lifecycle |
-| Custom events | Yield workflow outputs via `context.yield_output()` |
+| `WorkflowOutputEvent` | Workflow output (what an Executor emits via `context.yield_output()`) |
+| `ExecutorInvokedEvent` / `ExecutorCompletedEvent` | Executor lifecycle (invocation and completion) |
+| Custom events | Any event an Executor emits via `context.add_event()` |
 
 ### Checkpointing
 
@@ -783,7 +784,7 @@ await server.start(host="0.0.0.0", port=8080)
 
 ### AG-UI (Agent-User Interface) Protocol
 
-AG-UI is a protocol proposed by CopilotKit for real-time connection between agents and frontends. It provides a standard interface for showing agent behavior to users, such as streaming responses, tool-call progress indicators, and Human-in-the-Loop approval UIs.
+AG-UI is a protocol proposed by CopilotKit for real-time connection between agents and frontends. It provides a standard interface for showing agent behavior to users, such as streaming responses, tool-call progress indicators, and human-in-the-loop approval UIs.
 
 ### Azure Functions / Container Apps
 
@@ -798,7 +799,7 @@ You can also convert an agent into an MCP server, making it callable from other 
 server = agent.as_mcp_server(server_name="MyAgent", version="1.0.0")
 ```
 
-The `as_mcp_server()` implementation converts the agent to a tool via `as_tool()` and registers it as an MCP `@server.call_tool()` handler. As a result, MCP clients can call the agent as a single tool.
+The `as_mcp_server()` implementation converts the agent to a tool via `as_tool()` and registers it as the MCP server's `call_tool` handler. As a result, MCP clients can call the agent as a single tool.
 
 ### DevUI
 
@@ -855,12 +856,12 @@ Python and C#/.NET share the same concepts and API patterns, so what you learn i
 
 Agent Framework's internals can be viewed as the following layers:
 
-1. <strong>Agent layer</strong> — A pipeline of message normalization → ContextProvider → ChatClient → response post-processing that manages LLM interactions
-2. <strong>Tool layer</strong> — `@tool` decorators, MCP integration, and Agent-as-Tool connect agents to the outside world
-3. <strong>Middleware layer</strong> — Three levels (Agent / Function / ChatClient) for injecting cross-cutting concerns
-4. <strong>Session layer</strong> — AgentSession and ContextProvider enable multi-turn conversations on top of the stateless LLM API
-5. <strong>Workflow layer</strong> — A graph of Executors and Edges for declaratively describing conditional branching, parallel processing, and Human-in-the-Loop
-6. <strong>Observability layer</strong> — OpenTelemetry traces for monitoring and debugging agent behavior
+1. Agent layer — A pipeline of message normalization → ContextProvider → ChatClient → response post-processing that manages LLM interactions
+2. Tool layer — `@tool` decorators, MCP integration, and Agent-as-Tool connect agents to the outside world
+3. Middleware layer — Three levels (Agent / Function / ChatClient) for injecting cross-cutting concerns
+4. Session layer — AgentSession and ContextProvider enable multi-turn conversations on top of the stateless LLM API
+5. Workflow layer — A graph of Executors and Edges for declaratively describing conditional branching, parallel processing, and human-in-the-loop steps
+6. Observability layer — OpenTelemetry traces for monitoring and debugging agent behavior
 
 Agent Framework combines Semantic Kernel's enterprise features with AutoGen's simple agent abstractions and supports MCP, A2A, and AG-UI. Microsoft positions it as the unified foundation for agent development and the successor to both.
 

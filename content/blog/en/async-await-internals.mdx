@@ -1,7 +1,7 @@
 ---
 title: "Inside async/await — Event Loops, Coroutines, and Runtime Mechanics"
 date: "2026-03-31"
-description: "What the runtime does behind the async/await keywords, explained for three models: JavaScript's event loop, Python's asyncio, and Rust's polling-based Futures."
+description: "Behind async/await, a runtime suspends a function at each await and resumes it when the awaited I/O completes, without blocking the thread. This article compares how JavaScript's event loop, Python's asyncio, and Rust's poll-based Futures do this."
 tags: ["Async", "async/await", "Event Loop", "Coroutine", "JavaScript", "Python", "Rust"]
 ---
 
@@ -19,12 +19,12 @@ async function fetchData() {
 
 When this code runs, the runtime does the following:
 
-1. At `await`, it <strong>suspends</strong> the function and returns control to the runtime
+1. At `await`, it <strong>suspends</strong> the function and takes back control
 2. It watches for I/O completion without blocking the thread
 3. When the I/O completes, it <strong>resumes</strong> the function where it left off
 4. Meanwhile, it schedules and runs other async operations
 
-The sections below cover three execution models in turn: JavaScript's event loop, Python's asyncio, and Rust's poll-based Futures.
+JavaScript does this with an event loop, Python with asyncio, and Rust with poll-based Futures.
 
 <ArticleVideo slug="async-await-internals" />
 
@@ -51,10 +51,10 @@ JavaScript code runs on a single thread. The <strong>event loop</strong> is what
 
 Four components are involved in how the event loop works:
 
-1. <strong>Call Stack</strong> — Stack of currently executing functions
+1. <strong>Call stack</strong> — Stack of currently executing functions
 2. <strong>Web APIs / Node APIs</strong> — Environment for async operations (timers, network, file I/O)
-3. <strong>Microtask Queue</strong> — Promise `.then` / `.catch` / `.finally` callbacks, `queueMicrotask()`
-4. <strong>Macrotask Queue</strong> (Task Queue) — `setTimeout`, `setInterval`, I/O callbacks, UI events
+3. <strong>Microtask queue</strong> — Promise `.then` / `.catch` / `.finally` callbacks, `queueMicrotask()`
+4. <strong>Macrotask queue</strong> (task queue) — `setTimeout`, `setInterval`, I/O callbacks, UI events
 
 <EventLoopCycle />
 
@@ -112,7 +112,7 @@ function example() {
 
 When an `await` expression is reached, the engine does the following:
 
-1. Evaluate the right-hand side expression; if the value is not a Promise, wrap it in a resolved Promise
+1. Evaluate the expression after `await`; if the value is not a Promise, wrap it in a resolved Promise
 2. Register the rest of the function to run when that Promise resolves (on resolution, the resume step enters the microtask queue)
 3. Suspend the function and return control to the caller
 
@@ -120,13 +120,13 @@ As a result, the event loop can keep processing other tasks while the I/O is pen
 
 ### V8 Engine Optimizations
 
-V8 (the JavaScript engine in Chrome and Node.js) made `await` faster in v7.2. When the value passed to `await` is already a native Promise, `promiseResolve` now uses that Promise as is, and V8 no longer creates an extra wrapper Promise or the `throwaway` Promise. This cut the number of microtask ticks for one `await` from 3 to 1.
+V8 (the JavaScript engine in Chrome and Node.js) made `await` faster in v7.2 ([V8 blog post](https://v8.dev/blog/fast-async)). When the value passed to `await` is already a native Promise, `promiseResolve` now uses that Promise as is, so V8 no longer creates an extra wrapper Promise. This cut the number of microtask ticks for one `await` from a minimum of 3 to 1. A separate change to the specification also lets engines skip the internal `throwaway` Promise in most cases.
 
 ## Python: asyncio and Coroutines
 
 ### Python Coroutines
 
-Python's `async/await` was introduced in Python 3.5 and is based on <strong>coroutines</strong>. A coroutine is a function whose execution can be suspended and resumed; Python builds coroutines on an extension of the generator mechanism.
+Python's `async/await` was introduced in Python 3.5 ([PEP 492](https://peps.python.org/pep-0492/)) and is based on <strong>coroutines</strong>. A coroutine is a function whose execution can be suspended and resumed; Python builds coroutines on an extension of the generator mechanism.
 
 ```python
 import asyncio
@@ -193,7 +193,7 @@ In CPython's implementation, the coroutine frame (local variables, execution pos
 
 Python's `asyncio` has the following constraints:
 
-- <strong>GIL (Global Interpreter Lock)</strong>: In CPython, only one thread executes Python bytecode at a time. asyncio runs on a single thread, so the GIL barely affects it
+- <strong>GIL (Global Interpreter Lock)</strong>: In CPython's default build, only one thread executes Python bytecode at a time. asyncio runs on a single thread, so the GIL barely affects it
 - <strong>Not suited for CPU-bound work</strong>: async/await helps with work that spends much of its time waiting on I/O. For CPU-bound work, use `multiprocessing` or `concurrent.futures.ProcessPoolExecutor`
 - <strong>Library support required</strong>: Calling a synchronous library (e.g., `requests`) directly from async code blocks the event loop, so you need an async alternative (e.g., `aiohttp`)
 
@@ -280,11 +280,10 @@ impl Future for ExampleFuture {
 }
 ```
 
-This transformation has the following properties:
+In this transformation, each `await` corresponds to one state transition. The resulting Future has the following properties:
 
 - <strong>No mandatory per-`await` heap allocation</strong>: The Future is a concrete state-machine value that can stay on the stack when awaited directly; it is heap-allocated when you box it, erase its type, or spawn it into a runtime task
 - <strong>No dynamic dispatch</strong>: Concrete types are determined at compile time
-- Each `await` corresponds to one state transition
 
 ### Waker and Runtime Cooperation
 
@@ -336,12 +335,12 @@ tokio's main components are:
 
 | Model | Languages | Mechanism | Advantage |
 |-------|-----------|-----------|-----------|
-| Push-based | JS, Python | Calls callback/continuation on completion | Simpler mechanism |
+| Push-based | JS, Python | Calls callback/continuation on completion | Simpler mechanism (no polling or Waker needed) |
 | Pull-based | Rust | Runtime polls Futures | Zero-cost, natural cancellation |
 
 One advantage of the pull-based model is how easy cancellation is. In Rust, dropping a Future means it is never polled again, so its work stops (a task spawned onto a runtime, however, keeps running even if you drop its JoinHandle). Push-based models often need an explicit way to signal cancellation, such as JavaScript's `AbortController`.
 
-### Memory Model
+### Coroutine State and Memory Allocation
 
 | Language | Coroutine State Storage | Memory Allocation |
 |----------|------------------------|-------------------|
@@ -380,13 +379,13 @@ async function bad() {
   console.log(data);            // Prints Promise object
 }
 
-// NG: Sequential when it could be parallel
+// NG: Sequential when it could be concurrent
 async function sequential() {
   const a = await fetchA();  // Wait 1 second
   const b = await fetchB();  // Wait 1 more second → 2 seconds total
 }
 
-// OK: Use Promise.all for parallel execution
+// OK: Use Promise.all to run them concurrently
 async function parallel() {
   const [a, b] = await Promise.all([fetchA(), fetchB()]);  // 1 second total
 }
@@ -440,8 +439,8 @@ async fn cpu_work() {
 
 The async/await syntax looks similar across languages, but the implementations behind it differ widely:
 
-- <strong>JavaScript</strong>: Suspends and resumes functions using Promises on a single-threaded event loop. The priority of microtasks over macrotasks determines execution order
-- <strong>Python</strong>: The asyncio event loop schedules coroutines (an extension of generators). Under the GIL, it makes progress on I/O waits concurrently
-- <strong>Rust</strong>: Compiles async fn into Future state machines. The runtime drives execution by polling, and no heap allocation is required per `await`
+- JavaScript: Suspends and resumes functions using Promises on a single-threaded event loop. The priority of microtasks over macrotasks determines execution order
+- Python: The asyncio event loop schedules coroutines (an extension of generators). Under the GIL, it makes progress on I/O waits concurrently
+- Rust: Compiles async fn into Future state machines. The runtime drives execution by polling, and no heap allocation is required per `await`
 
 All three share one design goal: <strong>don't leave a thread idle while waiting on I/O</strong>. async/await is syntax that lets you write this kind of asynchronous code in a form close to synchronous code.

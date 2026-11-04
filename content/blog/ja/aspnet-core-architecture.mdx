@@ -1,7 +1,7 @@
 ---
 title: "ASP.NET Core の内部構造 — リクエストが到達してからレスポンスを返すまで"
 date: "2026-04-05"
-description: "ASP.NET Core がリクエストを受けてからレスポンスを返すまでに通る、ホスティングモデル、ミドルウェアパイプライン、DI コンテナー、ルーティング、フィルターパイプラインなどの内部実装を、簡略化したコードと図で説明します。"
+description: "ASP.NET Core がリクエストを受けてからレスポンスを返すまでの処理を、ホスティングモデル、ミドルウェアパイプライン、DI コンテナー、ルーティング、フィルターパイプラインなどの内部実装に沿って、簡略化したコードと図で説明します。"
 tags: ["ASP.NET Core", ".NET", "Architecture", "Middleware", "Dependency Injection"]
 ---
 
@@ -9,7 +9,7 @@ tags: ["ASP.NET Core", ".NET", "Architecture", "Middleware", "Dependency Injecti
 
 ASP.NET Core は、Microsoft が開発するクロスプラットフォームの Web フレームワークです。`app.MapGet("/hello", () => "Hello World")` の一行で書いたハンドラーにも、リクエストは Kestrel での HTTP 解析、DI スコープの作成、ミドルウェアパイプライン、ルーティングなどを経て届きます。
 
-以降の章では、リクエストが通る順に各段階を取り上げ、それを担うコンポーネントの内部実装を、簡略化したコードと図で説明します。
+以降の章では、この経路の各段階を担うコンポーネントと、構成・エラーハンドリング・テストなどの周辺の仕組みについて、内部実装を簡略化したコードと図で説明します。
 
 ## 全体アーキテクチャの俯瞰
 
@@ -139,21 +139,21 @@ while (true)
 
 #### 接続管理と同時接続
 
-Kestrel は各接続を個別の `Task` として管理します。`.NET` のスレッドプールと `async/await` により、I/O を待つ間はスレッドを解放するので、少数の OS スレッドで大量の同時接続を処理できます。
+Kestrel は各接続を個別の `Task` として管理します。.NET のスレッドプールと `async/await` により、I/O を待つ間はスレッドを解放するので、少数の OS スレッドで大量の同時接続を処理できます。
 
-接続数・リクエストサイズ・タイムアウトの上限は `KestrelServerLimits` で設定でき、既定値は次のとおりです。
+接続数・リクエストサイズ・タイムアウトの上限は `KestrelServerLimits` で設定でき、既定値は次のとおりです（[Microsoft Learn](https://learn.microsoft.com/dotnet/api/microsoft.aspnetcore.server.kestrel.core.kestrelserverlimits)）。
 
 | パラメーター | 既定値 | 説明 |
 |-----------|--------|------|
 | `MaxConcurrentConnections` | `null`（無制限） | 同時接続数の上限 |
 | `MaxConcurrentUpgradedConnections` | `null`（無制限） | WebSocket 等のアップグレード接続上限 |
-| `MaxRequestBodySize` | 約 30 MB（30,000,000 bytes） | リクエストボディーの最大サイズ |
-| `RequestHeadersTimeout` | 30 秒 | リクエストヘッダー受信のタイムアウト |
-| `KeepAliveTimeout` | 130 秒 | Keep-Alive 接続のタイムアウト |
+| `MaxRequestBodySize` | 約30 MB（30,000,000バイト） | リクエストボディーの最大サイズ |
+| `RequestHeadersTimeout` | 30秒 | リクエストヘッダー受信のタイムアウト |
+| `KeepAliveTimeout` | 130秒 | Keep-Alive 接続のタイムアウト |
 
 ### リバースプロキシー構成
 
-プロダクション環境では、Kestrel を直接公開せず、リバースプロキシー（Nginx, IIS, YARP 等）の背後に配置するのが一般的です。
+本番環境では、Kestrel をリバースプロキシー（Nginx, IIS, YARP 等）の背後に配置するのが一般的です。
 
 ```mermaid
 graph LR
@@ -165,11 +165,11 @@ graph LR
 
 リバースプロキシーには、主に次の処理を任せられます。
 
-- TLS 終端：SSL/TLS の暗号化と復号
-- ロードバランシング：複数の Kestrel インスタンスへの負荷分散
+- TLS 終端：SSL/TLS の暗号化と復号を担う
+- ロードバランシング：複数の Kestrel インスタンスに負荷を分散する
 - リクエストバッファリング：遅いクライアントからの送信をプロキシー側で受け切る
 - 静的ファイル配信：Kestrel に到達させずにレスポンスを返す
-- レート制限：DDoS 攻撃や過剰なリクエストの緩和
+- レート制限：DDoS 攻撃や過剰なリクエストを緩和する
 
 ## 第2章：ミドルウェアパイプライン — リクエストの旅
 
@@ -232,7 +232,7 @@ graph TD
     end
 ```
 
-`ApplicationBuilder.Build()` は、404 を返す終端のデリゲートから始めて、登録されたミドルウェアを後ろから順に包みます。
+`ApplicationBuilder.Build()` は、404を返す終端のデリゲートから始めて、登録されたミドルウェアを後ろから順に包みます。
 
 ```csharp
 // ApplicationBuilder.Build() の簡略化した実装
@@ -257,7 +257,7 @@ public RequestDelegate Build()
 
 ### 短絡（Short-Circuit）
 
-ミドルウェアは `next()` を呼ばなければ、パイプラインを<strong>短絡</strong>できます。例えば `StaticFiles` ミドルウェアは、該当するファイルが見つかると、後続のミドルウェアを実行せずにレスポンスを返します。
+ミドルウェアは `next()` を呼ばないことで、パイプラインを<strong>短絡</strong>できます。例えば `StaticFiles` ミドルウェアは、該当するファイルが見つかると、後続のミドルウェアを実行せずにレスポンスを返します。
 
 ```mermaid
 sequenceDiagram
@@ -280,20 +280,20 @@ sequenceDiagram
 
 ### 組み込みミドルウェアの順序
 
-ミドルウェアは登録順に実行されるので、順序が動作を左右します。例えば `Authorization` を `Authentication` より前に置くと、認可の時点ではまだユーザーが確立されていません。推奨される順序は次のとおりです。
+ミドルウェアは登録順に実行されるので、順序が動作を左右します。例えば `Authorization` を `Authentication` より前に置くと、認可の時点ではまだユーザーが認証されていません。推奨される順序は次のとおりです（[Microsoft Learn](https://learn.microsoft.com/aspnet/core/fundamentals/middleware/#middleware-order)）。
 
 | 順序 | ミドルウェア | 責務 |
 |------|------------|------|
 | 1 | `ExceptionHandler` / `DeveloperExceptionPage` | 例外をキャッチしてエラーレスポンスに変換 |
 | 2 | `HSTS` | HTTP Strict Transport Security ヘッダー追加 |
 | 3 | `HttpsRedirection` | HTTP → HTTPS リダイレクト |
-| 4 | `StaticFiles` / `MapStaticAssets` | 静的ファイルの配信（短絡可能）。.NET 9 以降は `MapStaticAssets` が推奨（ビルド時圧縮・フィンガープリント対応） |
-| 5 | `Routing` | URLに基づいてエンドポイントを選択 |
+| 4 | `StaticFiles` / `MapStaticAssets` | 静的ファイルの配信（短絡可能）。.NET 9以降は `MapStaticAssets` が推奨（ビルド時圧縮・フィンガープリント対応） |
+| 5 | `Routing` | URL に基づいてエンドポイントを選択 |
 | 6 | `RateLimiter` | レート制限ポリシーの適用 |
 | 7 | `Cors` | Cross-Origin Resource Sharing ポリシー適用 |
 | 8 | `Authentication` | ユーザー認証（Identity 確立） |
 | 9 | `Authorization` | ユーザー認可（アクセス制御） |
-| 10 | `OutputCache` | レスポンスキャッシュ |
+| 10 | `OutputCache` | レスポンスをサーバー側でキャッシュ |
 | 11 | エンドポイントミドルウェア | `MapGet()` / `MapControllers()` 等 |
 
 ## 第3章：依存性注入（DI）コンテナーの内部実装
@@ -357,7 +357,7 @@ public class MySingleton
 }
 ```
 
-ASP.NET Core には、この依存関係を検出して例外をスローする検証機能があります。`WebApplication.CreateBuilder()` を使う場合、開発環境では `ValidateScopes` と `ValidateOnBuild` が既定で有効です（.NET 6 以降）。本番環境でも有効にしたい場合や、`WebApplicationBuilder` 以外の方法でホストを構築する場合は、次のように設定します。
+ASP.NET Core には、この依存関係を検出して例外をスローする検証機能があります。`WebApplication.CreateBuilder()` を使う場合、開発環境では `ValidateScopes` と `ValidateOnBuild` が既定で有効です（.NET 6以降）。本番環境でも有効にしたい場合や、`WebApplicationBuilder` 以外の方法でホストを構築する場合は、次のように設定します。
 
 ```csharp
 builder.Host.UseDefaultServiceProvider(options =>
@@ -383,7 +383,7 @@ graph TD
     CompiledResolver --> Instance["インスタンスを返却"]
 ```
 
-あるサービスを初めて解決するとき、`CallSiteFactory` が依存関係のグラフ（CallSite チェーン）を構築します。最初はこのグラフをたどってインスタンスを生成し、同じサービスが繰り返し解決されると、グラフからコンパイルしたファクトリーデリゲートに切り替えて高速に解決します。
+あるサービスを初めて解決するとき、`CallSiteFactory` が CallSite のグラフを構築します。最初はこのグラフをたどってインスタンスを生成し、同じサービスが繰り返し解決されると、グラフからコンパイルしたファクトリーデリゲートに切り替えて高速に解決します。
 
 ```csharp
 // ServiceProvider の解決プロセスの概要
@@ -424,7 +424,7 @@ sequenceDiagram
 
 ### エンドポイントルーティング
 
-ASP.NET Core は .NET Core 3.0 以降、エンドポイントルーティングを採用しており、ルーティングの処理は2つのミドルウェアに分かれています。
+ASP.NET Core は .NET Core 3.0以降、エンドポイントルーティングを採用しており、ルーティングの処理は2つのミドルウェアに分かれています。
 
 ```mermaid
 graph LR
@@ -467,7 +467,7 @@ graph TD
     Blog -->|"{slug}"| BlogPost["Endpoint:<br/>GetBlogPost(string slug)"]
 ```
 
-DFA マッチャーには次の特長があります。
+DFA マッチャーには次の特徴があります。
 
 - マッチングの時間計算量は O(パスのセグメント数) で、全ルートを線形に走査しない
 - オートマトンは、マッチングの前にルートテーブルから構築しておく
@@ -489,7 +489,7 @@ app.MapGet("/api/users/{id:guid}", (Guid id) => ...);
 
 ### Minimal API と Controller の比較
 
-ASP.NET Core には、Minimal API と Controller（MVC）の2つのプログラミングモデルがあります。Minimal API はハンドラーごとに `RequestDelegateFactory` がデリゲートを生成し、Controller は起動時にコントローラーを解析して、フィルターパイプラインを通してアクションを実行します。
+ASP.NET Core には、Minimal API と Controller（MVC）の2つのプログラミングモデルがあります。Minimal API では、ハンドラーごとに `RequestDelegateFactory` がデリゲートを生成します。Controller では、起動時にフレームワークがコントローラーを解析し、アクションをフィルターパイプライン経由で実行します。
 
 ```mermaid
 graph TD
@@ -544,12 +544,12 @@ sequenceDiagram
 
 属性を指定しない場合、値はフォームフィールド → リクエストボディー（`[ApiController]` が付いたコントローラー）→ ルートデータ → クエリー文字列 → アップロードファイルの順に探されます。ルートデータとクエリー文字列は主に単純型、アップロードファイルは `IFormFile` / `IEnumerable<IFormFile>` にだけ使われます。属性を明示すると、次のソースからデータを取得できます。
 
-1. フォームデータ (`[FromForm]`)
-2. リクエストボディー (`[FromBody]`)：入力フォーマッター経由で処理
-3. ルートパラメーター (`[FromRoute]`)
-4. クエリー文字列 (`[FromQuery]`)
-5. ヘッダー (`[FromHeader]`)
-6. サービス（DI コンテナー） (`[FromServices]`)
+- フォームデータ（`[FromForm]`）
+- リクエストボディー（`[FromBody]`）：入力フォーマッター経由で処理
+- ルートパラメーター（`[FromRoute]`）
+- クエリー文字列（`[FromQuery]`）
+- ヘッダー（`[FromHeader]`）
+- DI コンテナーのサービス（`[FromServices]`）
 
 ```csharp
 // バインディングソースの明示指定
@@ -567,14 +567,14 @@ public IActionResult UpdateOrder(
 
 ### JSON シリアライズ：System.Text.Json
 
-ASP.NET Core は既定で System.Text.Json を使います。Newtonsoft.Json から移行する際の主な違いは次のとおりです。既定の解析が厳格になる点と、ポリモーフィズムの指定方法が変わる点は、既存コードの動作に影響します。
+ASP.NET Core は既定で System.Text.Json を使います。Newtonsoft.Json から移行すると、既定の解析が厳格になる点と、ポリモーフィズムの指定方法が変わる点が既存コードの動作に影響します。主な違いは次のとおりです。
 
 | 特徴 | System.Text.Json | Newtonsoft.Json |
 |------|-----------------|-----------------|
 | パフォーマンス | `Utf8JsonReader/Writer` による高速処理 | リフレクション重視 |
 | メモリー効率 | `Span<byte>` ベース、アロケーション最小 | `string` ベース |
 | Source Generator | `JsonSerializerContext` で AOT 対応 | なし |
-| 既定の動作 | 厳格（コメント不可、trailing comma 不可） | 寛容 |
+| 既定の動作 | 厳格（コメント不可、末尾のコンマ不可） | 寛容 |
 | ポリモーフィズム | `[JsonDerivedType]`（.NET 7+） | `TypeNameHandling`（セキュリティーリスクあり） |
 
 ```csharp
@@ -616,7 +616,7 @@ graph TD
 
 ### Endpoint Filter（Minimal API 用）
 
-Minimal API では、MVC フィルターの代わりに Endpoint Filter を使います（ASP.NET Core 7 以降）。次の例では、ハンドラーを呼ぶ前に引数 `id` を検査し、正の整数でなければ 400 Bad Request を返します。
+Minimal API では、MVC フィルターの代わりに Endpoint Filter を使います（ASP.NET Core 7以降）。次の例では、ハンドラーを呼ぶ前に引数 `id` を検査し、正の整数でなければ400 Bad Request を返します。
 
 ```csharp
 app.MapGet("/api/users/{id}", (int id) => ...)
@@ -827,7 +827,7 @@ graph TD
 
 ### Feature コレクション
 
-`HttpContext.Features` は、インターフェースの型をキーにした機能のコレクションです。サーバーやミドルウェアはここに機能を追加し、アプリはその型で取り出して使います。接続情報はサーバー（Kestrel）が設定し、リクエストのタイムアウトは RequestTimeouts ミドルウェアが追加します。
+`HttpContext.Features` は、インターフェースの型をキーにした機能のコレクションです。サーバーやミドルウェアはここに機能を追加し、アプリケーションはその型で取り出して使います。接続情報はサーバー（Kestrel）が設定し、リクエストのタイムアウトは RequestTimeouts ミドルウェアが追加します。
 
 ```csharp
 // Kestrel が提供する Feature の例
@@ -849,7 +849,7 @@ timeoutFeature?.DisableTimeout();
 
 ### Object Pool
 
-ASP.NET Core は頻繁に使うオブジェクトをプールして再利用し、GC の負荷を減らしています。アプリのコードでも `ObjectPool<T>` を使えば同じことができます。
+ASP.NET Core は頻繁に使うオブジェクトをプールして再利用し、GC の負荷を減らしています。アプリケーションのコードでも `ObjectPool<T>` を使えば同じことができます。
 
 ```csharp
 // StringBuilder のプーリング例
@@ -890,7 +890,7 @@ finally
 
 ### Response Compression
 
-レスポンス圧縮ミドルウェアは、`Accept-Encoding` ヘッダーに基づいて自動的にレスポンスを圧縮します。
+レスポンス圧縮ミドルウェアは、`Accept-Encoding` ヘッダーに基づいて自動的にレスポンスを圧縮します。HTTPS での圧縮は、CRIME 攻撃や BREACH 攻撃のリスクがあるため既定で無効です（[Microsoft Learn](https://learn.microsoft.com/aspnet/core/performance/response-compression)）。次の例では `EnableForHttps` で有効にしています。
 
 ```csharp
 builder.Services.AddResponseCompression(options =>
@@ -904,17 +904,19 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
     options => options.Level = CompressionLevel.Fastest);
 ```
 
-### .NET 8 以降のパフォーマンス機能
+### .NET 8以降のパフォーマンス改善と新機能
+
+各表の ASP.NET Core の機能は、Microsoft Learn の What's new in ASP.NET Core（[.NET 8](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-8.0)、[.NET 9](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-9.0)、[.NET 10](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-10.0)）に載っています。.NET 8の表の Frozen Collections、SearchValues、CompositeFormat は .NET 8のライブラリーに追加された機能で、[What's new in .NET 8 runtime](https://learn.microsoft.com/dotnet/core/whats-new/dotnet-8/runtime) に載っています。
 
 #### .NET 8
 
 | 機能 | 説明 |
 |------|------|
-| Native AOT | JIT 不要。起動時間とメモリー消費を削減 |
+| Native AOT | ASP.NET Core が対応（gRPC、Minimal API、Worker Service。コンソールアプリは .NET 7から対応）。JIT 不要。起動時間とメモリー消費を削減 |
 | Request Delegate Generator | Minimal API のデリゲートをコンパイル時に生成 |
 | Frozen Collections | `FrozenDictionary` / `FrozenSet` で読み取り専用コレクションを最適化 |
-| SearchValues | 文字列検索の SIMD 最適化 |
-| Interceptors | コンパイル時にメソッド呼び出しを差し替え |
+| SearchValues | スパン内で特定の文字やバイトの集合を探す検索を最適化（部分文字列の検索は .NET 9で追加） |
+| Interceptors | コンパイル時にメソッド呼び出しを差し替え（C# 12ではプレビュー機能） |
 | CompositeFormat | `string.Format` のパース済みフォーマット文字列 |
 
 #### .NET 9
@@ -922,7 +924,7 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
 | 機能 | 説明 |
 |------|------|
 | MapStaticAssets | ビルド時圧縮・フィンガープリント付き静的ファイル配信（`UseStaticFiles` の推奨代替） |
-| HybridCache | `IDistributedCache` と `IMemoryCache` を統合する新キャッシュライブラリー。スタンピード防止機能付き |
+| HybridCache | `IDistributedCache` と `IMemoryCache` を統合する新キャッシュライブラリー。スタンピード防止機能付き（.NET 9のリリース時点ではプレビュー。最初の安定版は2025年3月の [9.3.0](https://www.nuget.org/packages/Microsoft.Extensions.Caching.Hybrid/9.3.0)） |
 | Keyed DI in Middleware | ミドルウェアのコンストラクターや `Invoke` メソッドで `[FromKeyedServices]` をサポート |
 | SignalR Native AOT | SignalR のクライアント/サーバーがトリミングと Native AOT に対応 |
 
@@ -932,7 +934,7 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
 |------|------|
 | Minimal API Validation | `AddValidation()` で DataAnnotations ベースの組み込みバリデーションを有効化 |
 | Server-Sent Events | `TypedResults.ServerSentEvents` で SSE ストリームを返却可能 |
-| OpenAPI 3.1 | JSON Schema draft 2020-12 に準拠した OpenAPI ドキュメント生成 |
+| OpenAPI 3.1 | JSON Schema draft 2020-12に準拠した OpenAPI ドキュメント生成 |
 | Memory Pool Eviction | Kestrel / IIS / HTTP.sys のメモリープールがアイドル時に自動解放 |
 | JSON Patch (System.Text.Json) | `Newtonsoft.Json` 不要の JSON Patch 実装 |
 
@@ -940,7 +942,7 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
 
 ### 例外処理の階層
 
-MVC のアクション内で発生した例外は、まず例外フィルターが処理します。フィルターで処理されなかった例外は、パイプラインの上流にある ExceptionHandler（開発環境では DeveloperExceptionPage）ミドルウェアに届きます。そこでも処理されなければ 500 が返ります。
+MVC のアクション内で発生した例外は、まず例外フィルターが処理します。フィルターで処理されなかった例外は、パイプラインの上流にある ExceptionHandler（開発環境では DeveloperExceptionPage）ミドルウェアに届きます。そこでも処理されなければ500が返ります。
 
 ```mermaid
 graph TD
@@ -955,7 +957,7 @@ graph TD
 
 ### Problem Details（RFC 9457）
 
-ASP.NET Core 7 以降は、Problem Details 形式のエラーレスポンスを簡単に返せます。この形式は RFC 7807 で定義され、2023 年に [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) へ置き換えられました。
+ASP.NET Core 7では、Problem Details サービス（`IProblemDetailsService`）が追加されました（[リリースノート](https://learn.microsoft.com/aspnet/core/release-notes/aspnetcore-7.0#new-problem-details-service)）。`AddProblemDetails()` でこのサービスを登録すると、`UseExceptionHandler()` と `UseStatusCodePages()` で追加したミドルウェアが、エラーレスポンスを Problem Details 形式で返します（[Microsoft Learn](https://learn.microsoft.com/aspnet/core/fundamentals/error-handling-api#problem-details)）。この形式は RFC 7807で定義され、2023年に [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) へ置き換えられました。
 
 ```csharp
 // グローバルに Problem Details を有効化
@@ -985,7 +987,7 @@ app.UseStatusCodePages();
 
 ### WebApplicationFactory
 
-`WebApplicationFactory` は、アプリケーション全体をインメモリーの `TestServer` 上で起動します。テストの `HttpClient` からのリクエストはネットワークを通らずに、本番と同じミドルウェアパイプラインで処理されます。DI に登録したサービスはテスト用の実装に差し替えられます。
+`WebApplicationFactory` は、アプリケーション全体をインメモリーの `TestServer` 上で起動します。テストの `HttpClient` からのリクエストはネットワークを通らずに、本番と同じミドルウェアパイプラインで処理されます。DI に登録したサービスは、テスト用の実装に差し替えることができます。
 
 ```csharp
 public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
@@ -1021,7 +1023,7 @@ public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
 graph TD
     Test["テストメソッド"] --> WAF["WebApplicationFactory"]
     WAF --> TestServer["TestServer<br/>(インメモリー)"]
-    TestServer --> Pipeline["ミドルウェアパイプライン<br/>(本物と同じ)"]
+    TestServer --> Pipeline["ミドルウェアパイプライン<br/>(本番と同じ)"]
     Pipeline --> Handler["エンドポイントハンドラー"]
     Handler --> FakeDB["テスト用サービス<br/>(Fake / Mock)"]
 

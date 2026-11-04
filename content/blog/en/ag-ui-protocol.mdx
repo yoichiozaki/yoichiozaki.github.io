@@ -1,7 +1,7 @@
 ---
 title: "AG-UI Protocol Explained — Implementing the Standard Protocol Between Agents and Users with Microsoft Agent Framework"
 date: "2026-04-15"
-description: "How AG-UI (Agent-User Interaction Protocol) handles architecture, events, middleware, and state management, with implementation examples in Microsoft Agent Framework."
+description: "AG-UI (Agent-User Interaction Protocol) standardizes communication between agents and user-facing apps as a stream of typed events, so a frontend that implements it can work with any AG-UI backend. This article covers its architecture, events, middleware, and state synchronization, with implementation examples in Microsoft Agent Framework."
 tags: ["AG-UI", "AI", "Protocol", "Microsoft Agent Framework", "Python"]
 ---
 
@@ -66,7 +66,7 @@ Agents emit events of standardized types while they run, and the client processe
 
 ### 2. Bidirectional Interaction
 
-Agents can take input from users, so AI and humans can work together in one workflow. Models where the agent just returns a result one way can't do this.
+Agents can take input from users, so AI and humans can work together in one workflow.
 
 ### 3. Transport Agnostic
 
@@ -273,15 +273,17 @@ sequenceDiagram
         A->>C: TOOL_CALL_ARGS(toolCallId, delta)
     end
     A->>C: TOOL_CALL_END(toolCallId)
-    C->>A: TOOL_CALL_RESULT(toolCallId, content)
+    C->>A: tool-role message(toolCallId, content)
 ```
 
-In AG-UI, <strong>tools are defined in the frontend and passed to the agent</strong>. That makes Human-in-the-Loop workflows like this possible:
+In AG-UI, <strong>tools defined in the frontend can be passed to the agent at run time</strong>. That makes Human-in-the-Loop workflows like this possible:
 
 1. Agent requests a tool call (TOOL_CALL_START → TOOL_CALL_ARGS → TOOL_CALL_END)
 2. Frontend executes the tool (may include user judgment)
-3. Result is returned to the agent (TOOL_CALL_RESULT)
+3. Result is returned to the agent as a tool-role message
 4. Agent continues reasoning with the result
+
+When a tool runs on the backend, the agent sends its result to the client in a `TOOL_CALL_RESULT` event.
 
 Tool calls also have a convenience event, `TOOL_CALL_CHUNK`, that corresponds to `TEXT_MESSAGE_CHUNK`. Including `toolCallId` and `toolCallName` on the first chunk implicitly emits `TOOL_CALL_START`, and `TOOL_CALL_END` is emitted automatically when the stream switches to a new `toolCallId` or completes.
 
@@ -324,6 +326,37 @@ The events covered so far fall into three patterns, based on how they are sent.
 
 ---
 
+## Reasoning Events — Visualizing the Reasoning Process
+
+Reasoning Events carry reasoning summaries or metadata provided by the model so the UI can show them. They are not a way to expose the model's private raw chain-of-thought to the user.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as Agent
+    A->>C: REASONING_START(messageId)
+    A->>C: REASONING_MESSAGE_START(messageId, role="reasoning")
+    loop Reasoning content streaming
+        A->>C: REASONING_MESSAGE_CONTENT(messageId, delta)
+    end
+    A->>C: REASONING_MESSAGE_END(messageId)
+    A->>C: REASONING_END(messageId)
+```
+
+The `REASONING_ENCRYPTED_VALUE` event carries encrypted reasoning state across turns. The value is an opaque continuity token for the model or provider; the client only stores and forwards it and cannot read or render its contents. Reasoning can therefore continue across turns without exposing private chain-of-thought.
+
+| Event | Description |
+|-------|-------------|
+| `REASONING_START` | Start of reasoning process |
+| `REASONING_MESSAGE_START` | Start of reasoning message (visible portion) |
+| `REASONING_MESSAGE_CONTENT` | Reasoning content chunk |
+| `REASONING_MESSAGE_END` | Completion of reasoning message |
+| `REASONING_MESSAGE_CHUNK` | Convenience event auto-expanding Start/End |
+| `REASONING_END` | Completion of reasoning process |
+| `REASONING_ENCRYPTED_VALUE` | Opaque encrypted reasoning continuity value |
+
+---
+
 ## Middleware — Intercepting Event Streams
 
 AG-UI middleware sits between the agent and whatever consumes its events. It can transform the event stream, filter it, or add information to it.
@@ -334,6 +367,18 @@ graph LR
     M3 --> M2[Middleware 2]
     M2 --> M1[Middleware 1]
     M1 --> C[Client]
+```
+
+Middleware runs in the order it was added, and each one wraps the next. Events returned by the agent pass back through the middleware in reverse order before reaching the client.
+
+```text
+→ middleware1
+  → middleware2
+    → middleware3
+      → agent.run()
+    ← events flow back through middleware3
+  ← events flow back through middleware2
+← events flow back through middleware1
 ```
 
 ### Function-Based Middleware
@@ -406,91 +451,6 @@ const blocker = new FilterToolCallsMiddleware({
 
 agent.use(filter)
 ```
-
-Middleware runs in the order it was added, and each one wraps the next. Events returned by the agent pass back through the middleware in reverse order before reaching the client.
-
-```text
-→ middleware1
-  → middleware2
-    → middleware3
-      → agent.run()
-    ← events flow back through middleware3
-  ← events flow back through middleware2
-← events flow back through middleware1
-```
-
----
-
-## Reasoning Events — Visualizing the Reasoning Process
-
-Reasoning Events carry reasoning summaries or metadata provided by the model so the UI can show them. They are not a way to expose the model's private raw chain-of-thought to the user.
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as Agent
-    A->>C: REASONING_START(messageId)
-    A->>C: REASONING_MESSAGE_START(messageId, role="reasoning")
-    loop Reasoning content streaming
-        A->>C: REASONING_MESSAGE_CONTENT(messageId, delta)
-    end
-    A->>C: REASONING_MESSAGE_END(messageId)
-    A->>C: REASONING_END(messageId)
-```
-
-The `REASONING_ENCRYPTED_VALUE` event carries encrypted reasoning state across turns. The value is an opaque continuity token for the model or provider; the client only stores and forwards it and cannot read or render its contents. Reasoning can therefore continue across turns without exposing private chain-of-thought.
-
-| Event | Description |
-|-------|-------------|
-| `REASONING_START` | Start of reasoning process |
-| `REASONING_MESSAGE_START` | Start of reasoning message (visible portion) |
-| `REASONING_MESSAGE_CONTENT` | Reasoning content chunk |
-| `REASONING_MESSAGE_END` | Completion of reasoning message |
-| `REASONING_MESSAGE_CHUNK` | Convenience event auto-expanding Start/End |
-| `REASONING_END` | Completion of reasoning process |
-| `REASONING_ENCRYPTED_VALUE` | Opaque encrypted reasoning continuity value |
-
----
-
-## Security Considerations
-
-AG-UI endpoints do not enforce authentication by default. In production, add authentication with FastAPI's dependency injection.
-
-```python
-import os
-from fastapi import Depends, FastAPI, HTTPException, Security
-from fastapi.security import APIKeyHeader
-from agent_framework import Agent
-from agent_framework.ag_ui import add_agent_framework_fastapi_endpoint
-
-# API key authentication setup
-API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
-EXPECTED_API_KEY = os.environ.get("AG_UI_API_KEY")
-
-
-async def verify_api_key(
-    api_key: str | None = Security(API_KEY_HEADER),
-) -> None:
-    """Verify the API key in request headers."""
-    if not api_key or api_key != EXPECTED_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
-
-app = FastAPI()
-
-# Assume agent was created in a previous section
-# agent = simple_agent(chat_client)
-
-# Register endpoint WITH authentication
-add_agent_framework_fastapi_endpoint(
-    app,
-    agent,
-    "/",
-    dependencies=[Depends(verify_api_key)],
-)
-```
-
-The `dependencies` parameter accepts any FastAPI dependency, so instead of an API key you can plug in OAuth 2.0, JWT, or Azure AD / Entra ID authentication, or add rate limiting.
 
 ---
 
@@ -593,9 +553,13 @@ app = FastAPI(title="AG-UI Demo Server")
 # Create chat client
 chat_client = OpenAIChatCompletionClient(model="gpt-4o")
 
-# Register as AG-UI endpoint
-add_agent_framework_fastapi_endpoint(app, simple_agent(chat_client), "/agentic_chat")
+# Register as AG-UI endpoint (local, single user)
+add_agent_framework_fastapi_endpoint(
+    app, simple_agent(chat_client), "/agentic_chat", single_user=True
+)
 ```
+
+Registration requires a way to set the authorization scope: either `authorization_scope_resolver` or `single_user=True`. With neither, it raises `ValueError` ([agent-framework `_endpoint.py`](https://github.com/microsoft/agent-framework/blob/main/python/packages/ag-ui/agent_framework_ag_ui/_endpoint.py)). The examples in this article assume a local trial, so they use `single_user=True`; the security section covers services shared by several users.
 
 `add_agent_framework_fastapi_endpoint` does the following:
 
@@ -771,16 +735,18 @@ sequenceDiagram
     A->>F: TOOL_CALL_START(delete_file)
     A->>F: TOOL_CALL_ARGS({filename: "test.txt"})
     A->>F: TOOL_CALL_END
+    A->>F: RUN_FINISHED(outcome: interrupt)
     Note over F: Display approval UI
     U->>F: Approve
-    F->>A: TOOL_CALL_RESULT(approved)
+    F->>A: RunAgentInput(resume: approval)
+    A->>F: RUN_STARTED
     A->>F: TEXT_MESSAGE_START
     A->>F: TEXT_MESSAGE_CONTENT("File deleted")
     A->>F: TEXT_MESSAGE_END
     A->>F: RUN_FINISHED
 ```
 
-The orchestrator detects the approval response automatically, runs the tool if approved, and skips it if rejected. The approval flow is expressed with standard AG-UI events, so a frontend can implement a generic approval UI once and reuse it with other AG-UI agents.
+When a tool needs approval, the run ends with `RUN_FINISHED`, and its `outcome` carries an interrupt for the pending approval. The frontend resumes the same thread with the approval or rejection in `resume`; the tool runs if approved and does not run if rejected ([Microsoft Learn: Human-in-the-Loop with AG-UI](https://learn.microsoft.com/agent-framework/integrations/by-component/ui/ag-ui/human-in-the-loop)). Interrupts and resumes are AG-UI protocol types, so a frontend can implement a generic approval UI once and reuse it with other AG-UI agents.
 
 ### Feature 4: Shared State — Bidirectional State Synchronization
 
@@ -842,7 +808,7 @@ The `state_schema` defines the structure of state shared with the frontend. When
 
 ### Feature 5: Predictive State Updates — Optimistic State Updates
 
-Predictive State Updates write tool arguments into state while they are still being generated, during tool execution.
+Predictive State Updates write tool arguments into state in real time, while the LLM is still generating them.
 
 ```python
 # document_writer_agent.py
@@ -941,7 +907,7 @@ workflow = (
 )
 
 app = FastAPI()
-add_agent_framework_fastapi_endpoint(app, workflow, "/workflow")
+add_agent_framework_fastapi_endpoint(app, workflow, "/workflow", single_user=True)
 ```
 
 Workflow events (run/step/activity/tool/custom) are automatically converted to the corresponding AG-UI events.
@@ -974,19 +940,24 @@ chat_client = OpenAIChatCompletionClient(
 
 # Register endpoints for each feature
 add_agent_framework_fastapi_endpoint(
-    app, simple_agent(chat_client), "/agentic_chat"
+    app, simple_agent(chat_client), "/agentic_chat",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, weather_agent(chat_client), "/backend_tool_rendering"
+    app, weather_agent(chat_client), "/backend_tool_rendering",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, human_in_the_loop_agent(chat_client), "/human_in_the_loop"
+    app, human_in_the_loop_agent(chat_client), "/human_in_the_loop",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, recipe_agent(chat_client), "/shared_state"
+    app, recipe_agent(chat_client), "/shared_state",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, document_writer_agent(chat_client), "/predictive_state_updates"
+    app, document_writer_agent(chat_client), "/predictive_state_updates",
+    single_user=True,
 )
 
 if __name__ == "__main__":
@@ -1020,9 +991,53 @@ asyncio.run(main())
 
 ---
 
+## Security Considerations
+
+AG-UI endpoints do not enforce authentication by default. In production, add authentication with FastAPI's dependency injection.
+
+```python
+import os
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.security import APIKeyHeader
+from agent_framework import Agent
+from agent_framework.ag_ui import add_agent_framework_fastapi_endpoint
+
+# API key authentication setup
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+EXPECTED_API_KEY = os.environ.get("AG_UI_API_KEY")
+
+
+async def verify_api_key(
+    api_key: str | None = Security(API_KEY_HEADER),
+) -> None:
+    """Verify the API key in request headers."""
+    if not api_key or api_key != EXPECTED_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+app = FastAPI()
+
+# Assume agent was created in a previous section
+# agent = simple_agent(chat_client)
+
+# Register endpoint WITH authentication
+# Callers sharing one API key are treated as a single user
+add_agent_framework_fastapi_endpoint(
+    app,
+    agent,
+    "/",
+    dependencies=[Depends(verify_api_key)],
+    single_user=True,
+)
+```
+
+The `dependencies` parameter accepts any FastAPI dependency, so instead of an API key you can plug in OAuth 2.0, JWT, or Azure AD / Entra ID authentication, or add rate limiting. These dependencies only authenticate; they do not set the authorization scope. To keep conversation and approval state separate per user, pass an `authorization_scope_resolver` that returns a scope for the authenticated user instead of `single_user=True`.
+
+---
+
 ## Integration with CopilotKit
 
-[CopilotKit](https://docs.copilotkit.ai/) is a framework for adding AI copilot features to React applications and a well-known AG-UI client. It supports the AG-UI protocol natively.
+[CopilotKit](https://docs.copilotkit.ai/) is a framework for adding AI copilot features to React applications and a well-known client with native AG-UI support.
 
 CopilotKit's `useCopilotAction` hook gives a concise way to define AG-UI frontend tools.
 
@@ -1072,8 +1087,7 @@ The official AG-UI documentation lists the following building blocks.
 > <strong>Update (as of August 2026)</strong>: the table above still matches the current official documentation. The surrounding ecosystem has changed in these ways.
 >
 > - <strong>Composing with generative UI specs.</strong> AG-UI supports generative UI specifications such as Google's [A2UI](https://github.com/google/A2UI) and [MCP Apps](https://blog.modelcontextprotocol.io/posts/2025-11-21-mcp-apps/). A2UI and MCP Apps specify <em>how an agent describes a UI widget</em>. AG-UI is the protocol for <em>how a frontend and an agent backend talk to each other</em>. They work at different layers, so you can use them together.
-> - <strong>Microsoft Agent Framework is a first-party integration</strong> listed as Supported, so the implementation approach in this article still applies.
-> - <strong>Wider SDK coverage.</strong> Including community contributions, SDKs for Kotlin, Go, Dart, Java, Rust, Ruby, C++, and .NET are now listed as Supported.
+> - <strong>Microsoft Agent Framework's status.</strong> It is listed as a Supported first-party integration, so the implementation approach in this article still applies.
 > - <strong>Clients beyond web apps.</strong> AG-UI specifies an event stream, not a rendering target, so terminals, mobile apps, and chat platforms such as Slack and Microsoft Teams can also act as clients.
 
 ---
@@ -1100,7 +1114,7 @@ AG-UI was born from CopilotKit, and these agent frameworks now support it.
 
 ### SDKs
 
-At the time of writing, community-led SDKs for Kotlin, Golang, Dart, Java, and Rust were available alongside TypeScript, and .NET and Nim SDKs were in progress. For the status as of August 2026, see the update note in the previous section.
+At the time of writing, community-led SDKs for Kotlin, Go, Dart, Java, and Rust were available alongside TypeScript, and .NET and Nim SDKs were in progress. As of August 2026, SDKs for Kotlin, Go, Dart, Java, Rust, Ruby, C++, and .NET, including community contributions, are listed as Supported.
 
 ---
 
@@ -1132,7 +1146,7 @@ MCP handles the agent's connection to tools and data, A2A handles its connection
 1. <strong>Framework-agnostic</strong>: One protocol connects to every backend that supports AG-UI, including LangGraph, CrewAI, Microsoft Agent Framework, and Google ADK.
 2. <strong>Real-time</strong>: Text, tool calls, and state changes arrive as events one by one, so the UI can show what the agent is doing while it runs.
 3. <strong>Standardized Human-in-the-Loop</strong>: User approval flows are defined as part of the standard protocol.
-4. <strong>State Synchronization</strong>: Snapshots plus deltas keep agent and frontend state in sync in both directions with little traffic.
+4. <strong>State synchronization</strong>: Snapshots plus deltas keep agent and frontend state in sync in both directions with little traffic.
 5. <strong>Extensibility</strong>: You can extend it with middleware, custom events, and custom orchestrators.
 
 Microsoft Agent Framework supports these features first-party through the `agent-framework-ag-ui` package. A single call to `add_agent_framework_fastapi_endpoint` exposes an existing agent as an AG-UI-compatible endpoint.

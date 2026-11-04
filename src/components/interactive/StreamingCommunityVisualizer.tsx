@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -108,11 +109,11 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 0, target: 2, action: "add" },
       ],
       description:
-        "辺 A-C が到着。C は未割り当てだが A のコミュニティーに合流。ラベル伝搬: A のラベルが C に伝わる。",
+        "辺 A-C が到着。C は未割り当てなので A のラベルが伝わり、A のコミュニティー（青）に加わる（ラベル伝搬）。",
       descriptionEn:
-        "Edge A-C arrives. C is unassigned — joins A's community via label propagation.",
+        "Edge A-C arrives. C is unassigned, so it takes A's label and joins A's community (blue) via label propagation.",
       highlight: "ラベル伝搬による拡張",
-      highlightEn: "Label propagation expansion",
+      highlightEn: "Expansion via label propagation",
       phase: "add",
     },
     // Step 3: Edge B-C arrives, forming triangle
@@ -133,9 +134,9 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 1, target: 2, action: "add" },
       ],
       description:
-        "辺 B-C が到着し、三角形 △ABC が形成。コミュニティー内の密度が上がり、TILES なら三角形の完成をトリガーにコミュニティーを確定する。",
+        "辺 B-C が到着し、三角形 △ABC が形成。コミュニティー内の密度が上がる。TILES なら、この三角形ができた時点で初めてコミュニティーを作る。",
       descriptionEn:
-        "Edge B-C arrives, forming triangle △ABC. In TILES, triangle completion triggers community confirmation.",
+        "Edge B-C arrives, forming triangle △ABC, and the community becomes denser. TILES would create the community only now, when the triangle forms.",
       highlight: "三角形の完成 → コミュニティー強化",
       highlightEn: "Triangle completion → community reinforcement",
       phase: "add",
@@ -190,7 +191,7 @@ function buildStreamingScenario(): StreamStep[] {
       description:
         "辺 D-F が到着し、三角形 △DEF が完成。赤コミュニティーの結合が強化された。",
       descriptionEn:
-        "Edge D-F arrives, completing triangle △DEF. Red community is reinforced.",
+        "Edge D-F arrives, completing triangle △DEF. The red community is reinforced.",
       highlight: "2 つ目の三角形も完成",
       highlightEn: "Second triangle completed",
       phase: "add",
@@ -217,9 +218,9 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 2, target: 3, action: "add" },
       ],
       description:
-        "ブリッジ辺 C-D が到着。2 つのコミュニティーが接続された。ナイーブな LPA ならマージの可能性があるが、Modularity を監視する手法は「分離を保つ方が Q が高い」と判定し、コミュニティーを維持する。",
+        "ブリッジ辺 C-D が到着。2 つのコミュニティーが接続された。ナイーブな LPA ならマージの可能性があるが、Modularity を監視する手法は、分離したままの方が Modularity Q が高いと判定し、2 つのコミュニティーを維持する。",
       descriptionEn:
-        "Bridge edge C-D arrives, connecting two communities. Naive LPA might merge them, but modularity-aware methods keep them separate if Q is higher.",
+        "Bridge edge C-D arrives, connecting two communities. Naive LPA might merge them, but Modularity-aware methods keep them separate because Modularity Q is higher that way.",
       highlight: "ブリッジ辺: マージか分離か？",
       highlightEn: "Bridge edge: merge or keep separate?",
       phase: "update",
@@ -249,9 +250,9 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "add" },
       ],
       description:
-        "辺 F-G, F-H, G-H が到着し、3 つ目のコミュニティー（緑）が誕生。G と H は F とも接続されるが、F は赤コミュニティーに留まる（F の赤コミュニティー内の辺が多い）。",
+        "辺 F-G, F-H, G-H が到着し、3 つ目のコミュニティー（緑）が誕生。F は赤（D, E）と緑（G, H）に 2 本ずつ辺を持ち、どちらに入れるかは手法による。この図では赤に残す（重複を許す TILES なら両方に属する）。",
       descriptionEn:
-        "Edges F-G, F-H, G-H arrive. A third community (green) forms. F stays in red community due to stronger internal connections.",
+        "Edges F-G, F-H, G-H arrive. A third community (green) forms. F has two edges into red (D, E) and two into green (G, H), so its placement depends on the method; here it stays red (TILES, which allows overlap, would put F in both).",
       highlight: "境界ノード F: 複数コミュニティーに接続",
       highlightEn: "Boundary node F: connected to multiple communities",
       phase: "add",
@@ -281,9 +282,9 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "existing" },
       ],
       description:
-        "辺 C-D が削除（ストリーミングでは辺の削除も発生する）。ブリッジの消失により、青と赤コミュニティーは完全に分離。増分的手法ではブリッジ辺の削除時にのみ局所的な再計算を行う。",
+        "辺 C-D が削除（ストリーミングでは辺の削除も発生する）。ブリッジがなくなり、青と赤のコミュニティーは完全に分離。増分的手法は、この削除でも影響を受ける C, D の周辺だけを再計算する。",
       descriptionEn:
-        "Edge C-D is removed (edge deletions also occur in streaming). The bridge disappears; blue and red communities are fully separated. Incremental methods only recompute locally when bridge edges are removed.",
+        "Edge C-D is removed (edge deletions also occur in streaming). With the bridge gone, the blue and red communities are fully separated. Incremental methods recompute only around C and D, the nodes this deletion affects.",
       highlight: "辺削除 → 局所的な再計算のみ",
       highlightEn: "Edge deletion → local recomputation only",
       phase: "remove",
@@ -313,9 +314,9 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "existing" },
       ],
       description:
-        "辺 B-D が到着し新たなブリッジが形成。コミュニティー構造自体は維持されるが、B と D がコミュニティー間の仲介役になる。delta-screening Louvain は、この辺の追加が Modularity に影響する範囲（B, D の近傍）のみを再評価する。",
+        "辺 B-D が到着し新たなブリッジが形成。コミュニティー構造自体は維持されるが、B と D がコミュニティー間の仲介役になる。delta-screening Louvain は、Modularity 利得が変わりうるノード（B, D の近傍と、B, D が属するコミュニティーのノード）だけを再評価する。",
       descriptionEn:
-        "Edge B-D arrives, creating a new bridge. Community structure is maintained. Delta-screening Louvain only re-evaluates the neighborhood of B and D.",
+        "Edge B-D arrives, creating a new bridge. The community structure is maintained, with B and D now linking the communities. Delta-screening Louvain re-evaluates only nodes whose Modularity gain may change: the neighbors of B and D and the members of their communities.",
       highlight: "delta-screening: 影響範囲のみ再計算",
       highlightEn: "Delta-screening: recompute only affected scope",
       phase: "update",
@@ -345,11 +346,11 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "existing" },
       ],
       description:
-        "最終状態: 3 つの明確なコミュニティーが検出された。ストリーミング手法は、辺が 1 本ずつ到着・削除されるたびに局所的に更新を行い、全体の再計算を回避する。",
+        "最終状態: 青・赤・緑の 3 つのコミュニティー。ストリーミング手法は、辺が 1 本到着・削除されるたびに変更の周辺だけを更新し、グラフ全体の再計算を避ける。",
       descriptionEn:
-        "Final state: 3 clear communities detected. Streaming methods update locally as each edge arrives or departs, avoiding full recomputation.",
-      highlight: "ストリーミング CD: 局所更新が鍵",
-      highlightEn: "Streaming CD: local updates are key",
+        "Final state: three communities (blue, red, green). Streaming methods update only the region around each edge that arrives or is removed, avoiding a full recomputation.",
+      highlight: "ストリーミング CD: 変更の周辺だけを更新",
+      highlightEn: "Streaming CD: update only around each change",
       phase: "result",
     },
   ];
@@ -383,9 +384,9 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
   };
 
   const phaseLabels: Record<string, string> = {
-    init: isJa ? "初期化" : "Init",
-    add: isJa ? "辺追加" : "Edge Add",
-    remove: isJa ? "辺削除" : "Edge Remove",
+    init: isJa ? "初期状態" : "Initial state",
+    add: isJa ? "辺追加" : "Edge added",
+    remove: isJa ? "辺削除" : "Edge removed",
     update: isJa ? "更新" : "Update",
     split: isJa ? "分裂" : "Split",
     merge: isJa ? "統合" : "Merge",
@@ -401,8 +402,8 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "辺がストリームとして 1 本ずつ到着・削除される状況で、コミュニティーがどう変化するかを観察します。"
-          : "Observe how communities evolve as edges arrive and depart one by one in a streaming fashion."
+          ? "説明用のシナリオで、辺が 1 本ずつ到着・削除されるたびにコミュニティーがどう変わるかを示します。ノードの色は所属コミュニティー（灰色は未所属）です。"
+          : "An illustrative scenario showing how communities change as edges arrive and are removed one at a time. Node color shows community membership (gray = unassigned)."
       }
     >
       {/* Phase indicator */}
@@ -495,7 +496,7 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
               fill="#6b7280"
               dominantBaseline="central"
             >
-              {isJa ? "追加" : "Add"}
+              {isJa ? "追加" : "Added"}
             </text>
             <line
               x1={60}
@@ -513,7 +514,7 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
               fill="#6b7280"
               dominantBaseline="central"
             >
-              {isJa ? "削除" : "Remove"}
+              {isJa ? "削除" : "Removed"}
             </text>
             <line
               x1={115}
@@ -536,7 +537,7 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
         )}
       </svg>
 
-      <StepPlayerControls {...player} label={getLabel} />
+      <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }

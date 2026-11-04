@@ -1,7 +1,7 @@
 ---
 title: "The Design Space of a Production AI Agent — Harness-Centric Design in Claude Code's 512K Lines"
 date: "2026-04-18"
-description: "A walkthrough of arXiv:2604.14228, 'Dive into Claude Code'. Claude Code wraps a simple while loop in a deterministic harness that makes up an estimated 98.4% of its code. This post covers how that harness handles safety, context management, extensibility, multi-agent work, and persistence, and what it suggests for teams building AI agent products."
+description: "A walkthrough of arXiv:2604.14228, 'Dive into Claude Code'. Claude Code wraps a simple while loop in a deterministic harness that makes up an estimated 98.4% of its code. The harness layers permission checks, compacts context in stages, tiers extensions by context cost, isolates subagents, and persists sessions append-only. For teams building AI agent products, the lesson is that most of the design space lies outside the model."
 tags: ["AI Agent", "LLM", "Claude Code", "Architecture", "Paper Reading", "MCP", "Context Engineering"]
 ---
 
@@ -43,7 +43,7 @@ The paper starts by extracting five human values that motivate the architecture,
 
 <strong>Capability Amplification</strong> means expanding what people can do, not just how fast. In an Anthropic internal survey, about 27% of tasks done with Claude Code were work the engineers would not have attempted without the tool. The point is that new kinds of work become possible. Its developers describe Claude Code as "a Unix utility rather than a traditional product," built from small composable parts.
 
-<strong>Contextual Adaptability</strong> means fitting the user's project and improving as the relationship goes on. In long-term tracking data, the auto-approve rate rises from about 20% for users with fewer than 50 sessions to over 40% after 750 sessions. The paper describes this autonomy as "co-constructed by the model, the user, and the product," and Claude Code is designed around trust that changes over time rather than a fixed level of trust.
+<strong>Contextual Adaptability</strong> means fitting the user's project and improving as the relationship goes on. In long-term tracking data, the auto-approve rate rises from about 20% for users with fewer than 50 sessions to over 40% after 750 sessions. The paper describes the agent's autonomy as "co-constructed by the model, the user, and the product," and Claude Code is designed around trust that changes over time rather than a fixed level of trust.
 
 These five values become 13 design principles. The one that best explains the overall architecture is <strong>"minimal scaffolding, maximal operational harness."</strong> Instead of shaping the model's decisions from outside with planners or state graphs, as LangGraph does, Claude Code leaves decisions to the model and surrounds it with deterministic infrastructure. The 1.6% / 98.4% split reflects that choice.
 
@@ -57,11 +57,11 @@ Separately from the five values, the paper adds an evaluative lens: long-term pr
 
 ### All interfaces converge on queryLoop()
 
-Claude Code has several interfaces: the interactive CLI, the headless CLI (`claude -p`), the Agent SDK, and IDE integrations. <strong>All of them converge on the same `queryLoop()` function.</strong> Only the rendering layer differs. `QueryEngine` (`QueryEngine.ts`, 47KB) is a conversation wrapper for the SDK and headless modes, not the engine itself. The interactive CLI skips `QueryEngine` and calls `query()` directly. The shared code path is a loop function, not a class, and that distinction matters for understanding the architecture.
+Claude Code has several interfaces: the interactive CLI, the headless CLI (`claude -p`), the Agent SDK, and IDE integrations. <strong>All of them converge on the same `queryLoop()` function.</strong> Only the rendering layer differs. `QueryEngine` (`QueryEngine.ts`, 47 KB) is a conversation wrapper for the SDK and headless modes, not the engine itself. The interactive CLI skips `QueryEngine` and calls `query()` directly. The shared code path is this loop function, not a class.
 
 ### One turn in 9 steps
 
-`queryLoop()` in `query.ts` (68KB) is a while-true loop written as an async generator. Here is one turn of the running example, "Fix the failing test in `auth.test.ts`":
+`queryLoop()` in `query.ts` (68 KB) is a while-true loop written as an async generator. Here is one turn of the running example, "Fix the failing test in `auth.test.ts`":
 
 1. <strong>Settings resolution</strong> — unpack the system prompt, permission callback, and model configuration
 2. <strong>State initialization</strong> — gather message history, tool context, and compaction tracking into a single State object. The loop's 7 continue points replace this object as a whole rather than mutating individual fields
@@ -77,9 +77,9 @@ This is a plain implementation of the ReAct pattern (reason, act, observe, repea
 
 ### Five stop conditions
 
-A while-true loop does not run forever. It stops in five cases: (1) the model replies with text only and no tool_use, which is the normal exit; (2) `maxTurns` is reached; (3) the API returns `prompt_too_long` and recovery fails; (4) a PostToolUse hook sets `hook_stopped_continuation`; (5) the `abortController` signal fires.
+The while-true loop stops in five cases: (1) the model replies with text only and no tool_use, which is the normal exit; (2) `maxTurns` is reached; (3) the API returns `prompt_too_long` and recovery fails; (4) a PostToolUse hook sets `hook_stopped_continuation`; (5) the `abortController` signal fires.
 
-These stop conditions relate directly to the compound error problem described by Huyen (2025). At 95% accuracy per step, a 100-step task succeeds only about 0.6% of the time. Claude Code tries to contain this decay by combining stop conditions with a permission check at every step.
+These stop conditions relate directly to the compound error problem described by Huyen (2025). If each step succeeds independently with 95% probability, a 100-step task succeeds with probability 0.95^100, or only about 0.6%. Claude Code tries to contain this decay by combining stop conditions with a permission check at every step.
 
 ### Concurrent tool execution
 
@@ -89,27 +89,27 @@ This sits between speculative execution like PASTE (Sui et al., 2026), which sta
 
 ### The 5-stage compaction pipeline
 
-Claude Code compacts context in <strong>multiple stages</strong>. Claude Code treats the context window as a scarce computational resource, not a container for data, and manages it with a five-stage pipeline. It tries cheap compression first and moves to the next stage only when that is not enough, so context quality degrades gradually rather than all at once.
+Claude Code treats the context window as a scarce computational resource, not a container for data, and manages it with a five-stage pipeline. It tries cheap compression first and moves to the next stage only when that is not enough, so context quality degrades gradually rather than all at once.
 
 | Stage | Name | What it trims | Note |
 |---|---|---|---|
-| 1 | <strong>Budget reduction</strong> | Oversized tool results | Always on; replaced with content references |
-| 2 | <strong>Snip</strong> | Older history segments | Feature-flagged; lightweight trim |
-| 3 | <strong>Microcompact</strong> | Fine-grained, cache-aware | Defers the boundary until after the API response. Anthropic's API caches repeated prompt prefixes, so breaking the prefix boundary triggers a charge to rebuild the cache |
-| 4 | <strong>Context collapse</strong> | Read-time projection over history | Leaves the original transcript untouched |
-| 5 | <strong>Auto-compact</strong> | Model-generated summary | Last resort when stages 1–4 are not enough |
+| 1 | Budget reduction | Oversized tool results | Always on; replaced with content references |
+| 2 | Snip | Older history segments | Feature-flagged; lightweight trim |
+| 3 | Microcompact | Fine-grained, cache-aware | Defers the boundary until after the API response. Anthropic's API caches repeated prompt prefixes, so breaking the prefix boundary triggers a charge to rebuild the cache |
+| 4 | Context collapse | Read-time projection over history | Leaves the original transcript untouched |
+| 5 | Auto-compact | Model-generated summary | Last resort when stages 1–4 are not enough |
 
 Compaction is tied directly to API billing. According to a January 2026 experiment comment in the source, a path that disabled prompt-cache reuse showed a 98% cache miss rate and accounted for about 0.76% of total cache-creation cost. Details of the compaction algorithm show up on the bill, which is a concern specific to agents running in production.
 
 Separately from the five stages, the paper identifies four other context-saving mechanisms: lazy loading of CLAUDE.md, deferred loading of tool schemas through ToolSearch, subagents that return only a summary, and a size cap on each tool result.
-
-> <strong>Industry implication #2</strong>: If you build your own agent, provide at least a per-tool-result size cap, session-wide token monitoring, a fallback model, and a small fixed retry budget for output-limit errors. Claude Code's retry count of 3 (`MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3`) is tuned for Anthropic's workload and is not a universal constant. The principle of trying cheap compression first and escalating step by step, however, carries over to other agents.
 
 ### Recovery mechanisms
 
 - Up to 3 retries when output tokens exceed the limit
 - `prompt_too_long` errors are handled by context collapse first, then reactive compact
 - A streaming fallback path and a fallback model are also available
+
+> <strong>Industry implication #2</strong>: If you build your own agent, provide at least a per-tool-result size cap, session-wide token monitoring, a fallback model, and a small fixed retry budget for output-limit errors. Claude Code's retry count of 3 (`MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3`) is tuned for Anthropic's workload and is not a universal constant. The principle of trying cheap compression first and escalating step by step, however, carries over to other agents.
 
 ---
 
@@ -119,7 +119,7 @@ Separately from the five stages, the paper identifies four other context-saving 
 
 Anthropic's auto-mode analysis (2026) found that users approve 93% of permission prompts. At first glance this suggests that most actions are safe. In practice it shows that <strong>interactive confirmation no longer works as a safety mechanism</strong>. Once confirming becomes a habit, people approve without reading. This is approval fatigue.
 
-Long-term tracking data supports this. The auto-approve rate rises from about 20% for users with fewer than 50 sessions to over 40% after 750 sessions, and sessions grow longer as well. Users do not deliberately switch modes; their trust shifts through gradual habituation. Introducing the sandbox cut the frequency of permission prompts by an estimated 84%. Anthropic redefined the problem from getting more approvals to reducing the number of decisions a person has to make.
+Long-term tracking data supports this. The auto-approve rate rises from about 20% for users with fewer than 50 sessions to over 40% after 750 sessions, and sessions grow longer as well. Users do not deliberately switch modes; their trust shifts through gradual habituation. In Anthropic's internal usage, introducing the sandbox cut permission prompts by 84% ([Anthropic, 2025](https://www.anthropic.com/engineering/claude-code-sandboxing)). Anthropic redefined the problem from getting more approvals to reducing the number of decisions a person has to make.
 
 That view sets the direction of Claude Code's safety design. SWE-Agent and OpenHands isolate the whole environment in a Docker sandbox, and Aider makes changes reversible after the fact with automatic git commits and `/undo`. Claude Code does neither. It stacks layers that apply policy to each individual action.
 
@@ -157,7 +157,7 @@ The layers are independent, and <strong>if any one of them blocks, the tool does
 
 The permission-evaluation code (`useCanUseTool.tsx`) branches into four paths depending on the runtime situation. (1) <strong>Coordinator</strong> is for multi-agent coordination mode; it tries to resolve the request automatically and falls back to the user if that fails. (2) <strong>Swarm worker</strong> is for workers inside an agent swarm. (3) <strong>Speculative classifier</strong> applies when `BASH_CLASSIFIER` is enabled and the tool is BashTool; a classification started in advance races a timeout, and a high-confidence result is approved without asking the user. (4) <strong>Interactive</strong> is the final fallback, which shows the standard approval dialog in the terminal UI.
 
-Denials are handled deliberately too: <strong>a permission denial is not a hard stop but a signal to choose a different action</strong>. The model receives the reason for the denial and tries a safer approach in the next iteration. The permission system changes the direction of the agent's behavior instead of halting it.
+<strong>A permission denial is not a hard stop but a signal to choose a different action.</strong> The model receives the reason for the denial and tries a safer approach in the next iteration.
 
 ### Trade-offs of the auto-mode classifier
 
@@ -165,13 +165,13 @@ Denials are handled deliberately too: <strong>a permission denial is not a hard 
 
 ### The initialization-order vulnerability
 
-The paper also finds a safety problem in <strong>the order in which things run</strong>. Project initialization (hooks, MCP servers, settings resolution) runs before the trust dialog appears. That pre-trust window is outside the deny-first pipeline, and several independently reported CVEs all trace back to it.
+The paper also finds a safety problem in the order in which things run. Project initialization (hooks, MCP servers, settings resolution) runs before the trust dialog appears. That pre-trust window is outside the deny-first pipeline, and several independently reported CVEs all trace back to it.
 
 A diagram that lays the layers out in space does not show this kind of timing property. When you review an architecture diagram for security, also check in what order, and when, each layer becomes active.
 
 ### A shell sandbox independent of permissions
 
-The shell sandbox, controlled by `shouldUseSandbox.ts`, works on a separate axis from the permission system. A command approved by the permission system still runs inside the sandbox if it is in scope. A denied command never reaches the sandbox at all. Defense in depth is meaningful because these two axes, <strong>authorization and isolation</strong>, are independent.
+The shell sandbox, controlled by `shouldUseSandbox.ts`, works on a separate axis from the permission system. A command approved by the permission system still runs inside the sandbox if it is in scope. A denied command never reaches the sandbox at all. Defense in depth is meaningful because these two axes, authorization and isolation, are independent.
 
 > <strong>Industry implication #3</strong>: Adopting deny-first on its own adds friction without making anything safer. It works in Claude Code because the classifier and sandbox catch what it misses downstream. A production agent needs at least three things: deny-first rules, a classifier or sandbox, and attention to initialization order. If you integrate MCP servers or plugins, require each extension's manifest to declare the phase in which it becomes active (`pre-trust-init`, `post-trust-init`, or `per-turn`).
 
@@ -185,20 +185,20 @@ When you build an agent platform, it is natural to want a single extension mecha
 
 | Mechanism | Context cost | Injection point | What it provides |
 |---|---|---|---|
-| <strong>Hooks</strong> | Zero | `execute()` | Lifecycle interception, event-driven |
-| <strong>Skills</strong> | Low | `assemble()` | Domain instructions and a meta-tool |
-| <strong>Plugins</strong> | Medium | All 3 points | Packaging of multiple components |
-| <strong>MCP servers</strong> | High | `model()` | External service integration (MCP = Model Context Protocol) |
+| Hooks | Zero | `execute()` | Lifecycle interception, event-driven |
+| Skills | Low | `assemble()` | Domain instructions and a meta-tool |
+| Plugins | Medium | All 3 points | Packaging of multiple components |
+| MCP servers | High | `model()` | External service integration (MCP = Model Context Protocol) |
 
 ### Three injection points
 
-The agent loop has three extension points. (a) `assemble()` decides what the model sees; CLAUDE.md, skill descriptions, and MCP resources are injected here. (b) `model()` decides what the model can use; built-in tools, MCP tools, SkillTool, and AgentTool are passed as a single flat list. (c) `execute()` decides whether and how an action runs; permission rules and PreToolUse / PostToolUse hooks intervene here. Each of the four extension mechanisms connects at a different place among these three points.
+The agent loop has three injection points. (a) `assemble()` decides what the model sees; CLAUDE.md, skill descriptions, and MCP resources are injected here. (b) `model()` decides what the model can use; built-in tools, MCP tools, SkillTool, and AgentTool are passed as a single flat list. (c) `execute()` decides whether and how an action runs; permission rules and PreToolUse / PostToolUse hooks intervene here. The "Injection point" column in the table above shows where each of the four extension mechanisms connects among these three points.
 
 ### 27 hook events
 
 `coreTypes.ts` defines 27 hook events: 5 for tool authorization (PreToolUse / PostToolUse / PostToolUseFailure / PermissionRequest / PermissionDenied), 5 for the session lifecycle, 3 for user interaction, 5 for subagent coordination, 4 for context management, 4 for workspace events, plus notification. Fifteen of them have detailed output schemas. Hooks can be implemented in five ways: shell command, LLM prompt, HTTP, agent-based verifier, or callback.
 
-A smaller detail: hooks run at different times for MCP and non-MCP tools. For non-MCP tools, the PostToolUse hook runs after the `tool_result` is emitted. For MCP tools, emitting the result is delayed until the hooks finish, so `updatedMCPToolOutput` can rewrite the output.
+Hooks run at different times for MCP and non-MCP tools. For non-MCP tools, the PostToolUse hook runs after the `tool_result` is emitted. For MCP tools, emitting the result is delayed until the hooks finish, so `updatedMCPToolOutput` can rewrite the output.
 
 > <strong>Industry implication #4</strong>: Now that MCP has been donated to the Linux Foundation's Agentic AI Foundation, the question of whether to separate mechanisms by cost or offer one unified API with cost annotations is one for the whole ecosystem. Claude Code chose separate mechanisms so that extension authors have to think about cost.
 
@@ -225,7 +225,7 @@ Memory retrieval uses no embeddings or vector index. An LLM scans the headers of
 
 ### Context-window assembly order
 
-The context window is assembled from nine sources in a fixed order: (1) system prompt, (2) environment info (git status and so on, memoized), (3) the CLAUDE.md hierarchy, (4) path-scoped rules (lazy), (5) auto memory (prefetched asynchronously), (6) tool metadata, (7) conversation history, (8) tool results, and (9) compaction summaries. Relevant-memory prefetch, MCP instruction deltas, and agent-listing deltas are added even after the main window is built. The context window is not fixed at assembly time and can grow during a turn.
+The context window is assembled from nine sources in a fixed order: (1) system prompt, (2) environment info (git status and so on, memoized), (3) the CLAUDE.md hierarchy, (4) path-scoped rules (lazy), (5) auto memory (prefetched asynchronously), (6) tool metadata, (7) conversation history, (8) tool results, and (9) compaction summaries. Relevant-memory prefetch, MCP instruction deltas, and agent-listing deltas are added even after the main window is built.
 
 > <strong>Industry implication #5</strong>: Put the context window at the center of your design as a scarce computational resource, not a container for data. Try cheap compression that leaves the original record intact first, and make the conditions for moving to the next stage explicit, so context quality degrades only gradually. Users should be able to inspect what was lost. Claude Code itself still has open issues here in balancing transparency and efficiency.
 
@@ -237,7 +237,7 @@ The context window is assembled from nine sources in a fixed order: (1) system p
 
 `AgentTool` is a meta-tool like `SkillTool`, but it works very differently. `SkillTool` injects instructions into the current context window, while `AgentTool` <strong>creates a new, independent context</strong>.
 
-The current official documentation lists three built-in subagents, Explore, Plan, and General-purpose, plus the helper agents claude, claude-code-guide, and statusline-setup. You can also define your own agents in `.claude/agents/*.md` or `~/.claude/agents/*.md`. YAML frontmatter lets you set tools, model, permission mode, hooks, max turns, skills, isolation mode, and more, so a custom agent can be a self-contained subsystem with its own tools, model, permissions, and hooks.
+The current official documentation lists three built-in subagents, Explore, Plan, and General-purpose, plus the helper agents claude, claude-code-guide, and statusline-setup. You can also define your own agents in `.claude/agents/*.md` or `~/.claude/agents/*.md`. YAML frontmatter lets you set tools, model, permission mode, hooks, max turns, skills, isolation mode, and more, so a custom agent can be a self-contained subsystem.
 
 ### Public isolation setting
 
@@ -249,7 +249,7 @@ Subagent permission-mode overrides follow specific rules. If the parent is in `b
 
 ### Sidechain records and token consumption
 
-Each subagent writes its own `.jsonl` and `.meta.json` files and returns only a summary to the parent. Data shows that agent teams in plan mode consume about 7 times as many tokens as a normal session, which makes summary-only return all the more important.
+Each subagent writes its own `.jsonl` and `.meta.json` files and returns only a summary to the parent. According to the [Claude Code documentation](https://code.claude.com/docs/en/costs), agent teams in plan mode consume about 7 times as many tokens as a normal session, which makes summary-only return all the more important.
 
 Multiple instances coordinate through file locking. No message broker or distributed coordination service is needed, so deployment has no external dependencies, and debugging is easy because you can read the state in plain JSON. File locking is fragile on NFS, however, and the approach works because Claude Code is a CLI tool used by a single user.
 
@@ -269,7 +269,7 @@ Persistence uses three channels that operate independently: session transcripts 
 
 The central commitment is <strong>append-only</strong> storage. Claude Code keeps appending to JSONL, and compaction boundary markers carry `headUuid / anchorUuid / tailUuid` so the chain can be repaired when it is read back. Past lines are never modified or deleted. The design favors auditability and simplicity over query performance.
 
-On the safety side, the key decision here is that <strong>`--resume` does not restore session-scoped permissions</strong>. Trust has to be established again in each session. Claude Code accepts the extra friction for users to avoid the risk of carrying stale trust forward.
+On the safety side, <strong>`--resume` does not restore session-scoped permissions</strong>. Trust has to be established again in each session. Claude Code accepts the extra friction for users to avoid the risk of carrying stale trust forward.
 
 ---
 
@@ -303,7 +303,7 @@ The third pattern has a concrete cost. Because of the context limit, the agent c
 
 ### KAIROS — toward proactive agents
 
-The feature-gated KAIROS system points beyond agents that only use tools when asked. A persistent background agent runs on a periodic heartbeat and injects a `<tick>` prompt at intervals when there are no user messages. It checks whether the terminal has focus and takes more autonomous action while the user is away. `SleepTool` makes the cost of waking up explicit, and because the prompt cache expires after 5 minutes, sleeping and waking become a way to keep costs down.
+The feature-gated KAIROS system points beyond agents that only use tools when asked. A persistent background agent runs on a periodic heartbeat and injects a `<tick>` prompt at intervals when there are no user messages. It checks whether the terminal has focus and takes more autonomous action while the user is away. `SleepTool` makes the cost of waking up explicit, and together with the 5-minute prompt-cache expiry, it lets the agent adjust how often it wakes while keeping costs down.
 
 KAIROS targets the tension between Capability and Adaptability described above. Proactive AI raises task completion by 12–18%, but in the high-frequency Persistent Suggest variant, user preference falls to 47% (Chi et al., 2025). KAIROS tries to address this by tying its behavior both to whether the user is present and to token cost. Whether it runs in production builds has not been confirmed.
 
@@ -313,14 +313,14 @@ KAIROS targets the tension between Capability and Adaptability described above. 
 
 The paper makes empirical predictions that source-code analysis alone cannot verify, and cites studies from adjacent fields:
 
-- <strong>A causal analysis of 807 repositories that adopted Cursor</strong> (He et al., 2026): code complexity rose by 40.7%, and the initial speed gains returned to pre-adoption levels within 3 months. The gains were cancelled out by the added complexity.
-- <strong>An audit of 304,000 AI-authored commits</strong> (Liu et al., 2026): security-related issues persisted especially long
-- <strong>A randomized controlled trial with 16 developers</strong> (METR / Becker et al., 2025): using AI made developers 19% slower, although they believed they were 20% faster. With N=16 the study is small, but it shows that output counts and end-to-end productivity can diverge
-- <strong>An EEG study of 54 participants</strong> (Kosmyna et al., 2025): LLM users showed weaker connectivity between brain regions, and the effect persisted after they stopped using AI
-- <strong>Developers working with AI assistance scored 17% lower on comprehension tests</strong> (Shen et al., 2026)
-- <strong>Entry-level tech hiring fell by 25%</strong> from 2023 to 2024 (Rak et al., 2025)
+- <strong>A causal analysis of 807 repositories that adopted Cursor</strong> (He et al., 2026): code complexity rose by 40.7%, and the initial speed gains returned to pre-adoption levels within 3 months. The added complexity appears to have offset the gains.
+- <strong>An audit of 304,000 AI-authored commits</strong> (Liu et al., 2026): security-related issues persisted especially long.
+- <strong>A randomized controlled trial with 16 developers</strong> (METR / Becker et al., 2025): using AI made developers 19% slower, although they believed they were 20% faster. With N=16 the study is small, but it shows that output counts and end-to-end productivity can diverge.
+- <strong>An EEG study of 54 participants</strong> (Kosmyna et al., 2025): LLM users showed weaker connectivity between brain regions, and the effect persisted after they stopped using AI.
+- <strong>A study of comprehension</strong> (Shen et al., 2026): developers working with AI assistance scored 17% lower on comprehension tests.
+- <strong>A study of hiring</strong> (Rak et al., 2025): entry-level tech hiring fell by 25% from 2023 to 2024.
 
-None of these is direct evidence against Claude Code's architecture, but they point to structural problems <strong>shared by any agent system built on a bounded context and a tool-use loop</strong>. Each is a single study with non-trivial confounders. Rather than treating any one result as settled fact, read the overall pattern as a reason to measure your own organization.
+None of these is direct evidence against Claude Code's architecture, but they point to structural problems <strong>shared by any agent system built on a bounded context and a tool-use loop</strong>. Each is a single study with non-trivial confounders, so read the overall pattern, not any one result, as a reason to measure your own organization.
 
 > <strong>Industry implication #7</strong>: If "productivity goes up" is your only KPI, your organization can lose capability over several years. Output counts such as commits, PRs, and lines are not the same as overall productivity. Track the share of agent-created PRs that ship without human edits versus those that needed substantive review. Measure the long-term buildup of code complexity and technical debt in CI as well.
 
@@ -328,7 +328,7 @@ None of these is direct evidence against Claude Code's architecture, but they po
 
 ## XI. Six Open Questions
 
-In its final chapter the paper lists six open questions. Rather than predictions, they form a list of design problems that do not yet have answers.
+In its final chapter the paper lists six design questions that do not yet have answers.
 
 <strong>1. Silent failures and the gap between observability and evaluation.</strong> 89% of organizations have adopted observability, but only 52.4% run offline evaluation (LangChain 2026 survey). Another report finds that 78% of failures go unnoticed (Bessemer 2026). Whether the separation of generation and evaluation belongs inside or outside the harness is still undecided.
 
@@ -338,7 +338,7 @@ In its final chapter the paper lists six open questions. Rather than predictions
 
 <strong>4. Longer task horizons.</strong> METR measures a "50% time horizon": the length of task, measured by how long it takes a human expert, that an AI completes with 50% probability. AI Scientist (Lu et al., 2024) writes a paper draft on its own, CoScientist (Gottweis et al., 2025) generates hypotheses over several days, and AlphaEvolve (Novikov et al., 2025) discovers algorithms over several weeks.
 
-<strong>5. Governance at scale.</strong> The EU AI Act becomes fully applicable in August 2026. Of the systems listed in the MIT AI Agent Index, only 13.3% publish an agent-specific safety card.
+<strong>5. Governance at scale.</strong> The [EU AI Act](https://eur-lex.europa.eu/eli/reg/2024/1689/oj) has a general date of application of August 2, 2026, and rules such as those for high-risk AI systems apply in later stages. Of the systems listed in the MIT AI Agent Index, only 13.3% publish an agent-specific safety card.
 
 <strong>6. Revisiting long-term human capability.</strong> Should the harness expose signals that track changes in comprehension at the session level? Here again, higher productivity and human growth are different things.
 
@@ -350,7 +350,7 @@ This section turns the analysis into concrete guidelines for people building pro
 
 ### 1. After picking a frontier model, invest in the harness
 
-The 1.6% / 98.4% split is a ratio of lines, not of value. The following claim still holds: <strong>once you have chosen a frontier model, additional investment pays off most in the deterministic harness</strong> (permissions, context management, recovery, observability), not in further fine-tuning your model choice. Keep in mind, though, that a 512K-line harness is itself a source of attack surface, onboarding cost, and behavior changes that are hard to notice.
+The 1.6% / 98.4% split is a ratio of lines, not of value. Still, <strong>once you have chosen a frontier model, additional investment pays off most in the deterministic harness</strong> (permissions, context management, recovery, observability), not in further fine-tuning your model choice. Keep in mind, though, that a 512K-line harness is itself a source of attack surface, onboarding cost, and behavior changes that are hard to notice.
 
 ### 2. Don't design permissions around human attention
 
@@ -370,7 +370,7 @@ Choose among worktrees (filesystem isolation), in-process agents (context isolat
 
 ### 6. Start persistence with append-only
 
-Combine appending to JSONL, repairing the chain at read time, and not restoring permissions. Do not carry trust over when a session is resumed.
+Combine appending to JSONL, repairing the chain at read time, and not restoring permissions.
 
 ### 7. Measure short-term productivity and long-term capability separately
 

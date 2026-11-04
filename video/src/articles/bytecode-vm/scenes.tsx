@@ -578,7 +578,7 @@ export function DispatchScene() {
             </div>
             {c.tone === "teal" && (
               <div style={{ marginTop: 26, fontFamily: fonts.sans, fontSize: 25, color: colors.muted }}>
-                {t({ ja: "15〜25%速いという報告", en: "reported 15–25% speedup" })}
+                {t({ ja: "最大15〜20%速い（CPython）", en: "up to 15–20% faster (CPython)" })}
               </div>
             )}
           </Card>

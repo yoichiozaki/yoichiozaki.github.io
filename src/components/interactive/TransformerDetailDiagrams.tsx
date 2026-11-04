@@ -48,7 +48,7 @@ export function PositionalEncodingDiagram({ locale = "ja" }: DiagramProps) {
       const intensity = Math.round(v * 255);
       return dark
         ? `rgb(${30 + intensity * 0.4}, ${30 + intensity * 0.7}, ${30 + intensity})`
-        : `rgb(${255 - intensity * 0.5}, ${255 - intensity * 0.3}, ${255 - intensity})`;
+        : `rgb(${255 - intensity * 0.85}, ${255 - intensity * 0.55}, ${255 - intensity * 0.1})`;
     } else {
       const intensity = Math.round(-v * 255);
       return dark
@@ -109,7 +109,7 @@ export function PositionalEncodingDiagram({ locale = "ja" }: DiagramProps) {
 
         {/* Legend */}
         <text x={offsetX} y={offsetY + positions * cellH + 38} fill={muted} fontSize={8}>
-          {en ? "Blue = positive    Red = negative    (sin for even dims, cos for odd dims)" : "青 = 正    赤 = 負    (偶数次元: sin, 奇数次元: cos)"}
+          {en ? "Blue = positive    Red = negative    (sin for even dimensions, cos for odd dimensions)" : "青 = 正    赤 = 負    (偶数次元: sin、奇数次元: cos)"}
         </text>
 
         {/* Highlight: low-freq vs high-freq annotation */}
@@ -258,7 +258,7 @@ export function MultiHeadAttentionDiagram({ locale = "ja" }: DiagramProps) {
               {/* Head box */}
               <rect x={hx} y={168} width={headW} height={headH} rx={5} fill={bg} stroke={headColors[i]} strokeWidth={1.5} />
               <text x={hcx} y={182} textAnchor="middle" dominantBaseline="central" fill={headColors[i]} fontSize={8} fontWeight={700}>
-                Head {i + 1}
+                {en ? `Head ${i + 1}` : `ヘッド ${i + 1}`}
               </text>
               <text x={hcx} y={196} textAnchor="middle" dominantBaseline="central" fill={muted} fontSize={7} fontFamily="monospace">
                 d_k = {en ? "128" : "128"}
@@ -268,7 +268,7 @@ export function MultiHeadAttentionDiagram({ locale = "ja" }: DiagramProps) {
               </text>
               <text x={hcx} y={222} textAnchor="middle" dominantBaseline="central" fill={muted} fontSize={6}>
                 {en
-                  ? i === 0 ? "subj–verb" : i === 1 ? "adj–noun" : i === 2 ? "coref" : "syntax"
+                  ? i === 0 ? "subject-verb" : i === 1 ? "adjective-noun" : i === 2 ? "coreference" : "syntax"
                   : i === 0 ? "主語-動詞" : i === 1 ? "形容詞-名詞" : i === 2 ? "共参照" : "構文"}
               </text>
 
@@ -334,7 +334,7 @@ export function CausalMaskDiagram({ locale = "ja" }: DiagramProps) {
           {en ? "Causal Mask (Attention Matrix)" : "因果マスク (注意行列)"}
         </text>
         <text x={190} y={35} textAnchor="middle" fill={muted} fontSize={9}>
-          {en ? "Green = attend, Red = masked (-∞)" : "緑 = 注意可能, 赤 = マスク (-∞)"}
+          {en ? "Green = can attend, red = masked (−∞)" : "緑 = 注意可能、赤 = マスク (−∞)"}
         </text>
 
         {/* Column headers (Key) */}
@@ -391,8 +391,8 @@ export function CausalMaskDiagram({ locale = "ja" }: DiagramProps) {
         {/* Annotation */}
         <text x={190} y={offsetY + n * cellSize + 22} textAnchor="middle" fill={muted} fontSize={8}>
           {en
-            ? 'Token "sat" (row 3) can see "The", "cat", "sat" but NOT "on", "the"'
-            : '"sat" (行3) は "The", "cat", "sat" を参照可能、"on", "the" は不可'}
+            ? '"sat" (row 3) can attend to "The", "cat", and "sat" but not to "on" or "the"'
+            : '"sat" (3 行目) は "The"、"cat"、"sat" に注意でき、"on"、"the" には注意できない'}
         </text>
       </svg>
     </div>
@@ -465,7 +465,7 @@ export function SwiGLUDiagram({ locale = "ja" }: DiagramProps) {
           ⊙
         </text>
         <text x={cx + 22} y={200} textAnchor="start" dominantBaseline="central" fill={muted} fontSize={8}>
-          {en ? "element-wise" : "要素積"}
+          {en ? "element-wise product" : "要素積"}
         </text>
 
         {/* W2 projection */}
@@ -509,7 +509,7 @@ export function RoPEDiagram({ locale = "ja" }: DiagramProps) {
         <text x={230} y={42} textAnchor="middle" fill={muted} fontSize={9}>
           {en
             ? "Pairs of dimensions are rotated by position-dependent angles"
-            : "次元のペアを位置に依存した角度で回転させる"}
+            : "次元の組を、位置に応じた角度だけ回転させる"}
         </text>
 
         {/* Show 2D rotation for dimension pair (d0, d1) */}
@@ -545,7 +545,7 @@ export function RoPEDiagram({ locale = "ja" }: DiagramProps) {
                 />
               )}
               <text x={cx} y={cy + r + 18} textAnchor="middle" fill={muted} fontSize={8}>
-                θ = {posIdx * 30}°
+                θ·pos = {posIdx * 30}°
               </text>
               {/* Dimension labels */}
               <text x={cx + r + 8} y={cy + 3} fill={muted} fontSize={7}>d₀</text>
@@ -557,13 +557,13 @@ export function RoPEDiagram({ locale = "ja" }: DiagramProps) {
         {/* Key insight */}
         <text x={230} y={215} textAnchor="middle" fill={text} fontSize={9} fontWeight={600}>
           {en
-            ? "q_m · k_n depends only on relative position (m − n)"
-            : "q_m · k_n は相対位置 (m − n) のみに依存"}
+            ? "q_m · k_n depends on position only through the relative position (m − n)"
+            : "q_m · k_n は、位置については相対位置 (m − n) だけに依存する"}
         </text>
         <text x={230} y={232} textAnchor="middle" fill={muted} fontSize={8}>
           {en
-            ? "→ Naturally captures relative positional relationships"
-            : "→ 相対的な位置関係を自然に捉える"}
+            ? "→ Rotations use absolute positions; the score keeps only their difference"
+            : "→ 回転角は絶対位置で決まるが、スコアには位置の差だけが残る"}
         </text>
       </svg>
     </div>

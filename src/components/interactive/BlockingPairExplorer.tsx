@@ -118,7 +118,7 @@ export function BlockingPairExplorer({ locale = "ja" }: Props) {
 
   const runGS = () => {
     const m = stableMatchingFor(inst, "left") as number[];
-    push(m, isJa ? "GS（A 側が提案）" : "GS (left proposes)");
+    push(m, isJa ? "Gale–Shapley（左側が提案）" : "Gale–Shapley (left proposes)");
   };
 
   const reset = () => choosePreset(presetKey);
@@ -139,7 +139,7 @@ export function BlockingPairExplorer({ locale = "ja" }: Props) {
     const theirRank = rR[j][i] + 1;
     const theirCur = rR[j][inv[j]] + 1;
     return isJa
-      ? `${L(i)} は今の ${Rn(match[i])}（${curRank} 位）より ${Rn(j)}（${myRank} 位）を好み、${Rn(j)} も今の ${L(inv[j])}（${theirCur} 位）より ${L(i)}（${theirRank} 位）を好む。`
+      ? `${L(i)} は今の ${Rn(match[i])}（${curRank} 位）より ${Rn(j)}（${myRank} 位）を好み、${Rn(j)} も今の ${L(inv[j])}（${theirCur} 位）より ${L(i)}（${theirRank} 位）を好みます。`
       : `${L(i)} prefers ${Rn(j)} (#${myRank}) to its partner ${Rn(match[i])} (#${curRank}), and ${Rn(j)} prefers ${L(i)} (#${theirRank}) to its partner ${L(inv[j])} (#${theirCur}).`;
   };
 
@@ -192,8 +192,8 @@ export function BlockingPairExplorer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "ブロッキングペアを探す — そして «1 組ずつ直す» が失敗する様子"
-          : "Hunting blocking pairs — and watching one-at-a-time repair fail"
+          ? "ブロッキングペアを探す — «1 組ずつ直す» 手続きが循環する様子"
+          : "Hunting blocking pairs — and how fixing them one at a time can cycle"
       }
       description={
         isJa
@@ -228,7 +228,7 @@ export function BlockingPairExplorer({ locale = "ja" }: Props) {
             aria-label={
               isJa
                 ? `マッチング ${code(match)}、ブロッキングペア ${blocking.length} 組`
-                : `Matching ${code(match)} with ${blocking.length} blocking pairs`
+                : `Matching ${code(match)}, blocking pairs: ${blocking.length}`
             }
           >
             {match.map((j, i) => (
@@ -281,8 +281,8 @@ export function BlockingPairExplorer({ locale = "ja" }: Props) {
           {blocking.length === 0 ? (
             <p className="text-xs font-semibold" style={{ color: STABLE_HEX }}>
               {isJa
-                ? `✓ ${code(match)} は安定です。誰と誰が駆け落ちしても、少なくとも一方は損をします。`
-                : `✓ ${code(match)} is stable: any pair that ran off together would leave at least one of them worse off.`}
+                ? `✓ ${code(match)} は安定です。どの 2 人が抜け駆けして組んでも、少なくとも一方は損をします。`
+                : `✓ ${code(match)} is stable: if any two agents paired up on their own, at least one of them would be worse off.`}
             </p>
           ) : (
             <ul className="space-y-1.5">
@@ -375,7 +375,7 @@ export function BlockingPairExplorer({ locale = "ja" }: Props) {
         {revisit >= 0 && (
           <p className="mt-2 text-xs font-semibold" style={{ color: REJECT_HEX }}>
             {isJa
-              ? `⚠ ${code(match)} は ${revisit + 1} 番目に一度訪れたマッチングです。同じ選び方を続ける限り、この手続きは永遠に回り続けます。`
+              ? `⚠ ${code(match)} は、たどったマッチングの ${revisit + 1} 番目と同じです。同じ選び方を続ける限り、この手続きは永遠に回り続けます。`
               : `⚠ ${code(match)} was already visited (entry ${revisit + 1}). Keep choosing the same way and this process loops forever.`}
           </p>
         )}

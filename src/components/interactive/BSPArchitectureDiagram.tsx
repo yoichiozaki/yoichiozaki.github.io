@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -52,8 +53,8 @@ function buildPhases(): PhaseState[] {
   return [
     // 0: End of previous superstep
     {
-      title: "Super Step #N-1 終了時点",
-      titleEn: "End of Super Step #N-1",
+      title: "スーパーステップ N-1 の終了時点",
+      titleEn: "End of Superstep N-1",
       currentStep: [
         { executorId: "A", messages: [] },
         { executorId: "B", messages: [] },
@@ -70,8 +71,8 @@ function buildPhases(): PhaseState[] {
         { id: "C", processing: false, label: "Summary" },
       ],
       eventQueue: [{ color: C.green }, { color: C.green }],
-      description: "前のスーパーステップの処理結果として、Edge 経由で _nextStep の各スロット（Executor ID をキーとする ConcurrentQueue）にメッセージが蓄積されている。currentStep は処理済みで空。",
-      descriptionEn: "As a result of the previous superstep's processing, messages have accumulated in _nextStep's slots (ConcurrentQueue keyed by Executor ID) via Edges. currentStep is empty after processing.",
+      description: "前のスーパーステップで送られたメッセージが、Edge を経由して _nextStep の宛先 Executor ID ごとのキュー（ConcurrentQueue）にたまっています。currentStep は処理済みで空です。",
+      descriptionEn: "Messages sent in the previous superstep have accumulated, via Edges, in _nextStep's per-target queues (one ConcurrentQueue per Executor ID). currentStep is empty after processing.",
       highlight: "next",
     },
     // 1: AdvanceAsync — atomic swap
@@ -94,7 +95,7 @@ function buildPhases(): PhaseState[] {
         { id: "C", processing: false, label: "Summary" },
       ],
       eventQueue: [{ color: C.green }, { color: C.green }],
-      description: "Interlocked.Exchange(ref _nextStep, new StepContext()) で _nextStep が currentStep にスワップ。旧 _nextStep のメッセージが currentStep に移り、新しい空の StepContext が _nextStep になる。",
+      description: "Interlocked.Exchange(ref _nextStep, new StepContext()) で _nextStep を currentStep にスワップします。旧 _nextStep のメッセージが currentStep に移り、新しい空の StepContext が _nextStep になります。",
       descriptionEn: "Interlocked.Exchange(ref _nextStep, new StepContext()) swaps _nextStep into currentStep. Messages from old _nextStep move to currentStep, and a fresh empty StepContext becomes _nextStep.",
       highlight: "swap",
     },
@@ -118,8 +119,8 @@ function buildPhases(): PhaseState[] {
         { id: "C", processing: true, label: "Summary" },
       ],
       eventQueue: [{ color: C.green }, { color: C.green }],
-      description: "currentStep.QueuedMessages.Keys を走査し、Executor ID ごとに currentStep.MessagesFor(id) でキューを取得。DeliverMessagesAsync() を Task.WhenAll で並行呼び出し。各 Executor の [MessageHandler] がメッセージを処理中。",
-      descriptionEn: "Iterates currentStep.QueuedMessages.Keys, retrieves queues via currentStep.MessagesFor(id) for each Executor ID. Calls DeliverMessagesAsync() in parallel via Task.WhenAll. Each Executor's [MessageHandler] processes messages.",
+      description: "InProcessRunner が currentStep.QueuedMessages.Keys を走査し、Executor ID ごとに currentStep.MessagesFor(id) でキューを取り出して、DeliverMessagesAsync() を Task.WhenAll で並行に呼び出します。各 Executor の [MessageHandler] がメッセージを処理しています。",
+      descriptionEn: "InProcessRunner iterates currentStep.QueuedMessages.Keys, gets each Executor's queue via currentStep.MessagesFor(id), and calls DeliverMessagesAsync() in parallel via Task.WhenAll. Each Executor's [MessageHandler] processes its messages.",
       highlight: "executors",
     },
     // 3: Send
@@ -142,8 +143,8 @@ function buildPhases(): PhaseState[] {
         { id: "C", processing: false, label: "Summary" },
       ],
       eventQueue: [{ color: C.green }, { color: C.green }, { color: C.blue }],
-      description: "Executor が context.SendMessageAsync() を呼ぶと、InProcessRunnerContext が全 Edge を foreach で走査し、条件にマッチした Edge の宛先 Executor ID で _nextStep.MessagesFor(targetId).Enqueue(envelope) にエンキュー。現在の currentStep には影響しない。",
-      descriptionEn: "When Executors call context.SendMessageAsync(), InProcessRunnerContext iterates all Edges via foreach. Matching Edge targets are enqueued via _nextStep.MessagesFor(targetId).Enqueue(envelope). The current currentStep is unaffected.",
+      description: "Executor が context.SendMessageAsync() を呼ぶと、InProcessRunnerContext が送信元の全 Edge を foreach で走査し、条件にマッチした Edge ごとに _nextStep.MessagesFor(targetId).Enqueue(envelope) で宛先のキューに入れます。currentStep には影響しません。",
+      descriptionEn: "When an Executor calls context.SendMessageAsync(), InProcessRunnerContext iterates the source's Edges via foreach and, for each matching Edge, enqueues the message via _nextStep.MessagesFor(targetId).Enqueue(envelope). currentStep is unaffected.",
       highlight: "next",
     },
     // 4: Barrier
@@ -166,8 +167,8 @@ function buildPhases(): PhaseState[] {
         { id: "C", processing: false, label: "Summary" },
       ],
       eventQueue: [{ color: C.green }, { color: C.green }, { color: C.blue }, { color: C.green }],
-      description: "StateManager.PublishUpdatesAsync() でキューされたステート更新をバッチ適用。CheckpointAsync() で _nextStep・ステート・Edge ステートを永続化。SuperStepCompletedEvent が Event Queue に投入される。次のステップでは再び AdvanceAsync() で _nextStep → currentStep スワップ。",
-      descriptionEn: "StateManager.PublishUpdatesAsync() batch-applies queued state updates. CheckpointAsync() persists _nextStep, state, and Edge state. SuperStepCompletedEvent pushed to Event Queue. Next step starts again with AdvanceAsync() swapping _nextStep → currentStep.",
+      description: "StateManager.PublishUpdatesAsync() がキューされたステート更新をまとめて適用します。チェックポイントが有効なら、CheckpointAsync() が _nextStep・ステート・Edge ステートを永続化します。SuperStepCompletedEvent が Event Queue に入り、次のスーパーステップは再び AdvanceAsync() による _nextStep → currentStep のスワップから始まります。",
+      descriptionEn: "StateManager.PublishUpdatesAsync() batch-applies queued state updates. If checkpointing is enabled, CheckpointAsync() persists _nextStep, state, and Edge state. SuperStepCompletedEvent goes to the Event Queue. The next superstep starts again with AdvanceAsync() swapping _nextStep → currentStep.",
       highlight: "barrier",
     },
   ];
@@ -304,11 +305,11 @@ export function BSPArchitectureDiagram({ locale = "ja" }: BSPArchitectureDiagram
 
   return (
     <InteractiveDemo
-      title={isJa ? "BSP スーパーステップ 構造図" : "BSP Superstep Architecture Diagram"}
+      title={isJa ? "BSP スーパーステップの構造図" : "BSP Superstep Architecture Diagram"}
       description={
         isJa
-          ? "StepContext（ConcurrentDictionary<executorId, Queue>）の currentStep / _nextStep スワップと Event Queue の関係を示す"
-          : "Shows the currentStep / _nextStep swap in StepContext (ConcurrentDictionary<executorId, Queue>) and its relationship with Event Queue"
+          ? "宛先 Executor ID ごとにキューを持つ 2 つの StepContext（currentStep / _nextStep）のスワップと、Event Queue との関係を示します"
+          : "Shows how the two StepContexts (currentStep / _nextStep), each holding one queue per target Executor ID, are swapped, and how they relate to the Event Queue"
       }
     >
       {/* SVG */}
@@ -470,7 +471,7 @@ export function BSPArchitectureDiagram({ locale = "ja" }: BSPArchitectureDiagram
               { label: "SendMessageAsync", desc: "→ _nextStep[targetId]", color: "#f59e0b" },
               { label: "AddEventAsync", desc: "→ Event Queue", color: "#16a34a" },
               { label: "YieldOutputAsync", desc: "→ Event Queue", color: "#16a34a" },
-              { label: "QueueStateUpdateAsync", desc: isJa ? "→ バリア時適用" : "→ applied at barrier", color: "#8b5cf6" },
+              { label: "QueueStateUpdateAsync", desc: isJa ? "→ バリア同期で適用" : "→ applied at barrier", color: "#8b5cf6" },
             ].map((api, i) => (
               <g key={i}>
                 <circle cx={465} cy={200 + i * 18} r={3} fill={api.color} />
@@ -495,7 +496,7 @@ export function BSPArchitectureDiagram({ locale = "ja" }: BSPArchitectureDiagram
         {isJa ? data.description : data.descriptionEn}
       </div>
 
-      <StepPlayerControls {...player} label={getLabel} />
+      <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }

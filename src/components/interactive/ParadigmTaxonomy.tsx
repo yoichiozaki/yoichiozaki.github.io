@@ -18,8 +18,8 @@ const tree: ParadigmNode = {
   label: "プログラミングパラダイム",
   labelEn: "Programming Paradigms",
   color: "#6b7280",
-  description: "ソフトウェアの構造化と問題解決のアプローチを定義する根本的な考え方。",
-  descriptionEn: "Fundamental approaches to structuring software and solving problems.",
+  description: "プログラムをどう構成し、問題をどう解くかについての基本的な考え方。",
+  descriptionEn: "Basic approaches to structuring programs and solving problems.",
   children: [
     {
       id: "imperative",
@@ -39,7 +39,7 @@ const tree: ParadigmNode = {
           description:
             "プログラムを手続き（プロシージャ/関数）に分割して構造化。C, Pascal, FORTRAN が代表例。制御フロー（if/for/while）で処理を記述。",
           descriptionEn:
-            "Structures programs into procedures/functions. C, Pascal, FORTRAN are key examples. Uses control flow (if/for/while).",
+            "Structures programs into procedures/functions. Examples: C, Pascal, FORTRAN. Uses control flow (if/for/while).",
         },
         {
           id: "oop",
@@ -47,9 +47,9 @@ const tree: ParadigmNode = {
           labelEn: "Object-Oriented",
           color: "#10b981",
           description:
-            "データと振る舞いをオブジェクトとしてカプセル化。継承・ポリモーフィズム・カプセル化が三本柱。Simula → Smalltalk → Java/C++ の系譜。",
+            "データと振る舞いをオブジェクトとしてカプセル化。継承・ポリモーフィズム・カプセル化が三本柱。Simula 系（C++, Java）と Smalltalk 系（Ruby, Objective-C）の 2 系統がある。",
           descriptionEn:
-            "Encapsulates data and behavior into objects. Inheritance, polymorphism, and encapsulation are the three pillars. Lineage: Simula → Smalltalk → Java/C++.",
+            "Encapsulates data and behavior into objects. Inheritance, polymorphism, and encapsulation are the three pillars. Two lineages: Simula (C++, Java) and Smalltalk (Ruby, Objective-C).",
         },
       ],
     },
@@ -69,9 +69,9 @@ const tree: ParadigmNode = {
           labelEn: "Functional",
           color: "#a78bfa",
           description:
-            "純粋関数と不変データを基盤とする。ラムダ計算が理論的基盤。参照透過性により並行処理が容易。Haskell, Erlang, Elixir が代表例。",
+            "純粋関数と不変データを中心に組み立てる。ラムダ計算が理論的基盤。参照透過性により並行処理を安全に書きやすい。Haskell, Erlang, Elixir が代表例。",
           descriptionEn:
-            "Based on pure functions and immutable data. Lambda calculus is the theoretical foundation. Referential transparency eases concurrency. Haskell, Erlang, Elixir.",
+            "Based on pure functions and immutable data. Lambda calculus is the theoretical foundation. Referential transparency makes concurrency safer. Examples: Haskell, Erlang, Elixir.",
         },
         {
           id: "logic",
@@ -79,9 +79,9 @@ const tree: ParadigmNode = {
           labelEn: "Logic",
           color: "#f59e0b",
           description:
-            "事実とルールを論理式で記述し、推論エンジンが解を探索。述語論理が基盤。Prolog, Datalog が代表例。",
+            "事実と規則を論理式で記述し、推論エンジンが解を探索。述語論理が基盤。Prolog, Datalog が代表例。",
           descriptionEn:
-            "Defines facts and rules as logical formulas; an inference engine searches for solutions. Based on predicate logic. Prolog, Datalog.",
+            "Defines facts and rules as logical formulas; an inference engine searches for solutions. Based on predicate logic. Examples: Prolog, Datalog.",
         },
         {
           id: "reactive",
@@ -91,19 +91,19 @@ const tree: ParadigmNode = {
           description:
             "データストリームと変更の伝播に基づく。非同期データフローを宣言的に記述。RxJS, React, Elm が代表例。",
           descriptionEn:
-            "Based on data streams and change propagation. Declaratively describes asynchronous data flows. RxJS, React, Elm.",
+            "Based on data streams and change propagation. Declaratively describes asynchronous data flows. Examples: RxJS, React, Elm.",
         },
       ],
     },
     {
       id: "concurrent",
       label: "並行指向",
-      labelEn: "Concurrent",
+      labelEn: "Concurrency-Oriented",
       color: "#ef4444",
       description:
-        "並行・並列処理をパラダイムの中核に据える。アクターモデル、CSP、データフロープログラミングなどが含まれる。",
+        "並行処理を言語やランタイムのレベルで安全に扱う。命令型・宣言型の軸と直交する面を持つ。アクターモデル、CSP、データフロープログラミングなどが含まれる。",
       descriptionEn:
-        "Places concurrency at the core. Includes actor model, CSP, and dataflow programming.",
+        "Makes concurrency safe at the language or runtime level, cutting across the imperative/declarative axis. Includes the actor model, CSP, and dataflow programming.",
       children: [
         {
           id: "actor",
@@ -111,9 +111,9 @@ const tree: ParadigmNode = {
           labelEn: "Actor Model",
           color: "#f87171",
           description:
-            "軽量プロセス間のメッセージパッシングで並行処理を実現。共有状態なし。Erlang/OTP, Akka が代表例。",
+            "アクター間のメッセージパッシングで並行処理を実現。各アクターは自分だけの状態を持ち、共有状態はない。Erlang/OTP, Akka が代表例。",
           descriptionEn:
-            "Achieves concurrency via message passing between lightweight processes. No shared state. Erlang/OTP, Akka.",
+            "Achieves concurrency via message passing between actors, each with its own private state. No shared state. Examples: Erlang/OTP, Akka.",
         },
         {
           id: "csp",
@@ -123,7 +123,7 @@ const tree: ParadigmNode = {
           description:
             "Communicating Sequential Processes。チャネルを介した同期通信で並行処理を構成。Go の goroutine + channel が代表例。",
           descriptionEn:
-            "Communicating Sequential Processes. Composes concurrency via synchronous communication over channels. Go's goroutines + channels.",
+            "Communicating Sequential Processes. Processes communicate synchronously over channels. Example: Go's goroutines and channels.",
         },
       ],
     },
@@ -202,8 +202,8 @@ export function ParadigmTaxonomy({ locale = "ja" }: ParadigmTaxonomyProps) {
       title={isEn ? "Paradigm Taxonomy" : "パラダイム分類図"}
       description={
         isEn
-          ? "Click any node to see its description. Programming paradigms form a tree of ideas."
-          : "各ノードをクリックすると説明が表示されます。パラダイムはアイデアの木構造を成しています。"
+          ? "Imperative and declarative form the two main branches; concurrency-oriented paradigms cut across that split, so they are grouped separately. Click a node to see its description."
+          : "命令型と宣言型という軸で 2 系統に分け、この軸と直交する面を持つ並行指向は別枠にしています。各ノードをクリックすると説明が表示されます。"
       }
     >
       <div className="flex flex-col gap-4">

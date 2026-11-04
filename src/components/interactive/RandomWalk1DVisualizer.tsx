@@ -120,11 +120,11 @@ export function RandomWalk1DVisualizer({
 
   return (
     <InteractiveDemo
-      title={isJa ? "1D ランダムウォーク" : "1D Random Walk"}
+      title={isJa ? "1 次元ランダムウォーク" : "1D Random Walk"}
       description={
         isJa
-          ? `${NUM_PATHS} 本の独立したランダムウォーク。期待値は常に 0 だが、分散は時間とともに拡大する`
-          : `${NUM_PATHS} independent random walks. Expected value stays at 0, but variance grows over time`
+          ? `${NUM_PATHS} 本の独立したランダムウォークと、その平均位置（太い破線）。期待値は常に 0 だが、分散は時間とともに拡大する`
+          : `${NUM_PATHS} independent random walks and their mean position (thick dashed line). Expected value stays at 0, but variance grows over time`
       }
     >
       <svg
@@ -298,7 +298,7 @@ export function RandomWalk1DVisualizer({
           onClick={handleReset}
           className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
-          {isJa ? "新しいパスで再生成" : "Regenerate paths"}
+          {isJa ? "パスを再生成" : "Regenerate paths"}
         </button>
         {/* Progress */}
         <div className="flex-1 h-1.5 rounded-full bg-border overflow-hidden ml-2">

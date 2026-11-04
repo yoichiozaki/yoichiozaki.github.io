@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type TestRunnerVisualizerProps = { locale?: string };
@@ -100,7 +101,7 @@ const steps: Step[] = [
   {
     phase: "ライフサイクル",
     phaseEn: "Lifecycle",
-    description: "Module 'test_math' の setup_module フックを実行中...",
+    description: "モジュール 'test_math' の setup_module フックを実行中...",
     descriptionEn: "Running setup_module hook for module 'test_math'...",
     suites: [
       {
@@ -202,9 +203,9 @@ const steps: Step[] = [
     phase: "アサーション",
     phaseEn: "Assertion",
     description:
-      "assert 2 == 2 — actual と expected を比較。一致 → PASS",
+      "assert 2 == 2 — 左辺と右辺を比較。一致 → PASS",
     descriptionEn:
-      "assert 2 == 2 — comparing actual vs expected. Match → PASS",
+      "assert 2 == 2 — comparing the left and right operands. Match → PASS",
     suites: [
       {
         name: "test_math",
@@ -305,9 +306,9 @@ const steps: Step[] = [
     phase: "アサーション",
     phaseEn: "Assertion",
     description:
-      "pytest.raises() — 関数を try-except で実行し、例外を検証",
+      "pytest.raises() — with ブロック内で送出された例外を捕捉し、型を検証",
     descriptionEn:
-      "pytest.raises() — execute function in try-except and verify exception",
+      "pytest.raises() — catching the exception raised in the with block and checking its type",
     suites: [
       {
         name: "test_math",
@@ -354,8 +355,8 @@ const steps: Step[] = [
   {
     phase: "テスト実行",
     phaseEn: "Test Execution",
-    description: "Module 'test_string' → setup_function → テスト 'test_strip' を実行中...",
-    descriptionEn: "Module 'test_string' → setup_function → Running test 'test_strip'...",
+    description: "teardown_function → モジュール 'test_string' → setup_function → テスト 'test_strip' を実行中...",
+    descriptionEn: "teardown_function → Module 'test_string' → setup_function → Running test 'test_strip'...",
     suites: [
       {
         name: "test_math",
@@ -385,12 +386,14 @@ const steps: Step[] = [
       },
     ],
     output: [
+      "🔧 teardown_function() → cleanup",
       "▶ Module test_string に移行",
       "🔧 setup_function()",
       "▶ def test_strip():",
       '      assert "  hi  ".strip() == "hi"',
     ],
     outputEn: [
+      "🔧 teardown_function() → cleanup",
       "▶ Entering module test_string",
       "🔧 setup_function()",
       "▶ def test_strip():",
@@ -403,9 +406,9 @@ const steps: Step[] = [
     phase: "テスト実行",
     phaseEn: "Test Execution",
     description:
-      "test_strip PASS → test_upper を実行... FAIL! AssertionError",
+      "test_strip PASS → test_upper を実行... FAIL（AssertionError）",
     descriptionEn:
-      "test_strip PASS → Running test_upper... FAIL! AssertionError",
+      "test_strip PASS → Running test_upper... FAIL (AssertionError)",
     suites: [
       {
         name: "test_math",
@@ -455,7 +458,7 @@ const steps: Step[] = [
     phase: "レポート生成",
     phaseEn: "Report Generation",
     description: "すべてのテスト結果を集計し、レポートを出力",
-    descriptionEn: "Aggregating all test results and generating report",
+    descriptionEn: "Aggregating all test results and generating the report",
     suites: [
       {
         name: "test_math",
@@ -556,8 +559,8 @@ export function TestRunnerVisualizer({
       }
       description={
         isJa
-          ? "ステップ実行して、テストフレームワークが裏で何をしているか見てみましょう"
-          : "Step through to see what a test framework does behind the scenes"
+          ? "2 つのテストファイルを例に、ディスカバリーからレポートまでの処理を順に表示します"
+          : "Follows two test files from discovery to the report, one step at a time"
       }
     >
       <div className="space-y-4">
@@ -647,6 +650,7 @@ export function TestRunnerVisualizer({
           label={(s) =>
             `${s + 1}/${steps.length} — ${isJa ? steps[s].phase : steps[s].phaseEn}`
           }
+          ariaLabels={stepPlayerAriaLabels(locale)}
         />
       </div>
     </InteractiveDemo>

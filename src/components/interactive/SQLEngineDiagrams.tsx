@@ -20,12 +20,12 @@ export function ExecutionModelComparison({ locale = "ja" }: DiagramProps) {
           unit: "1 タプル",
           calls: "行数 × 演算子数",
           pros: "実装が単純。演算子を自由に組み合わせられる",
-          cons: "仮想関数呼び出しと分岐予測ミスが支配的",
+          cons: "仮想関数呼び出しと分岐予測ミスのコストが、実処理を上回ることがある",
           used: "PostgreSQL, MySQL, Oracle",
         },
         {
           model: "ベクトル化（バッチ）",
-          unit: "1024 タプル程度のバッチ",
+          unit: "1,024 タプル程度のバッチ",
           calls: "行数 ÷ バッチ幅 × 演算子数",
           pros: "呼び出し回数が3桁減り、SIMD と列指向レイアウトが活きる",
           cons: "中間バッチのメモリーが必要。行指向ストレージとは相性が悪い",
@@ -35,7 +35,7 @@ export function ExecutionModelComparison({ locale = "ja" }: DiagramProps) {
           model: "コード生成（JIT）",
           unit: "パイプライン全体",
           calls: "0（融合されて消える）",
-          pros: "中間表現が消え、値がレジスターに載ったまま処理できる",
+          pros: "中間タプルを実体化せず、値をレジスターに載せたまま処理できる",
           cons: "コンパイル時間。短いクエリーでは元が取れない",
           used: "HyPer, Umbra, Spark（全段コード生成）",
         },
@@ -46,13 +46,13 @@ export function ExecutionModelComparison({ locale = "ja" }: DiagramProps) {
           unit: "1 tuple",
           calls: "rows × operators",
           pros: "Simple to implement; operators compose freely",
-          cons: "Virtual calls and branch mispredictions dominate",
+          cons: "Virtual calls and branch mispredictions can cost more than the work itself",
           used: "PostgreSQL, MySQL, Oracle",
         },
         {
           model: "Vectorized (batch)",
-          unit: "batch of ~1024 tuples",
-          calls: "rows ÷ batch × operators",
+          unit: "batch of ~1,024 tuples",
+          calls: "rows ÷ batch size × operators",
           pros: "Three orders of magnitude fewer calls; SIMD and columnar layouts pay off",
           cons: "Needs memory for intermediate batches; a poor fit for row stores",
           used: "DuckDB, ClickHouse, Velox, Photon",
@@ -61,7 +61,7 @@ export function ExecutionModelComparison({ locale = "ja" }: DiagramProps) {
           model: "Code generation (JIT)",
           unit: "whole pipeline",
           calls: "0 (fused away)",
-          pros: "Intermediate representations vanish; values stay in registers",
+          pros: "No intermediate tuples are materialized; values stay in registers",
           cons: "Compilation time; not worth it for short queries",
           used: "HyPer, Umbra, Spark (whole-stage codegen)",
         },
@@ -119,28 +119,28 @@ export function AccessPathComparison({ locale = "ja" }: DiagramProps) {
           path: "Seq Scan",
           reads: "全ブロックを順番に",
           io: "順次読み（先読みが効く）",
-          when: "テーブルの大部分を返すとき、または索引が無いとき",
-          gotcha: "選択率が高いほど有利。1行取り出すには最悪",
+          when: "テーブルの大部分を返すとき、またはインデックスが無いとき",
+          gotcha: "1行だけ返す場合も全ブロックを読む",
         },
         {
           path: "Index Scan",
-          reads: "索引を辿り、TID ごとにヒープを参照",
+          reads: "インデックスを辿り、TID ごとにヒープを参照",
           io: "ランダム読み（1行につき最悪1ページ）",
           when: "選択率が十分低いとき",
-          gotcha: "行数が増えると同じヒープページを何度も読む",
+          gotcha: "行数が増えると、同じヒープページを何度も読むことがある",
         },
         {
           path: "Index Only Scan",
-          reads: "索引だけを読み、ヒープには触れない",
-          io: "索引ページのみ",
-          when: "必要な列がすべて索引に含まれるとき",
-          gotcha: "PostgreSQL では可視性マップが立っているページに限られる",
+          reads: "インデックスだけを読み、ヒープには触れない",
+          io: "インデックスページのみ",
+          when: "必要な列がすべてインデックスに含まれるとき",
+          gotcha: "PostgreSQL では可視性マップのビットが立っているブロックに限られる",
         },
         {
           path: "Bitmap Heap Scan",
           reads: "TID をビットマップに集めてから物理順にヒープを読む",
           io: "ランダム読みを順次読みに変換",
-          when: "中間的な選択率、複数索引の AND / OR",
+          when: "中間的な選択率、複数インデックスの AND / OR",
           gotcha: "ビットマップが work_mem を超えるとページ単位に劣化する",
         },
       ]
@@ -150,14 +150,14 @@ export function AccessPathComparison({ locale = "ja" }: DiagramProps) {
           reads: "Every block, in order",
           io: "Sequential reads (prefetch friendly)",
           when: "When most of the table is returned, or no index exists",
-          gotcha: "The higher the selectivity the better; terrible for a single row",
+          gotcha: "Reads every block even to return a single row",
         },
         {
           path: "Index Scan",
           reads: "Walk the index, then fetch the heap per TID",
           io: "Random reads (up to one page per row)",
           when: "When selectivity is low enough",
-          gotcha: "As row counts grow, the same heap page is read again and again",
+          gotcha: "As row counts grow, the same heap page may be read again and again",
         },
         {
           path: "Index Only Scan",
@@ -245,7 +245,7 @@ export function PlanSpaceTable({ locale = "ja" }: DiagramProps) {
               scope="col"
               className="px-2 py-2 text-right font-semibold text-foreground"
             >
-              {isJa ? "左深優先木 n!" : "Left-deep trees n!"}
+              {isJa ? "左深木 n!" : "Left-deep trees n!"}
             </th>
             <th
               scope="col"
@@ -282,8 +282,8 @@ export function PlanSpaceTable({ locale = "ja" }: DiagramProps) {
       </table>
       <p className="mt-2 text-xs text-muted-foreground">
         {isJa
-          ? "列挙する木の数は階乗的に増えますが、動的計画法が管理するのは部分集合の数 2ⁿ です。それでも n = 12 前後で現実的な限界に達し、多くの実装はそこから遺伝的アルゴリズムなどのヒューリスティック探索に切り替えます。"
-          : "The number of trees to enumerate grows factorially, but dynamic programming only tracks 2ⁿ subsets. Even so, the practical limit arrives around n = 12, and most implementations switch to heuristic search (for example a genetic algorithm) beyond it."}
+          ? "列挙する木の数は階乗的に増えますが、動的計画法が管理するのは部分集合の数 2ⁿ です。それでも指数的に増えるので、PostgreSQL は n が geqo_threshold（既定 12）以上になると遺伝的アルゴリズムに切り替えます。"
+          : "The number of trees to enumerate grows factorially, but dynamic programming only tracks 2ⁿ subsets. That still grows exponentially, so PostgreSQL switches to a genetic algorithm once n reaches geqo_threshold (12 by default)."}
       </p>
     </div>
   );
@@ -377,8 +377,8 @@ export function CardinalityErrorDiagram({ locale = "ja" }: DiagramProps) {
         <line x1={30} y1={200} x2={590} y2={200} stroke={border} strokeWidth={1} />
         <text x={310} y={243} textAnchor="middle" fill={muted} fontSize={10}>
           {isJa
-            ? "各段で 4 倍ずれると仮定した場合。誤差は打ち消し合わず、片側に積み上がる"
-            : "Assuming a 4× error at each level. Errors do not cancel — they accumulate in one direction."}
+            ? "各段で推定が同じ向きに 4 倍ずれると仮定した場合"
+            : "Assuming the estimate is off by 4× in the same direction at every level."}
         </text>
       </svg>
     </div>
@@ -397,10 +397,10 @@ export function HeapTupleAnatomy({ locale = "ja" }: DiagramProps) {
   const green = dark ? "#4ade80" : "#16a34a";
 
   const fields = [
-    { name: "t_xmin", size: 4, color: violet, desc: isJa ? "作成トランザクション ID" : "creating xact id" },
-    { name: "t_xmax", size: 4, color: violet, desc: isJa ? "削除トランザクション ID" : "deleting xact id" },
-    { name: "t_cid", size: 4, color: violet, desc: isJa ? "コマンド ID / t_xvac と共用" : "command id (shared with t_xvac)" },
-    { name: "t_ctid", size: 6, color: amber, desc: isJa ? "この行の次バージョンの TID" : "TID of the next version" },
+    { name: "t_xmin", size: 4, color: violet, desc: isJa ? "作成トランザクション ID" : "creating transaction ID" },
+    { name: "t_xmax", size: 4, color: violet, desc: isJa ? "削除トランザクション ID" : "deleting transaction ID" },
+    { name: "t_cid", size: 4, color: violet, desc: isJa ? "コマンド ID（t_xvac と共用）" : "command ID (shared with t_xvac)" },
+    { name: "t_ctid", size: 6, color: amber, desc: isJa ? "自身または新しいバージョンの TID" : "TID of this or a newer version" },
     { name: "t_infomask2", size: 2, color: amber, desc: isJa ? "属性数と各種フラグ" : "attribute count + flags" },
     { name: "t_infomask", size: 2, color: amber, desc: isJa ? "NULL の有無・可視性ヒント" : "has-nulls / visibility hints" },
     { name: "t_hoff", size: 1, color: amber, desc: isJa ? "ヘッダー長（= データ開始位置）" : "header length (= data offset)" },
@@ -483,8 +483,8 @@ export function HeapTupleAnatomy({ locale = "ja" }: DiagramProps) {
         </text>
         <text x={12} y={95 + (fields.length + 1) * 20 + 4} fill={muted} fontSize={10}>
           {isJa
-            ? "t_hoff は MAXALIGN 済みなので、NULL が無い場合の実効ヘッダー長は 24 バイトになる"
-            : "t_hoff is MAXALIGN'd, so with no NULLs the effective header length is 24 bytes."}
+            ? "t_hoff は MAXALIGN（8バイト境界）に切り上げられるので、NULL が無ければ実効ヘッダー長は 24 バイトになる"
+            : "t_hoff is MAXALIGN'd (rounded up to 8 bytes), so with no NULLs the effective header length is 24 bytes."}
         </text>
       </svg>
     </div>

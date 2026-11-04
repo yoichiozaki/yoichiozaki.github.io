@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { InteractiveDemo } from "./InteractiveDemo";
 import { StepPlayerControls } from "./StepPlayerControls";
+import { stepPlayerAriaLabels } from "./stepPlayerAriaLabels";
 import { useStepPlayer } from "./useStepPlayer";
 
 type OOPStep = {
@@ -30,8 +31,8 @@ const steps: OOPStep[] = [
         color: "#6b7280",
       },
     ],
-    description: "基底クラス Animal を定義。name フィールドと speak メソッドを持つ。OOP の出発点は「抽象化」。",
-    descriptionEn: "Define base class Animal with name field and speak method. OOP starts with 'abstraction'.",
+    description: "動物に共通する性質を基底クラス Animal にまとめる（抽象化）。name フィールドと speak メソッドを持つ。",
+    descriptionEn: "Define the base class Animal for what all animals share (abstraction): a name field and a speak method.",
   },
   {
     objects: [
@@ -80,7 +81,7 @@ const steps: OOPStep[] = [
       },
     ],
     description: "Dog のインスタンス rex を生成。クラスは設計図、インスタンスは実体。name フィールドはオブジェクト内に隠蔽（Encapsulation）。",
-    descriptionEn: "Instantiate rex from Dog. Class is the blueprint, instance is the entity. name is hidden inside the object (Encapsulation).",
+    descriptionEn: "Create rex, an instance of Dog. The class is the blueprint; the instance is the concrete object. name is hidden inside the object (Encapsulation).",
   },
   {
     objects: [
@@ -105,8 +106,8 @@ const steps: OOPStep[] = [
       },
     ],
     message: { from: "caller", to: "Dog", label: "rex.speak()" },
-    description: "rex.speak() を呼び出す → メッセージパッシング。Smalltalk では「オブジェクトにメッセージを送る」と表現。実行時に Dog の speak が選択される。",
-    descriptionEn: "Call rex.speak() → message passing. Smalltalk says 'send a message to the object'. Dog's speak is selected at runtime.",
+    description: "rex.speak() を呼び出す。Smalltalk の用語では、rex に speak というメッセージを送ることに当たる。実行時に Dog の speak が選ばれる。",
+    descriptionEn: "Call rex.speak(). In Smalltalk terms, this sends the message speak to rex. Dog's speak is selected at runtime.",
   },
   {
     objects: [
@@ -131,8 +132,8 @@ const steps: OOPStep[] = [
       },
     ],
     message: { from: "caller", to: "Animal", label: "animals.forEach(a => a.speak())" },
-    description: "ポリモーフィズム（Polymorphism）: Animal 型の配列を走査。各要素は実行時の型に応じて適切な speak を実行。Liskov の置換原則。",
-    descriptionEn: "Polymorphism: iterate an Animal array. Each element executes the correct speak based on runtime type. Liskov substitution principle.",
+    description: "ポリモーフィズム（Polymorphism）: Animal 型の配列を走査し、各要素が実行時の型に応じた speak を実行する。Dog と Cat を Animal として扱えることが前提（Liskov の置換原則）。",
+    descriptionEn: "Polymorphism: iterate over an Animal array; each element runs the speak of its runtime type. This relies on Dog and Cat being substitutable for Animal (Liskov substitution principle).",
   },
   {
     objects: [
@@ -156,7 +157,7 @@ const steps: OOPStep[] = [
       },
     ],
     description: "OOP の三本柱: ① カプセル化（データ隠蔽）② 継承（コード再利用と is-a 関係）③ ポリモーフィズム（同じインターフェースで異なる振る舞い）。",
-    descriptionEn: "Three pillars of OOP: ① Encapsulation (data hiding) ② Inheritance (code reuse & is-a) ③ Polymorphism (same interface, different behavior).",
+    descriptionEn: "Three pillars of OOP: (1) encapsulation (data hiding), (2) inheritance (code reuse and is-a relationships), (3) polymorphism (same interface, different behavior).",
   },
 ];
 
@@ -219,8 +220,8 @@ export function OOPVisualizer({ locale = "ja" }: OOPVisualizerProps) {
       title={isEn ? "OOP: Objects, Inheritance & Polymorphism" : "OOP: オブジェクト・継承・ポリモーフィズム"}
       description={
         isEn
-          ? "Step through the three pillars of object-oriented programming."
-          : "オブジェクト指向の三本柱をステップ実行で理解しましょう。"
+          ? "An animal class hierarchy, stepped through to show inheritance, encapsulation, and polymorphism."
+          : "動物のクラス階層を例に、継承・カプセル化・ポリモーフィズムを 1 ステップずつ示します。"
       }
     >
       <div className="flex flex-col gap-4">
@@ -266,7 +267,7 @@ export function OOPVisualizer({ locale = "ja" }: OOPVisualizerProps) {
           {isEn ? current.descriptionEn : current.description}
         </div>
 
-        <StepPlayerControls {...player} label={getLabel} />
+        <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

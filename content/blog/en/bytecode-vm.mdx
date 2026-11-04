@@ -185,7 +185,7 @@ Example (CPython 3.12+, base instruction = 1 word = 2 bytes; some have inline ca
   BINARY_OP     0     → Pop 2 values from stack, add, push result
 ```
 
-Since CPython 3.6, bytecode uses a word code format: each code unit is 2 bytes (1 byte opcode + 1 byte oparg). Some opcodes reserve additional 2-byte inline-cache entries after the instruction, but the base code unit remains 2 bytes. When an operand exceeds 255, one or more `EXTENDED_ARG` instructions are prepended to extend the operand.
+Since CPython 3.6, bytecode uses a word code format: each code unit is 2 bytes (1 byte opcode + 1 byte oparg). Some opcodes also reserve inline-cache code units (2 bytes each) after the instruction. When an operand exceeds 255, one or more `EXTENDED_ARG` instructions are prepended to extend the operand.
 
 ### Code Objects
 
@@ -286,7 +286,7 @@ Cons:
 | Dalvik | Register machine | Java (Android, replaced by ART in Android 5.0) |
 | BEAM | Register machine (hybrid) | Erlang, Elixir |
 
-Shi et al. ("Virtual Machine Showdown: Stack Versus Registers", VEE 2005 / ACM TACO 2008) report that a register machine needs 47% fewer instruction dispatches than a stack machine, while its bytecode is about 26% larger.
+Shi et al. ("Virtual Machine Showdown: Stack Versus Registers", VEE 2005) translated Java VM stack bytecode into register code and report that the number of executed VM instructions, and thus of interpreter dispatches, fell by more than 47% on average, while the bytecode grew 25% larger. The extended journal version (ACM TACO 2008) reports more than 46% and 26%.
 
 The demo below executes the same expression `a + b × c` on a stack machine and a register machine side by side, so you can compare their instruction counts.
 
@@ -338,9 +338,9 @@ Pros: Simple to implement and understand. The historical core of CPython.
 
 Cons: Poor CPU branch prediction. All opcodes share the same `switch` branch point, so the branch predictor can't predict "which opcode comes next," causing frequent pipeline stalls.
 
-### Direct Threaded Interpreter
+### Threaded Interpreter (computed goto)
 
-Uses GCC's <strong>computed goto</strong> extension to jump directly to each opcode handler's address.
+Uses GCC's <strong>computed goto</strong> extension so that each handler jumps directly to the handler of the next instruction. In the example below, the bytecode keeps opcode numbers, and each dispatch looks up the jump target in `dispatch_table`. In the classification of the next section, this is token threading.
 
 ```c
 void eval_threaded(uint8_t *bytecode, Value *stack) {
@@ -381,17 +381,17 @@ op_return:
 }
 ```
 
-Pros: Since each handler ends with a different indirect jump, the CPU branch predictor can maintain independent entries per handler. Reported 15-25% speedup over switch-based implementations.
+Pros: Since each handler ends with a different indirect jump, the CPU branch predictor can maintain independent entries per handler. A comment in CPython's source ([Python/ceval_macros.h](https://github.com/python/cpython/blob/main/Python/ceval_macros.h)) states that, at the time it was written, this version was up to 15–20% faster than the switch version, depending on the compiler and CPU architecture.
 
 Cons: Depends on GCC/Clang extensions (not standard C). Not supported by MSVC.
 
-CPython 3.x detects at compile time whether computed goto is available and uses direct threading when it is.
+CPython 3.x detects at compile time whether computed goto is available and uses this approach when it is.
 
-### Token Threaded / Subroutine Threaded
+### Direct Threaded / Subroutine Threaded
 
-Beyond direct threading, there are other threading approaches:
+Besides looking up a table at dispatch time as above (token threading), there are other threading approaches:
 
-- <strong>Token Threaded</strong>: Keeps bytecode as opcode indices and looks up the dispatch table at dispatch time. Produces more compact bytecode than direct threading
+- <strong>Direct Threaded</strong>: Translates the bytecode into a sequence of handler addresses before execution and jumps without a table lookup, as in `goto **ip++`. Each dispatch needs one fewer memory read, but every instruction takes a pointer's worth of space, so the code is larger than with token threading
 - <strong>Subroutine Threaded</strong>: Implements each opcode handler as a function and converts the bytecode sequence into an array of function pointers. Uses `call`/`ret` instructions, which benefit from the CPU's Return Stack Buffer (RSB) for branch prediction
 
 ### Specializing Adaptive Interpreter
@@ -426,7 +426,7 @@ Key specialized instructions (CPython 3.12+):
 | `FOR_ITER` | `FOR_ITER_LIST` | List iteration |
 | `UNPACK_SEQUENCE` | `UNPACK_SEQUENCE_TWO_TUPLE` | 2-element tuple unpack |
 
-Together with other 3.11 optimizations such as lighter-weight frames (covered below), specialization made CPython 3.11 on average <strong>25%</strong> faster than 3.10. The gain came from interpreter improvements alone, without a JIT.
+According to [What's New in Python 3.11](https://docs.python.org/3.11/whatsnew/3.11.html#faster-cpython), specialization, together with other 3.11 optimizations such as lighter-weight frames (covered below), made CPython 3.11 on average 25% faster than 3.10 on the `pyperformance` benchmark suite (measured with GCC builds on Ubuntu Linux). The gain came from interpreter improvements alone, without a JIT.
 
 ## Frames and the Call Stack
 
@@ -481,7 +481,7 @@ outer() frame
 
 When `inner` executes `return`, its frame is discarded and control returns to `outer`'s frame.
 
-CPython limits the frame stack depth via `sys.getrecursionlimit()` (default 1000). This is a safety valve to prevent segmentation faults from stack overflow.
+CPython caps the frame stack depth with a recursion limit (default 1000, readable via `sys.getrecursionlimit()`). This is a safety valve to prevent segmentation faults from stack overflow.
 
 ### Frame Optimizations
 
@@ -497,7 +497,7 @@ A VM for a dynamically typed language has to represent each value together with 
 
 ### Boxing
 
-In CPython, every value is represented as a pointer to a PyObject struct. Even the integer `42` is a heap-allocated object.
+In CPython, every value is represented as a pointer to a PyObject struct, and integers are heap objects too. Only the small integers from -5 to 256 reuse shared objects created in advance.
 
 ```c
 // CPython's PyObject struct (simplified)
@@ -515,7 +515,7 @@ typedef struct {
 //   to inspect, but integers remain PyObject-based values
 ```
 
-Python's `int` is an arbitrary-precision integer that can represent values of any size. Even a small integer like `42` requires: reference count (8 bytes) + type pointer (8 bytes) + size (8 bytes) + digit array + memory allocator overhead = <strong>at least 28 bytes</strong>. Compared with the 4 bytes of a C `int`, that is more than seven times as much.
+Python's `int` is an arbitrary-precision integer that can represent values of any size. Even a small integer like `42` uses 28 bytes on 64-bit CPython: reference count (8 bytes) + type pointer (8 bytes) + size (8 bytes) + one 4-byte digit (this is the value `sys.getsizeof(42)` returns). That is seven times the 4 bytes of a C `int`, and the memory allocator's rounding adds more on top.
 
 ### NaN Boxing
 
@@ -776,7 +776,7 @@ JVM's HotSpot, V8, and SpiderMonkey all support OSR.
 
 ## Multi-Tier JIT Compilation
 
-JIT compilation trades compile time against optimization: the more a compiler optimizes, the longer it takes. Most practical JITs handle this with <strong>tiered compilation</strong>, which compiles code quickly with light optimization first and later recompiles only the code that keeps running, this time with heavier optimization.
+JIT compilation trades compile time against optimization: the more a compiler optimizes, the longer it takes. Most JITs handle this with <strong>tiered compilation</strong>, which compiles code quickly with light optimization first and later recompiles only the code that keeps running, this time with heavier optimization.
 
 The demo below shows functions moving from the interpreter to a baseline JIT and then to an optimizing JIT, along with the deoptimization and recompilation cycle.
 
@@ -784,7 +784,7 @@ The demo below shows functions moving from the interpreter to a baseline JIT and
 
 ### JVM HotSpot's Tiered Compilation
 
-JVM's HotSpot has 5 tiers, but methods don't necessarily pass through all of them sequentially. The most common path is Tier 0 → Tier 3 → Tier 4 (interpreter → C1 with full profiling → C2):
+JVM's HotSpot has 5 tiers; the most common path is Tier 0 → Tier 3 → Tier 4 (interpreter → C1 with full profiling → C2):
 
 ```text
 Tier 0: Interpreter (collects profiling data)
@@ -833,7 +833,7 @@ TurboFan (optimizing compiler)
 - <strong>Ignition</strong>: Register-based bytecode interpreter. All code starts here
 - <strong>Sparkplug</strong>: Non-optimizing compiler that generates native code directly from bytecode. Extremely fast compilation (a single pass over the bytecode, with no intermediate representation)
 - <strong>Maglev</strong> (Chrome 117+ / V8 v11.7+): Mid-tier compiler using SSA-based intermediate representation with type-feedback-based optimization
-- <strong>TurboFan</strong>: Full optimizing compiler using Sea of Nodes IR. Performs inlining, loop optimization, escape analysis, and more
+- <strong>TurboFan</strong>: Top-tier optimizing compiler using Sea of Nodes IR. Performs inlining, loop optimization, escape analysis, and more
 
 ### GraalVM's Graal JIT
 
@@ -866,10 +866,6 @@ CPython 3.13's <strong>copy-and-patch JIT</strong> is an ultra-lightweight JIT t
 
 The copy-and-patch JIT does not compile bytecodes directly. Instead, the Tier 2 optimizer first converts bytecodes to a micro-operation (μop) intermediate representation, and the JIT is applied to that μop sequence.
 
-As of Python 3.14 this JIT is still experimental, but it now ships inside the official macOS and Windows binaries and can be tried by setting `PYTHON_JIT=1`. The official documentation puts the impact of enabling it at anywhere from 10% slower to 20% faster depending on workload, and does not recommend it for production. You can check availability at runtime with `sys._jit.is_available()` and `sys._jit.is_enabled()`.
-
-Python 3.14 also added a different kind of interpreter: instead of one enormous C `switch` statement, it uses small per-opcode C functions chained by tail calls (`--with-tail-call-interp`, currently Clang 19+ on x86-64 and AArch64 only). The reported gain is roughly 3–5% geometric mean on the `pyperformance` suite. Changing neither the language nor the bytecode, only <strong>how dispatch is written</strong>, gained several percent. As discussed in "Interpreter Implementation Patterns," the way dispatch is implemented affects performance.
-
 ```text
 Copy-and-patch flow:
   1. At build time, generate native code templates (stencils) for each μop
@@ -880,7 +876,11 @@ Copy-and-patch flow:
   6. Execute the concatenated template sequence directly
 ```
 
-On the concurrency side, the free-threaded build graduated to official support (phase II) in Python 3.14 under [PEP 779](https://peps.python.org/pep-0779/). The specializing adaptive interpreter (PEP 659), originally disabled in free-threaded builds, is now enabled there too, bringing the single-threaded penalty down to roughly 5–10% depending on platform and compiler. Free-threaded builds and the JIT cannot currently be combined.
+As of Python 3.14 this JIT is still experimental, but it now ships inside the official macOS and Windows binaries and can be tried by setting `PYTHON_JIT=1`. [What's New in Python 3.14](https://docs.python.org/3.14/whatsnew/3.14.html) says the typical performance impact of enabling it ranges from 10% slower to 20% faster depending on workload, and does not recommend it for production. At runtime, `sys._jit.is_available()` tells you whether the executable supports JIT compilation, and `sys._jit.is_enabled()` whether it is enabled for the current process.
+
+Python 3.14 also added an opt-in interpreter of a different kind: instead of one enormous C `switch` statement, it uses small per-opcode C functions chained by tail calls (`--with-tail-call-interp`, currently Clang 19+ on x86-64 and AArch64 only). The same document reports a geometric-mean speedup of roughly 3–5% on the `pyperformance` suite over a Clang 19 build without the new interpreter, depending on platform and architecture. The gain came from changing only how dispatch is written, with no change to the language or the bytecode; as discussed in "Interpreter Implementation Patterns," the way dispatch is implemented affects performance.
+
+On the concurrency side, the free-threaded build graduated to official support (phase II) in Python 3.14 under [PEP 779](https://peps.python.org/pep-0779/). According to [What's New in Python 3.14](https://docs.python.org/3.14/whatsnew/3.14.html), the specializing adaptive interpreter (PEP 659), originally disabled in free-threaded builds, is now enabled there too, bringing the single-threaded penalty down to roughly 5–10% depending on the platform and C compiler. Free-threaded builds and the JIT cannot currently be combined.
 
 ### JVM (Java, Kotlin)
 
@@ -939,15 +939,15 @@ Features:
   - Fast FFI (Foreign Function Interface)
 ```
 
-LuaJIT, developed by Mike Pall, is one of the fastest tracing JITs. With a small codebase of about 100K lines of C and assembly, it reaches near-C performance on many benchmarks.
+LuaJIT is a tracing JIT developed by Mike Pall. According to its [official site](https://luajit.org/luajit.html), LuaJIT is widely considered one of the fastest dynamic language implementations. The site also says that greatly reducing the overhead of dynamic languages lets it reach the performance range traditionally reserved for offline static-language compilers. The codebase is small: about 120K lines of C and assembly (DynASM) in the [v2.1 branch](https://github.com/LuaJIT/LuaJIT/tree/v2.1) as of November 2026, counting all CPU architectures.
 
 How LuaJIT's tracing JIT works:
 
-1. <strong>Hot loop detection</strong>: A loop's back-edge execution count exceeding a threshold marks it as "hot"
+1. <strong>Hot loop detection</strong>: Counts loop iterations and function calls; a loop or function that reaches a threshold count is marked as "hot"
 2. <strong>Trace recording</strong>: Records the hot loop's execution path as a "trace." Function calls are unfolded into the trace
-3. <strong>SSA conversion</strong>: Converts the trace to SSA (Static Single Assignment) form IR
-4. <strong>Optimization</strong>: Constant folding, algebraic simplification, CSE (Common Subexpression Elimination), DCE (Dead Code Elimination), loop-invariant code motion, register allocation
-5. <strong>Code generation</strong>: Generates native code directly from optimized IR (supports x86, x64, ARM, MIPS, PPC)
+3. <strong>SSA conversion</strong>: While recording, translates each bytecode into SSA (Static Single Assignment) form IR instructions
+4. <strong>Optimization</strong>: Constant folding, algebraic simplification, CSE (Common Subexpression Elimination), DCE (Dead Code Elimination), hoisting of loop-invariant instructions via loop unrolling and copy-substitution, register allocation
+5. <strong>Code generation</strong>: Generates native code directly from optimized IR (the official site lists x86, x64, ARM, ARM64, PPC, MIPS32, and MIPS64)
 
 ### V8 (JavaScript)
 
@@ -1021,7 +1021,7 @@ fibonacci(3) execution trace:
 
 Instruction             Stack              Notes
 ─────────────────────────────────────────────────────
-RESUME                  []                 Frame initialization
+RESUME                  []                 Function start (internal checks only)
 LOAD_FAST 0 (n)         [3]                Push n=3
 LOAD_CONST 1 (1)        [3, 1]             Push constant 1
 COMPARE_OP <= (26)      [False]            3 <= 1 → False
@@ -1080,7 +1080,7 @@ getX({ x: 1, y: 2, z: 3 });
 getX({ a: 0, x: 1 });
 ```
 
-A monomorphic IC can speed up property access to <strong>one comparison + one memory read</strong>. JIT compilers use monomorphic IC information to generate direct field access code with type guards.
+A monomorphic IC can speed up property access to one comparison + one memory read. JIT compilers use monomorphic IC information to generate direct field access code with type guards.
 
 ## Profiling Mechanics
 
@@ -1157,13 +1157,14 @@ Each VM makes different tradeoffs:
 - <strong>V8</strong>: Multi-tier compilation balancing short script startup with server-side optimization
 - <strong>LuaJIT</strong>: A tracing JIT that gets high performance from a small codebase
 
-CPython has kept getting faster through the 2020s, with the Specializing Adaptive Interpreter in 3.11, the copy-and-patch JIT in 3.13, and the tail-call interpreter in 3.14. With WebAssembly (WASM), bytecode VM design is also spreading beyond the browser into server-side and edge computing.
+CPython has continued its performance work through the 2020s, with the Specializing Adaptive Interpreter in 3.11, the experimental copy-and-patch JIT in 3.13, and the tail-call interpreter in 3.14. With WebAssembly (WASM), bytecode VM design is also spreading beyond the browser into server-side and edge computing.
 
 ## References
 
 - Aho, Lam, Sethi, Ullman. *Compilers: Principles, Techniques, and Tools (2nd Edition)*, 2006
 - Smith & Nair. *Virtual Machines: Versatile Platforms for Systems and Processes*, 2005
-- Yunhe Shi, David Gregg, Andrew Beatty, M. Anton Ertl. "Virtual Machine Showdown: Stack Versus Registers", *ACM Transactions on Architecture and Code Optimization*, 2008
+- Yunhe Shi, David Gregg, Andrew Beatty, M. Anton Ertl. "Virtual Machine Showdown: Stack Versus Registers", *VEE 2005*. [https://doi.org/10.1145/1064979.1065001](https://doi.org/10.1145/1064979.1065001)
+- Yunhe Shi, Kevin Casey, M. Anton Ertl, David Gregg. "Virtual Machine Showdown: Stack Versus Registers", *ACM Transactions on Architecture and Code Optimization* 4(4), 2008. [https://doi.org/10.1145/1328195.1328197](https://doi.org/10.1145/1328195.1328197)
 - CPython Developer's Guide. [https://devguide.python.org/internals/](https://devguide.python.org/internals/)
 - Mark Shannon. "Faster CPython" (PEP 659 — Specializing Adaptive Interpreter)
 - Mike Pall. "LuaJIT 2.0 intellectual property disclosure and research opportunities", 2009

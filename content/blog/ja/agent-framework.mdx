@@ -11,7 +11,7 @@ tags: ["AI", "Agent", "Microsoft", "Python", ".NET", "LLM"]
 
 Agent Framework は、Microsoft が開発してきた [Semantic Kernel](https://github.com/microsoft/semantic-kernel) と [AutoGen](https://github.com/microsoft/autogen) の直接的な後継と位置づけられている。Semantic Kernel のエンタープライズ機能（セッション管理・型安全性・ミドルウェア・テレメトリー）と AutoGen のシンプルなエージェント抽象化を統合し、グラフベースのワークフローエンジンを加えている。
 
-フレームワークは、個々のエージェントを作る Agent と、複数のエージェントや関数をつなぐ Workflow の 2 本柱で構成される。以下では、全体構成を確認した後、エージェント側の仕組み（`run()` の実行フロー、ツール、ミドルウェア、セッション）を Python 実装のソースコードに沿って説明する。続いて、ワークフローエンジン、外部との統合とデプロイ、オブザーバビリティーを扱う。
+フレームワークは、個々のエージェントを作る Agent と、複数のエージェントや関数をつなぐ Workflow の二本柱で構成される。Agent の `run()` は、メッセージの正規化、ContextProvider、Chat Client、レスポンスの後処理を 1 本のパイプラインとして実行し、ツール・ミドルウェア・セッションはこのパイプラインに組み込まれる。Workflow は、Executor を Edge でつないだ有向グラフとして実行される。以下では、これらの仕組みを Python 実装のソースコードに沿って説明し、続いて外部との統合とデプロイ、オブザーバビリティーを扱う。
 
 ## 全体アーキテクチャ
 
@@ -89,7 +89,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`FoundryChatClient` は Azure AI Foundry 上のモデルへの接続を担い、`AzureCliCredential()` はローカル開発時の認証を行う。`Agent` のコンストラクターに渡した `instructions` はシステムプロンプトとして LLM に送られ、`run()` にユーザーメッセージを渡すと、構成したチャット／モデルプロバイダーが呼ばれてレスポンスが返る。この数行の裏では、次節で説明するメッセージの正規化 → ContextProvider → Chat Client → レスポンスの後処理のパイプラインが動いている。
+`FoundryChatClient` は Microsoft Foundry 上のモデルへの接続を担い、`AzureCliCredential()` はローカル開発時に Azure CLI のサインイン情報で認証する。`Agent` のコンストラクターに渡した `instructions` はシステムプロンプトとして LLM に送られ、`run()` にユーザーメッセージを渡すと、構成したチャット／モデルプロバイダーが呼ばれてレスポンスが返る。この数行の裏では、次節で説明するメッセージの正規化 → ContextProvider → Chat Client → レスポンスの後処理のパイプラインが動いている。
 
 .NET では次のように書く。
 
@@ -109,7 +109,7 @@ var agent = new AIProjectClient(
 Console.WriteLine(await agent.RunAsync("Agent Framework について俳句を詠んでください。"));
 ```
 
-.NET 版では、`AIProjectClient` の拡張メソッド `AsAIAgent()` でプロジェクトクライアントから直接エージェントを生成している。API のスタイルは Python 版と異なるが、Agent + ChatClient + instructions という 3 つの構成要素は共通だ。
+.NET 版では、`AIProjectClient` の拡張メソッド `AsAIAgent()` でプロジェクトクライアントから直接エージェントを生成している。API のスタイルは Python 版と異なるが、モデルに接続するクライアント、instructions、実行メソッド（`RunAsync()`）という 3 つの要素は共通だ。
 
 ## Agent の実行モデル — `run()` の内部
 
@@ -164,7 +164,7 @@ classDiagram
 - <strong>`SupportsAgentRun`</strong> — Protocol（ダックタイピング用インターフェース）。`run()`、`create_session()`、`id`/`name`/`description` プロパティーを定義
 - <strong>`BaseAgent`</strong> — コンテキストプロバイダー・ミドルウェア・セッション管理を実装する基底クラス。`as_tool()` で他のエージェントのツールになれる
 - <strong>`RawAgent`</strong> — Chat Client を使った LLM 呼び出しの実装。ミドルウェアとテレメトリーは含まない
-- <strong>`Agent`</strong> — `AgentMiddlewareLayer`（ミドルウェア）と `AgentTelemetryLayer`（OpenTelemetry）を Mix-in したフル機能クラス
+- <strong>`Agent`</strong> — `AgentMiddlewareLayer`（ミドルウェア）と `AgentTelemetryLayer`（OpenTelemetry）をミックスインしたフル機能クラス
 
 ### `run()` の実行フロー
 
@@ -173,14 +173,16 @@ classDiagram
 ```mermaid
 sequenceDiagram
     participant User as ユーザーコード
-    participant Agent as Agent.run()
-    participant Middleware as ミドルウェア
+    participant Middleware as Agent Run Middleware
+    participant Agent as RawAgent.run()
     participant Context as ContextProvider
     participant Client as ChatClient
     participant LLM as LLM Provider
     participant Tools as Tools
     
-    User->>Agent: run(messages, session)
+    User->>Middleware: agent.run(messages, session)
+    Note over Middleware: AgentMiddlewareLayer が<br/>run 全体を包む
+    Middleware->>Agent: run(messages, session)
     Agent->>Agent: _prepare_run_context()
     
     Note over Agent: 1. メッセージの正規化
@@ -192,9 +194,7 @@ sequenceDiagram
     Note over Agent: 4. ツール解決 (MCP接続含む)
     Note over Agent: 5. オプションマージ
     
-    Agent->>Middleware: Agent Run Middleware
-    Middleware->>Agent: _call_chat_client(context)
-    
+    Agent->>Agent: _call_chat_client(context)
     Agent->>Client: get_response(messages, options)
     Client->>LLM: API Call
     LLM-->>Client: Response (with tool calls)
@@ -211,18 +211,19 @@ sequenceDiagram
     Note over Agent: 6. author_name 設定
     Note over Agent: 7. conversation_id 伝播
     Agent->>Context: after_run(agent, session, context)
-    Agent-->>User: AgentResponse
+    Agent-->>Middleware: AgentResponse
+    Middleware-->>User: AgentResponse
 ```
 
 #### ステップ 1: `_prepare_run_context()`
 
 `_prepare_run_context()` は、Chat Client を呼ぶ前の準備をまとめて行う。ソースコード（[`_agents.py`](https://github.com/microsoft/agent-framework/blob/main/python/packages/core/agent_framework/_agents.py)）では、次の 5 つの処理が行われる。
 
-1. <strong>メッセージの正規化</strong>: `normalize_messages()` で入力を `Message` のリストに変換。文字列が渡された場合は `user` ロールの `Message` に変換される
-2. <strong>履歴プロバイダーの自動追加</strong>: `session` が渡されているが `context_providers` が未設定（かつサービス側セッション ID や `store` フラグもない）場合、自動的に `InMemoryHistoryProvider` が追加される
-3. <strong>ContextProvider 実行</strong>: `before_run()` を forward order で実行。履歴メッセージやシステムプロンプトが `SessionContext` に追加される
-4. <strong>ツール解決</strong>: デフォルトツール＋ランタイムツール＋MCP サーバーのツールを統合。MCP サーバーが未接続なら `AsyncExitStack` 経由で接続する
-5. <strong>オプションマージ</strong>: `_merge_options()` でデフォルトオプションとランタイムオプションをマージ。ツールは名前が重複しないように統合、`instructions` は連結、`logit_bias` や `metadata` は辞書マージされる
+1. メッセージの正規化: `normalize_messages()` で入力を `Message` のリストに変換。文字列が渡された場合は `user` ロールの `Message` に変換される
+2. 履歴プロバイダーの自動追加: `session` が渡されていて、履歴を読み込む `HistoryProvider` が登録されておらず、履歴をサービス側に任せる設定（会話 ID や `store` オプションなど）もない場合、自動的に `InMemoryHistoryProvider` が追加される
+3. ContextProvider 実行: `before_run()` を登録された順に実行。履歴メッセージやシステムプロンプトが `SessionContext` に追加される
+4. ツール解決: デフォルトツール＋ランタイムツール＋MCP サーバーのツールを統合。MCP サーバーが未接続なら `AsyncExitStack` 経由で接続する
+5. オプションマージ: `_merge_options()` でデフォルトオプションとランタイムオプションをマージ。ツールは名前が重複しないように統合、`instructions` は連結、`logit_bias` や `metadata` は辞書マージされる
 
 ```python
 # _merge_options() の動作イメージ
@@ -269,7 +270,7 @@ Chat Client 内部で<strong>ツール呼び出しループ</strong>が実行さ
 
 #### ステップ 3: レスポンスの後処理
 
-`_finalize_response()` は次の処理を行う。
+非ストリーミング時に `_parse_non_streaming_response()` が担う処理は次のとおり。
 
 - `author_name` の設定（各メッセージにエージェント名を付与）
 - `conversation_id` のセッションへの伝播
@@ -468,7 +469,7 @@ agent = Agent(
 
 ### .NET でのミドルウェア実装
 
-.NET では Builder パターンを使い、既存のエージェントにミドルウェアを加えた新しいエージェントを作る。`AsBuilder()` で既存エージェントのコピーを作り、`Use()` でミドルウェアをチェーンし、`Build()` で新しいエージェントを生成する。元のエージェントは変更されない。
+.NET では Builder パターンを使い、既存のエージェントにミドルウェアを加えた新しいエージェントを作る。`AsBuilder()` で既存エージェントを内側に持つビルダーを作り、`Use()` でミドルウェアをチェーンし、`Build()` で新しいエージェントを生成する。元のエージェントは変更されない。
 
 ```csharp
 var middlewareAgent = originalAgent
@@ -551,7 +552,7 @@ class CustomContextProvider(ContextProvider):
             state["last_response"] = context.response.text
 ```
 
-組み込みプロバイダーの代表は、会話履歴を保持する `InMemoryHistoryProvider` だ。前述のとおり、セッションを渡してプロバイダーを設定していなければ Agent がこれを自動で追加するので、上の AgentSession の例のように `session` を渡すだけでマルチターンの会話が成り立つ。
+組み込みプロバイダーの代表は、会話履歴を保持する `InMemoryHistoryProvider` だ。前述のとおり、セッションを渡し、履歴プロバイダーを設定していなければ Agent がこれを自動で追加するので、上の AgentSession の例のように `session` を渡すだけでマルチターンの会話が成り立つ。
 
 ### CompactionStrategy
 
@@ -566,7 +567,7 @@ class CustomContextProvider(ContextProvider):
 
 ## ワークフローエンジン — グラフベースのオーケストレーション
 
-業務プロセスには、複数のステップを決まった順序で実行し、途中で条件分岐するものがある。たとえば、メールをスパム判定し、正常なら返信を生成し、スパムなら隔離する処理だ。こうしたプロセスは 1 つのエージェントだけでは処理しきれないことが多く、ワークフローエンジンで組み立てる必要がある。
+業務プロセスには、複数のステップを決まった順序で実行し、途中で条件分岐するものがある。たとえば、メールをスパム判定し、正常なら返信を生成し、スパムなら隔離する処理だ。こうしたプロセスは 1 つのエージェントだけでは処理しきれないことが多いので、ワークフローエンジンで組み立てる。
 
 ### Agent vs Workflow
 
@@ -578,7 +579,7 @@ class CustomContextProvider(ContextProvider):
 
 ワークフローは <strong>Executor</strong>（処理ノード）を <strong>Edge</strong>（接続）でつなぐ有向グラフだ。
 
-### Executor（実行ノード）
+### Executor（処理ノード）
 
 Executor はワークフローの基本的な処理単位だ。メッセージを受け取り、処理し、出力メッセージを生成する。
 
@@ -747,13 +748,13 @@ builder.AddFanInBarrierEdge(
 
 ワークフローの実行は<strong>スーパーステップ方式</strong>で進行する。各スーパーステップで、アクティブな Executor が並行して実行され、出力メッセージは Edge に沿って次のスーパーステップの Executor に配送される。
 
-`WorkflowEvent` には次の種類がある。
+`WorkflowEvent` には次の種類がある。表のイベント名は .NET のクラス名で、Python では同じイベントを `WorkflowEvent` の `type`（`"output"`、`"executor_invoked"` など）で区別する。
 
 | イベント | 説明 |
 |---------|------|
-| `WorkflowOutputEvent` | 最終出力 |
-| `ExecutorStartEvent` / `ExecutorEndEvent` | Executor のライフサイクル |
-| カスタムイベント | `context.yield_output()` でワークフロー出力を発火 |
+| `WorkflowOutputEvent` | ワークフローの出力（Executor が `context.yield_output()` で出したもの） |
+| `ExecutorInvokedEvent` / `ExecutorCompletedEvent` | Executor のライフサイクル（呼び出しと完了） |
+| カスタムイベント | Executor が `context.add_event()` で発行する任意のイベント |
 
 ### チェックポイント
 
@@ -799,7 +800,7 @@ AG-UI は CopilotKit が提唱した、エージェントとフロントエン�
 server = agent.as_mcp_server(server_name="MyAgent", version="1.0.0")
 ```
 
-`as_mcp_server()` の実装は、エージェントを `as_tool()` でツール化し、MCP の `@server.call_tool()` ハンドラーとして登録する。その結果、MCP クライアントからエージェントを 1 つのツールとして呼び出せる。
+`as_mcp_server()` の実装は、エージェントを `as_tool()` でツール化し、MCP サーバーの `call_tool` ハンドラーとして登録する。その結果、MCP クライアントからエージェントを 1 つのツールとして呼び出せる。
 
 ### DevUI
 
@@ -807,7 +808,7 @@ DevUI は開発者向けのインタラクティブ UI で、エージェント�
 
 ## オブザーバビリティー
 
-Agent Framework は OpenTelemetry をネイティブサポートしており、`AgentTelemetryLayer`（`Agent` クラスの Mix-in）がすべての `run()` 呼び出しに対してスパンを自動生成する。
+Agent Framework は OpenTelemetry をネイティブサポートしており、`AgentTelemetryLayer`（`Agent` クラスのミックスイン）がすべての `run()` 呼び出しに対してスパンを自動生成する。
 
 ```python
 from opentelemetry import trace
@@ -850,18 +851,18 @@ Agent Framework は Semantic Kernel と AutoGen それぞれからの移行ガ�
 
 ### Python と .NET の対称性
 
-Python と C#/.NET で概念と API のパターンが共通なので、一方の言語で覚えた知識をもう一方でもそのまま使える。複数の言語を使うチームには便利だ。現在は Go 実装（public preview）も加わり 3 言語になったが、成熟度は揃っていない。Go では宣言的エージェント・RAG・CodeAct・関数型ワークフローなどがまだ提供されていない。
+Python と C#/.NET で概念と API のパターンが共通なので、一方の言語で覚えた知識をもう一方にも生かせる。複数の言語を使うチームには便利だ。現在は Go 実装（public preview）も加わり 3 言語になったが、成熟度は揃っていない。Go では宣言的エージェント・RAG・CodeAct・関数型ワークフローなどがまだ提供されていない。
 
 ## まとめ
 
 Agent Framework の内部は、次の層に分けて捉えられる。
 
-1. <strong>Agent 層</strong> — メッセージ正規化 → ContextProvider → ChatClient → レスポンス後処理のパイプラインで、LLM との対話を管理する
-2. <strong>ツール層</strong> — `@tool` デコレーター、MCP 統合、Agent-as-Tool により、エージェントと外部世界を接続する
-3. <strong>ミドルウェア層</strong> — Agent / Function / ChatClient の 3 レベルで横断的関心事を注入する
-4. <strong>セッション層</strong> — AgentSession と ContextProvider で、ステートレスな LLM API の上にマルチターン対話を実現する
-5. <strong>ワークフロー層</strong> — Executor と Edge のグラフで、条件分岐・並列処理・Human-in-the-Loop を宣言的に記述する
-6. <strong>オブザーバビリティー層</strong> — OpenTelemetry でエージェントの動作を監視・デバッグする
+1. Agent 層 — メッセージ正規化 → ContextProvider → ChatClient → レスポンス後処理のパイプラインで、LLM との対話を管理する
+2. ツール層 — `@tool` デコレーター、MCP 統合、Agent-as-Tool により、エージェントと外部世界を接続する
+3. ミドルウェア層 — Agent / Function / ChatClient の 3 レベルで横断的関心事を注入する
+4. セッション層 — AgentSession と ContextProvider で、ステートレスな LLM API の上にマルチターン対話を実現する
+5. ワークフロー層 — Executor と Edge のグラフで、条件分岐・並列処理・Human-in-the-Loop を宣言的に記述する
+6. オブザーバビリティー層 — OpenTelemetry でエージェントの動作を監視・デバッグする
 
 Agent Framework は、Semantic Kernel のエンタープライズ向け機能と AutoGen のシンプルなエージェント抽象を 1 つにまとめ、MCP・A2A・AG-UI にも対応する。Microsoft は、これを両者の後継となるエージェント開発の統一基盤として位置づけている。
 

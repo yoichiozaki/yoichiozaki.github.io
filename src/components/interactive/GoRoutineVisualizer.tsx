@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -79,9 +80,9 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [],
       description:
-        "go func() により runtime.newproc() が呼ばれ、G1 の goroutine 構造体（runtime.g）が生成されます。スタック 2KB が割り当てられ、P1 の runnext スロットに配置されます。",
+        "go func() により runtime.newproc() が呼ばれ、G1 の goroutine 構造体（runtime.g）が生成されます。G1 は 2KB 以上の初期スタックを割り当てられ、P1 の runnext スロットに置かれます。",
       descriptionEn:
-        "go func() calls runtime.newproc(), allocating a runtime.g struct for G1 with a 2KB stack. G1 is placed in P1's runnext slot.",
+        "go func() calls runtime.newproc(), which allocates a runtime.g struct for G1 with an initial stack of 2 KB or more. G1 is placed in P1's runnext slot.",
       highlight: "G1",
     },
     // Step 2: P1 picks G1 via findRunnable → execute
@@ -98,7 +99,7 @@ function buildScenario(): SchedulerState[] {
       description:
         "schedule() → findRunnable() が P1 の runnext を確認し G1 を取得。execute(G1) で G1 の gobuf（PC/SP）を復元し、M1 上でユーザーコードの実行を開始します。",
       descriptionEn:
-        "schedule() → findRunnable() checks P1's runnext and gets G1. execute(G1) restores G1's gobuf (PC/SP) and begins user code execution on M1.",
+        "schedule() → findRunnable() checks P1's runnext and gets G1. execute(G1) restores G1's gobuf (PC/SP) and starts running user code on M1.",
       highlight: "P1",
     },
     // Step 3: G1 spawns G2, G3 during execution
@@ -113,50 +114,50 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [],
       description:
-        "G1 内で go func() が 2 回呼ばれ G2, G3 が生成。新しい G は P1 のローカルキュー（256 エントリーのリングバッファー）に runqput() で追加されます。",
+        "G1 内で go func() が 2 回呼ばれ G2, G3 が生成。runqput() は新しい G を P1 の runnext に入れ、それまで runnext にいた G をローカルキュー（256 エントリーのリングバッファー）の末尾へ押し出します。G2 はキューに、G3 は runnext に入ります（図では runnext をキューの末尾に表示）。",
       descriptionEn:
-        "G1 calls go func() twice, spawning G2 and G3. New G's are added to P1's local queue (a 256-entry ring buffer) via runqput().",
+        "G1 calls go func() twice, spawning G2 and G3. runqput() puts each new G in P1's runnext and pushes the previous runnext G to the tail of the local queue (a 256-entry ring buffer), so G2 ends up in the queue and G3 in runnext (drawn at the end of the queue).",
       highlight: "G2",
     },
     // Step 4: Work stealing — P2 runs findRunnable → steals
     {
       ps: [
         { p: p1, m: m1, runningG: g1 },
-        { p: p2, m: m2, runningG: g3 },
+        { p: p2, m: m2, runningG: g2 },
       ],
       localQueues: new Map([
-        [1, [g2]],
+        [1, [g3]],
         [2, []],
       ]),
       globalQueue: [],
       description:
-        "P2 の findRunnable(): ① runnext → 空 ② ローカルキュー → 空 ③ グローバルキュー → 空 ④ netpoll → なし ⑤ 他の P から steal。P1 のキューの半分 (G3) を runqsteal() でアトミックに盗みます。",
+        "P2 の findRunnable(): ① runnext → 空 ② ローカルキュー → 空 ③ グローバルキュー → 空 ④ netpoll → なし ⑤ 他の P から steal。runqsteal() は P1 のキューの先頭から半分（ここでは G2 の 1 個）をアトミックに盗みます。runnext の G3 は P1 に残ります。",
       descriptionEn:
-        "P2's findRunnable(): ① runnext → empty ② local queue → empty ③ global queue → empty ④ netpoll → none ⑤ steal from other P. Atomically steals half of P1's queue (G3) via runqsteal().",
+        "P2's findRunnable(): ① runnext → empty ② local queue → empty ③ global queue → empty ④ netpoll → none ⑤ steal from another P. runqsteal() atomically takes half of P1's queue from its head (here, just G2); G3 stays in P1's runnext.",
       highlight: "P2",
     },
     // Step 5: Overflow → global queue (runqputslow)
     {
       ps: [
         { p: p1, m: m1, runningG: g1 },
-        { p: p2, m: m2, runningG: g3 },
+        { p: p2, m: m2, runningG: g2 },
       ],
       localQueues: new Map([
-        [1, [g2]],
+        [1, [g3]],
         [2, []],
       ]),
       globalQueue: [g4, g5, g6],
       description:
-        "さらに G4〜G6 が生成されます。ローカルキューに空きがない場合、runqputslow() がキューの半分 + 新しい G をグローバルキュー（mutex 保護のリンクリスト）にバッチ移動します。",
+        "さらに G4〜G6 が生成されます。ここでは P1 のローカルキューが満杯だったとします（図では省略）。満杯のキューに G を追加しようとすると、runqputslow() がキューの半分とその G をまとめてグローバルキュー（mutex で保護されたリンクリスト）へ移します。図では簡略化して、G4〜G6 がグローバルキューに入ったものとして描いています。",
       descriptionEn:
-        "G4–G6 are spawned. When the local queue is full, runqputslow() batch-moves half the queue + the new G to the global queue (a mutex-protected linked list).",
+        "G4–G6 are spawned. Here P1's local queue is assumed to be full (not drawn), so adding a G calls runqputslow(), which moves half of the queue plus that G to the global queue (a mutex-protected linked list) in one batch. For simplicity, the figure shows G4–G6 landing in the global queue.",
       highlight: "G4",
     },
     // Step 6: G1 completes → goexit → mcall(schedule)
     {
       ps: [
-        { p: p1, m: m1, runningG: g2 },
-        { p: p2, m: m2, runningG: g3 },
+        { p: p1, m: m1, runningG: g3 },
+        { p: p2, m: m2, runningG: g2 },
       ],
       localQueues: new Map([
         [1, []],
@@ -164,15 +165,15 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [g4, g5, g6],
       description:
-        "G1 が return → runtime.goexit() が呼ばれ、G1 は _Gdead 状態に。G1 の構造体はフリーリスト（gFree）に戻されます。mcall(schedule) で g0 スタックに切り替わり、次の G2 を実行。",
+        "G1 が return すると runtime.goexit() が呼ばれ、mcall(goexit0) で g0 スタックに切り替わります。G1 は _Gdead になって構造体が gFree リストに戻され、schedule() が次の G3 を実行します。",
       descriptionEn:
-        "G1 returns → runtime.goexit() sets G1 to _Gdead. The g struct is returned to gFree pool. mcall(schedule) switches to g0 stack and runs G2 next.",
+        "G1 returns → runtime.goexit() runs, and mcall(goexit0) switches to the g0 stack. G1 becomes _Gdead, its g struct goes back to the gFree list, and schedule() runs G3 next.",
       highlight: "P1",
     },
     // Step 7: Syscall → entersyscall → hand-off
     {
       ps: [
-        { p: p1, m: m1, runningG: g2 },
+        { p: p1, m: m1, runningG: g3 },
         { p: p2, m: null, runningG: null },
       ],
       localQueues: new Map([
@@ -181,32 +182,32 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [g4, g5, g6],
       description:
-        "G3 がシステムコール（read(2) など）を実行。runtime.entersyscall() が G3 を _Gsyscall に、P2 を _Psyscall に設定。sysmon が 20μs 後にこれを検知し、handoffp() で P2 を M2 から切り離します。",
+        "G2 がシステムコール（read(2) など）に入り、runtime.entersyscall() で G2 は _Gsyscall になります。sysmon は 20μs 以上続いている syscall を検知し、handoffp() で P2 を M2 から切り離します。",
       descriptionEn:
-        "G3 enters a syscall (e.g., read(2)). runtime.entersyscall() sets G3 to _Gsyscall and P2 to _Psyscall. sysmon detects this after ~20μs and calls handoffp() to detach P2 from M2.",
+        "G2 enters a syscall (e.g., read(2)), and runtime.entersyscall() sets G2 to _Gsyscall. sysmon finds that the syscall has lasted 20 μs or more and calls handoffp() to detach P2 from M2.",
       highlight: "M2",
     },
     // Step 8: P2 gets M3, fetches from global queue
     {
       ps: [
-        { p: p1, m: m1, runningG: g2 },
+        { p: p1, m: m1, runningG: g3 },
         { p: p2, m: m3, runningG: g4 },
       ],
       localQueues: new Map([
         [1, []],
-        [2, []],
+        [2, [g5]],
       ]),
-      globalQueue: [g5, g6],
+      globalQueue: [g6],
       description:
-        "handoffp() がアイドル M を探すか新しい M3 を startm() で生成。P2 が M3 に紐付き、globrunqget() でグローバルキューから G4 を取得して実行再開。グローバルキューからは min(len/GOMAXPROCS+1, len/2) 個取得されます。",
+        "handoffp() が startm() を呼び、アイドル M がないので新しい M3 を起動します。P2 が M3 に紐付き、findRunnable() がグローバルキューから 2 個（min(3/2+1, 3, 128)）をまとめて取ります。G4 を実行し、G5 を P2 のローカルキューに入れます。",
       descriptionEn:
-        "handoffp() finds an idle M or creates M3 via startm(). P2 binds to M3 and globrunqget() fetches G4 from the global queue. It takes min(len/GOMAXPROCS+1, len/2) items.",
+        "handoffp() calls startm(), which starts a new M3 because no idle M is available. P2 binds to M3, and findRunnable() takes two G's from the global queue in one batch (min(3/2+1, 3, 128)): it runs G4 and puts G5 in P2's local queue.",
       highlight: "M3",
     },
-    // Step 9: Preemption — sysmon detects long-running G2
+    // Step 9: Preemption — sysmon detects long-running G3
     {
       ps: [
-        { p: p1, m: m1, runningG: g2 },
+        { p: p1, m: m1, runningG: g3 },
         { p: p2, m: m3, runningG: g5 },
       ],
       localQueues: new Map([
@@ -215,60 +216,60 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [g6],
       description:
-        "G2 が 10ms 以上実行を続けています。sysmon の retake() が検知し、G2 の stackguard0 に stackPreempt を設定。次の関数プロローグで G2 はプリエンプトされます（cooperative preemption）。Go 1.14+ では SIGURG シグナルで非同期プリエンプションも可能です。",
+        "G3 が 10ms 以上実行を続けています。sysmon の retake() が検知し、G3 の stackguard0 に stackPreempt を設定。次の関数プロローグで G3 はプリエンプトされます（協調的プリエンプション）。Go 1.14 以降は、シグナル（Unix 系では SIGURG）による非同期プリエンプションも可能です。",
       descriptionEn:
-        "G2 has been running for >10ms. sysmon's retake() detects this and sets G2's stackguard0 to stackPreempt. G2 is preempted at the next function prologue (cooperative). Go 1.14+ also supports async preemption via SIGURG signal.",
-      highlight: "G2",
+        "G3 has been running for more than 10 ms. sysmon's retake() detects this and sets G3's stackguard0 to stackPreempt, so G3 is preempted at its next function prologue (cooperative preemption). Since Go 1.14, a signal (SIGURG on Unix-like platforms) can also preempt it asynchronously.",
+      highlight: "G3",
     },
-    // Step 10: G2 preempted → back to local queue
+    // Step 10: G3 preempted → back to local queue
     {
       ps: [
         { p: p1, m: m1, runningG: g7 },
         { p: p2, m: m3, runningG: g5 },
       ],
       localQueues: new Map([
-        [1, [g2]],
+        [1, [g3]],
         [2, []],
       ]),
       globalQueue: [g6],
       description:
-        "G2 がプリエンプトされ、現在の実行状態（gobuf に PC/SP/BP を保存）を退避してローカルキューの末尾に戻されます（_Grunnable）。schedule() が G7 を選択して実行。公平性のため、61 回に 1 回はグローバルキューが優先されます。",
+        "G3 がプリエンプトされ、PC/SP/BP が gobuf に保存されます。G3 は _Grunnable に戻ってグローバルキューに入ります（図では簡略化して P1 のキューに表示）。schedule() が G7 を選択して実行。公平性のため、61 回に 1 回はグローバルキューが優先されます。",
       descriptionEn:
-        "G2 is preempted: its state is saved in gobuf (PC/SP/BP) and pushed back to the local queue as _Grunnable. schedule() picks G7 next. For fairness, the global queue is checked every 61 schedule cycles.",
+        "G3 is preempted: its PC/SP/BP are saved in gobuf, and it becomes _Grunnable and goes to the global queue (drawn in P1's queue for simplicity). schedule() picks G7 next. For fairness, the global queue is checked every 61 schedule cycles.",
       highlight: "G7",
     },
-    // Step 11: Netpoller — G3 syscall completes
+    // Step 11: Netpoller — G2 syscall completes
     {
       ps: [
         { p: p1, m: m1, runningG: g7 },
         { p: p2, m: m3, runningG: g5 },
       ],
       localQueues: new Map([
-        [1, [g2]],
-        [2, [g3]],
+        [1, [g3]],
+        [2, [g2]],
       ]),
       globalQueue: [g6],
       description:
-        "M2 上でブロックしていた G3 のシステムコールが完了。runtime.exitsyscall() で G3 は _Grunnable に戻ります。元の P2 はすでに別の M に渡っているため、G3 は P2 のローカルキューに入れられます。",
+        "M2 上でブロックしていた G2 のシステムコールが完了し、runtime.exitsyscall() で G2 は _Grunnable に戻ります。P2 は M3 に渡っていて空いている P もないので、G2 はグローバルキューに入ります（図では簡略化して P2 のキューに表示）。",
       descriptionEn:
-        "G3's syscall on M2 completes. runtime.exitsyscall() sets G3 back to _Grunnable. Since P2 was already handed off, G3 is placed in P2's local queue.",
-      highlight: "G3",
+        "G2's syscall on M2 completes, and runtime.exitsyscall() sets G2 back to _Grunnable. P2 is now on M3 and no P is idle, so G2 goes to the global queue (drawn in P2's queue for simplicity).",
+      highlight: "G2",
     },
     // Step 12: All goroutines draining
     {
       ps: [
-        { p: p1, m: m1, runningG: g2 },
+        { p: p1, m: m1, runningG: g3 },
         { p: p2, m: m3, runningG: g6 },
       ],
       localQueues: new Map([
         [1, []],
-        [2, [g3]],
+        [2, [g2]],
       ]),
       globalQueue: [],
       description:
-        "G7, G5 が完了。P1 は G2 の実行を再開（gobuf から復元）、P2 はグローバルキューから G6 を取得。schedule() ループは「findRunnable → execute → goexit/preempt → schedule」を G がなくなるまで繰り返します。",
+        "G7, G5 が完了。P1 は G3 の実行を再開（gobuf から復元）、P2 はグローバルキューから G6 を取得。schedule() ループは「findRunnable → execute → goexit/preempt → schedule」を G がなくなるまで繰り返します。",
       descriptionEn:
-        "G7, G5 complete. P1 resumes G2 (restored from gobuf), P2 fetches G6 from global queue. The schedule() loop repeats 'findRunnable → execute → goexit/preempt → schedule' until all G's are done.",
+        "G7, G5 complete. P1 resumes G3 (restored from gobuf), P2 fetches G6 from the global queue. The schedule() loop repeats 'findRunnable → execute → goexit/preempt → schedule' until all G's are done.",
       highlight: "G6",
     },
     // Step 13: Final — all done, M's park
@@ -283,9 +284,9 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [],
       description:
-        "全ての Goroutine が完了。findRunnable() で実行可能な G が見つからない M は stopm() でパークし、futex/semaphore で待機します。M2 は syscall から復帰後にアイドルリストに戻されます。P も pidle リストに戻ります。",
+        "全ての goroutine が完了。findRunnable() で実行可能な G が見つからない M は stopm() でパークし、futex/semaphore で待機します。M2 は syscall から復帰後にアイドルリストに戻されます。P も pidle リストに戻ります。",
       descriptionEn:
-        "All goroutines done. M's that can't find runnable G's call stopm() and park on a futex/semaphore. M2 returns to the idle list after its syscall. P's return to pidle list.",
+        "All goroutines done. M's that can't find runnable G's call stopm() and park on a futex/semaphore. M2 returns to the idle list after its syscall. P's return to the pidle list.",
     },
   ];
 }
@@ -317,10 +318,12 @@ function ProcessorSlot({
   pState,
   localQueue,
   highlight,
+  isEn,
 }: {
   pState: SchedulerState["ps"][0];
   localQueue: G[];
   highlight?: string;
+  isEn: boolean;
 }) {
   const { p, m, runningG } = pState;
   const isPHighlighted = highlight === p.label;
@@ -356,13 +359,13 @@ function ProcessorSlot({
           {m ? m.label : "—"}
         </div>
         <div className="text-[10px] text-muted-foreground">
-          {m ? "OS Thread" : "detached"}
+          {m ? (isEn ? "OS thread" : "OS スレッド") : isEn ? "detached" : "切り離し中"}
         </div>
       </div>
 
       {/* Running G */}
       <div className="flex flex-col items-center gap-1">
-        <div className="text-[10px] text-muted-foreground">Running</div>
+        <div className="text-[10px] text-muted-foreground">{isEn ? "Running" : "実行中"}</div>
         <div className="h-9 w-9 flex items-center justify-center">
           {runningG ? (
             <GBadge g={runningG} highlight={highlight} />
@@ -376,14 +379,14 @@ function ProcessorSlot({
 
       {/* Local queue */}
       <div className="mt-1 flex flex-col items-center gap-1">
-        <div className="text-[10px] text-muted-foreground">Local Queue</div>
+        <div className="text-[10px] text-muted-foreground">{isEn ? "Local queue" : "ローカルキュー"}</div>
         <div className="flex gap-1 min-h-[28px] items-center">
           {localQueue.length > 0 ? (
             localQueue.map((g) => (
               <GBadge key={g.id} g={g} highlight={highlight} small />
             ))
           ) : (
-            <span className="text-[10px] text-muted-foreground/50">empty</span>
+            <span className="text-[10px] text-muted-foreground/50">{isEn ? "empty" : "空"}</span>
           )}
         </div>
       </div>
@@ -425,7 +428,7 @@ export function GoRoutineVisualizer({
       description={
         isEn
           ? "Step through how Go's runtime scheduler maps goroutines (G) onto OS threads (M) via processors (P)."
-          : "Go ランタイムスケジューラーが Goroutine (G) を OS スレッド (M) に Processor (P) 経由でマッピングする様子をステップ実行で見てみましょう。"
+          : "Go のランタイムスケジューラーが goroutine（G）を P（Processor）経由で OS スレッド（M）に割り当てて実行する流れを、1 ステップずつ確認できます。"
       }
     >
       {/* Visualization */}
@@ -438,6 +441,7 @@ export function GoRoutineVisualizer({
               pState={pState}
               localQueue={state.localQueues.get(pState.p.id) ?? []}
               highlight={state.highlight}
+              isEn={isEn}
             />
           ))}
         </div>
@@ -445,7 +449,7 @@ export function GoRoutineVisualizer({
         {/* Global queue */}
         <div className="rounded-lg border border-border bg-background p-3">
           <div className="text-xs font-semibold text-muted-foreground mb-2 text-center">
-            Global Run Queue
+            {isEn ? "Global run queue" : "グローバルキュー"}
           </div>
           <div className="flex gap-1 justify-center min-h-[28px] items-center">
             {state.globalQueue.length > 0 ? (
@@ -459,7 +463,7 @@ export function GoRoutineVisualizer({
               ))
             ) : (
               <span className="text-[10px] text-muted-foreground/50">
-                empty
+                {isEn ? "empty" : "空"}
               </span>
             )}
           </div>
@@ -471,7 +475,7 @@ export function GoRoutineVisualizer({
         </div>
 
         {/* Controls */}
-        <StepPlayerControls {...player} label={getLabel} />
+        <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

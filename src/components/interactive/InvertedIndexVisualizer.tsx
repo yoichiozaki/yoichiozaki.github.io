@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type Props = { locale?: string };
@@ -55,8 +56,8 @@ const steps: Step[] = [
     index: [],
     query: null,
     desc: {
-      ja: "3つのドキュメントがあります。ここから転置インデックスを構築していきましょう。",
-      en: "We have 3 documents. Let's build an inverted index from them step by step.",
+      ja: "3つのドキュメント D1〜D3 から転置インデックスを構築します。",
+      en: "Start with 3 documents, D1–D3, and build an inverted index from them.",
     },
   },
   /* 1 */ {
@@ -81,8 +82,8 @@ const steps: Step[] = [
     index: [],
     query: null,
     desc: {
-      ja: "ストップワード（the, on）を除去し重複を排除 → [cat, sat, mat]",
-      en: 'Remove stopwords ("the", "on") and deduplicate → [cat, sat, mat]',
+      ja: "ストップワード（the, on）を除去 → [cat, sat, mat]",
+      en: 'Remove stopwords ("the", "on") → [cat, sat, mat]',
     },
   },
   /* 3 */ {
@@ -150,8 +151,8 @@ const steps: Step[] = [
     ],
     query: null,
     desc: {
-      ja: "D2 のタームを追加。cat は既にあるのでポスティングリストに D2 を追加。dog は新規登録。",
-      en: 'Add D2 terms. "cat" already exists — append D2. "dog" is new.',
+      ja: "D2 のタームを登録。cat は登録済みなので、そのポスティングリストに D2 を追加。dog は新規登録。",
+      en: 'Add D2 terms. "cat" is already indexed, so append D2 to its posting list. "dog" is new.',
     },
   },
   /* 7 */ {
@@ -205,8 +206,8 @@ const steps: Step[] = [
     ],
     query: null,
     desc: {
-      ja: "D3 のタームを追加。dog と sat に D3 を追加。log は新規登録。",
-      en: 'Add D3 terms. Append D3 to "dog" and "sat". "log" is new.',
+      ja: "D3 のタームを登録。dog と sat のポスティングリストに D3 を追加。log は新規登録。",
+      en: 'Add D3 terms. Append D3 to the posting lists of "dog" and "sat". "log" is new.',
     },
   },
   /* 10 */ {
@@ -224,8 +225,8 @@ const steps: Step[] = [
     ],
     query: null,
     desc: {
-      ja: "転置インデックスの構築が完了しました！各ターム → ドキュメントIDリストの対応関係ができています。次はこのインデックスで検索してみましょう。",
-      en: "Inverted index is complete! Each term maps to a sorted list of document IDs. Now let's use it to search.",
+      ja: "転置インデックスが完成しました。各タームは、それを含むドキュメントの ID をソートしたリスト（ポスティングリスト）に対応します。次に、このインデックスで検索します。",
+      en: "The inverted index is complete. Each term maps to its posting list: the sorted IDs of the documents that contain it. Next, use the index to search.",
     },
   },
   /* 11 */ {
@@ -266,7 +267,7 @@ const steps: Step[] = [
       lookups: [{ term: "cat", postings: [1, 2] }],
     },
     desc: {
-      ja: '"cat" をインデックスで検索 → ポスティングリスト {D1, D2}',
+      ja: '"cat" をインデックスで引く → ポスティングリスト {D1, D2}',
       en: 'Look up "cat" in the index → posting list {D1, D2}',
     },
   },
@@ -292,7 +293,7 @@ const steps: Step[] = [
       ],
     },
     desc: {
-      ja: '"sat" をインデックスで検索 → ポスティングリスト {D1, D3}',
+      ja: '"sat" をインデックスで引く → ポスティングリスト {D1, D3}',
       en: 'Look up "sat" in the index → posting list {D1, D3}',
     },
   },
@@ -320,8 +321,8 @@ const steps: Step[] = [
       result: [1],
     },
     desc: {
-      ja: "AND 演算: {D1, D2} ∩ {D1, D3} = {D1}。両方のタームを含むのは D1 だけです！",
-      en: "AND operation: {D1,D2} ∩ {D1,D3} = {D1}. Only D1 contains both terms!",
+      ja: "AND 演算: {D1, D2} ∩ {D1, D3} = {D1}。両方のタームを含むのは D1 だけです。",
+      en: "AND operation: {D1,D2} ∩ {D1,D3} = {D1}. Only D1 contains both terms.",
     },
   },
 ];
@@ -345,11 +346,11 @@ export function InvertedIndexVisualizer({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={lang === "en" ? "Inverted Index Builder" : "転置インデックス構築デモ"}
+      title={lang === "en" ? "Building and Searching an Inverted Index" : "転置インデックスの構築と検索"}
       description={
         lang === "en"
-          ? "Watch how an inverted index is built from documents, then used to answer a search query."
-          : "ドキュメントから転置インデックスを構築し、検索クエリーに応答する過程を見てみましょう。"
+          ? 'Step through building an inverted index from 3 documents, then using it to find the documents that contain both "cat" and "sat".'
+          : '3つのドキュメントから転置インデックスを1ステップずつ構築し、それを使って "cat" と "sat" の両方を含むドキュメントを探します。'
       }
     >
       <div className="space-y-4">
@@ -505,10 +506,10 @@ export function InvertedIndexVisualizer({ locale = "ja" }: Props) {
         )}
 
         {/* Controls */}
-        <StepPlayerControls
-          {...player}
-          label={(s) => steps[s].desc[lang]}
-        />
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {current.desc[lang]}
+        </p>
+        <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

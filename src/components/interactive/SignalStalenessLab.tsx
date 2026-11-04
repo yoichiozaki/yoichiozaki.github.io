@@ -35,15 +35,15 @@ const TEXT = {
     policy: "選択規則",
     policyNames: {
       "least-outstanding": "最小未完了数（古い値をそのまま信じる）",
-      "in-flight-aware": "最小未完了数＋自分が投げた分",
+      "in-flight-aware": "最小未完了数 + 自分が投げた分",
       "power-of-two": "ランダムに 2 台だけ比較（補正なし）",
       "in-flight-aware-p2c": "両方",
     } satisfies Record<StalenessPolicy, string>,
     policyDescriptions: {
       "least-outstanding":
-        "取得したスナップショットの最小値を選びます。取得タイミングをずらさない場合、全ルーターが同じスナップショットを見るため、更新までの間は同じレプリカへ投げ続けます（同点はランダムに分散します）。",
+        "取得したスナップショットで値が最小のレプリカを選びます。取得タイミングをずらさない場合、全ルーターが同じスナップショットを見るため、更新までの間は同じレプリカへ投げ続けます（同点はランダムに分散します）。",
       "in-flight-aware":
-        "スナップショットに「前回の取得以降に自分が投げた件数」を足してから選びます。ルーター内部の盲点は消えますが、ルーター同士の衝突は残ります。台数を 1 にすると効果が最大になります。",
+        "スナップショットに「前回の取得以降に自分が投げた件数」を足してから選びます。ルーター内部の盲点は消えますが、ルーター同士の衝突は残ります。ルーター台数を 1 にすると効果が最大になります。",
       "power-of-two":
         "毎回ランダムに 2 台選び、古い値の小さい方を採ります（自分の投入分の加算はしません）。全員が同じ最小値へ殺到する経路そのものを断ちます。",
       "in-flight-aware-p2c":
@@ -67,21 +67,21 @@ const TEXT = {
     none: "なし",
     spread: "最大値 − 最小値",
     spreadTimeline: "偏りの推移",
-    compare: "4 方式の比較",
+    compare: "4 つの選択規則の比較",
     maxSpread: "偏りの最大値",
     meanSpread: "偏りの平均",
     oscillation: "振動幅（偏りのティック間変化の平均）",
-    pileUp: "全投入が 1 台へ集中したティックの割合",
+    pileUp: "全到着が 1 台へ向かったティックの割合",
     spreadChart: (max: number, mean: string) =>
       `偏りの推移を示す棒グラフ。最大 ${max}、平均 ${mean}。`,
     loadChart: (loads: string) => `実際の未完了数：${loads}`,
     caution:
-      "サービス時間を固定した抽象モデルです。実際のスクレイプはルーターごとに位相がずれ、メトリクス自体にも平滑化が入ります。ここで見るべきは絶対値ではなく、「同じ古い値を全員が信じると振動が持続する」という構造です。",
+      "サービス時間を固定した抽象モデルです。実際には、スクレイプの位相がルーターごとにずれていることも、メトリクス自体が平滑化されていることもあります。ここで見るべきは絶対値ではなく、「同じ古い値を全員が信じると振動が持続する」という構造です。",
   },
   en: {
     title: "Signal freshness and herding",
     description:
-      "Routers decide at millisecond cadence while metrics refresh every few seconds. Changing only that gap, watch the oscillation appear and then damp out, one tick at a time.",
+      "Routers decide at millisecond cadence while metrics refresh every few seconds. Changing only that gap, watch the oscillation appear or damp out, one tick at a time.",
     policy: "Selection rule",
     policyNames: {
       "least-outstanding": "Least outstanding (trust the stale view)",
@@ -91,13 +91,13 @@ const TEXT = {
     } satisfies Record<StalenessPolicy, string>,
     policyDescriptions: {
       "least-outstanding":
-        "Take the minimum of the last snapshot. Unless scrapes are staggered, every router reads the same snapshot, so they all keep sending to the same replica until the next scrape (ties are broken at random).",
+        "Pick the replica with the lowest value in the last snapshot. Unless scrapes are staggered, every router reads the same snapshot, so they all keep sending to the same replica until the next scrape (ties are broken at random).",
       "in-flight-aware":
-        "Add \"requests I dispatched since the last scrape\" before choosing. This removes the router's blindness to itself, but not the collision between routers, so it works best with a single router.",
+        "Add \"requests I dispatched since the last scrape\" before choosing. This removes each router's blind spot for its own dispatches, but not the collision between routers, so it works best with a single router.",
       "power-of-two":
         "Sample two replicas at random and take the lower stale value, with no in-flight correction. This severs the path by which every router stampedes toward the same minimum.",
       "in-flight-aware-p2c":
-        "Correct for your own dispatches and then compare two. Addresses both the intra-router blind spot and the inter-router synchronization.",
+        "Add the router's own dispatches, then compare two replicas. This addresses both the blind spot within each router and the synchronization between routers.",
     } satisfies Record<StalenessPolicy, string>,
     scrapeInterval: "Scrape interval (ticks)",
     routers: "Routers",
@@ -121,12 +121,12 @@ const TEXT = {
     maxSpread: "Peak skew",
     meanSpread: "Mean skew",
     oscillation: "Oscillation (mean tick-over-tick change in skew)",
-    pileUp: "Ticks where every arrival hit one replica",
+    pileUp: "Share of ticks where every arrival hit one replica",
     spreadChart: (max: number, mean: string) =>
       `Bar chart of skew over time. Peak ${max}, mean ${mean}.`,
     loadChart: (loads: string) => `Actual outstanding requests: ${loads}`,
     caution:
-      "An abstract model with fixed service time. Real scrapes are phase-shifted per router and the metrics themselves are smoothed. What to read here is not the absolute numbers but the structure: when everyone trusts the same stale value, the oscillation sustains.",
+      "An abstract model with fixed service time. In practice, scrapes may be out of phase across routers, and the metrics themselves may be smoothed. Read the structure rather than the absolute numbers: when every router trusts the same stale value, the oscillation persists.",
   },
 } as const;
 

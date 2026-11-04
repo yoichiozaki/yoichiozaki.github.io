@@ -360,13 +360,13 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
         : "Open an entry to read about it, with its sources and the sections of the article that discuss it."
       : fullscreen
         ? isJa
-          ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、ホイールで拡大・縮小。Esc で全画面を閉じる。"
+        ? "クリックで関係する要素を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、ホイールで拡大・縮小。Esc で全画面を閉じる。"
           : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan, scroll to zoom, Esc to exit full screen."
         : isJa
-          ? "クリックで関係を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、Ctrl（⌘）+ ホイールかピンチで拡大・縮小。"
+        ? "クリックで関係する要素を強調し、ダブルクリックで説明と出典を開く。ドラッグで移動、Ctrl（⌘）+ ホイールかピンチで拡大・縮小。"
           : "Click to highlight connections; double-click to open the explanation and sources. Drag to pan; Ctrl (⌘) + scroll or pinch to zoom.";
   const modes: [Mode, string][] = [
-    ["map", isJa ? "マップ" : "Map"],
+    ["map", isJa ? "地図" : "Map"],
     ["companies", isJa ? "各社" : "Companies"],
     ["list", isJa ? "一覧" : "List"],
   ];
@@ -446,7 +446,7 @@ export function CapabilityLeverMap({ locale = "ja" }: Props) {
               role="region"
               aria-label={
                 isJa
-                  ? "マップ（矢印キーで移動、+ と − で拡大・縮小、0 で全体を表示。選んだ項目でもう一度 Enter を押すと説明を開く）"
+                  ? "地図（矢印キーで移動、+ と − で拡大・縮小、0 で全体を表示。選んだ項目でもう一度 Enter を押すと説明を開く）"
                   : "Map (arrow keys to pan, + and − to zoom, 0 to fit; press Enter again on a selected item to open its details)"
               }
               className={`absolute inset-0 overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${

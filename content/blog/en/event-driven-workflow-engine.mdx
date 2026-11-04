@@ -7,9 +7,9 @@ tags: ["Workflow Engine", "Event Sourcing", "State Machine", "Python", "Architec
 
 ## Introduction
 
-Workflow engines such as Temporal, Azure Durable Functions, and AWS Step Functions run e-commerce order processing, SaaS user onboarding, payment flows, and any other process that must carry several steps through to completion reliably.
+Workflow engines such as Temporal, Azure Durable Functions, and AWS Step Functions run e-commerce order processing, SaaS user onboarding, payment flows, and other processes that must carry several steps through to completion reliably.
 
-Building a small workflow engine yourself shows why these products are designed as they are. This article builds an event-driven workflow engine from scratch in Python. It uses only the standard library, including `dataclass`, `ABC` (Abstract Base Class), and `collections.deque`, so no external packages are required.
+At their core, these engines append everything that happens to a history of events; after a crash, they replay that history and resume where they left off. Building a small engine yourself shows why workflow code must be deterministic and why consumers such as workers must be idempotent. This article builds an event-driven workflow engine from scratch in Python. It uses only the standard library, including `dataclass`, `ABC` (Abstract Base Class), and `collections.deque`, so no external packages are required.
 
 ### Topics Covered
 
@@ -22,7 +22,7 @@ Building a small workflow engine yourself shows why these products are designed 
 7. Transactional consistency — the Outbox pattern
 8. Putting it all together — an order processing workflow
 9. Snapshot optimization
-10. Mapping to commercial engines
+10. Mapping to Temporal and Azure Durable Functions
 
 ### Target Audience
 
@@ -56,7 +56,7 @@ The components have these roles:
 - <strong>Worker</strong> — A process that pulls tasks from the queue and executes them.
 - <strong>Timer Queue</strong> — Handles time-based control such as "send a reminder in 30 days."
 
-This structure is a heavily simplified version of Temporal's architecture, but it uses the same core concepts. Temporal is the successor to Cadence, which was developed at Uber, and is now used in production by companies worldwide.
+This structure is a heavily simplified version of Temporal's architecture, but it uses the same core concepts.
 
 ## Chapter 1: What Is a Workflow — The Four Essential Properties
 
@@ -82,7 +82,7 @@ A workflow engine solves this problem: it carries multi-step, long-running proce
 
 ### The Four Properties of a Workflow
 
-Temporal co-founder Maxim Fateev defines a workflow by these four properties:
+In his talk "Designing a Workflow Engine from First Principles," Temporal co-founder Maxim Fateev defines a workflow by these four properties:
 
 1. <strong>Resilient Program</strong> — Execution survives process crashes and resumes from where it left off
 2. <strong>Executes Tasks</strong> — Invokes side-effectful operations (API calls, database writes, and so on)
@@ -219,7 +219,7 @@ WorkflowEvent = (
 )
 ```
 
-Every event class has a `timestamp` field that records when the event occurred. Deterministic replay, covered in Chapter 4, depends on this field: if `decide` needs the time, it must read it from events instead of calling `time.time()`.
+Every event class has a `timestamp` field that records when the event occurred. Deterministic replay, covered in Chapter 4, depends on this field: if the workflow definition needs the time, it must read it from events instead of calling `time.time()`.
 
 ### Implementing the Event Store
 
@@ -290,7 +290,7 @@ The engine's core loop repeats the following cycle:
 4. The engine executes the commands and records the results as events
 5. Go back to step 1
 
-In this loop, the workflow definition returns commands and the engine records events. Keeping the two clearly separate is a key design principle.
+In this loop, the workflow definition returns commands and the engine records events.
 
 ### Separating Commands from Events
 
@@ -321,7 +321,7 @@ The separation lets the workflow definition contain only pure logic. It decides 
 
 Commands are defined with `dataclass`, like events, and the workflow definition interface is defined with `ABC` (Abstract Base Class).
 
-A class derived from `ABC` cannot be instantiated directly; a subclass must implement the specified methods. It plays the same role as `interface` in Java or C#.
+A class derived from `ABC` that has methods marked `@abstractmethod` cannot be instantiated directly; a subclass must implement those methods. It plays the same role as `interface` in Java or C#.
 
 ```python
 from abc import ABC, abstractmethod
@@ -523,7 +523,7 @@ Replay works only if `decide` is deterministic, always producing the same output
 | Network calls | Side effects re-execute on replay | Execute as an activity (task) |
 | Global variable access | Values may differ across processes | Pass as input via events |
 
-Temporal explicitly states in its official documentation that "workflow code must be deterministic." Temporal moves every side-effectful operation into an activity (task) and records its result as an event. During replay, it uses the recorded results instead of running the activities again, which keeps replay deterministic.
+Temporal's official documentation explicitly states that workflow code must be deterministic. Temporal moves every side-effectful operation into an activity (task) and records its result as an event. During replay, it uses the recorded results instead of running the activities again, which keeps replay deterministic.
 
 ### Implementing the Replay Engine
 
@@ -905,13 +905,7 @@ class TimerQueue:
 
 ### The Consistency Trap in Distributed Systems
 
-Each operation in the workflow engine must persist its state change and its delivery intent atomically (all writes succeed or all fail):
-
-1. Append events to the event store
-2. Record task-enqueue messages in an Outbox table
-3. Record timer-registration messages in the same Outbox table
-
-Without atomicity, the event store and the task queue can disagree in two ways:
+Each operation in the workflow engine must persist its state change (events) and its delivery intent (requests to enqueue a task or register a timer) atomically: all writes succeed or all fail. If the engine records the event and enqueues the task as separate steps, the event store and the task queue can disagree in two ways:
 
 ```mermaid
 sequenceDiagram
@@ -940,14 +934,14 @@ In Case 2, the task is in the queue and gets executed, but the event store has n
 
 ### The Outbox Pattern Solution
 
-Temporal's architecture solves this with a Transfer Queue. In microservices architecture, the same technique is widely known as the Transactional Outbox pattern, formalized by Chris Richardson.
+Temporal's architecture solves this with a Transfer Queue. In microservices architecture, the same technique is widely known as the Transactional Outbox pattern, described by Chris Richardson.
 
 The pattern works in two parts:
 
 1. Write events and messages (notifications of task enqueue or timer registration) to the database in the <strong>same transaction</strong>
 2. A separate process (Outbox relay) asynchronously reads messages and delivers them to the actual queues
 
-This eliminates Case 1, in which the event is recorded but the message is never delivered. If the Outbox relay process crashes, undelivered messages remain in the database and can be retried after it restarts.
+This eliminates Case 1, in which the event is recorded but the message is never delivered. If the Outbox relay process crashes, undelivered messages remain in the database and can be retried after it restarts. Case 2 cannot occur either: the relay delivers only messages committed in the same transaction as their events, so no task runs without a recorded event.
 
 ```python
 import json
@@ -1203,7 +1197,7 @@ This history lets you reconstruct the state at any point in time and use it for 
 
 ### The Replay Cost Problem
 
-In the current implementation, every call to `process_workflow` reads all events from the event store and passes them to `decide`. This is fine for short workflows, but for workflows with thousands or tens of thousands of steps (such as large batch processes or long-running approval flows), replaying all events every time becomes prohibitively expensive.
+In the current implementation, every call to `process_workflow` reads all events from the event store and passes them to `decide`. This is fine for short workflows, but for workflows with thousands or tens of thousands of steps (such as large batch processes or long-running approval flows), the cost of replaying all events every time is no longer negligible.
 
 ### Snapshots as the Solution
 
@@ -1224,7 +1218,7 @@ For example, in a workflow with 1,000 events where a snapshot was taken at event
 
 Snapshots are only an optimization; the event stream remains the source of truth. A corrupted or lost snapshot can always be regenerated from the event stream, so no data is lost.
 
-## Chapter 10: Mapping to Commercial Workflow Engines
+## Chapter 10: Mapping to Temporal and Azure Durable Functions
 
 The table maps each part of the minimal engine to its counterpart in Temporal and Azure Durable Functions. The names differ, but the underlying mechanisms correspond; the exception is replay optimization, where neither engine keeps a persistent snapshot.
 

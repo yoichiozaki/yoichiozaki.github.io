@@ -160,7 +160,7 @@ export function MatchingStrategyLab({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "嘘の申告で得ができるか — 全通り試す実験室"
+          ? "嘘の申告で得をできるか — 全通り試す実験室"
           : "Can lying pay? A lab that tries every lie"
       }
       description={
@@ -338,7 +338,7 @@ export function MatchingStrategyLab({ locale = "ja" }: Props) {
           <thead>
             <tr className="text-muted-foreground">
               <th className="text-left font-medium">{isJa ? "得られる相手" : "partner obtained"}</th>
-              <th className="text-right font-medium">{isJa ? "そうなる申告の数" : "# reports"}</th>
+              <th className="text-right font-medium">{isJa ? "そうなる申告の数" : "number of reports"}</th>
               <th className="pl-3 text-left font-medium">{isJa ? "申告の例" : "example report"}</th>
             </tr>
           </thead>
@@ -379,8 +379,8 @@ export function MatchingStrategyLab({ locale = "ja" }: Props) {
               : `No report does better for ${self} than the truth.`}
           {isProposer && mechanism === "da"
             ? isJa
-              ? "（DA の提案側はつねにこうなる — 耐戦略性）"
-              : " (Always the case for DA proposers — strategy-proofness.)"
+              ? "（DA の提案側ではつねにこうなる — 正直な申告が支配戦略）"
+              : " (Always the case for DA proposers: truthful reporting is a dominant strategy.)"
             : ""}
           {mechanism === "boston" && search.best.trueRank < search.truthful.trueRank
             ? isJa
@@ -391,7 +391,7 @@ export function MatchingStrategyLab({ locale = "ja" }: Props) {
         <p className={`mt-1 text-[10px] ${sideText[agent.side]}`}>
           {isJa
             ? "「相手なし」は、本当は受け入れられる相手まで切り捨てた結果、誰とも組めなかったことを表します。"
-            : "“Unmatched” means the report cut off every partner that was actually available."}
+            : "“Unmatched” means the report cut off even partners who were acceptable under the true preferences, leaving nobody to match with."}
         </p>
       </Panel>
     </InteractiveDemo>

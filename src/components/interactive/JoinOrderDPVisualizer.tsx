@@ -269,7 +269,7 @@ function runDP(): DPStep[] {
     table: snapshotTable(),
     final,
     note: `最適プランは ${final.plan}、推定コスト ${final.cost.toLocaleString("en-US")}。SQL に書かれた順どおりの ((u ⋈ o) ⋈ i) ⋈ p は 605,000 なので、およそ 40 倍の差になります。最も選択的な products から結合を始めるのが正解でした。`,
-    noteEn: `The optimal plan is ${final.plan} at an estimated cost of ${final.cost.toLocaleString("en-US")}. The textual order ((u ⋈ o) ⋈ i) ⋈ p costs 605,000 — roughly 40× more. Starting from the most selective relation, products, was the right move.`,
+    noteEn: `The optimal plan is ${final.plan} at an estimated cost of ${final.cost.toLocaleString("en-US")}. The order as written, ((u ⋈ o) ⋈ i) ⋈ p, costs 605,000 — roughly 40× more. Starting from the most selective relation, products, was the right move.`,
   });
 
   return steps;
@@ -295,7 +295,7 @@ export function JoinOrderDPVisualizer({ locale = "ja" }: Props) {
       description={
         isJa
           ? "4テーブルの結合について、部分集合の小さい順に最適な部分プランを確定していきます。直積になる部分集合は探索空間から刈り取られます。"
-          : "For a four-table join, the optimal sub-plan for every subset is fixed in increasing order of size. Subsets that would require a Cartesian product are pruned from the search space."
+          : "For a four-table join, the optimal sub-plan for every subset is determined in increasing order of size. Subsets that would require a Cartesian product are pruned from the search space."
       }
     >
       <div className="space-y-4">
@@ -367,7 +367,7 @@ export function JoinOrderDPVisualizer({ locale = "ja" }: Props) {
             )}
             {s.skipped && (
               <span className="rounded border border-rose-500/40 bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:text-rose-300">
-                {isJa ? "直積のため除外" : "pruned: cross product"}
+                {isJa ? "直積のため除外" : "pruned: Cartesian product"}
               </span>
             )}
           </div>
@@ -431,7 +431,7 @@ export function JoinOrderDPVisualizer({ locale = "ja" }: Props) {
         {/* DP table */}
         <div>
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {isJa ? "DP 表（確定済みの最適部分プラン）" : "DP table (fixed optimal sub-plans)"}
+            {isJa ? "DP 表（確定済みの最適部分プラン）" : "DP table (optimal sub-plans determined so far)"}
           </div>
           <div className="overflow-x-auto rounded-lg border border-border bg-background">
             <table className="w-full min-w-[420px] border-collapse text-[11px]">

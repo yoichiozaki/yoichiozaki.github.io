@@ -114,8 +114,8 @@ export function RandomMarketLab({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "全員の好みを一様ランダムに生成し、左側（n 人）が提案した場合と右側が提案した場合の両方で GS を実行して、左側が得る相手の平均順位を比べます（1 位が最良）。右側の人数を 1 人増やすと何が起きるかを見てください。"
-          : "Preferences are drawn uniformly at random. GS is run twice — left side (n agents) proposing and right side proposing — and we plot the average rank the left side gets (1 is best). Then add a single agent to the right side and watch."
+          ? "全員の好みを一様ランダムに生成し、左側（n 人）が提案した場合と右側が提案した場合の両方で Gale–Shapley を実行して、左側が得る相手の平均順位を比べます（1 位が最良）。右側の人数を 1 人増やすと何が起きるかを見てください。"
+          : "Preferences are drawn uniformly at random. Gale–Shapley is run twice — left side (n agents) proposing and right side proposing — and we plot the average rank the left side gets (1 is best). Then add a single agent to the right side and watch."
       }
     >
       <div className="mb-3 flex flex-col gap-2">
@@ -181,8 +181,8 @@ export function RandomMarketLab({ locale = "ja" }: Props) {
           role="img"
           aria-label={
             isJa
-              ? "n に対する左側の平均順位のグラフ"
-              : "Average rank obtained by the left side as a function of n"
+              ? "n に対する左側の平均順位のグラフ（左側が提案した場合と右側が提案した場合。参考曲線は ln n と n / ln n）"
+              : "Average rank obtained by the left side as a function of n, when the left proposes and when the right proposes, with reference curves ln n and n / ln n"
           }
         >
           {ticksY.map((v) => (
@@ -244,11 +244,11 @@ export function RandomMarketLab({ locale = "ja" }: Props) {
         <div className="mt-1 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <span className="inline-block h-0.5 w-5" style={{ backgroundColor: SIDE_HEX.left }} />
-            {isJa ? "左側が提案したときの左側の平均順位" : "left's average rank, left proposes"}
+            {isJa ? "左側が提案したときの左側の平均順位" : "left side's average rank when the left proposes"}
           </span>
           <span className="inline-flex items-center gap-1">
             <span className="inline-block h-0.5 w-5" style={{ backgroundColor: SIDE_HEX.right }} />
-            {isJa ? "右側が提案したときの左側の平均順位" : "left's average rank, right proposes"}
+            {isJa ? "右側が提案したときの左側の平均順位" : "left side's average rank when the right proposes"}
           </span>
         </div>
       </div>
@@ -284,22 +284,22 @@ export function RandomMarketLab({ locale = "ja" }: Props) {
               <span className="font-mono">{(last.nLeft / Math.log(last.nLeft)).toFixed(2)}</span>
             </div>
             <div>
-              {isJa ? "左側が提案したときの申し込み総数: " : "Proposals when the left proposes: "}
+              {isJa ? "左側が提案したときの申し込み回数: " : "Proposals when the left proposes: "}
               <span className="font-mono">{last.proposalsWhenLeftProposes.toFixed(1)}</span>
               {ex === 0 && (
                 <span className="text-muted-foreground">
-                  {isJa ? "（n·H_n = " : " (n·H_n = "}
+                  {isJa ? "（期待値の上界 n·H_n = " : " (upper bound on the expected value: n·H_n = "}
                   <span className="font-mono">
                     {(last.nLeft * Array.from({ length: last.nLeft }, (_, k) => 1 / (k + 1)).reduce((a, b) => a + b, 0)).toFixed(1)}
                   </span>
-                  {isJa ? " が上界）" : " is an upper bound)"}
+                  {isJa ? "）" : ")"}
                 </span>
               )}
             </div>
             <div>
               {isJa
-                ? "2 つの極端な安定マッチングで相手が異なる左側の割合（＝右側が申し込むとき、嘘で得をできる左側の割合）: "
-                : "Share of the left side whose partner differs between the two extreme stable matchings (= the left agents who could gain by lying when the right proposes): "}
+                ? "2 つの極端な安定マッチングで相手が異なる左側の割合（＝右側が申し込むとき、嘘で得をできる左側の人の割合）: "
+                : "Share of left agents whose partner differs between the two extreme stable matchings (= the share of left agents who could gain by lying when the right side proposes): "}
               <span className="font-mono font-semibold">
                 {(last.leftAgentsWithDifferentPartners * 100).toFixed(0)}%
               </span>

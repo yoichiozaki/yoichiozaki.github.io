@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -97,20 +98,31 @@ function buildScenario(): LouvainStep[] {
 
   const m = baseEdges.reduce((s, e) => s + e.weight, 0); // total edge weight
 
-  // Compute modularity for given community assignment
+  // Compute modularity for given community assignment:
+  // Q = Σ_c [ L_c / m − (d_c / 2m)² ], where L_c is the internal edge weight
+  // of community c and d_c is the sum of its node degrees.
   function computeModularity(communities: number[]): number {
     const degrees = new Array(10).fill(0);
     for (const e of baseEdges) {
       degrees[e.source] += e.weight;
       degrees[e.target] += e.weight;
     }
-    let q = 0;
+    const internal = new Map<number, number>();
     for (const e of baseEdges) {
       if (communities[e.source] === communities[e.target]) {
-        q += e.weight - (degrees[e.source] * degrees[e.target]) / (2 * m);
+        const c = communities[e.source];
+        internal.set(c, (internal.get(c) ?? 0) + e.weight);
       }
     }
-    return q / (2 * m);
+    const degreeSum = new Map<number, number>();
+    communities.forEach((c, i) => {
+      degreeSum.set(c, (degreeSum.get(c) ?? 0) + degrees[i]);
+    });
+    let q = 0;
+    for (const [c, d] of degreeSum) {
+      q += (internal.get(c) ?? 0) / m - (d / (2 * m)) ** 2;
+    }
+    return q;
   }
 
   // Step 0: Each node in its own community
@@ -123,9 +135,9 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity(init),
       description:
-        "Louvain アルゴリズム開始。Phase 1（局所移動）: 各ノードを独自のコミュニティーに初期化します。10 ノード・14 辺のグラフで、3 つのクラスター構造が潜んでいます。",
+        "Louvain アルゴリズムの開始。各ノードを自分だけのコミュニティーに置いた状態から Phase 1（局所移動）を始めます。グラフは 10 ノード・14 辺で、3 つのクラスターがあります。",
       descriptionEn:
-        "Louvain algorithm begins. Phase 1 (local moving): Initialize each node in its own community. A 10-node, 14-edge graph with 3 hidden clusters.",
+        "Louvain begins with each node in its own community; Phase 1 (local moving) starts from this state. The graph has 10 nodes, 14 edges, and 3 clusters.",
       phase: "init",
     },
     // Step 1: Node 1 → community of node 0
@@ -134,9 +146,9 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 2, 3, 4, 5, 6, 7, 8, 9]),
       description:
-        "ノード 1 を評価: 隣接ノード 0, 2, 3 のコミュニティーへの移動による ΔQ を計算。ノード 0 のコミュニティーに移動すると ΔQ が最大になるため移動。",
+        "ノード 1 を評価: 隣接ノード 0, 2, 3 のコミュニティーへ移動したときの ΔQ を計算します。3 つとも同じ正の値なので、ここではノード 0 のコミュニティーに移動します。",
       descriptionEn:
-        "Evaluate node 1: Compute ΔQ for moving to communities of neighbors 0, 2, 3. Moving to node 0's community yields the largest ΔQ gain.",
+        "Evaluate node 1: compute ΔQ for moving it to the community of neighbor 0, 2, or 3. All three give the same positive ΔQ, so here it joins node 0's community.",
       phase: "move",
       highlight: 1,
       moveArrow: { from: 1, to: 0 },
@@ -147,7 +159,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 3, 4, 5, 6, 7, 8, 9]),
       description:
-        "ノード 2 も同様に ΔQ を計算。ノード 0，1 と同じコミュニティーに移動すると密結合クラスターの内部辺が増え、ΔQ > 0。",
+        "ノード 2 も同様に ΔQ を計算。ノード 0, 1 と同じコミュニティーに移動すると密結合クラスターの内部辺が増え、ΔQ > 0。",
       descriptionEn:
         "Node 2 similarly joins community 0. The dense internal edges among nodes 0, 1, 2 yield ΔQ > 0.",
       phase: "move",
@@ -212,9 +224,9 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 7]),
       description:
-        "ノード 9 がコミュニティー 7 に合流。辺 0-9 はコミュニティー間の橋（ブリッジ辺）として残ります。Phase 1 完了 — これ以上 ΔQ > 0 の移動はありません。",
+        "ノード 9 がコミュニティー 7 に合流。辺 0-9 はコミュニティー間のブリッジ辺として残ります。Phase 1 完了 — これ以上 ΔQ > 0 の移動はありません。",
       descriptionEn:
-        "Node 9 joins community 7. Edge 0–9 remains as an inter-community bridge. Phase 1 complete — no more moves with ΔQ > 0.",
+        "Node 9 joins community 7. Edge 0-9 remains as an inter-community bridge. Phase 1 complete — no more moves with ΔQ > 0.",
       phase: "move",
       highlight: 9,
       moveArrow: { from: 9, to: 7 },
@@ -233,9 +245,9 @@ function buildScenario(): LouvainStep[] {
       ],
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 7]),
       description:
-        "Phase 2（集約）: 各コミュニティーを超ノードに縮約。内部辺は自己ループ（自己辺重み）となり、コミュニティー間辺は超辺になります。3 ノードの縮約グラフが得られました。",
+        "Phase 2（集約）: 各コミュニティーを超ノードに縮約。内部辺は自己ループ（図では省略）に、コミュニティー間辺は超辺になります。3 ノードの縮約グラフが得られました。",
       descriptionEn:
-        "Phase 2 (aggregation): Collapse each community into a super-node. Internal edges become self-loops; inter-community edges become super-edges. A 3-node coarsened graph is obtained.",
+        "Phase 2 (aggregation): Collapse each community into a super-node. Internal edges become self-loops (not drawn); inter-community edges become super-edges. A 3-node coarsened graph is obtained.",
       phase: "aggregate",
     },
     // Step 9: Final — no further improvement
@@ -394,17 +406,17 @@ function ModularityBar({ value }: { value: number }) {
 
 // ── Phase badge ─────────────────────────────────────────────
 
-function PhaseBadge({ phase }: { phase: LouvainStep["phase"] }) {
-  const labels: Record<string, [string, string]> = {
-    init: ["初期化", "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"],
-    move: ["Phase 1: 局所移動", "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"],
-    aggregate: ["Phase 2: 集約", "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"],
-    done: ["収束", "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300"],
+function PhaseBadge({ phase, isJa }: { phase: LouvainStep["phase"]; isJa: boolean }) {
+  const labels: Record<string, [string, string, string]> = {
+    init: ["初期化", "Initialization", "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"],
+    move: ["Phase 1: 局所移動", "Phase 1: Local moving", "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"],
+    aggregate: ["Phase 2: 集約", "Phase 2: Aggregation", "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"],
+    done: ["収束", "Converged", "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300"],
   };
-  const [label, cls] = labels[phase];
+  const [labelJa, labelEn, cls] = labels[phase];
   return (
     <span className={`text-xs font-medium px-2 py-0.5 rounded ${cls}`}>
-      {label}
+      {isJa ? labelJa : labelEn}
     </span>
   );
 }
@@ -429,13 +441,13 @@ export function CommunityDetectionVisualizer({ locale = "ja" }: Props) {
       title={isJa ? "Louvain アルゴリズム ステップ実行" : "Louvain Algorithm Step-Through"}
       description={
         isJa
-          ? "10 ノードのグラフで Louvain の 2 フェーズ（局所移動 → 集約）を追体験します"
+          ? "10 ノードのグラフで、Louvain の 2 フェーズ（局所移動 → 集約）を 1 ステップずつ追います"
           : "Walk through Louvain's two phases (local moving → aggregation) on a 10-node graph"
       }
     >
       <div className="space-y-4">
         <div className="flex items-center gap-3">
-          <PhaseBadge phase={current.phase} />
+          <PhaseBadge phase={current.phase} isJa={isJa} />
           <ModularityBar value={current.modularity} />
         </div>
 
@@ -445,7 +457,7 @@ export function CommunityDetectionVisualizer({ locale = "ja" }: Props) {
           {isJa ? current.description : current.descriptionEn}
         </p>
 
-        <StepPlayerControls {...player} label={stepLabel} />
+        <StepPlayerControls {...player} label={stepLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

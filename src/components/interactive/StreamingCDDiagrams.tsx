@@ -21,56 +21,48 @@ const TIMELINE_EVENTS: TimelineEvent[] = [
     title: "Evolutionary Clustering",
     titleEn: "Evolutionary Clustering",
     desc: "Chakrabarti らが時間的一貫性と品質のトレードオフを定式化",
-    descEn: "Chakrabarti et al. formalize temporal coherence vs quality trade-off",
+    descEn: "Chakrabarti et al. formalize the trade-off between temporal consistency and quality",
     color: "#3b82f6",
   },
   {
     year: "2007",
     title: "GraphScope",
     titleEn: "GraphScope",
-    desc: "Sun らが情報理論ベースの変化点検出付きストリーミング CD を提案",
-    descEn: "Sun et al. propose information-theoretic streaming CD with change-point detection",
+    desc: "Sun らが MDL に基づく変化点検出と送信元・送信先グループのモデル化を組み合わせた手法を提案",
+    descEn: "Sun et al. propose combining MDL-based change-point detection with source/destination group modeling",
     color: "#6366f1",
   },
   {
-    year: "2009",
+    year: "2010",
     title: "DiDiC",
     titleEn: "DiDiC",
-    desc: "Gehweiler & Meyerhenke が分散拡散型クラスタリングを提案",
-    descEn: "Gehweiler & Meyerhenke propose distributed diffusive clustering",
+    desc: "Gehweiler と Meyerhenke が分散拡散型クラスタリングを提案",
+    descEn: "Gehweiler and Meyerhenke propose distributed diffusive clustering",
     color: "#8b5cf6",
-  },
-  {
-    year: "2010",
-    title: "LabelRankT",
-    titleEn: "LabelRankT",
-    desc: "Xie & Szymanski がラベル伝搬を増分化した動的 CD を提案",
-    descEn: "Xie & Szymanski propose incremental label propagation for dynamic CD",
-    color: "#10b981",
   },
   {
     year: "2011",
     title: "OSLOM",
     titleEn: "OSLOM",
-    desc: "Lancichinetti らが統計的有意性に基づく増分的 CD を提案",
-    descEn: "Lancichinetti et al. propose statistically significant incremental CD",
+    desc: "Lancichinetti らがコミュニティーの統計的有意性を局所的に検定する手法を提案",
+    descEn: "Lancichinetti et al. propose testing the statistical significance of communities locally",
     color: "#f59e0b",
   },
   {
     year: "2012",
     title: "DEMON",
     titleEn: "DEMON",
-    desc: "Coscia らがエゴネット＋ラベル伝搬の局所的 CD を提案",
-    descEn: "Coscia et al. propose ego-net + label propagation local CD",
+    desc: "Coscia らが各ノードのエゴネットにラベル伝搬を適用する局所的 CD を提案",
+    descEn: "Coscia et al. propose local CD that runs label propagation on each node's ego-net",
     color: "#ef4444",
   },
   {
-    year: "2015",
-    title: "DynaMo",
-    titleEn: "DynaMo",
-    desc: "Zhuang らが Modularity 増分更新のストリーミング手法を提案",
-    descEn: "Zhuang et al. propose streaming method with incremental Modularity updates",
-    color: "#14b8a6",
+    year: "2013",
+    title: "LabelRankT",
+    titleEn: "LabelRankT",
+    desc: "Xie らが LabelRank を辺の変更に合わせて増分的に更新する動的 CD を提案",
+    descEn: "Xie et al. propose dynamic CD that updates LabelRank incrementally as edges change",
+    color: "#10b981",
   },
   {
     year: "2017",
@@ -81,35 +73,43 @@ const TIMELINE_EVENTS: TimelineEvent[] = [
     color: "#e11d48",
   },
   {
-    year: "2018",
-    title: "ANGEL",
-    titleEn: "ANGEL",
-    desc: "Rossetti がマージベースの増分的重複コミュニティー検出を提案",
-    descEn: "Rossetti proposes merge-based incremental overlapping CD",
-    color: "#f97316",
-  },
-  {
     year: "2019",
-    title: "delta-screening",
-    titleEn: "Delta-screening",
-    desc: "Zarayeneh & Kalyanaraman が Louvain の影響範囲限定更新を提案",
-    descEn: "Zarayeneh & Kalyanaraman propose scope-limited Louvain updates",
-    color: "#0ea5e9",
+    title: "DynaMo",
+    titleEn: "DynaMo",
+    desc: "Zhuang らが辺の追加・削除に合わせて Modularity を増分的に更新する手法を提案",
+    descEn: "Zhuang et al. propose updating Modularity incrementally as edges are added and removed",
+    color: "#14b8a6",
   },
   {
-    year: "2021",
-    title: "EvoGNN",
-    titleEn: "EvoGNN",
-    desc: "GNN ベースの動的コミュニティー検出が本格化",
-    descEn: "GNN-based dynamic community detection gains traction",
+    year: "2020",
+    title: "EvolveGCN",
+    titleEn: "EvolveGCN",
+    desc: "Pareja らが GCN の重みを RNN で時間方向に更新する手法を提案",
+    descEn: "Pareja et al. propose updating GCN weights over time with an RNN",
     color: "#a855f7",
   },
   {
-    year: "2023–",
-    title: "Streaming GNN + LLM",
-    titleEn: "Streaming GNN + LLM",
-    desc: "大規模ストリーミングへの GNN/LLM 応用が活発化",
-    descEn: "GNN/LLM applications to large-scale streaming grow active",
+    year: "2020",
+    title: "ANGEL",
+    titleEn: "ANGEL",
+    desc: "Rossetti がマージベースの重複 CD 手法と、スナップショット単位の動的版 ArchAngel を提案",
+    descEn: "Rossetti proposes a merge-based overlapping CD method and ArchAngel, its snapshot-based dynamic version",
+    color: "#f97316",
+  },
+  {
+    year: "2021",
+    title: "delta-screening",
+    titleEn: "Delta-screening",
+    desc: "Zarayeneh と Kalyanaraman が、辺の変更で影響を受けるノードだけで Louvain を再実行する手法を提案",
+    descEn: "Zarayeneh and Kalyanaraman propose re-running Louvain only on the nodes an edge change affects",
+    color: "#0ea5e9",
+  },
+  {
+    year: "2022",
+    title: "ROLAND",
+    titleEn: "ROLAND",
+    desc: "You らが GNN の各層の出力に時系列モデリングを適用し、ノード表現を継続的に更新する手法を提案",
+    descEn: "You et al. propose applying temporal modeling to each GNN layer's output to keep node representations up to date",
     color: "#ec4899",
   },
 ];
@@ -121,8 +121,8 @@ export function StreamingCDTimeline({ locale = "ja" }: Props) {
       title={isJa ? "ストリーミング CD の歴史" : "History of Streaming CD"}
       description={
         isJa
-          ? "辺ストリームに対するコミュニティー検出研究の主要マイルストーン"
-          : "Key milestones in community detection for edge streams"
+          ? "動的グラフや辺ストリームでのコミュニティー検出 (CD) に関わる主な研究（年は論文の発表年）"
+          : "Key work on community detection (CD) in dynamic graphs and edge streams (years are publication years)"
       }
     >
       <div className="relative ml-4 border-l-2 border-neutral-300 pl-6 dark:border-neutral-600">
@@ -162,26 +162,26 @@ export function BatchVsStreamingDiagram({ locale = "ja" }: Props) {
     {
       label: isJa ? "バッチ再計算" : "Batch Recompute",
       desc: isJa
-        ? "変更があるたびにグラフ全体でCDを再実行"
-        : "Re-run CD on entire graph for every change",
+        ? "辺が変わるたびに、グラフ全体（n ノード、m 辺）で CD を最初から再実行"
+        : "Re-run CD from scratch on the whole graph (n nodes, m edges) after every change",
       cost: "O(m + n)",
       color: "#ef4444",
       icon: "🔄",
     },
     {
-      label: isJa ? "増分的 (Incremental)" : "Incremental",
+      label: isJa ? "増分的更新" : "Incremental Update",
       desc: isJa
-        ? "変更の影響範囲のみを局所的に再計算"
-        : "Locally recompute only the affected scope",
+        ? "変更の影響が及ぶ範囲だけを再計算（Δ = 変更辺数、k = 平均次数）"
+        : "Recompute only the region the change affects (Δ = changed edges, k = average degree)",
       cost: "O(Δ · k)",
       color: "#f59e0b",
       icon: "📍",
     },
     {
-      label: isJa ? "ストリーミング" : "Streaming",
+      label: isJa ? "真のストリーミング" : "True Streaming",
       desc: isJa
-        ? "辺1本の到着につき定数〜対数時間で更新"
-        : "Update in constant or log time per edge arrival",
+        ? "辺 1 本の到着につき、定数時間か対数時間で内部状態を更新"
+        : "Update the internal state in constant or logarithmic time per arriving edge",
       cost: "O(1)–O(log n)",
       color: "#10b981",
       icon: "⚡",
@@ -244,19 +244,19 @@ const ALGO_DATA: AlgoRow[] = [
   {
     name: "LabelRankT",
     year: "2013",
-    paradigm: "ラベル伝搬",
-    paradigmEn: "Label Propagation",
+    paradigm: "ラベル分布の伝搬",
+    paradigmEn: "Label-distribution propagation",
     overlap: false,
     edgeDel: true,
-    complexity: "O(k·d)",
-    strength: "高速、パラメーター不要",
-    strengthEn: "Fast, parameter-free",
+    complexity: "O(k·m_Δ)",
+    strength: "高速、比較的シンプル",
+    strengthEn: "Fast, relatively simple",
   },
   {
     name: "OSLOM",
     year: "2011",
     paradigm: "統計検定",
-    paradigmEn: "Statistical Test",
+    paradigmEn: "Statistical test",
     overlap: true,
     edgeDel: true,
     complexity: "O(c²)",
@@ -292,7 +292,7 @@ const ALGO_DATA: AlgoRow[] = [
     paradigmEn: "Triangle-based",
     overlap: true,
     edgeDel: true,
-    complexity: "O(deg²)",
+    complexity: "O(d + |W|·|labels|)",
     strength: "真のストリーミング、TTL 機構",
     strengthEn: "True streaming, TTL mechanism",
   },
@@ -303,9 +303,9 @@ const ALGO_DATA: AlgoRow[] = [
     paradigmEn: "Merge-based",
     overlap: true,
     edgeDel: false,
-    complexity: "O(d²)",
-    strength: "重複 + 階層構造",
-    strengthEn: "Overlapping + hierarchical",
+    complexity: "—",
+    strength: "ノード中心、重複コミュニティー",
+    strengthEn: "Node-centric, overlapping communities",
   },
   {
     name: "Delta-screening",
@@ -315,8 +315,8 @@ const ALGO_DATA: AlgoRow[] = [
     overlap: false,
     edgeDel: true,
     complexity: "O(d)",
-    strength: "Louvain の品質を維持",
-    strengthEn: "Preserves Louvain quality",
+    strength: "Louvain の再実行比で最大 38 倍高速、Modularity はほぼ同じ（報告値）",
+    strengthEn: "Up to 38× faster than rerunning Louvain, similar Modularity (reported)",
   },
 ];
 
@@ -341,13 +341,13 @@ export function StreamingCDComparisonTable({ locale = "ja" }: Props) {
                 {isJa ? "年" : "Year"}
               </th>
               <th className="px-2 py-1 text-left font-bold">
-                {isJa ? "パラダイム" : "Paradigm"}
+                {isJa ? "アプローチ" : "Approach"}
               </th>
               <th className="px-2 py-1 text-center font-bold">
                 {isJa ? "重複" : "Overlap"}
               </th>
               <th className="px-2 py-1 text-center font-bold">
-                {isJa ? "辺削除" : "Edge Del"}
+                {isJa ? "辺削除" : "Edge deletion"}
               </th>
               <th className="px-2 py-1 text-left font-bold">
                 {isJa ? "計算量 (辺あたり)" : "Complexity (per edge)"}
@@ -385,8 +385,8 @@ export function StreamingCDComparisonTable({ locale = "ja" }: Props) {
       </div>
       <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-500">
         {isJa
-          ? "d = 端点の次数, c = コミュニティーサイズ, k = 反復回数 (2–5), deg = ノード次数"
-          : "d = endpoint degree, c = community size, k = iterations (2–5), deg = node degree"}
+          ? "d = 端点の次数, c = コミュニティーサイズ, k = 局所反復回数, m_Δ = 影響集合 Δ の内外で触れる辺数, W = u と v の共通近傍, labels = 各ノードのラベル集合, — = 辺ごとの更新なし（ArchAngel はスナップショット単位）"
+          : "d = endpoint degree, c = community size, k = local iterations, m_Δ = edges touched in and around the affected set Δ, W = common neighbors of u and v, labels = a node's label set, — = no per-edge update (ArchAngel works per snapshot)"}
       </p>
     </InteractiveDemo>
   );
@@ -411,7 +411,7 @@ export function StreamingDesignSpaceDiagram({ locale = "ja" }: Props) {
         },
         {
           label: isJa ? "遅延更新" : "Lazy Update",
-          desc: isJa ? "バッチで償却" : "Amortized in batches",
+          desc: isJa ? "変更をためてまとめて更新" : "Buffer changes, update in batches",
         },
       ],
       color: "#3b82f6",
@@ -435,11 +435,11 @@ export function StreamingDesignSpaceDiagram({ locale = "ja" }: Props) {
       color: "#10b981",
     },
     {
-      axis: isJa ? "コミュニティーの性質" : "Community Property",
+      axis: isJa ? "コミュニティーの性質" : "Community Properties",
       options: [
         {
           label: isJa ? "排他的" : "Disjoint",
-          desc: isJa ? "各ノードは 1 コミュニティー" : "Each node in 1 community",
+          desc: isJa ? "各ノードは高々 1 つに所属" : "Each node in at most one community",
         },
         {
           label: isJa ? "重複" : "Overlapping",
@@ -464,8 +464,12 @@ export function StreamingDesignSpaceDiagram({ locale = "ja" }: Props) {
           desc: isJa ? "有意性に基づく" : "Significance-based",
         },
         {
-          label: isJa ? "情報理論" : "Info-theoretic",
-          desc: isJa ? "Map Equation 等" : "Map Equation etc.",
+          label: isJa ? "三角形密度" : "Triangle Density",
+          desc: isJa ? "三角形の共有で定義（TILES）" : "Shared triangles define communities (TILES)",
+        },
+        {
+          label: isJa ? "情報理論" : "Information-theoretic",
+          desc: isJa ? "Map Equation など" : "e.g., Map Equation",
         },
       ],
       color: "#8b5cf6",
@@ -481,8 +485,8 @@ export function StreamingDesignSpaceDiagram({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "ストリーミング CD アルゴリズムを設計する際に検討すべき 4 つの独立した次元"
-          : "Four independent dimensions to consider when designing a streaming CD algorithm"
+          ? "ストリーミング CD の設計を、おおむね独立に選べる 4 つの次元で整理した図"
+          : "Streaming CD design organized along four dimensions that can be chosen largely independently"
       }
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -533,35 +537,35 @@ export function TILESProcessDiagram({ locale = "ja" }: Props) {
       label: isJa ? "辺 (u, v) が到着" : "Edge (u, v) arrives",
       desc: isJa
         ? "タイムスタンプ付きの辺がストリームから到着"
-        : "Timestamped edge arrives from stream",
+        : "A timestamped edge arrives from the stream",
     },
     {
       icon: "🔺",
       label: isJa ? "三角形チェック" : "Triangle check",
       desc: isJa
-        ? "u と v の共通近傍 w を探索。三角形 (u,v,w) が存在するか？"
-        : "Search for common neighbor w. Does triangle (u,v,w) exist?",
+        ? "u と v の共通近傍 w を探索。三角形 (u, v, w) が存在するか？"
+        : "Search for a common neighbor w. Does triangle (u, v, w) exist?",
     },
     {
       icon: "🏠",
       label: isJa ? "コミュニティー更新" : "Community update",
       desc: isJa
-        ? "三角形が存在 → u, v, w を同一コミュニティーにマージ or 既存を拡張"
-        : "Triangle exists → merge u, v, w into same community or extend existing",
+        ? "三角形ができたら、u, v, w のうち 2 ノードが共有するコミュニティーに 3 ノードを加える。該当がなければ新しいコミュニティーを作成"
+        : "If a triangle forms, add u, v, w to each community shared by two of them; if there is none, create a new community",
     },
     {
       icon: "⏳",
       label: isJa ? "TTL チェック" : "TTL check",
       desc: isJa
-        ? "辺の TTL（生存時間）を確認。期限切れの辺を除去し、コミュニティーを再評価"
-        : "Check edge TTL. Remove expired edges and re-evaluate communities",
+        ? "辺の TTL（生存時間）を確認。期限切れの辺を除去し、影響を受けるコミュニティーを再評価"
+        : "Check each edge's TTL (time-to-live). Remove expired edges and re-evaluate the affected communities",
     },
     {
       icon: "📤",
       label: isJa ? "結果を出力" : "Emit result",
       desc: isJa
         ? "現在のコミュニティー構造を出力（随時更新）"
-        : "Output current community structure (continuously updated)",
+        : "Output the current community structure (updated continuously)",
     },
   ];
 
@@ -614,8 +618,8 @@ export function DeltaScreeningDiagram({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "辺の変更が Modularity に影響しうるノードだけを特定し、局所的に Louvain を再実行する"
-          : "Identify only nodes whose Modularity may be affected by edge changes, re-run Louvain locally"
+          ? "辺の変更で Modularity 利得が変わりうるノードを先に絞り込み、そのノードだけに Louvain の局所移動を適用する"
+          : "Screen for nodes whose Modularity gain may change after an edge update, then apply Louvain's local moves only to those nodes"
       }
     >
       <svg
@@ -632,7 +636,7 @@ export function DeltaScreeningDiagram({ locale = "ja" }: Props) {
           fontWeight="bold"
           className="fill-neutral-800 dark:fill-neutral-200"
         >
-          {isJa ? "ステップ 1: 変更を検出" : "Step 1: Detect Change"}
+          {isJa ? "ステップ 1: スクリーニング" : "Step 1: Screening"}
         </text>
         {/* Cluster 1 */}
         <circle cx={40} cy={60} r={8} fill="#3b82f6" opacity={0.3} />
@@ -659,7 +663,7 @@ export function DeltaScreeningDiagram({ locale = "ja" }: Props) {
           strokeDasharray="5,3"
         />
         <text x={95} y={58} textAnchor="middle" fontSize={7} fill="#10b981" fontWeight="bold">
-          {isJa ? "新辺" : "new"}
+          {isJa ? "新しい辺" : "new edge"}
         </text>
         {/* Affected zone */}
         <ellipse
@@ -708,7 +712,7 @@ export function DeltaScreeningDiagram({ locale = "ja" }: Props) {
         <line x1={330} y1={55} x2={350} y2={70} stroke="#ef4444" strokeWidth={0.7} opacity={0.2} />
 
         <text x={310} y={105} textAnchor="middle" fontSize={8} fill="#f59e0b">
-          {isJa ? "黄枠のノードのみ再評価" : "Only bordered nodes re-evaluated"}
+          {isJa ? "黄枠のノードのみ再評価" : "Only outlined nodes are re-evaluated"}
         </text>
 
         {/* Savings text */}
@@ -721,8 +725,8 @@ export function DeltaScreeningDiagram({ locale = "ja" }: Props) {
           fill="#10b981"
         >
           {isJa
-            ? "→ 大部分のノードはスキップ → 大幅な高速化"
-            : "→ Most nodes skipped → significant speedup"}
+            ? "→ 大部分のノードをスキップ。全体の再実行より最大 38 倍高速（報告値）"
+            : "→ Most nodes skipped: up to 38× faster than full reruns (reported)"}
         </text>
 
         <defs>

@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -39,7 +40,7 @@ const TIER_LABELS: Record<Tier, { ja: string; en: string }> = {
   interpreter: { ja: "インタプリター", en: "Interpreter" },
   baseline: { ja: "ベースライン JIT", en: "Baseline JIT" },
   optimized: { ja: "最適化 JIT", en: "Optimizing JIT" },
-  deopt: { ja: "脱最適化!", en: "Deoptimized!" },
+  deopt: { ja: "脱最適化", en: "Deoptimized" },
 };
 
 // ── Scenario ────────────────────────────────────────────────
@@ -56,7 +57,7 @@ function buildScenario(): JITState[] {
       events: [],
       eventsEn: [],
       description:
-        "プログラム開始: すべての関数はインタプリターで実行されます。プロファイリングデータの収集が始まります。",
+        "プログラム開始: すべての関数はインタプリターで実行されます。プロファイル情報の収集が始まります。",
       descriptionEn:
         "Program start: All functions execute in the interpreter. Profiling data collection begins.",
     },
@@ -67,8 +68,8 @@ function buildScenario(): JITState[] {
         { name: "helper()", callCount: 200, tier: "interpreter", color: TIER_COLORS.interpreter },
         { name: "format()", callCount: 5, tier: "interpreter", color: TIER_COLORS.interpreter },
       ],
-      events: ["呼び出しカウンターを蓄積中..."],
-      eventsEn: ["Accumulating call counters..."],
+      events: ["呼び出し回数をカウント中..."],
+      eventsEn: ["Counting calls..."],
       description:
         "実行開始直後: 各関数の呼び出し回数がカウントされています。helper() が最も頻繁に呼ばれています。",
       descriptionEn:
@@ -82,11 +83,11 @@ function buildScenario(): JITState[] {
         { name: "format()", callCount: 10, tier: "interpreter", color: TIER_COLORS.interpreter },
       ],
       events: [
-        "helper(): 500回呼び出し → しきい値到達!",
+        "helper(): 500回呼び出し → しきい値に到達",
         "→ ベースライン JIT でコンパイル",
       ],
       eventsEn: [
-        "helper(): 500 calls → threshold reached!",
+        "helper(): 500 calls → threshold reached",
         "→ Compiled with baseline JIT",
       ],
       description:
@@ -124,21 +125,21 @@ function buildScenario(): JITState[] {
         { name: "format()", callCount: 30, tier: "interpreter", color: TIER_COLORS.interpreter },
       ],
       events: [
-        "helper(): 十分なプロファイルデータ蓄積",
-        "→ 最適化 JIT でコンパイル!",
+        "helper(): 十分なプロファイル情報を蓄積",
+        "→ 最適化 JIT でコンパイル",
         "  ・型特殊化: int 想定",
-        "  ・インライン展開: calculate() 内の呼び出しをインライン化",
+        "  ・インライン展開: helper() 内の呼び出しを展開",
         "  ・ガード命令を挿入",
       ],
       eventsEn: [
         "helper(): sufficient profile data accumulated",
-        "→ Compiled with optimizing JIT!",
+        "→ Compiled with optimizing JIT",
         "  - Type specialization: assuming int",
-        "  - Inlining: inline calls within calculate()",
+        "  - Inlining: inline calls within helper()",
         "  - Guard instructions inserted",
       ],
       description:
-        "helper() が十分なプロファイルデータを蓄積し、最適化 JIT でコンパイルされます。型特殊化（int 前提）、インライン展開、ガード命令の挿入が行われます。",
+        "helper() が十分なプロファイル情報を蓄積し、最適化 JIT でコンパイルされます。型特殊化（int 前提）、インライン展開、ガード命令の挿入が行われます。",
       descriptionEn:
         "helper() has enough profile data — compiled by optimizing JIT. Type specialization (assuming int), inlining, and guard instruction insertion are performed.",
       highlight: "helper()",
@@ -153,17 +154,17 @@ function buildScenario(): JITState[] {
       events: [
         "calculate() も最適化 JIT へ昇格",
         "format() はコールドなままインタプリターで実行",
-        "★ ホットコードはネイティブ速度で動作中!",
+        "★ ホットな関数は最適化済みネイティブコードで実行中",
       ],
       eventsEn: [
         "calculate() also promoted to optimizing JIT",
         "format() remains cold, stays in interpreter",
-        "★ Hot code running at native speed!",
+        "★ Hot functions run as optimized native code",
       ],
       description:
         "定常状態: ホットな関数（calculate, helper）は最適化済みネイティブコードで高速実行。コールドな format() はインタプリターのまま（コンパイルコスト不要）。",
       descriptionEn:
-        "Steady state: Hot functions (calculate, helper) run as optimized native code at full speed. Cold format() stays in interpreter (no compilation cost).",
+        "Steady state: Hot functions (calculate, helper) run quickly as optimized native code. Cold format() stays in the interpreter (no compilation cost).",
     },
     // Step 6: DEOPT!
     {
@@ -173,21 +174,21 @@ function buildScenario(): JITState[] {
         { name: "format()", callCount: 50, tier: "interpreter", color: TIER_COLORS.interpreter },
       ],
       events: [
-        "helper(\"string\") ← string が渡された!",
-        "→ ガード命令が失敗 (型チェック: int ではない!)",
-        "→ 脱最適化 (deoptimization) 発生!",
-        "→ インタプリターに戻ってフレームを再構築",
+        "helper(\"string\") ← string が渡された",
+        "→ ガード命令が失敗 (型チェック: int ではない)",
+        "→ 脱最適化 (deoptimization) が発生",
+        "→ インタプリターのフレームを再構築して制御を戻す",
       ],
       eventsEn: [
-        "helper(\"string\") ← string was passed!",
-        "→ Guard instruction failed (type check: not int!)",
-        "→ Deoptimization triggered!",
-        "→ Fall back to interpreter, reconstruct frame",
+        "helper(\"string\") ← string was passed",
+        "→ Guard instruction failed (type check: not int)",
+        "→ Deoptimization triggered",
+        "→ Reconstruct interpreter frame, resume in interpreter",
       ],
       description:
-        "予期しない型（string）で helper() が呼ばれました！ガード命令が失敗し、脱最適化が発生。ネイティブコードを破棄してインタプリターに戻ります。",
+        "予期しない型（string）で helper() が呼ばれました。ガード命令が失敗して脱最適化が発生し、ネイティブコードを破棄してインタプリターに戻ります。",
       descriptionEn:
-        "helper() called with unexpected type (string)! Guard instruction fails, deoptimization occurs. Native code discarded, falls back to interpreter.",
+        "helper() is called with an unexpected type (string). The guard instruction fails and deoptimization occurs: the native code is discarded and execution falls back to the interpreter.",
       highlight: "helper()",
     },
     // Step 7: Recompile
@@ -198,21 +199,21 @@ function buildScenario(): JITState[] {
         { name: "format()", callCount: 50, tier: "interpreter", color: TIER_COLORS.interpreter },
       ],
       events: [
-        "helper(): 新しいプロファイルデータで再コンパイル",
-        "→ 型特殊化: int | string（多相版）",
+        "helper(): 新しいプロファイル情報で再コンパイル",
+        "→ 型特殊化: int | string（多形）",
         "→ 再び最適化 JIT で実行",
-        "★ VM は学習し適応する!",
+        "★ 観測した型に合わせて再最適化",
       ],
       eventsEn: [
         "helper(): recompiled with new profile data",
         "→ Type specialization: int | string (polymorphic)",
         "→ Running in optimizing JIT again",
-        "★ The VM learns and adapts!",
+        "★ Reoptimized for the observed types",
       ],
       description:
-        "helper() が更新されたプロファイルで再コンパイル。今度は int と string の両方に対応する多相版の最適化コードが生成されます。VM は経験から学習します。",
+        "helper() が更新されたプロファイル情報で再コンパイルされます。今度は int と string の両方に対応する多形（polymorphic）の最適化コードが生成されます。",
       descriptionEn:
-        "helper() recompiled with updated profile. Now generates polymorphic optimized code handling both int and string. The VM learns from experience.",
+        "helper() is recompiled with the updated profile, this time into polymorphic optimized code that handles both int and string.",
       highlight: "helper()",
     },
   ];
@@ -243,8 +244,8 @@ export function JITTieringVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "3つの関数が実行されるにつれて、インタプリター → ベースライン JIT → 最適化 JIT へ昇格していく過程を追いかけます。脱最適化と再コンパイルも体験できます。"
-          : "Watch 3 functions progress from interpreter → baseline JIT → optimizing JIT as they execute. Experience deoptimization and recompilation."
+          ? "3つの関数のうち、呼び出し回数が増えたものがインタプリター → ベースライン JIT → 最適化 JIT へ昇格し、その1つが脱最適化と再コンパイルを経る様子を示します。しきい値と回数は説明用の値です。"
+          : "Step through 3 functions: those called often move from interpreter → baseline JIT → optimizing JIT, and one is then deoptimized and recompiled. Thresholds and counts are illustrative."
       }
     >
       {/* Tier legend */}
@@ -343,7 +344,7 @@ export function JITTieringVisualizer({ locale = "ja" }: Props) {
         </div>
       )}
 
-      <StepPlayerControls {...player} label={labelFn} />
+      <StepPlayerControls {...player} label={labelFn} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }

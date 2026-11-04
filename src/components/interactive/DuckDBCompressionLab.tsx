@@ -33,8 +33,8 @@ const DATASETS: Dataset[] = [
     ],
     winner: "BitPacking (DELTA_FOR)",
     why: {
-      ja: "差分がほぼ 0〜2 に収まるので、DELTA_FOR モードが基準値からの差を 2 ビットに詰め込める。BitpackingMode は CONSTANT / CONSTANT_DELTA / DELTA_FOR / FOR の 4 モードを 2048 値グループごとに選び直す。",
-      en: "Deltas fall in 0–2, so DELTA_FOR packs each value into 2 bits above a frame of reference. BitpackingMode re-picks among CONSTANT / CONSTANT_DELTA / DELTA_FOR / FOR for every group of 2048 values.",
+      ja: "差分が 0〜2 に収まるので、DELTA_FOR モードは差分を基準値からのずれとして 1 値 2 ビットに詰め込めます。BitpackingMode は CONSTANT / CONSTANT_DELTA / DELTA_FOR / FOR の 4 モードを 2048 値のグループごとに選び直します。",
+      en: "Deltas fall in 0–2, so DELTA_FOR packs each delta into 2 bits above a frame of reference. BitpackingMode re-picks among CONSTANT / CONSTANT_DELTA / DELTA_FOR / FOR for every group of 2048 values.",
     },
   },
   {
@@ -50,13 +50,13 @@ const DATASETS: Dataset[] = [
     ],
     winner: "Dictionary",
     why: {
-      ja: "辞書は 3 エントリーだけ。各行は「辞書の何番目か」を指すインデックスになり、それをさらにビットパックすると 1 行 2 ビット。文字列そのものはもう 1 度も現れない。DICT_FSST の見積もりは `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2 という一律 2 倍圧縮の仮定なので 61,440 バイト。なお FSST と DICT_FSST が同じ競争に並ぶことはありません（ストレージ v1.3.0 以降は FSST 側の Analyze が nullptr を返して無効化されます）。",
-      en: "The dictionary holds just three entries; every row becomes an index into it, bit-packed down to 2 bits. The string bytes themselves never repeat. DICT_FSST's estimate is `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2 — a flat \"assume 2×\" guess — i.e. 61,440 bytes. Note that FSST and DICT_FSST never appear in the same contest: from storage v1.3.0 onward FSST's Analyze returns nullptr and it is disabled.",
+      ja: "辞書は 3 エントリーだけです。各行は「辞書の何番目か」を指すインデックスになり、ビットパックすると 1 行 2 ビットです。文字列そのものは辞書に 1 回ずつしか現れません。DICT_FSST の見積もりは `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2、つまり一律 2 倍圧縮の仮定なので 61,440 バイトです。なお DICT_FSST が Dictionary や FSST と同じ競争に並ぶことはありません（ストレージ v1.3.0 以降は Dictionary と FSST の Analyze が nullptr を返して無効になり、それより前は DICT_FSST が無効です）。Dictionary が勝つのは、v1.3.0 より前のストレージ形式の場合です。",
+      en: "The dictionary holds just three entries; every row becomes an index into it, bit-packed down to 2 bits. The string bytes themselves never repeat. DICT_FSST's estimate is `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2 — a flat \"assume 2×\" guess — i.e. 61,440 bytes. Note that DICT_FSST never shares a contest with Dictionary or FSST: from storage v1.3.0 onward, Dictionary's and FSST's Analyze return nullptr, and before that DICT_FSST is disabled. Dictionary wins only with the pre-v1.3.0 storage format.",
     },
   },
   {
     id: "comment",
-    label: { ja: "自由文テキスト（平均 27 文字）", en: "Free-form text (avg. 27 chars)" },
+    label: { ja: "自由記述テキスト（平均 27 文字）", en: "Free-form text (avg. 27 chars)" },
     physical: "VARCHAR",
     sample: "'furiously regular accounts wake', …",
     candidates: [
@@ -67,13 +67,13 @@ const DATASETS: Dataset[] = [
     ],
     winner: "DICT_FSST",
     why: {
-      ja: "ほぼ全行が異なるので辞書は効きません。FSST は 255 個の「よく出る 1〜8 バイト列」を 1 バイトの記号に置き換える静的シンボルテーブルで、ランダムアクセス可能なまま約半分に縮みます。DICT_FSST は辞書と FSST を 1 つのセグメント形式に統合したもので、見積もりは total_string_length / 2 = 1,658,880 バイト。FSST 単体はストレージ v1.3.0 以降は候補から外れるので、DICT_FSST と直接競うことはありません。",
-      en: "Almost every row differs, so a dictionary is useless. FSST replaces up to 255 frequent 1–8 byte substrings with single-byte symbols, roughly halving the payload while staying randomly accessible. DICT_FSST folds dictionary and FSST into a single segment format; its estimate is total_string_length / 2 = 1,658,880 bytes. Plain FSST is not a rival here — it is excluded from the candidate list on storage v1.3.0 and newer.",
+      ja: "ほぼ全行が異なるので辞書は効きません。FSST は、よく出る 1〜8 バイト列を最大 255 個まで 1 バイトの記号に置き換える静的シンボルテーブルで、ランダムアクセスできるまま文字列を約半分に縮めます。DICT_FSST は辞書と FSST を 1 つのセグメント形式に統合したもので、見積もりは total_string_length / 2 = 1,658,880 バイトです。Dictionary と FSST 単体はストレージ v1.3.0 以降は候補から外れるので、DICT_FSST と直接競うことはありません。",
+      en: "Almost every row differs, so a dictionary does not help. FSST replaces up to 255 frequent 1–8 byte substrings with single-byte symbols, roughly halving the payload while staying randomly accessible. DICT_FSST folds dictionary and FSST into a single segment format; its estimate is total_string_length / 2 = 1,658,880 bytes. Dictionary and plain FSST are not rivals here: on storage v1.3.0 and newer, both are excluded from the candidate list.",
     },
   },
   {
     id: "price",
-    label: { ja: "小数 2 桁の DOUBLE", en: "DOUBLE with 2 decimal digits" },
+    label: { ja: "小数 2 桁の DOUBLE", en: "DOUBLE with 2 decimal places" },
     physical: "DOUBLE",
     sample: "938.71, 1204.05, 87.60, 4412.33, …",
     candidates: [
@@ -84,8 +84,8 @@ const DATASETS: Dataset[] = [
     ],
     winner: "ALP",
     why: {
-      ja: "ALP (Adaptive Lossless floating-Point) は「その double は本当は 10 進小数だろう」と賭ける。値 × 10^e を整数に丸めて元に戻せるか検証し、成功すれば整数として FOR + ビットパック。1024 値ごとに exponent/factor を選び直し、外れ値は例外リストに逃がす。",
-      en: "ALP (Adaptive Lossless floating-Point) bets that the double is really a decimal. It rounds value × 10^e to an integer, verifies the round trip, and on success stores it as FOR + bit-packed integers. Exponent and factor are re-chosen every 1024 values, with outliers spilled to an exception list.",
+      ja: "ALP (Adaptive Lossless floating-Point) は「その double は本当は 10 進小数だろう」と賭けます。値 × 10^e を整数に丸めて元に戻せるか検証し、成功すれば整数として FOR + ビットパックします。1024 値ごとに指数と係数を選び直し、外れ値は例外リストに格納します。",
+      en: "ALP (Adaptive Lossless floating-Point) bets that the double is really a decimal. It rounds value × 10^e to an integer, verifies the round trip, and on success stores it as FOR + bit-packed integers. Exponent and factor are re-chosen every 1024 values, with outliers stored in an exception list.",
     },
   },
   {
@@ -101,8 +101,8 @@ const DATASETS: Dataset[] = [
     ],
     winner: "RLE",
     why: {
-      ja: "RLE は (値, 実行長) の組を並べるだけ。実行長は uint16_t なので 1 ランは最大 65535 行。240 ランなら 240 × 6 バイト = 1440 バイトで 1 row group 全体が表現できる。",
-      en: "RLE stores (value, run length) pairs. The run length is a uint16_t, so a single run covers at most 65,535 rows. With 240 runs, an entire row group fits in 240 × 6 = 1,440 bytes.",
+      ja: "RLE は (値, ランの長さ) の組を並べるだけです。ランの長さは uint16_t なので、1 ランは最大 65,535 行です。240 ランなら 240 × (4 + 2) バイト = 1,440 バイトで 1 row group 全体を表現できます。",
+      en: "RLE stores (value, run length) pairs. The run length is a uint16_t, so a single run covers at most 65,535 rows. With 240 runs, an entire row group fits in 240 × (4 + 2) = 1,440 bytes.",
     },
   },
   {
@@ -118,7 +118,7 @@ const DATASETS: Dataset[] = [
     ],
     winner: "Constant",
     why: {
-      ja: "この列だけは Analyze の勝者ではありません。Constant は `COMPRESSION_CONSTANT = 2, // internal only` で、`EmitCompressionFunction()` が候補一覧から外すため Analyze には参加しません。Analyze を勝つのは RLE です — `RLEState::Update()` は NULL を「直前のランを 1 伸ばすだけ」として扱うので、非 NULL がすべて同じ値ならこの row group はほぼ 1 ラン（1 ランの上限は 65,535 行）に潰れます。そのうえで書き出し時に `BaseStatistics::IsConstant()`（min == max）が成立するため、セグメントは最終的に Constant に差し替えられます。NULL の位置を示す validity は別の列として checkpoint され、そちらでは Roaring が候補に入ります。",
+      ja: "この列だけは、Analyze の結果では方式が決まりません。Constant は `COMPRESSION_CONSTANT = 2, // internal only` で、`EmitCompressionFunction()` が候補一覧から外すため Analyze には参加しません。Analyze で勝つのは RLE です。`RLEState::Update()` は NULL を「直前のランを 1 伸ばすだけ」として扱うので、非 NULL がすべて同じ値ならこの row group は約 2 ラン（1 ランの上限は 65,535 行）に潰れます。そのうえで書き出し時に `BaseStatistics::IsConstant()`（min == max）が成立するため、セグメントは最終的に Constant に差し替えられます。NULL の位置を示す validity は別の列として checkpoint され、そちらでは Roaring が候補に入ります。",
       en: "This column is the one case not decided by Analyze. Constant is `COMPRESSION_CONSTANT = 2, // internal only`, and `EmitCompressionFunction()` keeps it out of the candidate list, so it never runs Analyze at all. The Analyze contest is actually won by RLE: `RLEState::Update()` treats a NULL as merely incrementing the last seen count, so with every non-NULL equal to 42 the whole row group collapses into about two runs (a run caps at 65,535 rows). Then at flush time `BaseStatistics::IsConstant()` (min == max) holds and the segment is swapped to Constant anyway. The validity mask marking the NULL positions is checkpointed as its own column, and that is where Roaring competes.",
     },
   },
@@ -146,8 +146,8 @@ export function DuckDBCompressionLab({ locale = "ja" }: Props) {
       title={isJa ? "圧縮方式はデータが決める" : "The data picks the compression"}
       description={
         isJa
-          ? `1 row group（${ROWS.toLocaleString()} 行）を書き出すとき、DuckDB は候補となる圧縮関数それぞれに Analyze を通し、FinalAnalyze が返す推定バイト数が最小のものを採用します。列を選んで、その競争を覗いてみてください（数値は概算）。`
-          : `When flushing one row group (${ROWS.toLocaleString()} rows), DuckDB runs Analyze for every candidate compression function and keeps the one whose FinalAnalyze returns the smallest estimate. Pick a column to watch that contest (figures are ballpark).`
+          ? `1 row group（${ROWS.toLocaleString()} 行）を書き出すとき、DuckDB は候補となる圧縮関数それぞれに Analyze を通し、FinalAnalyze が返す推定バイト数が最小のものを採用します。列を選んで、その競争を覗いてみてください（サイズは説明用の概算）。`
+          : `When flushing one row group (${ROWS.toLocaleString()} rows), DuckDB runs Analyze for every candidate compression function and keeps the one whose FinalAnalyze returns the smallest estimate. Pick a column to watch that contest (sizes are illustrative estimates).`
       }
     >
       <div className="flex flex-col gap-4">
@@ -206,8 +206,8 @@ export function DuckDBCompressionLab({ locale = "ja" }: Props) {
                   <span className="absolute inset-y-0 left-2 font-mono text-[10px] leading-6 text-foreground">
                     {skipped
                       ? isJa
-                        ? "この列のデータには当てはまらない"
-                        : "does not apply to this data"
+                        ? "この列には適用されない"
+                        : "not applicable to this column"
                       : fmt(c.bytes)}
                   </span>
                 </div>

@@ -20,7 +20,7 @@ const MAX_K = 12;
 const SERIES = [
   { key: "servedRate", color: "#5db8a6", ja: "提供率", en: "served rate" },
   { key: "escapeShare", color: "#cc785c", ja: "提供物中の不良率", en: "defect share of served" },
-  { key: "escapesPerItem", color: "#e8a55a", ja: "不良の提供 / 生成 item", en: "defects served per item" },
+  { key: "escapesPerItem", color: "#e8a55a", ja: "不良の提供数 / item", en: "defects served per item" },
 ] as const;
 
 type SeriesKey = (typeof SERIES)[number]["key"];
@@ -43,16 +43,16 @@ const SLIDERS: SliderSpec[] = [
   { key: "hardShare", ja: "直せない item の割合", en: "share of unfixable items", min: 0, max: 0.6, step: 0.05, format: pct0 },
   { key: "fixRate", ja: "1 回の修正で直る確率", en: "P(one revision fixes a bad draft)", min: 0, max: 1, step: 0.05, format: pct0 },
   { key: "regressionRate", ja: "誤って落とされた良稿の改悪率", en: "P(revising a falsely rejected good draft breaks it)", min: 0, max: 0.5, step: 0.05, format: pct0 },
-  { key: "specificity", ja: "ジャッジの Specificity（fail 再現率）", en: "judge specificity (fail-recall)", min: 0.5, max: 1, step: 0.01, format: pct0 },
-  { key: "recall", ja: "ジャッジの Recall（pass 再現率）", en: "judge recall (pass-recall)", min: 0.5, max: 1, step: 0.01, format: pct0 },
+  { key: "specificity", ja: "ジャッジの Specificity（fail 再現率）", en: "judge Specificity (fail-recall)", min: 0.5, max: 1, step: 0.01, format: pct0 },
+  { key: "recall", ja: "ジャッジの Recall（pass 再現率）", en: "judge Recall (pass-recall)", min: 0.5, max: 1, step: 0.01, format: pct0 },
   { key: "persistence", ja: "見逃しの持続性 ρ", en: "persistence of misses ρ", min: 0, max: 1, step: 0.1, format: (v) => v.toFixed(1) },
   { key: "retryBudget", ja: "リトライ予算 K", en: "retry budget K", min: 0, max: MAX_K, step: 1, format: (v) => String(v) },
 ];
 
 const PRESETS: Array<{ id: string; ja: string; en: string; params: GateParams }> = [
   { id: "default", ja: "既定", en: "default", params: DEFAULT_GATE_PARAMS },
-  { id: "independent", ja: "見逃しが毎回独立 (ρ=0)", en: "independent misses (ρ=0)", params: { ...DEFAULT_GATE_PARAMS, persistence: 0 } },
-  { id: "persistent", ja: "見逃しが一貫 (ρ=1)", en: "persistent misses (ρ=1)", params: { ...DEFAULT_GATE_PARAMS, persistence: 1 } },
+  { id: "independent", ja: "見逃しが毎回独立（ρ=0）", en: "independent misses (ρ=0)", params: { ...DEFAULT_GATE_PARAMS, persistence: 0 } },
+  { id: "persistent", ja: "見逃しが一貫（ρ=1）", en: "persistent misses (ρ=1)", params: { ...DEFAULT_GATE_PARAMS, persistence: 1 } },
   {
     id: "weak",
     ja: "弱い生成器",
@@ -109,14 +109,14 @@ export function JudgeGateSimulator({ locale = "ja" }: Props) {
               ? "Defects grow faster than coverage, so the defect share users see gets worse too."
               : countRises
                 ? "The defect share of what is served does not get worse, but the absolute number of defects served still rises."
-                : "The number of defects served barely changes: retries are adding almost only good items."
+                : "The number of defects served barely changes: retries are adding almost exclusively good items."
           }`,
     );
   }
   if (hasPostRevision) {
     verdicts.push(
       isJa
-        ? `修正後に提供された層の不良率は ${pct(strata.postRevisionShare)}（同じ設定で ρ=1 なら ${pct(strataPersistent.postRevisionShare)}、ρ=0 なら ${pct(strataIndependent.postRevisionShare)}）。人手監査で測ったこの層の不良率がこの範囲のどこにあるかで、ρ の見当が付きます（ただしこのモデルは草稿の欠陥を 1 つとして扱います。捕まる欠陥と見逃される欠陥が相乗りする実際のシステムでは ρ=1 の値を上回ることがあり、そのときは ρ ではなく相乗りを疑います）。この層はリトライが K=0 に上乗せした提供そのものなので、その不良率が損益分岐（フォールバックの価値を 0 とすれば、良品 1 件の価値 ÷（その価値 + 不良 1 件の損害））を上回るなら K を下げるべきです。`
+        ? `修正後に提供された層の不良率は ${pct(strata.postRevisionShare)} です（同じ設定で ρ=1 なら ${pct(strataPersistent.postRevisionShare)}、ρ=0 なら ${pct(strataIndependent.postRevisionShare)}）。人手監査で測ったこの層の不良率がこの範囲のどこにあるかで、ρ の見当が付きます（ただしこのモデルは草稿の欠陥を 1 つとして扱います。捕まる欠陥と見逃される欠陥が相乗りする実際のシステムでは ρ=1 の値を上回ることがあり、そのときは ρ ではなく相乗りを疑います）。この層はリトライが K=0 に上乗せした提供そのものなので、その不良率が損益分岐（フォールバックの価値を 0 とすれば、良品 1 件の価値 ÷（その価値 + 不良 1 件の損害））を上回るなら K を下げるべきです。`
         : `The defect share of the "served after revision" stratum is ${pct(strata.postRevisionShare)} (with the same settings: ${pct(strataPersistent.postRevisionShare)} at ρ=1, ${pct(strataIndependent.postRevisionShare)} at ρ=0). Where your human-audited share falls in that range gives a rough idea of your ρ, within this single-defect model: in a real system where a caught defect can ride along with an always-missed one, the share can exceed the ρ=1 value, and if it does, suspect ride-along defects rather than ρ. This stratum is exactly what retries add on top of K=0, so if its defect share exceeds the break-even rate (with a fallback worth 0: value of a good item ÷ (that value + cost of a defect)), lower K.`,
     );
   }
@@ -124,7 +124,7 @@ export function JudgeGateSimulator({ locale = "ja" }: Props) {
     verdicts.push(
       isJa
         ? `提供物の ${pct(current.escapeShare)} が人間基準では不良です。Specificity が高く見えても、初稿の不良率（事前確率）が高いと提供物は汚れます。`
-        : `${pct(current.escapeShare)} of what users see is defective by the human standard. A specificity that sounds high is not enough when most drafts start out bad.`,
+        : `${pct(current.escapeShare)} of what users see is defective by the human standard. A Specificity that sounds high is not enough when the first-draft defect rate (the prior) is high.`,
     );
   }
   if (current.dropRate >= 0.25) {
@@ -137,8 +137,8 @@ export function JudgeGateSimulator({ locale = "ja" }: Props) {
 
   const columns = [
     { title: isJa ? "ジャッジなし" : "no judge", summary: none },
-    { title: isJa ? "ゲートのみ (K=0)" : "gate only (K=0)", summary: gateOnly },
-    { title: isJa ? `ゲート + 批評家 (K=${K})` : `gate + critic (K=${K})`, summary: current },
+    { title: isJa ? "ゲートのみ（K=0）" : "gate only (K=0)", summary: gateOnly },
+    { title: isJa ? `ゲート + 批評家（K=${K}）` : `gate + critic (K=${K})`, summary: current },
   ];
 
   const rows: Array<{ label: string; cells: string[] }> = [
@@ -165,11 +165,11 @@ export function JudgeGateSimulator({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "ゲート + 批評家ループのシミュレーター" : "Gate + critic loop simulator"}
+      title={isJa ? "ゲート + 修正ループのシミュレーター" : "Gate + revision loop simulator"}
       description={
         isJa
-          ? "生成 → 判定 → 修正のループを、人間基準の良否とジャッジの Specificity / Recall で表した小さなマルコフ連鎖です。リトライ予算 K を増やすと提供率は上がりますが、ジャッジの見逃しが試行ごとに独立なほど、不良の提供も増えます。"
-          : "A small Markov chain of the generate → judge → revise loop, with human-standard quality and the judge's specificity / recall. Raising the retry budget K serves more items, but the more independent the judge's misses are across attempts, the more defects slip through too."
+          ? "生成 → 判定 → 修正のループを、人間基準の良否とジャッジの Specificity / Recall で表した小さなマルコフ連鎖です。リトライ予算 K を増やすと提供率は上がりますが、ジャッジの見逃しが試行ごとに独立なほど、不良の提供数も増えます。"
+          : "A small Markov chain of the generate → judge → revise loop, with human-standard quality and the judge's Specificity / Recall. Raising the retry budget K serves more items, but the more independent the judge's misses are across attempts, the more defects slip through too."
       }
     >
       <div className="flex flex-col gap-5">
@@ -240,8 +240,8 @@ export function JudgeGateSimulator({ locale = "ja" }: Props) {
 
         <p className="text-xs leading-relaxed text-muted-foreground">
           {isJa
-            ? "前提: 良否は人間の基準。草稿は全体として良か不良かの 2 値で表し、基準ごとに別々の欠陥が同時に存在する状況（捕まる欠陥と見逃される欠陥の相乗り）は扱いません。直せない item の草稿は何度直しても不良のまま。ρ は「同じ item の欠陥をジャッジが見逃すかどうか」が試行間でどれだけ一貫しているかで、ρ=0 は毎回独立（リトライにとって最悪）、ρ=1 は item ごとに常に捕まえるか常に見逃すか。誤って落とされた良稿の修正は、改悪率の確率で不良になります。数値はすべて仮定であり、論文の Netflix システムを再現したものではありません。"
-            : "Assumptions: good/bad follows the human standard. A draft is good or bad as a whole; separate defects co-occurring across criteria (a caught defect riding along with an always-missed one) are not modeled. Drafts of unfixable items stay bad however often they are revised. ρ is how consistent the judge's miss/catch decision is across attempts on the same item: ρ=0 means independent draws (the worst case for retries), ρ=1 means each item is either always caught or always missed. Revising a falsely rejected good draft breaks it with the regression probability. All numbers are assumptions; this does not reconstruct Netflix's system."}
+            ? "前提: 良否は人間の基準に従います。草稿は全体として良か不良かの 2 値で表し、基準ごとに別々の欠陥が同時に存在する状況（捕まる欠陥と見逃される欠陥の相乗り）は扱いません。直せない item の草稿は何度直しても不良のままです。ρ は「同じ item の欠陥をジャッジが見逃すかどうか」が試行間でどれだけ一貫しているかを表し、ρ=0 は毎回独立（リトライにとって最悪）、ρ=1 は item ごとに常に捕まえるか常に見逃すかのどちらかです。誤って落とされた良稿の修正は、改悪率の確率で不良になります。パラメーターの値はすべて仮定で、論文の Netflix システムを再現したものではありません。"
+            : "Assumptions: good/bad follows the human standard. A draft is good or bad as a whole; separate defects co-occurring across criteria (a caught defect riding along with an always-missed one) are not modeled. Drafts of unfixable items stay bad however often they are revised. ρ is how consistent the judge's miss/catch decision is across attempts on the same item: ρ=0 means independent draws (the worst case for retries), ρ=1 means each item is either always caught or always missed. Revising a falsely rejected good draft breaks it with the regression probability. All parameter values are assumptions; this does not reconstruct Netflix's system."}
         </p>
       </div>
     </InteractiveDemo>

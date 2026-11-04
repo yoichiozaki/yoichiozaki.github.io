@@ -9,15 +9,7 @@ tags: ["AI", "Agent", "Workflow", "C#", ".NET", "Microsoft Agent Framework"]
 
 2025 年から 2026 年にかけて、LLM をチャットの応答に使うだけでなく、複数のエージェントを協調させて複雑なタスクを遂行する「Agentic Workflow」という設計が急速に広まっている。
 
-Agentic Workflow では、LLM で推論するエージェントをグラフのノードに置き、実行順序・分岐・並列度を開発者が定義する。この記事では、この組み合わせが従来の自動化やチャットボットで扱えないタスクをなぜ扱えるのかを整理し、代表的なワークフローパターンを [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) の C# コードで実装する。各パターンでメッセージがどう流れるかは、インタラクティブなビジュアライザーで確認できる。扱う内容は次のとおりだ。
-
-1. Agentic Workflow とは何か — 定義・背景・従来手法との比較
-2. ワークフローの設計パターン — Sequential・Concurrent・Conditional・Handoff・Writer-Critic・Group Chat
-3. 発展的な構成パターン — Sub-Workflow・Workflow-as-Agent・Declarative Workflow
-4. Microsoft Agent Framework の C# 実装 — WorkflowBuilder・Executor・Edge のコードレベル解説
-5. 実践的な実装例 — Writer-Critic ループのフル実装
-6. 本番運用の考慮事項 — エラーハンドリング・チェックポイント・オブザーバビリティー・Human-in-the-Loop
-7. 設計指針 — いつ Agent を使い、いつ Workflow を使うべきか
+Agentic Workflow では、LLM で推論するエージェントをグラフのノードに置き、実行順序・分岐・並列度を開発者が定義する。そのため、ルールでは書けない判断を含む複数ステップの処理も、決めておいた流れどおりに実行できる。この記事では、従来の自動化・チャットボット・単一エージェントとの違いを整理し、代表的なワークフローパターンを [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) の C# コードで実装する。フレームワークの実行モデル（Pregel / BSP）と実装上の注意点、本番運用での考慮事項、Agent と Workflow の使い分けも扱う。各パターンでメッセージがどう流れるかは、インタラクティブなビジュアライザーで確認できる。
 
 ## Agentic Workflow とは何か
 
@@ -27,40 +19,40 @@ Agentic Workflow では、LLM で推論するエージェントをグラフの�
 
 この定義には 2 つの要素がある。
 
-1. 「エージェント」が構成要素である — LLM で推論するエージェントが、ワークフローのノードとして働く
-2. 「ワークフロー」で制御される — エージェントの実行順序・条件分岐・並列度は、ワークフロー定義で明示的に制御される。次に何をするかをエージェントの判断に任せず、開発者がグラフ構造で実行フローを設計する
+1. LLM で推論するエージェントが、ワークフローのノードとして働く
+2. ワークフロー定義が、エージェントの実行順序・条件分岐・並列度を明示的に制御する。次に何をするかをエージェントの判断に任せず、開発者がグラフ構造で実行フローを設計する
 
 つまり Agentic Workflow は、個々の判断に LLM の柔軟性を使い、実行の流れをワークフローで決定論的に制御する設計だ。
 
 ### 従来手法との比較
 
-次の表の 4 つのアプローチのうち、高い柔軟性と高い制御性を両立するのは Agentic Workflow だけだ。
+次の表は 4 つのアプローチを定性的に比べたものだ。柔軟性は想定外の入力やあいまいな判断に対応できる度合い、制御性は実行の流れを開発者があらかじめ決めておける度合いを指す。高い柔軟性と高い制御性を両立するのは Agentic Workflow だけだ。
 
-| 特性 | 従来の自動化 (RPA等) | チャットボット | 単一エージェント | Agentic Workflow |
+| 特性 | 従来の自動化（RPA 等） | チャットボット | 単一エージェント | Agentic Workflow |
 |------|---------------------|-------------|---------------|-----------------|
 | 柔軟性 | 低い（ルールベース） | 中程度 | 高い | 高い |
 | 制御性 | 非常に高い | 低い | 低い | 高い |
 | 複雑なタスク | ハードコード | 不向き | 単一視点 | 多角的に対応 |
-| エラーハンドリング | 分岐で対応 | LLM任せ | LLM任せ | 構造的に対応 |
+| エラーハンドリング | 分岐で対応 | LLM 任せ | LLM 任せ | 構造的に対応 |
 | 品質保証 | テスト可能 | 困難 | 困難 | レビューループで対応 |
 | 実装コスト | 高い | 低い | 低い～中程度 | 中程度 |
 
-従来の自動化（RPA 等）は、定義済みのルールに厳密に従うため制御性は高いが、想定外の入力やあいまいな判断には対応できない。「もしメールの件名にキーワード X が含まれたら Y をする」というルールは書けるが、「このメールの意図を理解して適切に返信する」は不可能だ。
+従来の自動化（RPA 等）は、定義済みのルールに厳密に従うため制御性は高いが、想定外の入力やあいまいな判断には対応できない。「もしメールの件名にキーワード X が含まれたら Y をする」というルールは書けるが、「このメールの意図を理解して適切に返信する」というルールは書けない。
 
 チャットボットは LLM の柔軟性を活かせるが、単発の応答に限られ、複雑な業務プロセスの遂行には向かない。「旅行の予約を手伝って」と言えば会話はできるが、予約・決済・確認メール送信という一連のプロセスを確実にこなすのは難しい。
 
 単一エージェントはツール呼び出しで外部世界とやりとりでき、かなり複雑なタスクもこなせる。しかし、すべてのロジックが 1 つのエージェントに集中するため、関心の分離が難しく、品質管理の過程も外から見えなくなる。
 
-Agentic Workflow では、各エージェントに専門領域を持たせ、ワークフローで実行順序を制御し、品質ゲート（Critic による審査ループなど）をグラフに組み込める。
+Agentic Workflow は、各エージェントに専門領域を持たせ、ワークフローで実行順序を制御し、品質ゲート（Critic による審査ループなど）をグラフに組み込むことで、これらの課題に対処する。
 
 ### なぜ今 Agentic Workflow なのか
 
 Agentic Workflow が実用的になった背景には、次の 4 つの技術的進歩がある。
 
-1. <strong>LLM の能力向上</strong> — GPT-4 以降のモデルは、ツール呼び出し・構造化出力・ロールプレイの能力が大幅に向上し、ワークフロー内のノードとして十分に機能するようになった
-2. <strong>Structured Output</strong> — LLM が JSON スキーマに従った構造化出力を確実に生成できるようになり、エージェント間でメッセージを型安全に受け渡せるようになった
-3. <strong>MCP の標準化</strong> — Model Context Protocol によってエージェントとツールの接続方法が標準化され、ツール統合のコストが大きく下がった
-4. <strong>フレームワークの成熟</strong> — Microsoft Agent Framework、LangGraph、CrewAI などのフレームワークが成熟し、少ないコードでワークフローを構築できるようになった
+1. GPT-4 以降のモデルは、ツール呼び出し・構造化出力・ロールプレイの能力が向上し、ワークフロー内のノードとして十分に機能するようになった
+2. LLM が JSON スキーマに従った構造化出力（Structured Output）を確実に生成できるようになり、エージェント間でメッセージを型安全に受け渡せるようになった
+3. Model Context Protocol によってエージェントとツールの接続方法が標準化され、ツール統合のコストが下がった
+4. Microsoft Agent Framework、LangGraph、CrewAI などのフレームワークが成熟し、少ないコードでワークフローを構築できるようになった
 
 ## ワークフローの設計パターン
 
@@ -76,11 +68,11 @@ Agentic Workflow には定番の設計パターンがいくつかあり、単独
 
 <SequentialPatternDiagram />
 
-<strong>ユースケース</strong>: 翻訳チェーン、データ変換パイプライン、段階的な文書処理
+ユースケース: 翻訳チェーン、データ変換パイプライン、段階的な文書処理
 
-<strong>メリット</strong>: 実装が簡単で、各ステップの入出力が明確なのでデバッグしやすい。
+メリット: 実装が簡単で、各ステップの入出力が明確なのでデバッグしやすい。
 
-<strong>トレードオフ</strong>: ステップを並列化できないため、全体のレイテンシーは各ステップの合計になる。
+トレードオフ: ステップを並列化できないため、全体のレイテンシーは各ステップの合計になる。
 
 Microsoft Agent Framework では `AgentWorkflowBuilder.BuildSequential()` の 1 行でこのパターンを構築できる。
 
@@ -117,11 +109,11 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 
 <ConcurrentPatternDiagram />
 
-<strong>ユースケース</strong>: 複数言語への同時翻訳、複数角度からの分析、並列データ処理
+ユースケース: 複数言語への同時翻訳、複数角度からの分析、並列データ処理
 
-<strong>メリット</strong>: 全体のレイテンシーは、Sequential のような各ステップの合計ではなく、最も遅いエージェントの処理時間で決まる。
+メリット: 全体のレイテンシーは、Sequential のような各ステップの合計ではなく、最も遅いエージェントの処理時間で決まる。
 
-<strong>トレードオフ</strong>: API の同時呼び出しが増えるため、レート制限に注意が必要になる。結果を集約するロジックも必要だ。
+トレードオフ: API の同時呼び出しが増えるため、レート制限に注意が必要になる。結果を集約するロジックも必要だ。
 
 ```csharp
 // Concurrent: 並列翻訳
@@ -140,11 +132,11 @@ Workflow workflow = AgentWorkflowBuilder.BuildConcurrent(
 
 ### パターン 3: Conditional Routing（条件分岐）
 
-Executor の出力に基づいて次の実行先を動的に決定するパターンだ。`if-else` や `switch-case` に相当する。
+Executor（ワークフローの処理ノード）の出力に基づいて次の実行先を動的に決定するパターンだ。`if-else` や `switch-case` に相当する。
 
 <ConditionalPatternDiagram />
 
-<strong>ユースケース</strong>: メール分類（スパム/正常）、チケットルーティング、コンテンツモデレーション
+ユースケース: メール分類（スパム/正常）、チケットルーティング、コンテンツモデレーション
 
 ```csharp
 // Conditional Routing: スパム分類の例
@@ -163,15 +155,15 @@ WorkflowBuilder builder = new WorkflowBuilder(classifier)
     .WithOutputFrom(spamHandler, replyGenerator, manualReviewHandler);
 ```
 
-`AddSwitch` は内部で単一の `FanOutEdge` を生成し、`EdgeSelector` が最初にマッチしたケースで早期リターンする。そのため `AddSwitch` の分岐は switch-case と同じく排他的だ。一方、`AddEdge` で条件付き Edge を個別に複数追加すると、分岐は独立した複数の if 文と同じく非排他的になり、条件を満たすすべての Edge にメッセージが配信される。この違いは「実装上の注意点」で、ソースコードとともに説明する。
+`AddSwitch` の分岐は `switch-case` と同じく排他的で、最初に条件を満たしたケースの宛先だけにメッセージが届く。一方、`AddEdge` で条件付き Edge を個別に複数追加すると、分岐は独立した複数の `if` 文と同じく非排他的になり、条件を満たすすべての Edge にメッセージが配信される。この違いが生じる仕組みは「実装上の注意点」で、ソースコードとともに説明する。
 
 ### パターン 4: Handoff（委任）
 
-トリアージ・エージェントが入力を分析し、適切な専門エージェントに処理を委任するパターンだ。Conditional と似ているが、エージェント自身が委任先を決定する点が異なる。
+トリアージ・エージェントが入力を分析し、適切な専門エージェントに処理を委任するパターンだ。Conditional ではワークフロー定義の条件が分岐先を決めるが、Handoff ではエージェント自身が委任先を決める。
 
 <HandoffPatternDiagram />
 
-<strong>ユースケース</strong>: カスタマーサポートの振り分け、教育チューター、専門家チーム
+ユースケース: カスタマーサポートの振り分け、教育チューター、専門家チーム
 
 ```csharp
 // Handoff: トリアージ → 専門エージェントへの委任
@@ -213,11 +205,11 @@ Writer が成果物を生成し、Critic がレビューし、承認されるま
 
 <WriterCriticPatternDiagram />
 
-<strong>ユースケース</strong>: コンテンツ生成、コードレビュー、翻訳品質管理
+ユースケース: コンテンツ生成、コードレビュー、翻訳品質管理
 
-<strong>メリット</strong>: 品質ゲートがグラフに組み込まれ、反復のたびに出力の品質を高められる。
+メリット: 品質ゲートがグラフに組み込まれ、反復のたびに出力の品質を高められる。
 
-<strong>トレードオフ</strong>: ループ回数に比例して LLM の呼び出しが増える。最大イテレーション数の安全弁が必要になる。
+トレードオフ: ループ回数に比例して LLM の呼び出しが増える。最大イテレーション数の安全弁が必要になる。
 
 ```csharp
 // Writer-Critic ループ: 反復改善ワークフロー
@@ -234,11 +226,11 @@ WorkflowBuilder builder = new WorkflowBuilder(writer)
 
 ### パターン 6: Group Chat（グループチャット）
 
-Handoff パターンでは「今のエージェントが次のエージェントを 1 つ選ぶ」のに対し、Group Chat は複数のエージェントがラウンドで会話するパターンだ。誰が次に発言するかは `GroupChatManager` が制御する。
+Group Chat は、複数のエージェントがラウンドで会話するパターンだ。Handoff では今のエージェントが次のエージェントを 1 つ選ぶが、Group Chat では誰が次に発言するかを `GroupChatManager` が決める。
 
 <GroupChatPatternDiagram />
 
-<strong>ユースケース</strong>: ブレインストーミング、多角的レビュー、ディベート形式の分析
+ユースケース: ブレインストーミング、多角的レビュー、ディベート形式の分析
 
 ```csharp
 // Group Chat: マネージャーが発言順を制御する複数エージェントの会話
@@ -255,7 +247,7 @@ Workflow workflow = AgentWorkflowBuilder
 
 ### 発展的な構成パターン
 
-Agent Framework には、ワークフローを部品として組み合わせたり、別の形で公開・定義したりする仕組みもある。
+Agent Framework には、ワークフローを別のワークフローに埋め込んだり、エージェントとして公開したり、YAML で定義したりする仕組みもある。
 
 #### Sub-Workflow（サブワークフロー）
 
@@ -327,7 +319,7 @@ Agent Framework のワークフローは、処理ノードである Executor を
 <!-- or Microsoft.Agents.AI.Foundry for Azure AI Foundry -->
 ```
 
-`Microsoft.Agents.AI` がフレームワークのコアで、`AIAgent`、`ChatClientAgent`、`AgentResponseUpdate` といったエージェント関連の基盤型が含まれる。`Microsoft.Agents.AI.Workflows` にはワークフロー関連の型（`WorkflowBuilder`、`Executor`、`InProcessExecution`、`StreamingRun` 等）が含まれる。`Microsoft.Agents.AI.Workflows.Generators` はソースジェネレーターで、`[MessageHandler]` 属性のディスパッチコードを自動生成する。`Microsoft.Agents.AI.OpenAI` は OpenAI / Azure OpenAI と、`Microsoft.Agents.AI.Foundry` は Microsoft Foundry (旧 Azure AI Foundry) と統合するためのパッケージだ。
+`Microsoft.Agents.AI` がフレームワークのコアで、`AIAgent`、`ChatClientAgent`、`AgentResponseUpdate` といったエージェント関連の基盤型が含まれる。`Microsoft.Agents.AI.Workflows` にはワークフロー関連の型（`WorkflowBuilder`、`Executor`、`InProcessExecution`、`StreamingRun` 等）が含まれる。`Microsoft.Agents.AI.Workflows.Generators` はソースジェネレーターで、`[MessageHandler]` 属性のディスパッチコードを自動生成する。`Microsoft.Agents.AI.OpenAI` は OpenAI / Azure OpenAI と、`Microsoft.Agents.AI.Foundry` は Microsoft Foundry（旧 Azure AI Foundry）と統合するためのパッケージだ。
 
 ### コア概念: Executor
 
@@ -468,7 +460,7 @@ builder.AddFanInBarrierEdge(
     target: aggregator);
 ```
 
-Edge は、ワークフローエンジンがスーパーステップ（後述する実行の区切り）を進めるときに使われる。各スーパーステップでアクティブな Executor が実行され、その出力メッセージが Edge の条件に従って次の Executor に配送される。条件は Edge ごとに独立して評価されるため、`AddEdge` で作った複数の条件付き Edge に、1 つの出力が同時にマッチすることがある。この挙動を含む注意点は「実装上の注意点」で説明する。
+Edge は、スーパーステップ（後述する実行の区切り）をまたいでメッセージを運ぶ。各スーパーステップでアクティブな Executor が実行され、その出力メッセージが Edge の条件に従って次の Executor に配送される。条件は Edge ごとに独立して評価されるため、`AddEdge` で作った複数の条件付き Edge に、1 つの出力が同時にマッチすることがある。この挙動を含む注意点は「実装上の注意点」で説明する。
 
 ### コア概念: WorkflowBuilder
 
@@ -526,11 +518,11 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 
 #### Pregel / BSP とは何か
 
-<strong>BSP（Bulk Synchronous Parallel）</strong>は 1990 年に Leslie Valiant が提唱した並列計算モデルで、計算を「スーパーステップ」と呼ぶ区切りの繰り返しとして組み立てる。各スーパーステップは次の 3 つのフェーズからなる。
+<strong>BSP（Bulk Synchronous Parallel）</strong>は 1990 年に Leslie Valiant が[論文](https://doi.org/10.1145/79173.79181)で提唱した並列計算モデルで、計算を「スーパーステップ」と呼ぶ区切りの繰り返しとして組み立てる。各スーパーステップは次の 3 つのフェーズからなる。
 
-1. <strong>ローカル計算</strong> — 各プロセッサー（Executor）がローカルのメッセージキューを読み取り、計算を実行する
-2. <strong>メッセージ送信</strong> — 計算結果を他のプロセッサーへのメッセージとして送信する
-3. <strong>バリア同期</strong> — 全プロセッサーの計算完了を待ち、状態更新をバッチ適用する。次のスーパーステップでは新しいメッセージが利用可能になる
+1. ローカル計算 — 各プロセッサー（Executor）がローカルのメッセージキューを読み取り、計算を実行する
+2. メッセージ送信 — 計算結果を他のプロセッサーへのメッセージとして送信する
+3. バリア同期 — 全プロセッサーの計算完了を待ち、状態の更新をまとめて適用する。次のスーパーステップでは新しいメッセージが利用可能になる
 
 Pregel は BSP を有向グラフの頂点ベース計算に特化させたもので、「各頂点が受信メッセージを処理し、隣接頂点にメッセージを送信し、自身の状態を更新する」というループを繰り返す。
 
@@ -549,7 +541,7 @@ sequenceDiagram
     SS1->>B1: 出力メッセージを Edge に送信
     Note over B1: フェーズ 3: バリア同期
     B1->>B1: 全 Executor の完了を待機
-    B1->>B1: ステート更新をバッチ適用
+    B1->>B1: ステート更新をまとめて適用
     B1->>B1: チェックポイント作成（有効時）
     B1->>SS2: 新しいメッセージキューを配信
     Note over SS2: 次のスーパーステップ開始
@@ -558,7 +550,7 @@ sequenceDiagram
     B2->>SS3: 継続...
 ```
 
-次のシミュレーターでは、Concurrent 翻訳ワークフローを例に、各フェーズ（ローカル計算 → メッセージ送信 → バリア同期）で Executor のメッセージキューとステートがどう変わるかをステップ実行で追える。
+次のシミュレーターでは、Concurrent 翻訳ワークフローを例に、各フェーズ（ローカル計算 → メッセージ送信 → バリア同期）で各 Executor 宛てのメッセージとステートがどう変わるかをステップ実行で追える。
 
 <BSPVisualizer />
 
@@ -614,13 +606,15 @@ async ValueTask<bool> RunSuperStepAsync(CancellationToken cancellationToken)
 }
 ```
 
+配送待ちのメッセージがなくなるまで、エンジンはこのメソッドを繰り返し呼ぶ。その時点で外部入力の待ちもなければ、ワークフローは完了する。
+
 このメソッドのうち、ワークフローの設計に関わるのは次の 3 つのステップだ。
 
-<strong>並行実行</strong>: ステップ 3 では `Task.WhenAll` で、同一スーパーステップ内のすべての Executor を並行に実行する。Concurrent（Fan-out）パターンで複数のエージェントが同時に動くのはこのためだ。Sequential パターンでは各スーパーステップでアクティブな Executor が 1 つだけなので、実行は実質的に直列になる。
+並行実行: ステップ 3 では `Task.WhenAll` で、同一スーパーステップ内のすべての Executor を並行に実行する。Concurrent（Fan-out）パターンで複数のエージェントが同時に動くのはこのためだ。Sequential パターンでは各スーパーステップでアクティブな Executor が 1 つだけなので、実行は実質的に直列になる。
 
-<strong>バリア同期</strong>: ステップ 5 で `PublishUpdatesAsync()` が呼ばれ、スーパーステップ中に `QueueStateUpdateAsync()` でキューされたステート更新がまとめて適用される。そのため、同一スーパーステップ内の複数の Executor は同じスナップショットを読む。別の Executor がキューした更新は、次のスーパーステップまで見えない。
+バリア同期: ステップ 5 で `PublishUpdatesAsync()` が呼ばれ、スーパーステップ中に `QueueStateUpdateAsync()` でキューされたステート更新がまとめて適用される。そのため、同一スーパーステップ内の複数の Executor は同じスナップショットを読む。別の Executor がキューした更新は、次のスーパーステップまで見えない。
 
-<strong>チェックポイント</strong>: チェックポイントが有効なら、ステップ 6 で各スーパーステップの終わりに自動で作成される。チェックポイントには次の情報が含まれる。
+チェックポイント: チェックポイントが有効なら、ステップ 6 で各スーパーステップの終わりに自動で作成される。チェックポイントには次の情報が含まれる。
 - `StepContext` — 次のスーパーステップに配送予定のメッセージキュー
 - `StateManager` — 全 Executor のステート
 - `EdgeMap` — Edge のステート（Fan-in バリアの待機状態等）
@@ -711,15 +705,13 @@ await foreach (WorkflowEvent evt in run.WatchStreamAsync())
 
 #### なぜ Pregel / BSP なのか
 
-Agent Framework がこのモデルを採用した利点として、次の 5 つが挙げられる。
+Agent Framework がこのモデルを採用した利点は次の 5 つだ。
 
-1. <strong>決定論的な実行順序</strong>: バリア同期により、「スーパーステップ N で送信されたメッセージはスーパーステップ N+1 で処理される」ことが保証される。そのため、デバッグとテストがしやすい
-2. <strong>一貫したステート</strong>: ステート更新はバリア時にまとめて適用されるため、同一ステップ内の複数の Executor が同じステートを読み書きしても競合しない
-3. <strong>チェックポイントとの親和性</strong>: バリアがチェックポイントを作る自然な位置になるため、障害復旧やワークフローの再開を簡潔に実装できる
-4. <strong>並行実行の制御</strong>: ステップ内の `Task.WhenAll` による並行実行と、ステップ間のバリアによる同期を組み合わせて、並行度を制御できる
-5. <strong>オブザーバビリティー</strong>: スーパーステップ単位でイベントが発生するため、ワークフローの進行をステップごとに追跡できる
-
-全 Executor のキューが空になるか、`WithOutputFrom` で指定された Executor が出力を生成するとワークフローが完了する。
+1. 決定論的な実行順序: バリア同期により、「スーパーステップ N で送信されたメッセージはスーパーステップ N+1 で処理される」ことが保証される。そのため、デバッグとテストがしやすい
+2. 一貫したステート: ステート更新はバリア時にまとめて適用されるため、同一ステップ内の複数の Executor が同じステートを読み書きしても競合しない
+3. チェックポイントとの親和性: バリアがチェックポイントを作る自然な位置になるため、障害復旧やワークフローの再開を簡潔に実装できる
+4. 並行実行の制御: ステップ内の `Task.WhenAll` による並行実行と、ステップ間のバリアによる同期を組み合わせて、並行度を制御できる
+5. オブザーバビリティー: スーパーステップ単位でイベントが発生するため、ワークフローの進行をステップごとに追跡できる
 
 #### 2 つのキュー — Message Queue と Event Queue
 
@@ -729,9 +721,9 @@ Agent Framework がこのモデルを採用した利点として、次の 5 つ�
 
 ##### Message Queue（`StepContext.QueuedMessages`）
 
-<strong>流れるもの</strong>: Executor 間のビジネスメッセージ（`MessageEnvelope`）
+流れるもの: Executor 間のビジネスメッセージ（`MessageEnvelope`）
 
-キューは Executor ごとにあるわけではない。[`StepContext`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/Execution/StepContext.cs) が `ConcurrentDictionary<string, ConcurrentQueue<MessageEnvelope>>` を保持し、Executor ID をキーにしてメッセージを振り分ける。
+メッセージキューは Executor 自身ではなく [`StepContext`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/Execution/StepContext.cs) が持ち、`ConcurrentDictionary<string, ConcurrentQueue<MessageEnvelope>>` で宛先の Executor ID ごとにキューを分けている。
 
 Executor が送ったメッセージは、次の経路で次のスーパーステップ用のキューに入る。
 
@@ -761,23 +753,51 @@ public async ValueTask<StepContext> AdvanceAsync(CancellationToken cancellationT
 }
 ```
 
-取り出された `StepContext` の `QueuedMessages` は、`RunSuperstepAsync()` 内で Executor ID ごとにフィルターされ、各 Executor に並行配信される。
+取り出された `StepContext` は、前掲の `RunSuperStepAsync()` の抜粋のステップ 3 で各 Executor に配られる。`QueuedMessages` にある Executor ID ごとに、`MessagesFor(receiverId)` でその Executor 宛てのキューを取り出し、`DeliverMessagesAsync()` を 1 回ずつ呼ぶ。異なる Executor への配信は並行に進む。`DeliverMessagesAsync()` の中では 1 つの Executor 宛てのキューからメッセージを 1 件ずつ取り出すので、同じ Executor 宛てのメッセージはキューに入った順に処理される。
 
 ```csharp
-// InProcessRunner.RunSuperstepAsync() — Executor ID でフィルタして配信
-List<Task> receiverTasks = currentStep.QueuedMessages.Keys
-    .Select(receiverId =>
-        DeliverMessagesAsync(
-            receiverId,
-            currentStep.MessagesFor(receiverId),  // Executor ID でフィルタ
-            cancellationToken).AsTask())
-    .ToList();
-await Task.WhenAll(receiverTasks);  // 同一ステップ内は並行実行
+// InProcessRunner.DeliverMessagesAsync() — 1 つの Executor 宛てのキューを順に処理する（抜粋）
+// https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/InProc/InProcessRunner.cs
+private async ValueTask DeliverMessagesAsync(string receiverId, ConcurrentQueue<MessageEnvelope> envelopes, CancellationToken cancellationToken)
+{
+    Executor executor = await this.RunContext.EnsureExecutorAsync(receiverId, this.StepTracer, cancellationToken).ConfigureAwait(false);
+
+    this.StepTracer.TraceActivated(receiverId);
+
+    // ...
+    IWorkflowContext tracelessContext = this.RunContext.BindWorkflowContext(receiverId);
+
+    try
+    {
+        await executor.OnMessageDeliveryStartingAsync(tracelessContext, cancellationToken)
+                      .ConfigureAwait(false);
+
+        while (envelopes.TryDequeue(out var envelope))
+        {
+            (object message, TypeId messageType) = await TranslateMessageAsync(envelope).ConfigureAwait(false);
+
+            await executor.ExecuteCoreAsync(
+                message,
+                messageType,
+                this.RunContext.BindWorkflowContext(receiverId, envelope.TraceContext),
+                this.TelemetryContext,
+                cancellationToken
+            ).ConfigureAwait(false);
+        }
+    }
+    finally
+    {
+        await executor.OnMessageDeliveryFinishedAsync(tracelessContext, cancellationToken)
+                      .ConfigureAwait(false);
+    }
+
+    // （各メッセージの型を復元するローカル関数 TranslateMessageAsync は省略）
+}
 ```
 
 ##### Event Queue（`ConcurrentEventSink`）
 
-<strong>流れるもの</strong>: ワークフローの観測・制御イベント（`WorkflowEvent`）
+流れるもの: ワークフローの観測・制御イベント（`WorkflowEvent`）
 
 [`ConcurrentEventSink`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/Execution/ConcurrentEventSink.cs) は `InProcessRunner` が 1 つだけ保持するイベントシンクで、Executor 間のメッセージルーティングには関与しない。
 
@@ -793,15 +813,15 @@ internal class ConcurrentEventSink : IEventSink
 }
 ```
 
-ここに流れる主なイベントは次のとおり。
+ここに流れる主なイベントは次のとおりだ。
 
 | イベント | 発火タイミング |
 |---------|-------------|
 | `SuperStepStartedEvent` | スーパーステップ開始時 |
 | `SuperStepCompletedEvent` | スーパーステップ完了時 |
-| `AgentResponseUpdateEvent` | LLM ストリーミング出力（トークン単位） |
-| `WorkflowOutputEvent` | `YieldOutputAsync()` で最終出力が生成された時 |
-| `RequestInfoEvent` | Human-in-the-Loop の入力待ち |
+| `AgentResponseUpdateEvent` | LLM がストリーミングで出力するたび（トークン単位） |
+| `WorkflowOutputEvent` | `YieldOutputAsync()` で最終出力が生成されたとき |
+| `RequestInfoEvent` | Human-in-the-Loop で外部入力を要求したとき |
 | `WorkflowErrorEvent` | 例外発生時 |
 
 これらは `StreamingRun.WatchStreamAsync()` でクライアントコードに公開される。
@@ -810,7 +830,7 @@ internal class ConcurrentEventSink : IEventSink
 
 | 項目 | Message Queue | Event Queue |
 |------|--------------|-------------|
-| 正体 | `StepContext.QueuedMessages` | `ConcurrentEventSink` |
+| 実体 | `StepContext.QueuedMessages` | `ConcurrentEventSink` |
 | 流れるデータ | `MessageEnvelope`（ビジネスデータ） | `WorkflowEvent`（観測イベント） |
 | 目的 | Executor 間のメッセージルーティング | ワークフロー実行状況の外部通知 |
 | ルーティング | Edge の条件判定で宛先決定 | なし（全イベントが外部に流れる） |
@@ -896,7 +916,7 @@ internal sealed class CriticExecutor : Executor<ChatMessage, CriticDecision>
 }
 ```
 
-`ChatResponseFormat.ForJsonSchema<CriticDecision>()` を指定すると、LLM は `CriticDecision` クラスの JSON Schema に従った JSON を出力する。`[Description]` 属性が各フィールドの意味を LLM に伝え、`[JsonPropertyName]` が JSON のキー名を指定する。`[JsonIgnore]` が付いたフィールドは JSON Schema に含まれず、ワークフロー内部の状態管理専用として使える。
+`ChatResponseFormat.ForJsonSchema<CriticDecision>()` を指定すると、LLM は `CriticDecision` クラスの JSON スキーマに従った JSON を出力する。`[Description]` 属性が各フィールドの意味を LLM に伝え、`[JsonPropertyName]` が JSON のキー名を指定する。`[JsonIgnore]` が付いたフィールドは JSON スキーマに含まれず、ワークフロー内部の状態管理専用として使える。
 
 ### IWorkflowContext による状態管理
 
@@ -956,6 +976,129 @@ internal sealed class AggregationExecutor()
 ```
 
 `IResettableExecutor` を実装していないステートフルな共有 Executor を再利用しようとすると、`InvalidOperationException` がスローされる。ファクトリー経由で毎回新しいインスタンスを生成する場合は不要だが、パフォーマンス上の理由でインスタンスを共有する場合は必須だ。
+
+### 実装上の注意点（Gotchas）
+
+Microsoft Agent Framework のワークフローには、ドキュメントだけでは見落としやすい挙動がある。以下は、ソースコードで確認できたものだ。
+
+#### 1. `AddEdge` の条件付き Edge は排他的ではない
+
+`AddEdge` で複数の条件付き Edge を同一ソースに追加すると、すべての Edge が独立に評価される。`if-else` ではなく、独立した `if` 文が並んでいるのと同じだ。
+
+```csharp
+// ⚠️ 両方の条件が true なら、processorA と processorB の両方が実行される！
+builder
+    .AddEdge<MyResult>(source, processorA, r => r?.Score > 50)
+    .AddEdge<MyResult>(source, processorB, r => r?.Score > 30);
+// Score = 70 の場合 → processorA と processorB の両方にメッセージが配信される
+```
+
+根拠は [`InProcessRunnerContext.SendMessageAsync()`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/InProc/InProcessRunnerContext.cs) にある。このメソッドは全 Edge を `foreach` で走査し、マッチした Edge すべての宛先にメッセージを配信する。
+
+```csharp
+// InProcessRunnerContext.SendMessageAsync() — 全 Edge を独立評価
+foreach (Edge edge in edges)  // break も return もない
+{
+    DeliveryMapping? maybeMapping =
+        await _edgeMap.PrepareDeliveryForEdgeAsync(edge, envelope, cancellationToken);
+    maybeMapping?.MapInto(this._nextStep);  // マッチした分だけ全部配信
+}
+```
+
+<strong>排他的な分岐が必要な場合は `AddSwitch` を使う。</strong> `AddSwitch` は内部的に単一の `FanOutEdge` を生成し、[`SwitchBuilder.ReduceToFanOut()`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/SwitchBuilder.cs) 内の `EdgeSelector` が最初にマッチしたケースで早期リターンする。
+
+```csharp
+// SwitchBuilder 内部の EdgeSelector（簡略化）
+IEnumerable<int> EdgeSelector(object? input, int targetCount)
+{
+    for (int i = 0; i < caseMap.Count; i++)
+    {
+        if (caseMap[i].Predicate(input))
+            return caseMap[i].OutgoingIndicies;  // 最初のマッチで即 return
+    }
+    return defaultIndicies;  // どれにもマッチしなければデフォルト
+}
+```
+
+| API | 内部 Edge | セマンティクス | 複数マッチ |
+|------|----------|------------|--------|
+| `AddEdge` × N | 複数の `DirectEdge` | 複数の独立した `if` | あり得る |
+| `AddSwitch` | 単一の `FanOutEdge` | `switch-case`（最初のマッチで確定） | なし |
+
+#### 2. 型が合わないメッセージは黙って捨てられる
+
+`DirectEdgeRunner` は、メッセージの型がターゲット Executor の `[MessageHandler]` で受け付ける型に合致しない場合、メッセージをエラーなしで破棄する（`DroppedTypeMismatch`）。
+
+```csharp
+// DirectEdgeRunner.ChaseEdgeAsync() — 型不一致はサイレントにドロップ
+if (CanHandle(target, messageType))
+{
+    return new DeliveryMapping(envelope, target);  // 配信
+}
+// ↓ ここに到達すると DroppedTypeMismatch — 例外は発生しない
+return null;
+```
+
+これは意図的な設計で、同一ソースから異なる型のメッセージが出るポリモーフィックなルーティングを可能にするためだ。ただし、意図しない型の不一致によるバグが、エラーなしで起きるリスクがある。デバッグ時は OpenTelemetry のトレースで `DroppedTypeMismatch` タグを確認するとよい。
+
+#### 3. `FanOutEdge` の `targetSelector` が null なら全ターゲットに配信される
+
+`AddFanOutEdge` で `targetSelector` を省略すると、すべてのターゲット Executor にメッセージが配信される。ブロードキャストが目的なら問題ないが、配信先を選びたいなら必ず `targetSelector` を指定する。
+
+```csharp
+// ⚠️ targetSelector 省略 → 全ターゲットに配信
+builder.AddFanOutEdge(source, [handlerA, handlerB, handlerC]);
+
+// ✅ targetSelector で配信先を制御
+builder.AddFanOutEdge<MyResult>(source, [handlerA, handlerB, handlerC],
+    targetSelector: (result, count) =>
+    {
+        if (result?.Category == "urgent") return [0];  // handlerA のみ
+        return Enumerable.Range(0, count);              // 全ターゲット
+    });
+```
+
+#### 4. `FanInBarrierEdge` は「全ソースの完了」を待つ
+
+`AddFanInBarrierEdge` は、すべてのソース Executor が少なくとも 1 つのメッセージを送信するまでターゲットへの配信を保留する。メッセージを送らないソースが 1 つでもあると、ターゲットは実行されず、ワークフローはバリアの先へ進まない。
+
+```csharp
+// ⚠️ workerC がメッセージを送らないと、aggregator は永遠に実行されない
+builder.AddFanInBarrierEdge(
+    sources: [workerA, workerB, workerC],
+    target: aggregator);
+```
+
+対策として、処理対象外の場合でも各ソース Executor が空のレスポンスメッセージを送るようにするか、タイムアウト付きの安全弁を設けることを検討する。
+
+#### 5. `QueueStateUpdateAsync` の更新は別 Executor には即座に反映されない
+
+`QueueStateUpdateAsync()` でキューされたステート更新の可視性は、読み取り元の Executor によって異なる。`StateManager` の `ReadValueOrDefaultAsync()` は未公開のキュー（`_queuedUpdates`）を最初に参照するため、同一 Executor 内では自分自身の書き込みを即座に読める。一方、別の Executor がキューした更新は `PublishUpdatesAsync()` が実行されるスーパーステップ終了時まで見えない。
+
+```csharp
+// ✅ 同一 Executor 内では自分の書き込みは即座に読める
+await context.QueueStateUpdateAsync("key", newValue, scopeName: "MyScope");
+var value = await context.ReadStateAsync<MyState>("key", scopeName: "MyScope");
+// value は newValue が返る（StateManager が _queuedUpdates を参照するため）
+
+// ⚠️ ただし、別の Executor がキューした更新は同一スーパーステップ内では見えない
+// Executor A の書き込みは、同一スーパーステップ内の Executor B からは読めない
+// 反映されるのは次のスーパーステップから（PublishUpdatesAsync() 実行後）
+```
+
+#### 6. 同一ソース-ターゲット間に無条件 Edge を重ねて追加すると例外になる
+
+同じソースとターゲットの組に対して条件なしの `AddEdge` を 2 回呼ぶと、`InvalidOperationException` がスローされる。`idempotent: true` を渡すと 2 回目は NoOp になり、例外を避けられる。
+
+```csharp
+// ⚠️ 例外がスローされる
+builder.AddEdge(source, target);
+builder.AddEdge(source, target);  // InvalidOperationException!
+
+// ✅ idempotent で安全に
+builder.AddEdge(source, target, idempotent: true);
+builder.AddEdge(source, target, idempotent: true);  // OK（2回目は NoOp）
+```
 
 ## 実践: Writer-Critic ループのフル実装
 
@@ -1115,11 +1258,11 @@ if (!decision.Approved && state.Iteration >= Program.MaxIterations)
 
 ### エラーハンドリングと障害モード
 
-Agentic Workflow のエラーハンドリングでは、従来のアプリケーションにない事情を考慮する。LLM の呼び出しは非決定的で、レート制限・タイムアウト・不正な出力など、障害の種類も多い。
+Agentic Workflow のエラーハンドリングは、従来のアプリケーションより難しい。LLM の呼び出しは非決定的で、レート制限・タイムアウト・不正な出力など、障害の種類も多いからだ。
 
 #### Executor 内の例外処理
 
-Executor 内でスローされた例外はワークフローエンジンにキャッチされ、ワークフロー全体が失敗する。そのため、LLM 呼び出しの一時的なエラーは Executor 内でリトライするべきだ。
+メッセージハンドラーが例外をスローすると、Executor は `ExecutorFailedEvent` を発行し、例外はスーパーステップまで伝わる。同じスーパーステップのほかの Executor は最後まで実行されるが、そのステップはチェックポイントも `SuperStepCompletedEvent` もないまま終わる。続いて [`InProcessRunner`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/InProc/InProcessRunner.cs) が例外をキャッチして `WorkflowErrorEvent` を発行する。その `Exception` は、元の例外を包んだ `TargetInvocationException` だ。`WatchStreamAsync()` は例外を再スローしないので、イベントループでこのイベントを確認する。既定の `OffThread` モードでは、このイベントで実行ループも止まり、実行は終了する（ステータスは `Ended`）。`Lockstep` モードはイベントを通知するだけで、キューにメッセージが残っていれば次のスーパーステップに進む。Microsoft.Agents.AI.Workflows の 1.1.0 と 1.27.0（2026 年 10 月）は、どちらもこの動作だ。LLM 呼び出しの一時的なエラーは、Executor 内でリトライするべきだ。
 
 ```csharp
 // Executor 内のリトライとエラーハンドリング
@@ -1165,7 +1308,7 @@ public async ValueTask<ChatMessage> HandleAsync(
 | 不正な出力 | Structured Output のパース失敗 | デフォルト値でフォールバック、またはリトライ |
 | 無限ループ | Writer-Critic が収束しない | MaxIterations の安全弁 |
 | タイムアウト | LLM が応答しない | CancellationToken + タイムアウト設定 |
-| 部分的な障害 | Concurrent の一部が失敗 | Fan-in Barrier でエラーのあった結果を除外する集約ロジック |
+| 部分的な障害 | Concurrent の一部が失敗 | Concurrent の各 Executor の中で例外を捕捉してエラー結果を送り、Fan-in Barrier の集約ロジックでそれを除外する |
 
 ### チェックポイント
 
@@ -1208,7 +1351,7 @@ using var tracerProvider = Sdk.CreateTracerProviderBuilder()
 
 ## 設計指針: Agent vs Workflow
 
-Microsoft の公式ドキュメントは、Agent と Workflow の使い分けを次のように示している。
+[Microsoft の公式ドキュメント](https://learn.microsoft.com/en-us/agent-framework/overview/)は、Agent と Workflow の使い分けを次のように示している。
 
 | Agent を使うべき場面 | Workflow を使うべき場面 |
 |---------------------|----------------------|
@@ -1218,154 +1361,31 @@ Microsoft の公式ドキュメントは、Agent と Workflow の使い分けを
 
 中でも最も重要な指針は、<strong>関数で処理できるなら AI エージェントを使う必要はない</strong>ということだ。LLM の呼び出しにはコスト・レイテンシー・非決定性が伴う。確定的なロジックは通常の関数で実装し、LLM が本当に必要な部分にだけエージェントを使えば、コストを抑えながらシステムの信頼性も高められる。
 
-### 実装上の注意点（Gotchas）
-
-Microsoft Agent Framework のワークフローには、ドキュメントだけでは見落としやすい挙動がある。以下は、ソースコードで確認できたものだ。
-
-#### 1. `AddEdge` の条件付き Edge は排他的ではない
-
-`AddEdge` で複数の条件付き Edge を同一ソースに追加すると、すべての Edge が独立に評価される。if-else ではなく、独立した if 文が並んでいるのと同じだ。
-
-```csharp
-// ⚠️ 両方の条件が true なら、processorA と processorB の両方が実行される！
-builder
-    .AddEdge<MyResult>(source, processorA, r => r?.Score > 50)
-    .AddEdge<MyResult>(source, processorB, r => r?.Score > 30);
-// Score = 70 の場合 → processorA と processorB の両方にメッセージが配信される
-```
-
-根拠は [`InProcessRunnerContext.SendMessageAsync()`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/InProc/InProcessRunnerContext.cs) にある。このメソッドは全 Edge を `foreach` で走査し、マッチした Edge すべての宛先にメッセージを配信する。
-
-```csharp
-// InProcessRunnerContext.SendMessageAsync() — 全 Edge を独立評価
-foreach (Edge edge in edges)  // break も return もない
-{
-    DeliveryMapping? maybeMapping =
-        await _edgeMap.PrepareDeliveryForEdgeAsync(edge, envelope, cancellationToken);
-    maybeMapping?.MapInto(this._nextStep);  // マッチした分だけ全部配信
-}
-```
-
-<strong>排他的な分岐が必要な場合は `AddSwitch` を使う。</strong> `AddSwitch` は内部的に単一の `FanOutEdge` を生成し、[`SwitchBuilder.ReduceToFanOut()`](https://github.com/microsoft/agent-framework/blob/main/dotnet/src/Microsoft.Agents.AI.Workflows/SwitchBuilder.cs) 内の `EdgeSelector` が最初にマッチしたケースで早期リターンする。
-
-```csharp
-// SwitchBuilder 内部の EdgeSelector（簡略化）
-IEnumerable<int> EdgeSelector(object? input, int targetCount)
-{
-    for (int i = 0; i < caseMap.Count; i++)
-    {
-        if (caseMap[i].Predicate(input))
-            return caseMap[i].OutgoingIndicies;  // 最初のマッチで即 return
-    }
-    return defaultIndicies;  // どれにもマッチしなければデフォルト
-}
-```
-
-| API | 内部 Edge | セマンティクス | 複数マッチ |
-|------|----------|------------|--------|
-| `AddEdge` × N | 複数の `DirectEdge` | 複数の独立した `if` | あり得る |
-| `AddSwitch` | 単一の `FanOutEdge` | `switch-case`（最初のマッチで確定） | なし |
-
-#### 2. 型が合わないメッセージは黙って捨てられる
-
-`DirectEdgeRunner` は、メッセージの型がターゲット Executor の `[MessageHandler]` で受け付ける型に合致しない場合、メッセージをエラーなしで破棄する（`DroppedTypeMismatch`）。
-
-```csharp
-// DirectEdgeRunner.ChaseEdgeAsync() — 型不一致はサイレントにドロップ
-if (CanHandle(target, messageType))
-{
-    return new DeliveryMapping(envelope, target);  // 配信
-}
-// ↓ ここに到達すると DroppedTypeMismatch — 例外は発生しない
-return null;
-```
-
-これは意図的な設計で、同一ソースから異なる型のメッセージが出るポリモーフィックなルーティングを可能にするためだ。ただし、意図しない型の不一致によるバグが、エラーなしで起きるリスクがある。デバッグ時は OpenTelemetry のトレースで `DroppedTypeMismatch` タグを確認するとよい。
-
-#### 3. `FanOutEdge` の `targetSelector` が null なら全ターゲットに配信
-
-`AddFanOutEdge` で `targetSelector` を省略すると、すべてのターゲット Executor にメッセージが配信される。ブロードキャストが目的なら問題ないが、配信先を選びたいなら必ず `targetSelector` を指定する。
-
-```csharp
-// ⚠️ targetSelector 省略 → 全ターゲットに配信
-builder.AddFanOutEdge(source, [handlerA, handlerB, handlerC]);
-
-// ✅ targetSelector で配信先を制御
-builder.AddFanOutEdge<MyResult>(source, [handlerA, handlerB, handlerC],
-    targetSelector: (result, count) =>
-    {
-        if (result?.Category == "urgent") return [0];  // handlerA のみ
-        return Enumerable.Range(0, count);              // 全ターゲット
-    });
-```
-
-#### 4. `FanInBarrierEdge` は「全ソースの完了」を待つ
-
-`AddFanInBarrierEdge` は、すべてのソース Executor が少なくとも 1 つのメッセージを送信するまでターゲットへの配信を保留する。メッセージを送らないソースが 1 つでもあると、ワークフローはそこで止まったままになる。
-
-```csharp
-// ⚠️ workerC がメッセージを送らないと、aggregator は永遠に実行されない
-builder.AddFanInBarrierEdge(
-    sources: [workerA, workerB, workerC],
-    target: aggregator);
-```
-
-対策として、処理対象外の場合でも各ソース Executor が空のレスポンスメッセージを送るようにするか、タイムアウト付きの安全弁を設けることを検討する。
-
-#### 5. `QueueStateUpdateAsync` の更新は別 Executor には即座に反映されない
-
-`QueueStateUpdateAsync()` でキューされたステート更新の可視性は、読み取り元の Executor によって異なる。`StateManager` の `ReadValueOrDefaultAsync()` は未公開のキュー（`_queuedUpdates`）を最初に参照するため、同一 Executor 内では自分自身の書き込みを即座に読める。一方、別の Executor がキューした更新は `PublishUpdatesAsync()` が実行されるスーパーステップ終了時まで見えない。
-
-```csharp
-// ✅ 同一 Executor 内では自分の書き込みは即座に読める
-await context.QueueStateUpdateAsync("key", newValue, scopeName: "MyScope");
-var value = await context.ReadStateAsync<MyState>("key", scopeName: "MyScope");
-// value は newValue が返る（StateManager が _queuedUpdates を参照するため）
-
-// ⚠️ ただし、別の Executor がキューした更新は同一スーパーステップ内では見えない
-// Executor A の書き込みは、同一スーパーステップ内の Executor B からは読めない
-// 反映されるのは次のスーパーステップから（PublishUpdatesAsync() 実行後）
-```
-
-#### 6. 同一ソース-ターゲット間に無条件 Edge は 1 本だけ
-
-同一の source → target ペアに対して条件なしの `AddEdge` を 2 回呼ぶと、`InvalidOperationException` がスローされる。`idempotent: true` を渡すと 2 回目は NoOp になり、例外を避けられる。
-
-```csharp
-// ⚠️ 例外がスローされる
-builder.AddEdge(source, target);
-builder.AddEdge(source, target);  // InvalidOperationException!
-
-// ✅ idempotent で安全に
-builder.AddEdge(source, target, idempotent: true);
-builder.AddEdge(source, target, idempotent: true);  // OK（2回目は NoOp）
-```
-
 ### ワークフロー設計のベストプラクティス
 
-1. <strong>単一責任の Executor</strong> — 各 Executor には 1 つの責務を持たせる。「文章を書く」「レビューする」「整形する」を分離する
-2. <strong>型安全なメッセージング</strong> — Structured Output と C# の型システムを活用し、Executor 間のメッセージを型で保証する
-3. <strong>安全弁の設置</strong> — ループには必ず MaxIterations を設ける。LLM は非決定的であり、常に期待どおりに判断するとは限らない
-4. <strong>ステートの最小化</strong> — 共有ステートは必要最小限にする。状態が多いほどデバッグが困難になる
-5. <strong>イベントの活用</strong> — ワークフローイベントでオブザーバビリティーを確保する。本番環境では「何が起きたか」を追跡できることが欠かせない
-6. <strong>段階的な複雑化</strong> — シンプルなパターン（Sequential）から始め、必要に応じて複雑なパターン（Writer-Critic）に移行する
-7. <strong>排他分岐には `AddSwitch` を使う</strong> — `AddEdge` の条件付き Edge は非排他的なので、意図せず複数の Edge に配信されるのを防ぐには `AddSwitch` を使う
-8. <strong>Edge の型一致を意識する</strong> — 型が一致しないメッセージはエラーなしで破棄される。OpenTelemetry のトレースで `DroppedTypeMismatch` を監視する
+1. 各 Executor には 1 つの責務を持たせる。「文章を書く」「レビューする」「整形する」を分離する
+2. Structured Output と C# の型システムを活用し、Executor 間のメッセージを型で保証する
+3. ループには必ず MaxIterations を設ける。LLM は非決定的であり、常に期待どおりに判断するとは限らない
+4. 共有ステートは必要最小限にする。ステートが多いほどデバッグが困難になる
+5. ワークフローイベントでオブザーバビリティーを確保する。本番環境では「何が起きたか」を追跡できることが欠かせない
+6. シンプルなパターン（Sequential）から始め、必要に応じて複雑なパターン（Writer-Critic）に移行する
+7. 排他的な分岐には `AddSwitch` を使う。`AddEdge` の条件付き Edge は非排他的で、意図せず複数の Edge に配信されることがある
+8. OpenTelemetry のトレースで `DroppedTypeMismatch` を監視する。型が一致しないメッセージはエラーなしで破棄される
 
 ## まとめ
 
-Agentic Workflow は、AI エージェントの実行をワークフローで決定論的に制御する設計だ。単一エージェントでは扱いきれない複雑な業務プロセスも、ワークフローグラフで構造化し、各エージェントに専門領域を持たせ、品質ゲートをグラフに組み込めば、信頼性の高い AI システムとして構築できる。
+Agentic Workflow は、AI エージェントの実行をワークフローで決定論的に制御する設計だ。単一エージェントでは扱いきれない複雑な業務プロセスも、ワークフローグラフで構造化し、各エージェントに専門領域を持たせ、品質ゲートをグラフに組み込めば、実行の順序と品質の確認を開発者が制御する AI システムとして構築できる。
 
 Microsoft Agent Framework では、C# で次のように実装する。
 
 - Executor と Edge で有向グラフを定義
-- `WorkflowBuilder` で宣言的にグラフを組み立て
+- `WorkflowBuilder` でグラフを宣言的に構築
 - Structured Output で型安全なエージェント間通信
 - `IWorkflowContext` で状態管理
 - チェックポイントで障害回復
 - OpenTelemetry でオブザーバビリティー
 
-6 つの基本パターン（Sequential、Concurrent、Conditional、Handoff、Writer-Critic、Group Chat）と、サブワークフローなどの構成パターンを組み合わせれば、ほとんどの業務シナリオに対応できる。Workflow-as-Agent を使えば単一エージェントから段階的にワークフローへ移行でき、Declarative Workflow ならコードをデプロイし直さずにワークフローを変更できる。そして最も重要な設計指針は「関数で済むなら関数で。LLM が必要な部分だけエージェントで。」だ。
+6 つの基本パターン（Sequential、Concurrent、Conditional、Handoff、Writer-Critic、Group Chat）と、サブワークフローなどの構成パターンを組み合わせれば、より複雑な業務プロセスも組み立てられる。Workflow-as-Agent を使えば単一エージェントから段階的にワークフローへ移行でき、Declarative Workflow ならコードをデプロイし直さずにワークフローを変更できる。そして最も重要な設計指針は「関数で済むなら関数で。LLM が必要な部分だけエージェントで。」だ。
 
 ## 参考リンク
 

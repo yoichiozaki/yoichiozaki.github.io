@@ -131,21 +131,21 @@ export function StableLatticeExplorer({ locale = "ja" }: Props) {
     if (idx === lattice.top)
       out.push(
         isJa
-          ? `${leftNames} 側最適（${leftNames} が提案した GS の出力）`
-          : `${leftNames}-optimal (GS output when ${leftNames} propose)`,
+          ? `${leftNames} 側最適（${leftNames} が提案した Gale–Shapley の出力）`
+          : `${leftNames}-optimal (Gale–Shapley output when ${leftNames} propose)`,
       );
     if (idx === lattice.bottom)
       out.push(
         isJa
-          ? `${rightNames} 側最適（${rightNames} が提案した GS の出力）`
-          : `${rightNames}-optimal (GS output when ${rightNames} propose)`,
+          ? `${rightNames} 側最適（${rightNames} が提案した Gale–Shapley の出力）`
+          : `${rightNames}-optimal (Gale–Shapley output when ${rightNames} propose)`,
       );
     if (nd.score.leftSum + nd.score.rightSum === minTotal)
       out.push(isJa ? "平等主義（順位の総和が最小）" : "egalitarian (minimum total rank)");
     if (nd.score.regret === minRegret)
-      out.push(isJa ? "最小後悔（最悪の順位が最小）" : "minimum regret (best worst-off rank)");
+      out.push(isJa ? "最小後悔（最悪の順位が最小）" : "minimum regret (minimum worst rank)");
     if (Math.abs(nd.score.leftSum - nd.score.rightSum) === minGap)
-      out.push(isJa ? "両側の差が最小" : "most balanced between sides");
+      out.push(isJa ? "両側平等（順位和の差が最小）" : "sex-equal (minimum gap between rank sums)");
     return out;
   };
 
@@ -172,12 +172,12 @@ export function StableLatticeExplorer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "安定マッチングの束 — 全員の利害が一列に並ぶ"
-          : "The lattice of stable matchings — interests line up along one axis"
+          ? "安定マッチングの束 — 左右の利害は対立する"
+          : "The lattice of stable matchings — the two sides' interests are opposed"
       }
       description={
         isJa
-          ? `${n}! = ${lattice.examined} 通りの完全マッチングを総当たりし、安定なものだけを «左側の全員が弱く好む» 順に並べた図（ハッセ図）です。上ほど左側（${leftNames}）に有利、下ほど右側（${rightNames}）に有利。ノードをクリックすると詳細を表示し、辺のラベル ρ は «回転»（rotation）を表します。`
+          ? `${n}! = ${lattice.examined} 通りの完全マッチングを総当たりし、安定なものだけを «左側の全員が弱く好む» 順に並べた図（ハッセ図）です。上ほど左側（${leftNames}）に有利、下ほど右側（${rightNames}）に有利。ノードをクリックすると詳細を表示します。辺のラベル ρ は «回転»（rotation）です。`
           : `All ${n}! = ${lattice.examined} perfect matchings are checked by brute force; the stable ones are drawn in the order “every left agent weakly prefers” (a Hasse diagram). Higher is better for ${leftNames}, lower is better for ${rightNames}. Click a node for details; edge labels ρ are rotations.`
       }
     >
@@ -205,7 +205,7 @@ export function StableLatticeExplorer({ locale = "ja" }: Props) {
         </ControlRow>
         <ControlRow label={isJa ? "クリックの動作" : "Click to"}>
           <Segmented
-            ariaLabel={isJa ? "クリックの動作" : "Click behaviour"}
+            ariaLabel={isJa ? "クリックの動作" : "Click behavior"}
             value={compareMode ? "compare" : "select"}
             options={[
               { value: "select", label: isJa ? "詳細を見る" : "Inspect" },
@@ -463,8 +463,8 @@ export function StableLatticeExplorer({ locale = "ja" }: Props) {
                   <p className="pt-1 text-muted-foreground">
                     {jm.joinIdx >= 0 && jm.meetIdx >= 0
                       ? isJa
-                        ? "どちらもきちんとしたマッチングで、しかも図の中にある（＝安定）ことを確かめてください。"
-                        : "Both are genuine matchings, and both appear in the diagram — they are stable."
+                        ? "どちらも 1 対 1 の組になっていて、図の中にある（＝安定な）マッチングです。"
+                        : "Both are genuine one-to-one matchings, and both appear in the diagram — they are stable."
                       : isJa
                         ? "（安定マッチングの組では起こりえないはずの結果です）"
                         : "(This should never happen for stable inputs.)"}
@@ -484,8 +484,8 @@ export function StableLatticeExplorer({ locale = "ja" }: Props) {
             </ul>
             <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
               {isJa
-                ? "回転は «左側の数人が、輪になって 1 つずつ次の相手へずれる» 操作です。ずれた左側は全員少し損をし、関係する右側は全員少し得をします。"
-                : "A rotation shifts a few left agents, in a cycle, each to the next partner: every one of them loses a little and every right agent involved gains."}
+                ? "回転は «左側の数人が、輪になって 1 つずつ次の人の相手へずれる» 操作です。ずれた左側は全員少し損をし、関係する右側は全員少し得をします。"
+                : "A rotation shifts a few left agents around a cycle, each to the partner of the next one: every one of them loses a little and every right agent involved gains a little."}
             </p>
           </Panel>
         </div>

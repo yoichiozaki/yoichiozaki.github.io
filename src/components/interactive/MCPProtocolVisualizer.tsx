@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type MCPProtocolVisualizerProps = { locale?: string };
@@ -31,7 +32,7 @@ const steps: StepData[] = [
     method: "new MCPClient()",
     direction: "right",
     highlightJa:
-      "AI アプリケーション(Host)が MCP Server ごとに MCP Client インスタンスを生成します。",
+      "AI アプリケーション（Host）は、接続する MCP Server ごとに MCP Client インスタンスを 1 つずつ生成します。",
     highlightEn:
       "The AI application (Host) creates an MCP Client instance for each MCP Server.",
   },
@@ -52,9 +53,9 @@ const steps: StepData[] = [
       2
     ),
     highlightJa:
-      "Client は protocolVersion、capabilities、clientInfo を送信し、Server と capability negotiation を開始します。",
+      "Client は protocolVersion、capabilities、clientInfo を送信し、Server との capability のネゴシエーションを開始します。",
     highlightEn:
-      "Client sends protocolVersion, capabilities, and clientInfo to begin capability negotiation with the Server.",
+      "The Client sends protocolVersion, capabilities, and clientInfo to begin capability negotiation with the Server.",
   },
   {
     labelJa: "3. Server → Client: initialize レスポンス",
@@ -76,9 +77,9 @@ const steps: StepData[] = [
       2
     ),
     highlightJa:
-      "Server は自身の capabilities（tools, resources 等）と serverInfo を返します。双方が互いの能力を把握します。",
+      "Server は自身の capabilities（tools、resources など）と serverInfo を返します。これで双方が互いの capability を把握します。",
     highlightEn:
-      "Server returns its capabilities (tools, resources, etc.) and serverInfo. Both sides now know each other's abilities.",
+      "The Server returns its capabilities (tools, resources, etc.) and serverInfo. Both sides now know each other's capabilities.",
   },
   {
     labelJa: "4. Client → Server: initialized 通知",
@@ -88,9 +89,9 @@ const steps: StepData[] = [
     method: "notifications/initialized",
     direction: "right",
     highlightJa:
-      "Client が初期化完了を通知します。JSON-RPC 通知なので id フィールドがなく、レスポンスは不要です。",
+      "Client が Server に初期化の完了を通知します。JSON-RPC の通知なので id フィールドがなく、レスポンスは返りません。",
     highlightEn:
-      "Client notifies initialization is complete. As a JSON-RPC notification, it has no id field and requires no response.",
+      "The Client notifies the Server that initialization is complete. As a JSON-RPC notification, it has no id field and gets no response.",
   },
   {
     labelJa: "5. Client → Server: tools/list リクエスト",
@@ -100,9 +101,9 @@ const steps: StepData[] = [
     method: "tools/list",
     direction: "right",
     highlightJa:
-      "Client は Server が公開している Tool を発見するため tools/list を送信します。",
+      "Client は、Server が公開している Tool の一覧を得るため、tools/list を送信します。",
     highlightEn:
-      "Client sends tools/list to discover the tools exposed by the Server.",
+      "The Client sends tools/list to discover the tools exposed by the Server.",
   },
   {
     labelJa: "6. Server → Client: tools/list レスポンス",
@@ -132,9 +133,9 @@ const steps: StepData[] = [
       2
     ),
     highlightJa:
-      "Server は利用可能な Tool の一覧を返します。各 Tool は name, description, inputSchema（JSON Schema）を含みます。",
+      "Server は利用可能な Tool の一覧を返します。各 Tool は name、description、inputSchema（JSON Schema）を含みます。",
     highlightEn:
-      "Server returns the list of available tools. Each tool includes name, description, and inputSchema (JSON Schema).",
+      "The Server returns the list of available tools. Each tool includes name, description, and inputSchema (JSON Schema).",
   },
   {
     labelJa: "7. Client → Server: tools/call 実行",
@@ -152,9 +153,9 @@ const steps: StepData[] = [
       2
     ),
     highlightJa:
-      "LLM が Tool 呼び出しを決定すると、Client は tools/call で指定の Tool を実行します。引数は inputSchema に従います。",
+      "LLM が Tool の呼び出しを決めると、Client は tools/call で Server に Tool の実行を依頼します。引数は inputSchema に従います。",
     highlightEn:
-      "When the LLM decides to call a tool, the Client executes it via tools/call. Arguments follow the inputSchema.",
+      "When the LLM decides to call a tool, the Client sends tools/call and the Server runs the tool. The arguments follow the inputSchema.",
   },
   {
     labelJa: "8. Server → Client: tools/call 結果",
@@ -177,9 +178,9 @@ const steps: StepData[] = [
       2
     ),
     highlightJa:
-      "Server は content 配列で結果を返します。text, image, audio, resource_link など複数のコンテンツタイプに対応しています。",
+      "Server は結果を content 配列で返します。コンテンツタイプには text、image、audio、resource_link などがあります。",
     highlightEn:
-      "Server returns results in a content array. Multiple content types are supported: text, image, audio, resource_link, etc.",
+      "The Server returns the result in a content array. Supported content types include text, image, audio, and resource_link.",
   },
   {
     labelJa: "9. Server → Client: tools/list_changed 通知",
@@ -189,9 +190,9 @@ const steps: StepData[] = [
     method: "notifications/tools/list_changed",
     direction: "left",
     highlightJa:
-      "Server の Tool リストが変更されると通知を送信します。listChanged: true を capability で宣言していた場合のみ送信されます。",
+      "Tool の一覧が変わると、Server は通知を送ります。送るのは、Capability 宣言で listChanged: true を示した場合だけです。",
     highlightEn:
-      "Server sends a notification when its tool list changes. Only sent if the server declared listChanged: true in capabilities.",
+      "The Server sends this notification when its tool list changes, but only if it declared listChanged: true in its capabilities.",
   },
   {
     labelJa: "10. Client → Server: tools/list 再取得",
@@ -201,9 +202,9 @@ const steps: StepData[] = [
     method: "tools/list",
     direction: "right",
     highlightJa:
-      "通知を受けた Client は最新の Tool リストを再取得し、LLM が利用可能な Tool を動的に更新します。",
+      "通知を受けた Client は最新の Tool 一覧を取得し直し、LLM が使える Tool を更新します。",
     highlightEn:
-      "Upon receiving the notification, the Client re-fetches the latest tool list, dynamically updating the tools available to the LLM.",
+      "After the notification, the Client fetches the latest tool list again and updates the tools available to the LLM.",
   },
 ];
 
@@ -306,8 +307,8 @@ export function MCPProtocolVisualizer({
       title={isJa ? "MCP プロトコル ライフサイクル" : "MCP Protocol Lifecycle"}
       description={
         isJa
-          ? "ステップごとに MCP の初期化・ツール発見・実行・通知の流れを追跡します"
-          : "Follow the MCP initialization, tool discovery, execution, and notification flow step by step"
+          ? "旧版 2025-06-18 の仕様で、初期化・Tool 一覧の取得・実行・通知の流れをステップごとにたどります"
+          : "Follow MCP initialization, tool discovery, execution, and notification step by step, as defined in the legacy 2025-06-18 revision"
       }
     >
       {/* Participants */}
@@ -380,6 +381,7 @@ export function MCPProtocolVisualizer({
       <StepPlayerControls
         {...player}
         label={(s) => (isJa ? steps[s].labelJa : steps[s].labelEn)}
+        ariaLabels={stepPlayerAriaLabels(locale)}
       />
     </InteractiveDemo>
   );

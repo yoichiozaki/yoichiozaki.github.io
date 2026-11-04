@@ -19,7 +19,7 @@ const EVENTS: Event[] = [
   {
     year: "1962",
     kind: "theory",
-    ja: "Gale と Shapley「College Admissions and the Stability of Marriage」。安定マッチングの存在と、提案側に最適な受入保留アルゴリズムを示す",
+    ja: "Gale と Shapley「College Admissions and the Stability of Marriage」。安定マッチングが必ず存在することと、受入保留アルゴリズムが提案側に最適な安定マッチングを求めることを示す",
     en: "Gale and Shapley, “College Admissions and the Stability of Marriage”: stable matchings always exist, and deferred acceptance finds the proposer-optimal one",
   },
   {
@@ -43,19 +43,19 @@ const EVENTS: Event[] = [
   {
     year: "1984",
     kind: "theory",
-    ja: "Roth、1952 年以来の NRMP の手続きが安定マッチングを返すことを指摘し、採用時期の «早期化»（unraveling）が止まった理由を説明",
-    en: "Roth shows the NRMP procedure in use since 1952 yields stable matchings — explaining why the market stopped unraveling",
+    ja: "Roth、1952 年以来の NRMP の手続きが安定マッチングを返すことを指摘し、それが採用時期の «早期化»（unraveling）が止まった理由だと論じる",
+    en: "Roth shows that the NRMP procedure in use since 1952 yields stable matchings, and argues that this is why the market stopped unraveling",
   },
   {
     year: "1985–87",
     kind: "theory",
-    ja: "Irving のルームメイト問題アルゴリズム、Irving–Leather–Gusfield の平等主義安定マッチング",
-    en: "Irving's stable roommates algorithm; Irving–Leather–Gusfield's egalitarian stable matching",
+    ja: "Irving のルームメイト問題のアルゴリズム、Irving–Leather–Gusfield による平等主義安定マッチングの多項式時間アルゴリズム",
+    en: "Irving's stable roommates algorithm; Irving–Leather–Gusfield's polynomial-time algorithm for the egalitarian stable matching",
   },
   {
     year: "1998",
     kind: "practice",
-    ja: "NRMP が研修医側が申し込む Roth–Peranson アルゴリズムに移行。カップルなど現実の複雑な条件も扱えるよう設計されている",
+    ja: "NRMP が、研修医側が申し込む Roth–Peranson アルゴリズムに移行。カップルなど現実の複雑な条件も扱えるよう設計されている",
     en: "The NRMP switches to the applicant-proposing Roth–Peranson algorithm, designed to handle real-world complications such as couples",
   },
   {
@@ -68,19 +68,19 @@ const EVENTS: Event[] = [
     year: "2012",
     kind: "theory",
     ja: "Shapley と Roth にノーベル経済学賞（安定配分の理論とマーケットデザインの実践）。Gale は 2008 年に死去していた",
-    en: "Shapley and Roth receive the Nobel Memorial Prize in Economic Sciences for stable allocations and market design; Gale had died in 2008",
+    en: "Shapley and Roth receive the Nobel Memorial Prize in Economic Sciences «for the theory of stable allocations and the practice of market design»; Gale had died in 2008",
   },
   {
     year: "2015",
     kind: "theory",
-    ja: "鎌田雄一郎と小島武仁、地域ごとの採用上限（JRMP など）のもとで既存の方式が非効率・不安定になりうることを示し、«柔軟な受入保留» を提案",
-    en: "Kamada and Kojima show that existing mechanisms can be inefficient and unstable under regional caps (as in the JRMP) and propose flexible deferred acceptance",
+    ja: "鎌田雄一郎と小島武仁、地域ごとの採用上限（JRMP など）のもとで各病院の定員を前もって削って受入保留を動かす方式は、非効率・不安定な結果を生みうることを示し、«柔軟な受入保留» を提案",
+    en: "Kamada and Kojima show that running deferred acceptance with hospital capacities cut in advance to respect regional caps (as in the JRMP) can produce inefficient and unstable outcomes, and propose flexible deferred acceptance",
   },
   {
     year: "2018",
     kind: "practice",
     ja: "フランスの大学入学プラットフォーム Parcoursup が、受入保留を «人間が回す» 形で運用",
-    en: "France's Parcoursup runs a human-in-the-loop form of deferred acceptance for university admissions",
+    en: "France's Parcoursup runs a form of deferred acceptance «executed by people» for university admissions",
   },
 ];
 

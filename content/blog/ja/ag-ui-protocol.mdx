@@ -66,7 +66,7 @@ AG-UI を使えば、フロントエンドは 1 つのプロトコルを実装�
 
 ### 2. 双方向インタラクション
 
-エージェントはユーザーからの入力を受け取れるので、AI と人間が協調するワークフローを組める。エージェントが結果を一方的に返すだけのモデルとは、この点が異なる。
+エージェントはユーザーからの入力を受け取れるので、AI と人間が協調するワークフローを組める。
 
 ### 3. トランスポート非依存
 
@@ -273,15 +273,17 @@ sequenceDiagram
         A->>C: TOOL_CALL_ARGS(toolCallId, delta)
     end
     A->>C: TOOL_CALL_END(toolCallId)
-    C->>A: TOOL_CALL_RESULT(toolCallId, content)
+    C->>A: tool ロールのメッセージ(toolCallId, content)
 ```
 
-AG-UI では、<strong>ツールはフロントエンドで定義され、エージェントに渡される</strong>。そのため、次のような Human-in-the-Loop ワークフローを組める。
+AG-UI では、<strong>フロントエンドで定義したツールを、実行時にエージェントに渡せる</strong>。そのため、次のような Human-in-the-Loop ワークフローを組める。
 
 1. エージェントがツール呼び出しを要求する（TOOL_CALL_START → TOOL_CALL_ARGS → TOOL_CALL_END）
 2. フロントエンドがツールを実行する（ユーザーの判断を含む場合もある）
-3. 結果をエージェントに返す（TOOL_CALL_RESULT）
+3. 結果を tool ロールのメッセージとしてエージェントに返す
 4. エージェントが結果を踏まえて推論を続ける
+
+バックエンドで実行したツールの結果は、エージェントが `TOOL_CALL_RESULT` イベントでクライアントに送る。
 
 ツール呼び出しにも、`TEXT_MESSAGE_CHUNK` に相当する便利イベント `TOOL_CALL_CHUNK` がある。最初のチャンクに `toolCallId` と `toolCallName` を含めると `TOOL_CALL_START` が暗黙的に発行され、ストリームが新しい `toolCallId` に切り替わるか完了した時点で `TOOL_CALL_END` が自動発行される。
 
@@ -324,6 +326,37 @@ sequenceDiagram
 
 ---
 
+## Reasoning Events ─ 推論プロセスの可視化
+
+Reasoning Events は、モデルが提供する推論サマリーやメタデータを UI に表示するためのイベントだ。非公開の生の Chain-of-Thought をユーザーに見せる仕組みではない。
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as Agent
+    A->>C: REASONING_START(messageId)
+    A->>C: REASONING_MESSAGE_START(messageId, role="reasoning")
+    loop 推論コンテンツのストリーミング
+        A->>C: REASONING_MESSAGE_CONTENT(messageId, delta)
+    end
+    A->>C: REASONING_MESSAGE_END(messageId)
+    A->>C: REASONING_END(messageId)
+```
+
+`REASONING_ENCRYPTED_VALUE` イベントは、暗号化された推論状態をターン間で引き継ぐ。この値はモデル／プロバイダー向けの不透明な継続トークンで、クライアントは保存して転送するだけで、内容を読んだり表示したりできない。そのため、非公開の Chain-of-Thought を露出せずに推論の継続性を保てる。
+
+| イベント | 説明 |
+|---------|------|
+| `REASONING_START` | 推論プロセスの開始 |
+| `REASONING_MESSAGE_START` | 推論メッセージの開始（可視部分） |
+| `REASONING_MESSAGE_CONTENT` | 推論コンテンツのチャンク |
+| `REASONING_MESSAGE_END` | 推論メッセージの完了 |
+| `REASONING_MESSAGE_CHUNK` | Start/End を自動展開する便利イベント |
+| `REASONING_END` | 推論プロセスの完了 |
+| `REASONING_ENCRYPTED_VALUE` | 不透明な暗号化済み推論継続値 |
+
+---
+
 ## ミドルウェア ─ イベントストリームのインターセプト
 
 AG-UI のミドルウェアは、エージェントとイベントを受け取る側の間に入り、イベントストリームを変換したり、絞り込んだり、情報を付け加えたりする。
@@ -334,6 +367,18 @@ graph LR
     M3 --> M2[Middleware 2]
     M2 --> M1[Middleware 1]
     M1 --> C[Client]
+```
+
+ミドルウェアは追加した順に実行され、各ミドルウェアが次のミドルウェアをラップする。エージェントが返したイベントは、逆の順にミドルウェアを通ってクライアントに届く。
+
+```text
+→ middleware1
+  → middleware2
+    → middleware3
+      → agent.run()
+    ← events flow back through middleware3
+  ← events flow back through middleware2
+← events flow back through middleware1
 ```
 
 ### 関数ベースミドルウェア
@@ -406,91 +451,6 @@ const blocker = new FilterToolCallsMiddleware({
 
 agent.use(filter)
 ```
-
-ミドルウェアは追加した順に実行され、各ミドルウェアが次のミドルウェアをラップする。エージェントが返したイベントは、逆の順にミドルウェアを通ってクライアントに届く。
-
-```text
-→ middleware1
-  → middleware2
-    → middleware3
-      → agent.run()
-    ← events flow back through middleware3
-  ← events flow back through middleware2
-← events flow back through middleware1
-```
-
----
-
-## Reasoning Events ─ 推論プロセスの可視化
-
-Reasoning Events は、モデルが提供する推論サマリーやメタデータを UI に表示するためのイベントだ。非公開の生の Chain-of-Thought をユーザーに見せる仕組みではない。
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as Agent
-    A->>C: REASONING_START(messageId)
-    A->>C: REASONING_MESSAGE_START(messageId, role="reasoning")
-    loop 推論コンテンツのストリーミング
-        A->>C: REASONING_MESSAGE_CONTENT(messageId, delta)
-    end
-    A->>C: REASONING_MESSAGE_END(messageId)
-    A->>C: REASONING_END(messageId)
-```
-
-`REASONING_ENCRYPTED_VALUE` イベントは、暗号化された推論状態をターン間で引き継ぐ。この値はモデル／プロバイダー向けの不透明な継続トークンで、クライアントは保存して転送するだけで、内容を読んだり表示したりできない。そのため、非公開の Chain-of-Thought を露出せずに推論の継続性を保てる。
-
-| イベント | 説明 |
-|---------|------|
-| `REASONING_START` | 推論プロセスの開始 |
-| `REASONING_MESSAGE_START` | 推論メッセージの開始（可視部分） |
-| `REASONING_MESSAGE_CONTENT` | 推論コンテンツのチャンク |
-| `REASONING_MESSAGE_END` | 推論メッセージの完了 |
-| `REASONING_MESSAGE_CHUNK` | Start/End を自動展開する便利イベント |
-| `REASONING_END` | 推論プロセスの完了 |
-| `REASONING_ENCRYPTED_VALUE` | 不透明な暗号化済み推論継続値 |
-
----
-
-## セキュリティーの考慮事項
-
-AG-UI エンドポイントは、デフォルトでは認証を強制しない。本番環境では、FastAPI の依存性注入を使って認証を追加する必要がある。
-
-```python
-import os
-from fastapi import Depends, FastAPI, HTTPException, Security
-from fastapi.security import APIKeyHeader
-from agent_framework import Agent
-from agent_framework.ag_ui import add_agent_framework_fastapi_endpoint
-
-# API キー認証の設定
-API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
-EXPECTED_API_KEY = os.environ.get("AG_UI_API_KEY")
-
-
-async def verify_api_key(
-    api_key: str | None = Security(API_KEY_HEADER),
-) -> None:
-    """リクエストヘッダの API キーを検証する。"""
-    if not api_key or api_key != EXPECTED_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
-
-app = FastAPI()
-
-# エージェントは前のセクションで作成済みと仮定
-# agent = simple_agent(chat_client)
-
-# 認証付きでエンドポイントを登録
-add_agent_framework_fastapi_endpoint(
-    app,
-    agent,
-    "/",
-    dependencies=[Depends(verify_api_key)],
-)
-```
-
-`dependencies` には任意の FastAPI 依存性を渡せるので、API キーの代わりに OAuth 2.0、JWT、Azure AD / Entra ID による認証を組み込んだり、レート制限を加えたりできる。
 
 ---
 
@@ -593,9 +553,13 @@ app = FastAPI(title="AG-UI Demo Server")
 # チャットクライアントを作成
 chat_client = OpenAIChatCompletionClient(model="gpt-4o")
 
-# AG-UI エンドポイントとして登録
-add_agent_framework_fastapi_endpoint(app, simple_agent(chat_client), "/agentic_chat")
+# AG-UI エンドポイントとして登録（ローカル・単一ユーザー用）
+add_agent_framework_fastapi_endpoint(
+    app, simple_agent(chat_client), "/agentic_chat", single_user=True
+)
 ```
+
+登録時には、認可スコープの決め方として `authorization_scope_resolver` か `single_user=True` のどちらかを指定する。どちらもないと `ValueError` になる（[agent-framework の `_endpoint.py`](https://github.com/microsoft/agent-framework/blob/main/python/packages/ag-ui/agent_framework_ag_ui/_endpoint.py)）。この記事の例はローカルで試す前提なので `single_user=True` とする。複数の利用者が使う場合は「セキュリティーの考慮事項」で扱う。
 
 `add_agent_framework_fastapi_endpoint` は次の処理を行う。
 
@@ -771,16 +735,18 @@ sequenceDiagram
     A->>F: TOOL_CALL_START(delete_file)
     A->>F: TOOL_CALL_ARGS({filename: "test.txt"})
     A->>F: TOOL_CALL_END
+    A->>F: RUN_FINISHED(outcome: interrupt)
     Note over F: 承認 UI を表示
     U->>F: 承認
-    F->>A: TOOL_CALL_RESULT(承認済み)
+    F->>A: RunAgentInput(resume: 承認)
+    A->>F: RUN_STARTED
     A->>F: TEXT_MESSAGE_START
     A->>F: TEXT_MESSAGE_CONTENT("削除しました")
     A->>F: TEXT_MESSAGE_END
     A->>F: RUN_FINISHED
 ```
 
-オーケストレーターが承認の応答を自動検出し、承認されればツールを実行し、拒否されればスキップする。承認フローも AG-UI の標準イベントで表されるので、フロントエンドは汎用的な承認 UI を一度実装すれば、AG-UI に対応したほかのエージェントでも使い回せる。
+承認が必要なツールを呼ぶと、実行はいったん `RUN_FINISHED` で終わり、その `outcome` に承認待ちの中断（interrupt）が入る。フロントエンドは同じスレッドで、承認か拒否を `resume` に載せて実行を再開する。承認されればツールを実行し、拒否されれば実行しない（[Microsoft Learn: Human-in-the-Loop with AG-UI](https://learn.microsoft.com/agent-framework/integrations/by-component/ui/ag-ui/human-in-the-loop)）。中断と再開も AG-UI のプロトコルの型で表されるので、フロントエンドは汎用的な承認 UI を一度実装すれば、AG-UI に対応したほかのエージェントでも使い回せる。
 
 ### Feature 4: Shared State ─ 双方向の状態同期
 
@@ -842,7 +808,7 @@ def recipe_agent(client: SupportsChatGetResponse[Any]) -> AgentFrameworkAgent:
 
 ### Feature 5: Predictive State Updates ─ 楽観的な状態更新
 
-Predictive State Updates は、ツールの実行中に、生成途中のツール引数をリアルタイムで状態に反映する機能だ。
+Predictive State Updates は、LLM が生成している途中のツール引数を、リアルタイムで状態に反映する機能だ。
 
 ```python
 # document_writer_agent.py
@@ -941,7 +907,7 @@ workflow = (
 )
 
 app = FastAPI()
-add_agent_framework_fastapi_endpoint(app, workflow, "/workflow")
+add_agent_framework_fastapi_endpoint(app, workflow, "/workflow", single_user=True)
 ```
 
 ワークフローのイベント（run/step/activity/tool/custom）は、対応する AG-UI イベントに自動的に変換される。
@@ -974,19 +940,24 @@ chat_client = OpenAIChatCompletionClient(
 
 # 各機能のエンドポイントを登録
 add_agent_framework_fastapi_endpoint(
-    app, simple_agent(chat_client), "/agentic_chat"
+    app, simple_agent(chat_client), "/agentic_chat",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, weather_agent(chat_client), "/backend_tool_rendering"
+    app, weather_agent(chat_client), "/backend_tool_rendering",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, human_in_the_loop_agent(chat_client), "/human_in_the_loop"
+    app, human_in_the_loop_agent(chat_client), "/human_in_the_loop",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, recipe_agent(chat_client), "/shared_state"
+    app, recipe_agent(chat_client), "/shared_state",
+    single_user=True,
 )
 add_agent_framework_fastapi_endpoint(
-    app, document_writer_agent(chat_client), "/predictive_state_updates"
+    app, document_writer_agent(chat_client), "/predictive_state_updates",
+    single_user=True,
 )
 
 if __name__ == "__main__":
@@ -1020,9 +991,53 @@ asyncio.run(main())
 
 ---
 
+## セキュリティーの考慮事項
+
+AG-UI エンドポイントは、デフォルトでは認証を強制しない。本番環境では、FastAPI の依存性注入を使って認証を追加する必要がある。
+
+```python
+import os
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.security import APIKeyHeader
+from agent_framework import Agent
+from agent_framework.ag_ui import add_agent_framework_fastapi_endpoint
+
+# API キー認証の設定
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+EXPECTED_API_KEY = os.environ.get("AG_UI_API_KEY")
+
+
+async def verify_api_key(
+    api_key: str | None = Security(API_KEY_HEADER),
+) -> None:
+    """リクエストヘッダの API キーを検証する。"""
+    if not api_key or api_key != EXPECTED_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+app = FastAPI()
+
+# エージェントは前のセクションで作成済みと仮定
+# agent = simple_agent(chat_client)
+
+# 認証付きでエンドポイントを登録
+# 1 つの API キーを共有する呼び出し元を 1 人の利用者として扱う
+add_agent_framework_fastapi_endpoint(
+    app,
+    agent,
+    "/",
+    dependencies=[Depends(verify_api_key)],
+    single_user=True,
+)
+```
+
+`dependencies` には任意の FastAPI 依存性を渡せるので、API キーの代わりに OAuth 2.0、JWT、Azure AD / Entra ID による認証を組み込んだり、レート制限を加えたりできる。ただし `dependencies` が担うのは認証だけで、認可スコープは決めない。利用者ごとに会話の状態や承認状態を分けるなら、`single_user=True` の代わりに、認証済みの利用者から認可スコープを返す `authorization_scope_resolver` を渡す。
+
+---
+
 ## CopilotKit との連携
 
-[CopilotKit](https://docs.copilotkit.ai/) は、React アプリケーションに AI コパイロット機能を組み込むフレームワークで、AG-UI の代表的なクライアントだ。AG-UI プロトコルにネイティブ対応している。
+[CopilotKit](https://docs.copilotkit.ai/) は、React アプリケーションに AI コパイロット機能を組み込むフレームワークで、AG-UI にネイティブ対応した代表的なクライアントだ。
 
 CopilotKit の `useCopilotAction` フックを使うと、AG-UI のフロントエンドツールを簡潔に定義できる。
 
@@ -1069,12 +1084,11 @@ AG-UI の公式ドキュメントに挙がっているビルディングブロ�
 | Tool Output Streaming | ツール結果のリアルタイムストリーミング | サポート済み |
 | Custom Events | プロトコルでカバーされない独自データ交換 | サポート済み |
 
-> <strong>追記（2026-08 時点）</strong>：上の一覧は現行の公式ドキュメントと一致している。周辺のエコシステムには次の動きがあった。
+> <strong>追記（2026 年 8 月時点）</strong>：上の一覧は現行の公式ドキュメントと一致している。周辺のエコシステムには次の動きがあった。
 >
 > - <strong>生成 UI 仕様との併用</strong>。AG-UI は、Google の [A2UI](https://github.com/google/A2UI) や [MCP Apps](https://blog.modelcontextprotocol.io/posts/2025-11-21-mcp-apps/) といった生成 UI 仕様（generative UI spec）をサポートする。A2UI や MCP Apps は、エージェントが UI ウィジェットをどう記述するかの仕様だ。AG-UI は、フロントエンドとエージェントのバックエンドをどうつなぐかのプロトコルだ。扱う層が違うので、組み合わせて使える。
-> - <strong>Microsoft Agent Framework はファーストパーティーの統合</strong>として Supported に分類されている。本記事の実装方針はそのまま使える。
-> - <strong>SDK の広がり</strong>。コミュニティー提供を含め、Kotlin / Go / Dart / Java / Rust / Ruby / C++ / .NET の SDK が Supported になっている。
-> - <strong>クライアントは Web だけではない</strong>。AG-UI はレンダリング先ではなくイベントストリームを規定するため、ターミナル、モバイル、Slack / Microsoft Teams などのチャットプラットフォームもクライアントになりうる。
+> - <strong>Microsoft Agent Framework の位置づけ</strong>。ファーストパーティーの統合として、サポート済みに分類されている。本記事の実装方針はそのまま使える。
+> - <strong>Web 以外のクライアント</strong>。AG-UI はレンダリング先ではなくイベントストリームを規定するため、ターミナル、モバイル、Slack / Microsoft Teams などのチャットプラットフォームもクライアントになりうる。
 
 ---
 
@@ -1100,7 +1114,7 @@ AG-UI は CopilotKit から生まれたプロトコルで、現在は次のエ�
 
 ### SDK
 
-執筆時点では、TypeScript に加えて Kotlin、Golang、Dart、Java、Rust の SDK がコミュニティー主導で開発されており、.NET と Nim の SDK は開発中だった。2026 年 8 月時点の状況は前節の追記のとおりだ。
+執筆時点では、TypeScript に加えて Kotlin、Go、Dart、Java、Rust の SDK がコミュニティー主導で開発されており、.NET と Nim の SDK は開発中だった。2026 年 8 月時点では、コミュニティー提供を含め、Kotlin、Go、Dart、Java、Rust、Ruby、C++、.NET の SDK がサポート済みになっている。
 
 ---
 

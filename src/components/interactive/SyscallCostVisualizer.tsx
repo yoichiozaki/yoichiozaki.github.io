@@ -37,17 +37,17 @@ export function SyscallCostVisualizer({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "syscall コストを数えてみる" : "Count the syscalls"}
+      title={isJa ? "syscall の回数を数えてみる" : "Count the syscalls"}
       description={
         isJa
-          ? "空港のイミグレに例えると分かりやすいです。epoll は旅行者 1 人ずつ審査官に声をかける方式、io_uring は団体ツアーの代表が 1 枚の名簿で一括審査してもらう方式、SQPOLL は常駐の顔パス担当がいて窓口すら通らない方式です。"
-          : "Think of passport control. With epoll, every traveller queues individually. With io_uring, a tour guide hands a single list for batch approval. With SQPOLL, there's a dedicated officer who recognises your group on sight — no counter at all."
+          ? "空港の入国審査にたとえると、epoll は旅行者 1 人ずつ審査官に声をかける方式、io_uring は団体ツアーの代表が 1 枚の名簿で一括審査してもらう方式です。SQPOLL では常駐の審査官が名簿を取りに来るので、声をかける必要もありません。"
+          : "Think of passport control. With epoll, every traveler queues individually. With io_uring, a tour guide hands in a single list for batch approval. With SQPOLL, a dedicated officer comes to collect the list, so nobody goes to the counter at all."
       }
     >
       <div className="flex flex-col gap-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <Slider
-            label={isJa ? "同時 I/O 件数" : "# concurrent I/Os"}
+            label={isJa ? "同時 I/O 件数 (n)" : "Concurrent I/Os (n)"}
             min={10}
             max={10000}
             step={10}
@@ -69,8 +69,8 @@ export function SyscallCostVisualizer({ locale = "ja" }: Props) {
             name="epoll"
             detail={
               isJa
-                ? `${counts.epoll} syscalls (n 個の read/write + epoll_wait 数回)`
-                : `${counts.epoll} syscalls (n read/write + a few epoll_wait)`
+                ? `syscall ${counts.epoll} 回 (read/write n 回 + epoll_wait ⌈n/256⌉ 回)`
+                : `${counts.epoll} syscalls (n read/write + ⌈n/256⌉ epoll_wait)`
             }
             ns={totals.epoll}
             max={max}
@@ -80,7 +80,7 @@ export function SyscallCostVisualizer({ locale = "ja" }: Props) {
             name="io_uring (default)"
             detail={
               isJa
-                ? `${counts.iouring} syscalls (⌈n/batch⌉)`
+                ? `syscall ${counts.iouring} 回 (⌈n/batch⌉)`
                 : `${counts.iouring} syscalls (⌈n/batch⌉)`
             }
             ns={totals.iouring}
@@ -89,7 +89,7 @@ export function SyscallCostVisualizer({ locale = "ja" }: Props) {
           />
           <Bar
             name="io_uring + SQPOLL"
-            detail={isJa ? "0 syscalls (kernel poller)" : "0 syscalls (kernel poller)"}
+            detail={isJa ? "syscall 0 回 (カーネルスレッドが SQ を監視)" : "0 syscalls (kernel poller)"}
             ns={totals.sqpoll}
             max={max}
             color="bg-emerald-500"
@@ -98,12 +98,12 @@ export function SyscallCostVisualizer({ locale = "ja" }: Props) {
 
         <p className="text-xs text-muted-foreground">
           {isJa
-            ? "前提: syscall 1 回 ≈ 500 ns (KPTI 有り、Intel 旧世代の典型値)、リクエスト当たりの user-side 処理 ≈ 50 ns。epoll は read/write が毎回 syscall になるため syscall コストが n に比例します。"
-            : "Assumes ~500 ns per syscall (KPTI on, conservative on older Intel) and ~50 ns user-side work per request. epoll\u2019s cost scales with n because each read/write is its own syscall."}
+            ? "仮定: syscall 1 回 500ns (KPTI 有効時の見積もり 0.1〜1µs の範囲内)、epoll_wait 1 回で 256 件のイベント、1 リクエストあたりのユーザー空間の処理 50ns。epoll は read/write が毎回 syscall になるため syscall コストが n に比例します。"
+            : "Assumes 500 ns per syscall (within the 0.1\u20131 µs estimate with KPTI), 256 events per epoll_wait, and 50 ns of user-space work per request. epoll\u2019s cost scales with n because each read/write is its own syscall."}
           {" "}
           {isJa
-            ? "n=10,000 のワークロードでは、epoll は数ミリ秒を syscall だけで溶かすのに対し、io_uring はバッチサイズ次第で二桁減り、SQPOLL だと syscall コストが消えます。"
-            : "At n=10,000, epoll burns several milliseconds on syscalls; io_uring cuts that by 1\u20132 orders of magnitude; SQPOLL erases the syscall column entirely."}
+            ? "この仮定で計算すると、n=10,000 では epoll の syscall だけで約 5ms かかります。io_uring では syscall がバッチ 1 つにつき 1 回に減り、SQPOLL では SQ スレッドが起きているあいだ 0 回です (そのスレッドが使う CPU 1 コア分はバーに含めていません)。"
+            : "With these assumptions, epoll spends about 5 ms on syscalls alone at n=10,000. io_uring needs only one syscall per batch, and SQPOLL needs none while the SQ thread is awake (the bars exclude the CPU core that thread occupies)."}
         </p>
       </div>
     </InteractiveDemo>

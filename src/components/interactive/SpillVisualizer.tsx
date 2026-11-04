@@ -214,24 +214,24 @@ const STEPS: StepDef[] = [
     title: (ja) => (ja ? "入力とメモリー予算" : "Input and memory budget"),
     body: (ja, s, a, mb) =>
       ja
-        ? `${num(ROWS)} 行 × ${ROW_BYTES} バイト = 330MB を、work_mem = ${mb}MB で処理します。ソートは全行を並べ替え、集約は同じ入力を ${num(GROUPS)} グループにまとめます（第11章前半のソート例と同じ入力です。表の 1,000,000 行 / 100,000 グループの例ではありません）。予算はソートが work_mem そのもの、ハッシュ集約は hash_mem_multiplier = ${HASH_MEM_MULTIPLIER} 倍の ${mb * HASH_MEM_MULTIPLIER}MB です。ソートは${s.fits ? "収まります" : "収まりません"}。ハッシュ表 ${num(GROUPS)} × ${HASH_ENTRY_BYTES}B = ${num(HASH_TABLE_BYTES / MB)}MB は${a.fits ? "収まります" : "収まりません"}。`
-        : `${num(ROWS)} rows × ${ROW_BYTES} bytes = 330 MB, processed with work_mem = ${mb} MB. The sort orders every row; the aggregate folds that same input into ${num(GROUPS)} groups (this is the chapter's sort example, not the 1,000,000-row / 100,000-group table above). Sorting gets work_mem itself; hash aggregation gets hash_mem_multiplier = ${HASH_MEM_MULTIPLIER}× that, i.e. ${mb * HASH_MEM_MULTIPLIER} MB. The sort ${s.fits ? "fits" : "does not fit"}. The hash table, ${num(GROUPS)} × ${HASH_ENTRY_BYTES} B = ${num(HASH_TABLE_BYTES / MB)} MB, ${a.fits ? "fits" : "does not fit"}.`,
+        ? `${num(ROWS)} 行 × ${ROW_BYTES} バイト = 330,000,000 バイトを、work_mem = ${mb}MB（${mb} × 1,048,576 バイト）で処理します。ソートは全行を並べ替え、集約は同じ入力を ${num(GROUPS)} グループにまとめます（第11章前半のソート例と同じ入力です）。予算はソートが work_mem そのもの、ハッシュ集約は hash_mem_multiplier = ${HASH_MEM_MULTIPLIER} 倍の ${mb * HASH_MEM_MULTIPLIER}MB です。ソートは${s.fits ? "収まります" : "収まりません"}。ハッシュ表 ${num(GROUPS)} × ${HASH_ENTRY_BYTES}B ≈ ${num(HASH_TABLE_BYTES / MB)}MB は${a.fits ? "収まります" : "収まりません"}。`
+        : `${num(ROWS)} rows × ${ROW_BYTES} bytes = 330,000,000 bytes, processed with work_mem = ${mb} MB (${mb} × 1,048,576 bytes). The sort orders every row; the aggregate folds that same input into ${num(GROUPS)} groups (this is the chapter's sort example). Sorting gets work_mem itself; hash aggregation gets hash_mem_multiplier = ${HASH_MEM_MULTIPLIER}× that, i.e. ${mb * HASH_MEM_MULTIPLIER} MB. The sort ${s.fits ? "fits" : "does not fit"}. The hash table, ${num(GROUPS)} × ${HASH_ENTRY_BYTES} B ≈ ${num(HASH_TABLE_BYTES / MB)} MB, ${a.fits ? "fits" : "does not fit"}.`,
   },
   {
     side: "sort",
-    title: (ja) => (ja ? "ソート: run の生成" : "Sort: generating runs"),
+    title: (ja) => (ja ? "ソート：run の生成" : "Sort: generating runs"),
     body: (ja, s, _a, mb) =>
       s.fits
         ? ja
           ? `入力全体が work_mem に収まるので run は作られません。メモリー内クイックソート1回で終わりです。`
           : `The whole input fits in work_mem, so no runs are produced — a single in-memory quicksort finishes the job.`
         : ja
-          ? `work_mem を使い切るたびに、その分だけをソートして一時ファイルへ書き出します。330MB ÷ ${mb}MB = ${num(s.runs)} 本の run ができます。ここまでは書き込みだけです。`
-          : `Each time work_mem fills up, that chunk is sorted and written to a temp file. 330 MB ÷ ${mb} MB gives ${num(s.runs)} runs. So far this is writes only.`,
+          ? `work_mem を使い切るたびに、その分だけをソートして一時ファイルへ書き出します。330,000,000 バイトを ${mb}MB ずつ区切るので、run は ${num(s.runs)} 本です。ここまでは書き込みだけです。`
+          : `Each time work_mem fills up, that chunk is sorted and written to a temp file. Cutting 330,000,000 bytes into ${mb} MB chunks gives ${num(s.runs)} runs. So far this is writes only.`,
   },
   {
     side: "sort",
-    title: (ja) => (ja ? "ソート: マージ次数" : "Sort: merge order"),
+    title: (ja) => (ja ? "ソート：マージ次数" : "Sort: merge order"),
     body: (ja, s, _a, mb) =>
       s.fits
         ? ja
@@ -243,7 +243,7 @@ const STEPS: StepDef[] = [
   },
   {
     side: "sort",
-    title: (ja) => (ja ? "ソート: マージパス" : "Sort: merge passes"),
+    title: (ja) => (ja ? "ソート：マージパス" : "Sort: merge passes"),
     body: (ja, s) =>
       s.fits
         ? ja
@@ -255,7 +255,7 @@ const STEPS: StepDef[] = [
   },
   {
     side: "sort",
-    title: (ja) => (ja ? "ソート: 合計" : "Sort: the total"),
+    title: (ja) => (ja ? "ソート：合計" : "Sort: the total"),
     body: (ja, s) =>
       ja
         ? `比較コストは ${num(s.cpu)} で、work_mem に関係なく一定です。ディスクは ${num(s.disk)}。合計 ${num(s.total)}、メモリー内実行の ${ratio(s.total, SORT_BASE)} 倍にとどまります。`
@@ -263,7 +263,7 @@ const STEPS: StepDef[] = [
   },
   {
     side: "agg",
-    title: (ja) => (ja ? "ハッシュ集約: 溢れる" : "Hash aggregation: overflowing"),
+    title: (ja) => (ja ? "ハッシュ集約：溢れる" : "Hash aggregation: overflowing"),
     body: (ja, _s, a, mb) =>
       a.fits
         ? ja
@@ -410,13 +410,13 @@ export function SpillVisualizer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "work_mem を超えたとき — ソートとハッシュ集約の壊れ方"
+          ? "work_mem を超えたとき — ソートとハッシュ集約の崩れ方"
           : "Crossing work_mem — How Sorting and Hash Aggregation Break"
       }
       description={
         isJa
-          ? "同じ 330MB の入力に対して、work_mem を動かしながらソートとハッシュ集約のコストを比べます。ソートはなだらかに、ハッシュ集約は段差で悪化します。"
-          : "The same 330 MB input, with work_mem as a dial: sorting degrades smoothly, hash aggregation degrades in steps."
+          ? "同じ 330MB の入力に対して、work_mem を動かしながら、PostgreSQL のコスト式に倣って計算したソートとハッシュ集約のコストを比べます。ソートはなだらかに、ハッシュ集約は段差で悪化します。"
+          : "Sort and hash-aggregation costs for the same 330 MB input, computed with PostgreSQL-style cost formulas as work_mem changes: sorting degrades smoothly, hash aggregation in steps."
       }
     >
       <div className="space-y-4">
@@ -509,12 +509,12 @@ export function SpillVisualizer({ locale = "ja" }: Props) {
                 ],
                 [isJa ? "バッチ数" : "batches", num(agg.batches)],
                 [
-                  isJa ? "再帰の深さ" : "spill depth",
+                  isJa ? "再帰の深さ" : "recursion depth",
                   String(agg.depth),
                 ],
                 ["CPU", num(agg.cpu)],
                 [
-                  isJa ? "ディスク" : "disk",
+                  isJa ? "溢れ処理" : "spill",
                   num(agg.disk + agg.spillCpu),
                 ],
                 [isJa ? "合計" : "total", num(agg.total)],
@@ -564,8 +564,8 @@ export function SpillVisualizer({ locale = "ja" }: Props) {
           <Chart current={workMem} isJa={isJa} />
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
             {isJa
-              ? "ハッシュ集約の線が 4〜32MB で平らなのは、cost_agg が見ているのが連続量ではなく整数の再帰の深さだからです。この範囲ではバッチ数が増えても深さは 1 のままなので、コストも動きません。平坦な区間はモデルの性質であって、実測値が本当に一定だという意味ではありません。"
-              : "The hash-aggregate line is flat from 4 to 32 MB because cost_agg keys off an integer — the recursion depth — rather than a continuous quantity. Across this range the batch count grows but the depth stays at 1, so the cost does not move. The plateau is a property of the model, not a claim that real runtimes are constant there."}
+              ? "ハッシュ集約の線が 4〜32MB で平らなのは、cost_agg が見ているのが連続量ではなく整数の再帰の深さだからです。この範囲で work_mem を増やすとバッチ数は減りますが、深さは 1 のままなので、コストも動きません。平坦な区間はモデルの性質であって、実測値が本当に一定だという意味ではありません。"
+              : "The hash-aggregate line is flat from 4 to 32 MB because cost_agg keys off an integer — the recursion depth — rather than a continuous quantity. Raising work_mem across this range cuts the batch count, but the depth stays at 1, so the cost does not move. The plateau is a property of the model, not a claim that real runtimes are constant there."}
           </p>
         </div>
 

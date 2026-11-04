@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type Props = { locale?: string };
@@ -50,8 +51,8 @@ const steps: Step[] = [
       { id: 3, terms: ["dog", "sat", "log"] },
     ],
     desc: {
-      ja: '3つのドキュメント（ストップワード除去済み）に対して、クエリー "cat mat" の TF-IDF スコアを計算してみましょう。',
-      en: 'Let\'s calculate TF-IDF scores for the query "cat mat" across 3 documents (after stopword removal).',
+      ja: '3つのドキュメント（N=3、ストップワード除去済み）について、クエリー "cat mat" に対する TF-IDF スコアを計算します。',
+      en: 'Calculate TF-IDF scores for the query "cat mat" across N=3 documents (after stopword removal).',
     },
   },
   /* 1 */ {
@@ -61,7 +62,7 @@ const steps: Step[] = [
       { id: 3, terms: ["dog", "sat", "log"], tfCat: 0 },
     ],
     desc: {
-      ja: 'TF（出現頻度）の計算 — "cat" の各ドキュメント内での出現回数: D1=1回, D2=1回, D3=0回',
+      ja: 'TF（出現頻度）の計算 — "cat" の各ドキュメント内での出現回数: D1=1回、D2=1回、D3=0回',
       en: 'Calculate TF (Term Frequency) for "cat" in each document: D1=1, D2=1, D3=0',
     },
   },
@@ -72,7 +73,7 @@ const steps: Step[] = [
       { id: 3, terms: ["dog", "sat", "log"], tfCat: 0, tfMat: 0 },
     ],
     desc: {
-      ja: '"mat" の出現回数: D1=1回, D2=0回, D3=0回',
+      ja: '"mat" の出現回数: D1=1回、D2=0回、D3=0回',
       en: 'TF for "mat": D1=1, D2=0, D3=0',
     },
   },
@@ -85,8 +86,8 @@ const steps: Step[] = [
     idfCat: 0.176,
     idfMat: 0.477,
     desc: {
-      ja: "IDF（逆文書頻度）を計算。cat: DF=2, IDF=log₁₀(3/2)≈0.176。mat: DF=1, IDF=log₁₀(3/1)≈0.477。mat の方が珍しいので IDF が高い！",
-      en: "Calculate IDF. cat: DF=2, IDF=log₁₀(3/2)≈0.176. mat: DF=1, IDF=log₁₀(3/1)≈0.477. mat is rarer, so it has higher IDF!",
+      ja: "IDF（逆文書頻度）を計算。cat を含むドキュメントは2つ（df=2）で IDF=log₁₀(3/2)≈0.176、mat は1つ（df=1）で IDF=log₁₀(3/1)≈0.477。mat の方が珍しいので IDF が高くなります。",
+      en: "Calculate IDF (Inverse Document Frequency). cat appears in 2 documents (df=2): IDF=log₁₀(3/2)≈0.176. mat appears in 1 (df=1): IDF=log₁₀(3/1)≈0.477. mat is rarer, so its IDF is higher.",
     },
   },
   /* 4 */ {
@@ -98,8 +99,8 @@ const steps: Step[] = [
     idfCat: 0.176,
     idfMat: 0.477,
     desc: {
-      ja: "TF-IDF = TF × IDF を各ドキュメントで計算。D1: 0.176+0.477=0.653、D2: 0.176+0=0.176、D3: 0",
-      en: "Compute TF-IDF = TF × IDF for each doc. D1: 0.176+0.477=0.653, D2: 0.176+0=0.176, D3: 0",
+      ja: "各タームの TF × IDF を求め、ドキュメントごとに合計。D1: 0.176+0.477=0.653、D2: 0.176+0=0.176、D3: 0",
+      en: "Compute TF × IDF for each term and sum per document. D1: 0.176+0.477=0.653, D2: 0.176+0=0.176, D3: 0",
     },
   },
   /* 5 */ {
@@ -112,8 +113,8 @@ const steps: Step[] = [
     idfMat: 0.477,
     showRank: true,
     desc: {
-      ja: "ランキング結果: D1（0.653）> D2（0.176）> D3（0）。珍しいターム mat を含む D1 が最上位！",
-      en: "Ranking: D1 (0.653) > D2 (0.176) > D3 (0). D1 ranks highest thanks to the rare term mat!",
+      ja: "ランキング結果: D1（0.653）> D2（0.176）> D3（0）。珍しいターム mat も含む D1 が最上位です。",
+      en: "Ranking: D1 (0.653) > D2 (0.176) > D3 (0). D1 ranks highest because it also contains the rare term mat.",
     },
   },
   /* 6 */ {
@@ -127,8 +128,8 @@ const steps: Step[] = [
     showRank: true,
     showBM25: true,
     desc: {
-      ja: "BM25 は TF-IDF を改良したアルゴリズム。TF の飽和関数と文書長の正規化を加え、より実用的なランキングを実現します。",
-      en: "BM25 improves on TF-IDF with TF saturation and document length normalization for more practical ranking.",
+      ja: "BM25 は TF-IDF を改良したスコアです。TF の寄与を飽和させ、ドキュメント長で正規化するので、同じタームの繰り返しや長いドキュメントでスコアが膨らみにくくなります。",
+      en: "BM25 refines TF-IDF: it saturates the TF contribution and normalizes for document length, so repeated terms and long documents inflate scores less.",
     },
   },
 ];
@@ -146,8 +147,8 @@ export function TFIDFCalculator({ locale = "ja" }: Props) {
       title={lang === "en" ? "TF-IDF Score Calculator" : "TF-IDF スコア計算デモ"}
       description={
         lang === "en"
-          ? 'Step through the TF-IDF scoring process for the query "cat mat".'
-          : 'クエリー "cat mat" に対する TF-IDF スコア計算の過程を見てみましょう。'
+          ? 'Step through computing TF-IDF scores of 3 documents for the query "cat mat" and ranking them.'
+          : 'クエリー "cat mat" について、3つのドキュメントの TF-IDF スコアを1ステップずつ計算し、順位を付けます。'
       }
     >
       <div className="space-y-4">
@@ -287,17 +288,20 @@ export function TFIDFCalculator({ locale = "ja" }: Props) {
               BM25 ({lang === "en" ? "Improvement" : "改良版"})
             </div>
             <div className="text-xs text-muted-foreground font-mono leading-relaxed">
-              BM25(t, d) = IDF(t) × TF(t,d) × (k₁ + 1) / (TF(t,d) + k₁ × (1 − b + b × |d| / avgdl))
+              BM25(t, d) = IDF_BM25(t) × TF(t,d) × (k₁ + 1) / (TF(t,d) + k₁ × (1 − b + b × |d| / avgdl))
             </div>
             <div className="text-xs text-muted-foreground">
               {lang === "en"
-                ? "k₁=1.2 controls TF saturation (diminishing returns). b=0.75 normalizes for document length."
-                : "k₁=1.2: TF の飽和（出現回数の増加に対して収穫逓減）。b=0.75: 文書長の正規化。"}
+                ? "k₁ (commonly 1.2–2.0) controls TF saturation (diminishing returns). b (commonly 0.75) normalizes for document length."
+                : "k₁（一般に 1.2〜2.0）: TF の飽和を制御（出現回数が増えるほどスコアの伸びが鈍る）。b（一般に 0.75）: ドキュメント長の正規化。"}
             </div>
           </div>
         )}
 
-        <StepPlayerControls {...player} label={(s) => steps[s].desc[lang]} />
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {current.desc[lang]}
+        </p>
+        <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

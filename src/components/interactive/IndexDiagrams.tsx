@@ -50,7 +50,7 @@ export function IndexTaxonomy({ locale = "ja" }: DiagramProps) {
 
         {/* B+Tree children */}
         {[
-          { x: 140, label: locale === "en" ? "Clustered" : "クラスタード", desc: locale === "en" ? "Row data in leaf" : "行データ=リーフ順" },
+          { x: 140, label: locale === "en" ? "Clustered" : "クラスタード", desc: locale === "en" ? "Row data in leaf" : "リーフに行データ" },
           { x: 310, label: locale === "en" ? "Non-clustered" : "非クラスタード", desc: locale === "en" ? "Pointer in leaf" : "リーフにポインター" },
         ].map((item, i) => (
           <g key={i}>
@@ -68,7 +68,7 @@ export function IndexTaxonomy({ locale = "ja" }: DiagramProps) {
         {/* LSM-Tree children */}
         {[
           { x: 420, label: "Memtable", desc: locale === "en" ? "In-memory write buffer" : "メモリー上の書込バッファー" },
-          { x: 420, yOff: 60, label: "SSTable", desc: locale === "en" ? "Sorted on-disk files" : "ディスク上のソート済ファイル" },
+          { x: 420, yOff: 60, label: "SSTable", desc: locale === "en" ? "Sorted on-disk files" : "ディスク上のソート済みファイル" },
         ].map((item, i) => (
           <g key={i}>
             <line x1={500} y1={116} x2={item.x + 70} y2={170 + (item.yOff ?? 0)} stroke={border} strokeWidth={1.5} />
@@ -172,7 +172,7 @@ export function BTreeComparison({ locale = "ja" }: DiagramProps) {
         {/* Summary comparison */}
         <line x1={30} y1={165} x2={610} y2={165} stroke={border} strokeWidth={0.5} />
         {[
-          { label: locale === "en" ? "Range scan" : "範囲検索", btree: locale === "en" ? "In-order traversal (slow)" : "中間順走査（遅い）", bplus: locale === "en" ? "Leaf linked list (fast)" : "リーフ連結リスト（高速）" },
+          { label: locale === "en" ? "Range scan" : "範囲検索", btree: locale === "en" ? "In-order traversal (slower)" : "中間順走査（遅い）", bplus: locale === "en" ? "Leaf linked list (fast)" : "リーフ連結リスト（高速）" },
           { label: locale === "en" ? "Point lookup" : "一点検索", btree: locale === "en" ? "Can stop early" : "途中で見つかる場合も", bplus: locale === "en" ? "Always to leaf" : "常にリーフまで" },
           { label: locale === "en" ? "Fan-out" : "分岐数", btree: locale === "en" ? "Lower (data in nodes)" : "小さい（ノードにデータ）", bplus: locale === "en" ? "Higher (keys only)" : "大きい（キーのみ）" },
         ].map((row, i) => (
@@ -203,32 +203,39 @@ export function LSMWritePath({ locale = "ja" }: DiagramProps) {
       <svg viewBox="0 0 560 220" className="w-full max-w-lg">
         {/* WAL */}
         <rect x={10} y={30} width={80} height={36} rx={6} fill={orange} opacity={0.15} stroke={orange} strokeWidth={1.5} />
-        <text x={50} y={52} textAnchor="middle" fill={orange} fontSize={12} fontWeight={600}>WAL</text>
+        <text x={50} y={52} textAnchor="middle" fill={orange} fontSize={12} fontWeight={600}>① WAL</text>
         <text x={50} y={82} textAnchor="middle" fill={muted} fontSize={9}>
           {locale === "en" ? "Write-Ahead Log" : "先行書込ログ"}
         </text>
 
         {/* Arrow */}
         <line x1={92} y1={48} x2={130} y2={48} stroke={border} strokeWidth={1.5} markerEnd="url(#lsmArr)" />
-        <text x={111} y={40} textAnchor="middle" fill={muted} fontSize={8}>①</text>
+        <text x={111} y={40} textAnchor="middle" fill={muted} fontSize={8}>②</text>
 
         {/* Memtable */}
         <rect x={132} y={30} width={100} height={36} rx={6} fill={accent} opacity={0.15} stroke={accent} strokeWidth={1.5} />
         <text x={182} y={52} textAnchor="middle" fill={accent} fontSize={12} fontWeight={600}>Memtable</text>
         <text x={182} y={82} textAnchor="middle" fill={muted} fontSize={9}>
-          {locale === "en" ? "In-memory sorted" : "メモリー上ソート済み"}
+          {locale === "en" ? "In-memory sorted" : "メモリー上のソート済み構造"}
         </text>
 
         {/* Arrow flush */}
         <line x1={234} y1={48} x2={270} y2={48} stroke={border} strokeWidth={1.5} markerEnd="url(#lsmArr)" />
-        <text x={252} y={40} textAnchor="middle" fill={muted} fontSize={8}>② flush</text>
+        {locale === "en" ? (
+          <text x={252} y={40} textAnchor="middle" fill={muted} fontSize={8}>③ flush</text>
+        ) : (
+          <>
+            <text x={252} y={40} textAnchor="middle" fill={muted} fontSize={8}>③</text>
+            <text x={252} y={60} textAnchor="middle" fill={muted} fontSize={7}>フラッシュ</text>
+          </>
+        )}
 
         {/* SSTable levels */}
         {[
-          { x: 272, y: 20, w: 90, label: "L0", desc: locale === "en" ? "Unsorted SSTables" : "未ソートSSTable" },
-          { x: 272, y: 70, w: 130, label: "L1", desc: locale === "en" ? "Sorted, 10× larger" : "ソート済、10倍" },
-          { x: 272, y: 120, w: 190, label: "L2", desc: locale === "en" ? "Sorted, 100× larger" : "ソート済、100倍" },
-          { x: 272, y: 170, w: 250, label: "L3", desc: locale === "en" ? "Sorted, 1000× larger" : "ソート済、1000倍" },
+          { x: 272, y: 20, w: 90, label: "L0", desc: locale === "en" ? "Ranges overlap" : "範囲が重なる" },
+          { x: 272, y: 70, w: 130, label: "L1", desc: locale === "en" ? "Sorted" : "ソート済み" },
+          { x: 272, y: 120, w: 190, label: "L2", desc: locale === "en" ? "Sorted, 10× L1" : "ソート済み、L1の10倍" },
+          { x: 272, y: 170, w: 250, label: "L3", desc: locale === "en" ? "Sorted, 10× L2" : "ソート済み、L2の10倍" },
         ].map((level, i) => (
           <g key={i}>
             <rect x={level.x} y={level.y} width={level.w} height={30} rx={4} fill={bg} stroke={border} strokeWidth={1} />
@@ -252,7 +259,7 @@ export function LSMWritePath({ locale = "ja" }: DiagramProps) {
                   fontSize={8}
                   fontWeight={500}
                 >
-                  compaction
+                  {locale === "en" ? "compaction" : "コンパクション"}
                 </text>
               </>
             )}
@@ -298,16 +305,16 @@ export function DiskIOComparison({ locale = "ja" }: DiagramProps) {
   ];
 
   const metrics = [
-    { key: "read" as const, label: locale === "en" ? "Point Read" : "一点読取" },
-    { key: "write" as const, label: locale === "en" ? "Write" : "書込" },
-    { key: "range" as const, label: locale === "en" ? "Range Scan" : "範囲検索" },
+    { key: "read" as const, label: locale === "en" ? "Point read" : "一点読取" },
+    { key: "write" as const, label: locale === "en" ? "Write" : "書込み" },
+    { key: "range" as const, label: locale === "en" ? "Range scan" : "範囲検索" },
   ];
 
   return (
     <div className="not-prose my-6 flex justify-center">
       <svg viewBox="0 0 480 200" className="w-full max-w-md">
         <text x={240} y={18} textAnchor="middle" fill={text} fontSize={13} fontWeight={700}>
-          {locale === "en" ? "Performance Characteristics" : "パフォーマンス特性"}
+          {locale === "en" ? "Relative Speed by Operation (Illustrative)" : "操作ごとの相対的な速さ（模式図）"}
         </text>
         {metrics.map((m, mi) => {
           const baseY = 38 + mi * 56;
@@ -354,23 +361,23 @@ export function DBIndexStrategies({ locale = "ja" }: DiagramProps) {
   const accent = dark ? "#3b82f6" : "#2563eb";
 
   const dbs = [
-    { name: "MySQL (InnoDB)", index: "B+Tree", note: locale === "en" ? "Clustered on PK" : "PKでクラスタード" },
-    { name: "PostgreSQL", index: "B+Tree", note: locale === "en" ? "Heap table + index" : "ヒープ+インデックス" },
-    { name: "SQLite", index: "B+Tree", note: locale === "en" ? "Table = B-Tree" : "テーブル=B木" },
+    { name: "MySQL (InnoDB)", index: "B+ Tree", note: locale === "en" ? "Clustered on primary key" : "主キーがクラスタードインデックス" },
+    { name: "PostgreSQL", index: "B+ Tree", note: locale === "en" ? "Heap table + index" : "ヒープ+インデックス" },
+    { name: "SQLite", index: "B+ Tree", note: locale === "en" ? "Table B-trees resemble B+ trees" : "テーブルB木はB+木に近い" },
     { name: "RocksDB", index: "LSM-Tree", note: locale === "en" ? "Write-optimized" : "書込最適化" },
     { name: "Cassandra", index: "LSM-Tree", note: locale === "en" ? "SSTable-based" : "SSTableベース" },
-    { name: "MongoDB (WiredTiger)", index: locale === "en" ? "Both" : "両方", note: locale === "en" ? "B-Tree + LSM option" : "B木 + LSM選択可" },
+    { name: "MongoDB (WiredTiger)", index: locale === "en" ? "B-Tree" : "B木", note: locale === "en" ? "Collections and indexes in B-trees" : "コレクションもインデックスもB木" },
   ];
 
   return (
     <div className="not-prose my-6 flex justify-center">
       <svg viewBox="0 0 520 240" className="w-full max-w-lg">
         <text x={260} y={20} textAnchor="middle" fill={text} fontSize={13} fontWeight={700}>
-          {locale === "en" ? "Database Index Strategies" : "データベースごとのインデックス戦略"}
+          {locale === "en" ? "Index Structures by Database" : "データベースごとのインデックス構造"}
         </text>
         {/* Header */}
-        <text x={20} y={48} fill={muted} fontSize={10} fontWeight={600}>Database</text>
-        <text x={200} y={48} fill={muted} fontSize={10} fontWeight={600}>Index</text>
+        <text x={20} y={48} fill={muted} fontSize={10} fontWeight={600}>{locale === "en" ? "Database" : "データベース"}</text>
+        <text x={200} y={48} fill={muted} fontSize={10} fontWeight={600}>{locale === "en" ? "Index" : "インデックス"}</text>
         <text x={320} y={48} fill={muted} fontSize={10} fontWeight={600}>{locale === "en" ? "Note" : "備考"}</text>
         <line x1={10} y1={54} x2={510} y2={54} stroke={border} strokeWidth={0.5} />
 

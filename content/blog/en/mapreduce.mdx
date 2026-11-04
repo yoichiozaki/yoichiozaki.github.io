@@ -9,12 +9,12 @@ tags: ["Distributed Systems", "MapReduce", "Big Data", "Systems Design"]
 
 In 2004, Jeff Dean and Sanjay Ghemawat from Google presented "[MapReduce: Simplified Data Processing on Large Clusters](https://research.google/pubs/mapreduce-simplified-data-processing-on-large-clusters/)" at OSDI'04. With MapReduce, a programmer writes two functions, map and reduce, and the framework spreads the work across a cluster of thousands of machines. The paper's main achievement was letting programmers without experience in parallel and distributed systems write large-scale computations.
 
-At the time, Google was routinely processing tens of petabytes of data collected by web crawlers. Index building, PageRank computation, and access log analysis all had to be distributed across thousands of machines, and each time engineers had to solve the same problems:
+At the time, Google was routinely processing large volumes of documents collected by web crawlers; according to Section 6.1 of the paper, the input to index building alone exceeded 20 TB. Index building, PageRank computation, and access log analysis all had to be distributed across thousands of machines, and each time engineers had to solve the same problems:
 
 - Data partitioning and distribution: How to spread data evenly across machines
 - Parallel execution control: How to coordinate thousands of processes
 - Fault recovery: What to do when a machine dies (and machines die almost daily)
-- Network bandwidth:  How to move terabytes of data efficiently
+- Network bandwidth: How to move terabytes of data efficiently
 
 The code for these problems was unrelated to the computation itself, yet it made up most of each program. MapReduce moves this plumbing into a framework so that programmers write only the computation.
 
@@ -26,7 +26,7 @@ The code for these problems was unrelated to the computation itself, yet it made
 
 ### The MPI (Message Passing Interface) Era
 
-In the early 2000s, MPI was the tool for large-scale computation. MPI is powerful, but the programmer must write everything, from partitioning and communication to aggregation and failure handling:
+In the early 2000s, MPI was used for large-scale computation. MPI can express any communication pattern, but the programmer must write everything, from partitioning and communication to aggregation and failure handling:
 
 ```c
 // Word Count with MPI (pseudocode) — hellish complexity
@@ -109,7 +109,7 @@ def reduce(word: str, counts: list[int]):
     emit(word, sum(counts))
 ```
 
-The user writes only these 6 lines, and they can process petabytes of data across thousands of machines in parallel. The framework handles distribution, fault recovery, and data transfer.
+The user writes only these two functions, and the same code can process petabytes of data across thousands of machines in parallel. The framework handles distribution, fault recovery, and data transfer.
 
 <MapReduceVisualizer />
 
@@ -265,7 +265,7 @@ Files on Map Worker's disk:
   /tmp/mr-0-(R-1)  (Intermediate data for Partition R-1)
 ```
 
-Map output is written to local disk, not GFS. Intermediate data is temporary and is no longer needed once the Shuffle has delivered it to the Reducers. The cost is that if a Worker fails, even the Map tasks it already completed must be re-executed.
+Map output is written to local disk, not GFS. Intermediate data is temporary and is no longer needed once the Shuffle has delivered it to the Reduce Workers. The cost is that if a Worker fails, even the Map tasks it already completed must be re-executed.
 
 ### Step 4: Shuffle and Sort
 
@@ -284,7 +284,7 @@ Shuffle network transfer volume:
       → this is MapReduce's bottleneck
 ```
 
-<strong>Combiner optimization</strong>: To reduce network traffic, a Combiner function can run on the Map side. A Combiner is often the same code as Reduce, but it is safe to use only when two conditions hold: the final result must not change when the framework applies it zero, one, or several times to parts of a mapper's output, and its output type must match the intermediate key/value type. For Word Count, instead of sending `(hello, 1), (hello, 1), (hello, 1)` over the network, the Combiner merges them into `(hello, 3)` before sending.
+<strong>Combiner optimization</strong>: To reduce network traffic, a Combiner function can run on the Map side. A Combiner is often the same code as Reduce, but it is safe to use only when two conditions hold: the final result must not change when the framework applies it zero, one, or several times to parts of a Map task's output, and its output type must match the intermediate key/value type. For Word Count, instead of sending `(hello, 1), (hello, 1), (hello, 1)` over the network, the Combiner merges them into `(hello, 3)` before sending.
 
 ### Step 5: Reduce Phase
 
@@ -418,7 +418,7 @@ public static class MapOutputBuffer<K, V> implements MapOutputCollector<K, V>, I
 - `NewOutputCollector` — Applying the partition function and routing to the buffer
 - `BlockingBuffer` — Write blocking control during spills
 
-When the user writes the single line `context.write(word, 1)`, the framework runs the following in order: serialization into a circular buffer, detection of a full buffer, sorting in a background thread, a per-partition write to disk, the combiner, and a final k-way merge. "Pushing complexity into the framework" means keeping all of this out of the user's code.
+When the user writes the single line `context.write(word, 1)`, the framework runs the following in order: serialization into a circular buffer, detection of a full buffer, sorting in a background thread, the combiner, a per-partition write to disk, and a final k-way merge. "Pushing complexity into the framework" means keeping all of this out of the user's code.
 
 ### Line Count Comparison
 
@@ -435,7 +435,7 @@ Framework side (core task execution):
   Total           ~4,100+ lines
 ```
 
-The core framework files that run tasks are more than 12x the size of the API classes users extend. Job scheduling and the Shuffle's network transport layer are not included, so for the framework as a whole the gap is even larger.
+The core framework files that run tasks (about 4,100 lines in total) are more than 12x the size of the two API classes users extend (about 330 lines in total). Job scheduling and the Shuffle's network transport layer are not included, so for the framework as a whole the gap is even larger.
 
 ## Fault Tolerance — Why It Works at Thousands of Machines
 
@@ -479,17 +479,17 @@ If the map and reduce functions are **deterministic** (always produce the same o
 
 ### Straggler Mitigation: Speculative Execution
 
-One major cause of long MapReduce jobs is **stragglers**: the last few tasks running abnormally slowly. Causes include:
+One major cause of long MapReduce jobs is **stragglers**: machines that take an unusually long time to complete one of the last few Map or Reduce tasks. A machine can become a straggler for several reasons:
 
 - Degraded disk: Read/write speed drops to 1/10 of normal or less
 - CPU overload: Other tasks running on the same machine
-- Network congestion:  Bandwidth saturated between specific racks
+- Network congestion: Bandwidth saturated between specific racks
 
 In none of these cases has the machine stopped, so they are not detected as failures.
 
 Google addressed this with **backup tasks** (speculative execution). Near the end of a job, when few tasks remain, the Master launches backup copies of all remaining in-progress tasks on other machines and uses the result of whichever copy finishes first.
 
-According to the paper, disabling backup tasks increased job completion time by 44%.
+In the paper's example, the sort job described below took 44% longer with backup tasks disabled.
 
 ## Performance Characteristics
 
@@ -539,7 +539,7 @@ Searching for a specific 3-character pattern across $10^{10}$ 100-byte records (
 
 Sorting $10^{10}$ 100-byte records (approximately 1 TB):
 
-- 1,764 Worker machines
+- About 1,700 machines
 - $M = 15000$, $R = 4000$
 - Total completion in approximately 891 seconds (about 15 minutes)
 - This time is with backup tasks enabled; with them disabled, the job took 44% longer, as noted above
@@ -584,10 +584,10 @@ graph TB
 ### What MapReduce Requires from GFS
 
 - High-throughput sequential reads and writes (random access not needed)
-- Atomic rename / commit semantics for final Reduce output; intermediate Map output stays on local worker disks, not in GFS
+- Atomic rename / commit semantics for final Reduce output
 - Optimized for large files (small files are a weak point)
 
-The GFS design was later implemented in the Hadoop ecosystem as HDFS (Hadoop Distributed File System), an open-source file system inspired by GFS.
+The Hadoop ecosystem later built HDFS (Hadoop Distributed File System), an open-source file system inspired by GFS.
 
 ## The Ecosystem MapReduce Created
 
@@ -597,7 +597,7 @@ MapReduce's influence did not stay inside Google; a series of open-source big da
 
 In 2006, Doug Cutting and Mike Cafarella developed Apache Hadoop as an open-source implementation inspired by Google's MapReduce and GFS papers. Yahoo! supported the development heavily. The combination of HDFS and Hadoop MapReduce let companies other than Google process petabytes of data.
 
-Projects built on Hadoop multiplied quickly:
+Projects around Hadoop multiplied quickly:
 
 - Hive: SQL interface on MapReduce (developed by Facebook)
 - Pig: Dataflow language on MapReduce (developed by Yahoo!)
@@ -648,7 +648,7 @@ counts = text.flatMap(lambda line: line.split()) \
 counts.saveAsTextFile("hdfs://output")
 ```
 
-- 10–100x speedup for iterative processing
+- Up to 20x faster than Hadoop for iterative machine learning and graph applications ([Zaharia et al., NSDI'12](https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/zaharia))
 - DAG-based execution engine (not a fixed map → reduce pipeline)
 - Interactive shell (Spark Shell) for running ad-hoc queries
 
@@ -711,4 +711,5 @@ While it has been superseded by Spark and Flink today, the principles MapReduce 
 - Dean, J., & Ghemawat, S. (2004). [MapReduce: Simplified Data Processing on Large Clusters](https://research.google/pubs/mapreduce-simplified-data-processing-on-large-clusters/). OSDI'04.
 - Ghemawat, S., Gobioff, H., & Leung, S.-T. (2003). [The Google File System](https://research.google/pubs/the-google-file-system/). SOSP'03.
 - Zaharia, M., et al. (2010). [Spark: Cluster Computing with Working Sets](https://www.usenix.org/legacy/event/hotcloud10/tech/full_papers/Zaharia.pdf). HotCloud'10.
+- Zaharia, M., et al. (2012). [Resilient Distributed Datasets: A Fault-Tolerant Abstraction for In-Memory Cluster Computing](https://www.usenix.org/conference/nsdi12/technical-sessions/presentation/zaharia). NSDI'12.
 - White, T. (2015). *Hadoop: The Definitive Guide*. O'Reilly Media.

@@ -52,9 +52,9 @@ export const stopsJa: StoryStop[] = [
   },
   {
     id: "amazon-hq",
-    title: "📦 Amazon本社 — The Spheres",
+    title: "📦 Amazon 本社 — The Spheres",
     description:
-      "Amazon本社のある South Lake Union 地区へ。まず目に入るのが、ガラスのドームが連なる「The Spheres」だ。約4万株の植物が植えられた温室のようなオフィスで、会社の規模の大きさを感じた。近くの Day 1 ビルも見て、無人コンビニの Amazon Go で買い物もしてみた。",
+      "Amazon 本社のある South Lake Union 地区へ。まず目に入るのが、ガラスのドームが連なる「The Spheres」だ。約4万株の植物が植えられた温室のようなオフィスで、会社の規模の大きさを感じた。近くの Day 1 ビルも見て、無人コンビニの Amazon Go で買い物もしてみた。",
     coordinates: [47.6157, -122.3389],
     zoom: 15,
     images: [
@@ -64,7 +64,7 @@ export const stopsJa: StoryStop[] = [
   },
   {
     id: "microsoft",
-    title: "💻 Microsoft本社 — Redmond",
+    title: "💻 Microsoft 本社 — Redmond",
     description:
       "シアトルから車で東へ約30分、Redmond の Microsoft 本社キャンパスへ。広い敷地にオフィスビルが点在していて、ひとつの街のようだった。ビジターセンターで Microsoft の歴史と技術の展示を見て、テック企業で働くことへの意欲が高まった。",
     coordinates: [47.6396, -122.1286],
@@ -113,7 +113,7 @@ export const stopsJa: StoryStop[] = [
     id: "lions-gate",
     title: "🌉 Lions Gate Bridge",
     description:
-      "Lynn Canyon の後は、バンクーバーのシンボルのひとつ、ライオンズ・ゲート・ブリッジへ。全長1,823mの吊り橋で、バラード・インレットをまたいでノースショアとバンクーバーのダウンタウンを結んでいる。橋の上からは、バンクーバーのビル群と周りの山々が一望できた。",
+      "Lynn Canyon の後は、バンクーバーのシンボルのひとつ、Lions Gate Bridge へ。全長1,823メートルの吊り橋で、バラード・インレットをまたいでノースショアとバンクーバーのダウンタウンを結んでいる。橋の上からは、バンクーバーのビル群と周りの山々が一望できた。",
     coordinates: [49.31740493348699, -123.14023029015001],
     zoom: 14,
     images: ["/images/trips/seattle-vancouver-2025/lions-gate-1.webp"],
@@ -206,7 +206,7 @@ export const stopsEn: StoryStop[] = [
     id: "amazon-hq",
     title: "📦 Amazon HQ — The Spheres",
     description:
-      "Headed to South Lake Union, where Amazon has its headquarters. The first thing you notice is The Spheres, a cluster of glass domes: a greenhouse-like office with about 40,000 plants, and a good sense of how big the company is. I also saw the Day 1 building nearby and shopped at an Amazon Go cashierless store.",
+      "Headed to South Lake Union, where Amazon has its headquarters. The first thing you notice is The Spheres, a cluster of glass domes that make up a greenhouse-like office with about 40,000 plants. It gave me a sense of how big the company is. I also saw the Day 1 building nearby and shopped at an Amazon Go cashierless store.",
     coordinates: [47.6157, -122.3389],
     zoom: 15,
     images: [
@@ -265,7 +265,7 @@ export const stopsEn: StoryStop[] = [
     id: "lions-gate",
     title: "🌉 Lions Gate Bridge",
     description:
-      "After Lynn Canyon, on to Lions Gate Bridge, one of Vancouver's landmarks. The 1,823m suspension bridge crosses Burrard Inlet, linking the North Shore with downtown Vancouver. From the bridge you can see the city's towers and the mountains around them.",
+      "After Lynn Canyon, on to Lions Gate Bridge, one of Vancouver's landmarks. The 1,823-meter suspension bridge crosses Burrard Inlet, linking the North Shore with downtown Vancouver. From the bridge I could see the city's towers and the mountains around them.",
     coordinates: [49.31740493348699, -123.14023029015001],
     zoom: 14,
     images: ["/images/trips/seattle-vancouver-2025/lions-gate-1.webp"],

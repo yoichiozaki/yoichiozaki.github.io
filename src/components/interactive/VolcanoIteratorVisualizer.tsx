@@ -427,8 +427,8 @@ export function VolcanoIteratorVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "Projection → NestedLoopJoin → Filter → SeqScan という演算子木を pull 型で実行します。呼び出しスタックと各演算子の next() 呼び出し回数に注目してください。"
-          : "A Projection → NestedLoopJoin → Filter → SeqScan tree executed in pull style. Watch the call stack and how many times each operator's next() is invoked."
+          ? "Projection → NestedLoopJoin → Filter → SeqScan という演算子木を pull 型で実行します。内側の SeqScan(orders) は外側の行ごとに読み直されるため、next() の呼び出し回数が最も多くなります。"
+          : "A Projection → NestedLoopJoin → Filter → SeqScan tree executed in pull style. The inner SeqScan(orders) is rescanned for each outer row, so its next() is called most often."
       }
     >
       <div className="space-y-4">

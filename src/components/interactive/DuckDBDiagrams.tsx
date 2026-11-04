@@ -39,16 +39,16 @@ export function DuckDBArchitecture({ locale = "ja" }: DiagramProps) {
     },
     {
       title: en ? "Binder → Logical planner" : "バインダー → 論理プランナー",
-      items: [en ? "name resolution, types" : "名前解決・型付け", "LogicalOperator"],
+      items: [en ? "name/type resolution" : "名前解決・型付け", "LogicalOperator"],
       color: p.accent,
     },
     {
       title: en ? "Optimizer" : "オプティマイザー",
       items: [
         en ? "filter pushdown" : "フィルター押し下げ",
-        en ? "join order (DP)" : "結合順序（DP）",
+        en ? "join order (DPhyp)" : "結合順序（DPhyp）",
         en ? "statistics propagation" : "統計伝播",
-        en ? "expression rewriting" : "式書き換え",
+        en ? "expression rewriting" : "式の書き換え",
       ],
       color: p.purple,
     },
@@ -173,7 +173,7 @@ export function StringTLayout({ locale = "ja" }: DiagramProps) {
         <text x={20} y={84} fill={p.muted} fontSize={10}>
           {en
             ? "No heap access at all: the whole value fits in one 16-byte struct."
-            : "ヒープアクセスがゼロ。値そのものが 16 バイト構造体に収まる。"}
+            : "ヒープにアクセスしない。値全体が 16 バイトの構造体に収まる。"}
         </text>
 
         <text x={20} y={124} fill={p.text} fontSize={12} fontWeight={700}>
@@ -195,7 +195,7 @@ export function StringTLayout({ locale = "ja" }: DiagramProps) {
 
         <text x={20} y={244} fill={p.muted} fontSize={10}>
           {en
-            ? "Equality first compares the leading 8 bytes (length + prefix) as one uint64 — most mismatches die here."
+            ? "Equality first compares the leading 8 bytes (length + prefix) as one uint64, which settles most mismatches."
             : "等値比較はまず先頭 8 バイト（length + prefix）を 1 つの uint64 として比べる。不一致の大半はここで決着する。"}
         </text>
       </svg>
@@ -286,8 +286,8 @@ export function RowGroupLayout({ locale = "ja" }: DiagramProps) {
         })}
         <text x={30} y={264} fill={p.muted} fontSize={9}>
           {en
-            ? "Each ColumnSegment lives in a ~256 KB block (DEFAULT_BLOCK_ALLOC_SIZE) and carries its own min/max statistics."
-            : "各 ColumnSegment は約 256 KB のブロック（DEFAULT_BLOCK_ALLOC_SIZE）に載り、自前の min/max 統計を持つ。"}
+            ? "Each ColumnSegment lives in a block (DEFAULT_BLOCK_ALLOC_SIZE = 256 KB) and carries its own min/max statistics."
+            : "各 ColumnSegment はブロック（DEFAULT_BLOCK_ALLOC_SIZE = 256 KB）に載り、自前の min/max 統計を持つ。"}
         </text>
 
         <rect x={16} y={282} width={628} height={40} rx={8} fill={p.bg} stroke={p.purple} strokeWidth={1.5} />
@@ -296,8 +296,8 @@ export function RowGroupLayout({ locale = "ja" }: DiagramProps) {
         </text>
         <text x={30} y={314} fill={p.muted} fontSize={9}>
           {en
-            ? "WHERE l_shipdate > '1998-01-01' → segments whose max < the constant are skipped without ever being read."
-            : "WHERE l_shipdate > '1998-01-01' → max がその定数未満のセグメントは、1 バイトも読まずに丸ごと飛ばせる。"}
+            ? "WHERE l_shipdate > '1998-01-01' → segments whose max ≤ the constant are skipped without ever being read."
+            : "WHERE l_shipdate > '1998-01-01' → max がその定数以下のセグメントは、1 バイトも読まずに丸ごと飛ばせる。"}
         </text>
       </svg>
     </div>
@@ -322,10 +322,10 @@ export function MVCCVersionDiagram({ locale = "ja" }: DiagramProps) {
     {
       id: 1,
       ins: "108",
-      del: "105",
+      del: "109",
       vis: false,
-      ja: "削除 105 も 110 より前 → 消えている",
-      en: "delete 105 also precedes 110 → gone",
+      ja: "削除 109 も 110 より前 → 消えている",
+      en: "delete 109 also precedes 110 → gone",
     },
     {
       id: 2,
@@ -373,7 +373,7 @@ export function MVCCVersionDiagram({ locale = "ja" }: DiagramProps) {
 
               <rect x={86} y={y} width={140} height={36} rx={4} fill={p.accent} opacity={0.15} stroke={p.accent} strokeWidth={1} />
               <text x={156} y={y + 15} textAnchor="middle" fill={p.muted} fontSize={8}>
-                {en ? "insert id" : "挿入 id"}
+                {en ? "insert id" : "挿入 ID"}
               </text>
               <text x={156} y={y + 29} textAnchor="middle" fill={p.text} fontSize={10} fontFamily="monospace">
                 {r.ins}
@@ -381,7 +381,7 @@ export function MVCCVersionDiagram({ locale = "ja" }: DiagramProps) {
 
               <rect x={238} y={y} width={140} height={36} rx={4} fill={p.amber} opacity={0.15} stroke={p.amber} strokeWidth={1} />
               <text x={308} y={y + 15} textAnchor="middle" fill={p.muted} fontSize={8}>
-                {en ? "delete id" : "削除 id"}
+                {en ? "delete id" : "削除 ID"}
               </text>
               <text x={308} y={y + 29} textAnchor="middle" fill={p.text} fontSize={10} fontFamily="monospace">
                 {r.del}
@@ -428,7 +428,7 @@ export function MVCCVersionDiagram({ locale = "ja" }: DiagramProps) {
         <text x={20} y={308} fill={p.muted} fontSize={10} fontFamily="monospace">
           {en
             ? "visible = UseVersion(insert id) && !UseVersion(delete id)"
-            : "visible = UseVersion(挿入 id) && !UseVersion(削除 id)"}
+            : "visible = UseVersion(挿入 ID) && !UseVersion(削除 ID)"}
         </text>
         <text x={20} y={326} fill={p.muted} fontSize={10}>
           {en
@@ -464,7 +464,7 @@ export function RadixPartitionDiagram({ locale = "ja" }: DiagramProps) {
               <path d={`M${x + 72} 54 L${x + 72} 68`} stroke={p.border} strokeWidth={1.2} />
               <rect x={x} y={68} width={144} height={30} rx={4} fill={p.accent} opacity={0.16} stroke={p.accent} strokeWidth={1.2} />
               <text x={x + 72} y={82} textAnchor="middle" fill={p.text} fontSize={9}>
-                {en ? "thread-local HT" : "スレッドローカル HT"}
+                {en ? "thread-local hash table" : "ローカルハッシュテーブル"}
               </text>
               <text x={x + 72} y={93} textAnchor="middle" fill={p.muted} fontSize={8} fontFamily="monospace">
                 ht_entry_t[capacity]
@@ -493,8 +493,8 @@ export function RadixPartitionDiagram({ locale = "ja" }: DiagramProps) {
         })}
         <text x={20} y={146} fill={p.muted} fontSize={9}>
           {en
-            ? "Partition index = the radix_bits just below the hash's top 16 bits: hash >> (48 - radix_bits)."
-            : "パーティション番号 = ハッシュの上位 16 ビットのすぐ下から radix_bits ビット。つまり hash >> (48 - radix_bits)。"}
+            ? "Partition index = the radix_bits bits just below the hash's top 16 bits: (hash & mask) >> (48 - radix_bits)."
+            : "パーティション番号 = ハッシュの上位 16 ビットのすぐ下にある radix_bits ビット。つまり (hash & mask) >> (48 - radix_bits)。"}
         </text>
         <text x={20} y={158} fill={p.muted} fontSize={9}>
           {en
@@ -503,7 +503,7 @@ export function RadixPartitionDiagram({ locale = "ja" }: DiagramProps) {
         </text>
 
         <text x={20} y={178} fill={p.text} fontSize={12} fontWeight={700}>
-          {en ? "Finalize phase — partition-parallel, never cross-partition" : "Finalize フェーズ — パーティション単位で並列。跨がることはない"}
+          {en ? "Finalize phase — parallel per partition, with no cross-partition work" : "Finalize フェーズ — パーティション単位で並列。パーティションをまたぐ処理はない"}
         </text>
 
         {[0, 1, 2, 3].map((q) => {
@@ -532,13 +532,13 @@ export function RadixPartitionDiagram({ locale = "ja" }: DiagramProps) {
 
         <text x={20} y={304} fill={p.muted} fontSize={9}>
           {en
-            ? "A group key can only land in one partition, so partitions are independent — the finalize step needs no synchronisation between them."
-            : "同じグループキーは必ず同じパーティションに落ちるので、パーティション同士は独立。Finalize でパーティション間の同期は要らない。"}
+            ? "A group key can only land in one partition, so partitions are independent — the finalize step needs no synchronization between them."
+            : "同じグループキーは必ず同じパーティションに入るので、パーティション同士は独立。Finalize でパーティション間の同期は要らない。"}
         </text>
         <text x={20} y={320} fill={p.muted} fontSize={9}>
           {en
             ? "If memory runs short, the same partitioning becomes the spilling unit: one partition at a time is pinned, the rest go to disk."
-            : "メモリーが足りなくなったら、この分割がそのまま溢れ出しの単位になる。1 度に 1 パーティションだけをメモリーに載せ、残りはディスクへ。"}
+            : "メモリーが足りなくなったら、この分割がそのまま溢れ出しの単位になる。一度に 1 パーティションだけをメモリーに載せ、残りはディスクへ。"}
         </text>
       </svg>
     </div>
@@ -568,7 +568,7 @@ export function VectorSizeTradeoff({ locale = "ja" }: DiagramProps) {
         <line x1={40} y1={214} x2={624} y2={214} stroke={p.border} strokeWidth={1.2} />
         <line x1={40} y1={30} x2={40} y2={214} stroke={p.border} strokeWidth={1.2} />
         <text x={40} y={24} fill={p.muted} fontSize={10}>
-          {en ? "relative cost" : "相対コスト"}
+          {en ? "relative cost (illustrative)" : "相対コスト（模式図）"}
         </text>
         <text x={624} y={232} textAnchor="end" fill={p.muted} fontSize={10}>
           {en ? "rows processed per operator call →" : "1 回の演算子呼び出しで処理する行数 →"}
@@ -620,13 +620,13 @@ export function VectorSizeTradeoff({ locale = "ja" }: DiagramProps) {
 
         <text x={40} y={266} fill={p.muted} fontSize={10}>
           {en
-            ? "2048 × 8 bytes = 16 KB per column — a handful of columns still fits in L1/L2, so intermediates never touch DRAM."
-            : "2048 × 8 バイト = 1 列あたり 16 KB。数列ぶんなら L1/L2 に収まり、中間結果が DRAM に落ちない。"}
+            ? "2048 × 8 bytes = 16 KB per column, so an operator's input, output and scratch space still fit in L2."
+            : "2048 × 8 バイト = 1 列あたり 16 KB。演算子の入出力と作業用バッファーを合わせても L2 に収まる。"}
         </text>
         <text x={40} y={282} fill={p.muted} fontSize={10}>
           {en
             ? "Compile-time constant: STANDARD_VECTOR_SIZE must be a power of two and DEFAULT_ROW_GROUP_SIZE a multiple of it."
-            : "コンパイル時定数。STANDARD_VECTOR_SIZE は 2 冪でなければならず、DEFAULT_ROW_GROUP_SIZE はその倍数でなければならない。"}
+            : "コンパイル時定数。STANDARD_VECTOR_SIZE は 2 の冪、DEFAULT_ROW_GROUP_SIZE はその倍数でなければならない。"}
         </text>
       </svg>
     </div>

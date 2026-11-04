@@ -73,9 +73,9 @@ const STEPS: StepInfo[] = [
     titleJa: "エンコード開始",
     titleEn: "Start encoding",
     bodyJa:
-      "Protobuf にはフィールド名も型名も入りません。入るのは「フィールド番号 + ワイヤー型 + 値」の三つ組だけです。スキーマ (.proto) を両端が持っている前提でメタ情報を削り落とすのが、JSON との最大の違いです。",
+      "Protobuf にはフィールド名も型名も入りません。入るのは「フィールド番号 + ワイヤー型 + 値」の三つ組だけです。両端が同じスキーマ (.proto) を持つ前提でこうしたメタ情報を省く点が、フィールド名を毎回送る JSON との違いです。",
     bodyEn:
-      "Protobuf carries no field names and no type names on the wire. Each field is just (field number, wire type, value). Stripping metadata is only possible because both ends already share the schema (.proto) — that is the core difference from JSON.",
+      "Protobuf carries no field names and no type names on the wire. Each field is just (field number, wire type, value). Leaving out this metadata works only because both ends share the schema (.proto); JSON, by contrast, spells out every field name.",
   },
   {
     titleJa: "field 1 のタグバイト",
@@ -90,9 +90,9 @@ const STEPS: StepInfo[] = [
     titleJa: "id の値 42",
     titleEn: "Value 42 for id",
     bodyJa:
-      "varint は 7 ビットずつ little-endian に詰め、続きがある間だけ最上位ビット (MSB) を 1 にします。42 は 7 ビットに収まるので 1 バイト: 0x2A。",
+      "varint は 7 ビットずつリトルエンディアンで詰め、続きがある間だけ最上位ビット (MSB) を 1 にします。42 は 7 ビットに収まるので 1 バイト: 0x2A。",
     bodyEn:
-      "A varint packs 7 bits per byte, little-endian, setting the MSB while more bytes follow. 42 fits in 7 bits, so it is a single byte: 0x2A.",
+      "A varint packs 7 bits per byte, little-endian, setting the most significant bit (MSB) while more bytes follow. 42 fits in 7 bits, so it is a single byte: 0x2A.",
     formula: "42 = 0b0101010 → 0x2A",
   },
   {
@@ -108,7 +108,7 @@ const STEPS: StepInfo[] = [
     titleJa: "文字列長 3",
     titleEn: "Length prefix 3",
     bodyJa:
-      "LEN 型は「長さ (varint) + 生バイト列」。\"Ada\" は UTF-8 で 3 バイトなので 0x03。デリミタも引用符もエスケープも不要です。",
+      "LEN 型は「長さ (varint) + 生バイト列」。\"Ada\" は UTF-8 で 3 バイトなので 0x03。デリミターも引用符もエスケープも不要です。",
     bodyEn:
       "LEN fields are `length (varint) + raw bytes`. \"Ada\" is 3 bytes in UTF-8, so 0x03. No delimiters, no quotes, no escaping.",
     formula: 'len("Ada") = 3 → 0x03',
@@ -155,7 +155,7 @@ const STEPS: StepInfo[] = [
     titleJa: "gRPC のフレーミングを前置き",
     titleEn: "Prepend the gRPC framing",
     bodyJa:
-      "gRPC は Protobuf の 9 バイトの前に 5 バイトを足します: 1 バイトの圧縮フラグ (0 = 非圧縮) と、4 バイトのビッグエンディアン長 (= 9)。この 5 バイト前置きが「Length-Prefixed-Message」で、1 本の HTTP/2 ストリーム上に複数メッセージを並べられる理由です。",
+      "gRPC は Protobuf の 9 バイトの前に 5 バイトを足します: 1 バイトの圧縮フラグ (0 = 非圧縮) と、4 バイトのビッグエンディアン長 (= 9)。この 5 バイトを前置きした形式を gRPC の仕様では「Length-Prefixed-Message」と呼びます。長さが分かるので、1 本の HTTP/2 ストリーム上に複数のメッセージを並べられます。",
     bodyEn:
       "gRPC prepends 5 bytes to the 9 protobuf bytes: a 1-byte compressed flag (0 = uncompressed) and a 4-byte big-endian length (= 9). This `Length-Prefixed-Message` framing is what lets many messages ride a single HTTP/2 stream.",
     formula: "0x00 | 0x00000009 | <9 bytes>",
@@ -164,7 +164,7 @@ const STEPS: StepInfo[] = [
     titleJa: "完成 — 14 バイト vs JSON 36 バイト",
     titleEn: "Done — 14 bytes vs 36 bytes of JSON",
     bodyJa:
-      "同じ意味の JSON は 36 バイト。フィールド名・引用符・コロン・カンマがすべて消え、型情報はスキーマ側に移りました。代償は「スキーマなしでは読めない」こと — curl で叩いて目視デバッグ、ができなくなります。",
+      "同じ意味の JSON は 36 バイト。フィールド名・引用符・コロン・カンマがすべて消え、型情報はスキーマ側に移りました。代償は、スキーマなしでは中身を読めないことです。curl で叩いて目で確かめるデバッグはできなくなります。",
     bodyEn:
       "The equivalent JSON is 36 bytes. Field names, quotes, colons, and commas are gone; type information moved into the schema. The price: the payload is unreadable without the schema — you can no longer eyeball it with curl.",
   },
@@ -219,8 +219,8 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
       title={isJa ? "Protobuf を 1 バイトずつ組み立てる" : "Build a protobuf message byte by byte"}
       description={
         isJa
-          ? "User{ id: 42, name: \"Ada\", active: true } を Protobuf でエンコードし、最後に gRPC のフレーミングを被せるまでを追います。右の JSON と比べてみてください。"
-          : "Encode User{ id: 42, name: \"Ada\", active: true } as protobuf, then wrap it in gRPC framing. Compare it with the JSON on the right."
+          ? "GetUser のレスポンスにあたる User{ id: 42, name: \"Ada\", active: true } を Protobuf でエンコードし、最後に gRPC の 5 バイトのプレフィクスを付けるまでを追います。同じ意味の JSON とバイト数を並べて比べます。"
+          : "Encode User{ id: 42, name: \"Ada\", active: true }, the GetUser response, as protobuf, then add the 5-byte gRPC prefix. The JSON panel shows the same value for comparison."
       }
     >
       <div className="flex flex-col gap-4">
@@ -228,7 +228,7 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
           {/* Byte grid */}
           <div className="rounded-lg border border-border bg-background p-3">
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <Legend className={GROUP_STYLE.frame} label={isJa ? "gRPC フレーム" : "gRPC frame"} />
+              <Legend className={GROUP_STYLE.frame} label={isJa ? "gRPC プレフィクス" : "gRPC prefix"} />
               <Legend className={GROUP_STYLE.f1} label="field 1: id" />
               <Legend className={GROUP_STYLE.f2} label="field 2: name" />
               <Legend className={GROUP_STYLE.f3} label="field 3: active" />
@@ -274,13 +274,13 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
                 color="bg-[#c64545]"
               />
               <SizeBar
-                label={isJa ? "Protobuf (本体)" : "Protobuf (body)"}
+                label={isJa ? "Protobuf (メッセージ)" : "Protobuf (message)"}
                 bytes={messageBytes}
                 max={JSON_TEXT.length}
                 color="bg-[#5db872]"
               />
               <SizeBar
-                label={isJa ? "gRPC フレーム込み" : "with gRPC framing"}
+                label={isJa ? "gRPC プレフィクス込み" : "with gRPC prefix"}
                 bytes={totalBytes}
                 max={JSON_TEXT.length}
                 color="bg-[#5db8a6]"

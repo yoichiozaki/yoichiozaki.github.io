@@ -68,9 +68,9 @@ const TEXT = {
   ja: {
     title: "スケジューリング・ラボ",
     description:
-      "CPU の時間軸と LLM ルーターの投入順序を切り替え、パラメーターを変えながら 1 判断ずつ追跡できます。",
-    cpuTab: "CPU：応答時間と実行中断",
-    llmTab: "LLM: テナント間の公平性",
+      "CPU の実行時間軸と LLM ルーターの投入順序を切り替え、パラメーターを変えながら 1 段階ずつ追えます。",
+    cpuTab: "CPU：応答時間とプリエンプション",
+    llmTab: "LLM：テナント間の公平性",
     algorithm: "アルゴリズム",
     quantum: "タイムクォンタム",
     arrival: "到着",
@@ -83,7 +83,7 @@ const TEXT = {
     empty: "空",
     idle: "アイドル",
     executed: "直前の実行区間",
-    notExecuted: "まだ実行していません",
+    notExecuted: "直前の区間で実行したタスクはありません",
     metrics: "完了後の指標",
     completion: "完了",
     turnaround: "ターンアラウンド",
@@ -100,31 +100,32 @@ const TEXT = {
     noSelection: "この段階では投入なし",
     joined: "この段階で参加",
     reset:
-      "直前の混雑期間が終了したため、V を最大完了タグまで進めました。",
-    queues: "テナント別待機キュー",
-    meters: "SFQ の開始メーター",
+      "直前の混雑期間が終了したため、V をメーターの最大値まで進めました。",
+    queues: "テナント別待ち行列",
+    meters: "SFQ のメーター（次の開始タグ）",
     virtualTime: "仮想時刻 V",
-    intervalService: "共通待機区間の正規化済み投入コスト",
+    intervalService: "共通して待ち仕事を持つ区間の正規化済み投入コスト",
     cohort: "投入直前の比較対象",
     jain: "Jain の公平性指標",
+    notAvailable: "該当なし",
     cumulative: "累積",
     cost: "コスト",
     cpuCaution:
       "単一 CPU・整数時間・切替コスト 0 の教育用モデルです。SJF/SRTF は実行時間を既知と仮定します。各段階は直前の 1 時間単位の遷移と、遷移後の状態を表します。",
     llmCaution:
-      "これは独立した論理到着時刻と、サーバー手前の投入順序を比べるモデルです。GPU 並列実行、継続的バッチ処理、KV キャッシュ、VTC のトークン単位課金は含みません。",
+      "到着を論理時刻で表し、サーバー群への投入順序だけを扱うモデルです。GPU の並列実行、継続的バッチ処理、KV キャッシュ、VTC のトークン単位の課金は含みません。",
     costNote:
-      "棒と Jain 指標は、投入直前の比較対象が共通して待ち仕事を持ち始めてからの増分です。待ち行列は投入後の状態、括弧内は全期間の累積値です。",
+      "棒と Jain 指標には、投入直前の比較対象が共通して待ち仕事を持ち始めてからの増分を使います。待ち行列は投入後の状態、括弧内は全期間の累積値です。",
     cpuAlgorithms: {
       fcfs: "FCFS / FIFO",
-      sjf: "SJF（実行中断なし）",
-      srtf: "SRTF（実行中断あり）",
+      sjf: "SJF（非プリエンプティブ）",
+      srtf: "SRTF（プリエンプティブ）",
       rr: "ラウンドロビン",
     },
     cpuDescriptions: {
-      fcfs: "最初に到着したタスクを完了まで実行します。長い A の後ろで短い C が待つコンボイ効果を確認できます。",
+      fcfs: "最初に到着したタスクを完了まで実行します。既定値では、長い A の後ろで短い C が待つコンボイ効果が起きます。",
       sjf: "CPU が空くたび、到着済みのうち総実行時間が最短のタスクを選びます。実行中のタスクは止めません。",
-      srtf: "残り時間が最短のタスクを毎時間単位で選び直し、短い新着タスクなら実行を中断して切り替えます。",
+      srtf: "1 時間単位ごとに残り時間が最短のタスクを選び直し、より短いタスクが到着すればプリエンプトします。",
       rr: "実行可能タスクを巡回し、タイムクォンタムを使い切ると末尾へ戻します。",
     },
     fairAlgorithms: {
@@ -136,7 +137,7 @@ const TEXT = {
     fairDescriptions: {
       fifo: "全体の到着順だけを見ます。同時に到着した一連のリクエストは設定上のテナント順で並べるため、A が先頭を占有します。",
       "round-robin": "各テナントから 1 件ずつ選びます。件数は揃っても、コストが違えば資源配分は揃いません。",
-      "shortest-request": "各テナントの先頭から推定コスト最小を選びます。重いテナントは飢餓状態になり得ます。",
+      "shortest-request": "各テナントの先頭のうち、推定コストが最小のリクエストを選びます。重いテナントは飢餓状態になり得ます。",
       sfq: "メーターが最小のテナントを選び、その後で推定コスト ÷ 重みを課金します。",
     },
     events: {
@@ -152,7 +153,7 @@ const TEXT = {
   en: {
     title: "Scheduling Lab",
     description:
-      "Switch between a CPU timeline and LLM-router admission, tune parameters, and inspect one decision at a time.",
+      "Switch between a CPU timeline and LLM-router admission, tune parameters, and step through one stage at a time.",
     cpuTab: "CPU: latency and preemption",
     llmTab: "LLM: cross-tenant fairness",
     algorithm: "Algorithm",
@@ -167,7 +168,7 @@ const TEXT = {
     empty: "empty",
     idle: "idle",
     executed: "Executed in the preceding interval",
-    notExecuted: "No interval has executed yet",
+    notExecuted: "No task ran in the preceding interval",
     metrics: "Final metrics",
     completion: "Completion",
     turnaround: "Turnaround",
@@ -184,21 +185,22 @@ const TEXT = {
     noSelection: "No admission at this stage",
     joined: "Joined at this stage",
     reset:
-      "The preceding busy period ended, so V advanced to the largest finish tag.",
+      "The preceding busy period ended, so V advanced to the largest meter value.",
     queues: "Waiting queues by tenant",
-    meters: "SFQ start meters",
+    meters: "SFQ meters (next start tags)",
     virtualTime: "Virtual time V",
     intervalService: "Normalized admitted cost in the common-backlog interval",
     cohort: "Pre-admission cohort",
-    jain: "Jain index",
+    jain: "Jain's fairness index",
+    notAvailable: "N/A",
     cumulative: "cumulative",
     cost: "cost",
     cpuCaution:
-      "This teaching model uses one CPU, integer ticks, and zero switch cost. SJF/SRTF assume known bursts. Each stage shows the preceding one-tick transition and its post-transition state.",
+      "This teaching model uses one CPU, integer ticks, and zero switch cost. SJF/SRTF assume known bursts. Each stage shows the preceding one-tick transition and the resulting state.",
     llmCaution:
-      "This model compares independent logical arrival time and admission order in front of a server pool. It omits parallel GPU execution, continuous batching, KV caches, and VTC token-level charging.",
+      "This model expresses arrivals in logical time and covers only the admission order into a server pool. It omits parallel GPU execution, continuous batching, KV caches, and VTC's token-level charging.",
     costNote:
-      "Bars and the Jain index use increments since the pre-admission cohort became commonly backlogged. Queue cards show post-admission state; parentheses show all-time totals.",
+      "Bars and the Jain index use increments since every tenant in the pre-admission cohort became backlogged. Queue cards show post-admission state; parentheses show all-time totals.",
     cpuAlgorithms: {
       fcfs: "FCFS / FIFO",
       sjf: "SJF (non-preemptive)",
@@ -206,7 +208,7 @@ const TEXT = {
       rr: "Round Robin",
     },
     cpuDescriptions: {
-      fcfs: "Runs the earliest arrival to completion. Short C waits behind long A—the convoy effect.",
+      fcfs: "Runs the earliest arrival to completion. With the defaults, short C waits behind long A—the convoy effect.",
       sjf: "Whenever the CPU is free, selects the arrived task with the shortest total burst without stopping a running task.",
       srtf: "Re-selects the shortest remaining task every tick and preempts for a shorter arrival.",
       rr: "Cycles through runnable tasks and returns each task to the tail after its quantum.",
@@ -218,10 +220,10 @@ const TEXT = {
       sfq: "Start-time Fair Queueing",
     },
     fairDescriptions: {
-      fifo: "Uses global arrival order. Simultaneous bursts use configured tenant order, so A occupies the head.",
+      fifo: "Uses global arrival order. Simultaneous arrivals follow the configured tenant order, so A occupies the head.",
       "round-robin": "Takes one request per tenant. Counts balance, but resource shares do not when costs differ.",
-      "shortest-request": "Selects the cheapest tenant head. Heavy tenants can starve.",
-      sfq: "Selects the smallest meter and then charges estimated cost ÷ weight.",
+      "shortest-request": "Selects the cheapest request among the tenants' queue heads. Heavy tenants can starve.",
+      sfq: "Selects the tenant with the smallest meter, then charges estimated cost ÷ weight.",
     },
     events: {
       initial: "Initial state",
@@ -485,7 +487,7 @@ function FairPlayback({ result, clients, algorithm, locale }: {
     </section>}
 
     <section className="rounded-lg border border-border bg-background p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><h4 className="font-semibold">{t.intervalService}</h4><span className="font-mono text-muted-foreground">{t.jain}: {fairness === null ? "N/A" : fairness.toFixed(3)}</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><h4 className="font-semibold">{t.intervalService}</h4><span className="font-mono text-muted-foreground">{t.jain}: {fairness === null ? t.notAvailable : fairness.toFixed(3)}</span></div>
       <div className="mt-1 text-right text-[10px] text-muted-foreground">{t.cohort}: {current.fairnessCohort.join(", ") || "—"}</div>
       <div className="mt-3 space-y-2">{clients.filter((client) => current.fairnessCohort.includes(client.id)).map((client) => {
         const windowValue = current.fairnessService[client.id] ?? 0;

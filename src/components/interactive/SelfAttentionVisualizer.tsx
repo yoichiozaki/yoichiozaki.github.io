@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type Props = { locale?: string };
@@ -28,6 +29,7 @@ type CellHighlight = "q" | "k" | "v" | "score" | "weight" | "output" | null;
 
 type MatrixDisplay = {
   label: string;
+  labelJa?: string;
   rows: { cells: string[]; highlights?: CellHighlight[] }[];
   color: string;
 };
@@ -45,6 +47,7 @@ const steps: Step[] = [
     matrices: [
       {
         label: "X (Input)",
+        labelJa: "X（入力）",
         rows: [
           { cells: ["1.0", "0.2", "0.5", "0.8"] },
           { cells: ["0.3", "0.9", "0.1", "0.6"] },
@@ -54,8 +57,8 @@ const steps: Step[] = [
       },
     ],
     desc: {
-      ja: '3つのトークン "The cat sat" の入力埋め込みベクトル X（各トークンは4次元ベクトル）。ここから Q, K, V の3つの行列を計算します。',
-      en: 'Input embedding matrix X for "The cat sat" (each token is a 4-dim vector). We will compute Q, K, V matrices from this.',
+      ja: '入力は "The cat sat" の 3 トークンの埋め込み X だ。各行が 1 トークンの 4 次元ベクトルで、ここから Q, K, V の 3 つの行列を計算する。',
+      en: 'The input is X, the embeddings of the three tokens in "The cat sat". Each row is the 4-dimensional vector of one token, and Q, K, and V are computed from X.',
     },
   },
   /* 1 */ {
@@ -90,13 +93,14 @@ const steps: Step[] = [
     ],
     desc: {
       ja: "入力 X に学習済み重み行列 W_Q, W_K, W_V を掛けて Query, Key, Value を得る。Q は「何を探しているか」、K は「何を持っているか」、V は「実際に渡す情報」を表す。",
-      en: "Multiply X by learned weight matrices W_Q, W_K, W_V to get Query, Key, Value. Q = 'what am I looking for', K = 'what do I contain', V = 'information to pass along'.",
+      en: 'Multiplying X by the learned weight matrices W_Q, W_K, and W_V gives the Query, Key, and Value matrices. Q represents what each token is "looking for," K what it "contains," and V the information it passes along.',
     },
   },
   /* 2 */ {
     matrices: [
       {
         label: "Q · Kᵀ (raw scores)",
+        labelJa: "Q · Kᵀ（正規化前のスコア）",
         rows: [
           { cells: ["0.67", "0.59", "0.50"], highlights: ["score", "score", "score"] },
           { cells: ["0.73", "0.21", "0.50"], highlights: ["score", "score", "score"] },
@@ -107,14 +111,15 @@ const steps: Step[] = [
     ],
     activeTokens: [0, 1, 2],
     desc: {
-      ja: "Q と K の転置の内積を計算。各スコアは「トークン i が トークン j にどれだけ注目すべきか」の生スコア。対角成分は自分自身への注目度。",
-      en: "Compute dot product of Q and Kᵀ. Each score measures how much token i should attend to token j. Diagonal = self-attention score.",
+      ja: "Q と Kᵀ の積をとる。i 行 j 列は q_i と k_j の内積で、トークン i がトークン j にどれだけ注意するかを表す正規化前のスコアだ。列も行と同じ The, cat, sat の順なので、対角成分は自分自身へのスコアになる。",
+      en: "Q is multiplied by Kᵀ. Row i, column j holds the dot product q_i · k_j, an unnormalized score for how much token i attends to token j. Columns follow the row order (The, cat, sat), so the diagonal holds each token's score for itself.",
     },
   },
   /* 3 */ {
     matrices: [
       {
         label: "Q · Kᵀ / √d_k (scaled)",
+        labelJa: "Q · Kᵀ / √d_k（スケーリング後）",
         rows: [
           { cells: ["0.47", "0.42", "0.35"], highlights: ["score", "score", "score"] },
           { cells: ["0.52", "0.15", "0.35"], highlights: ["score", "score", "score"] },
@@ -124,14 +129,15 @@ const steps: Step[] = [
       },
     ],
     desc: {
-      ja: "√d_k (= √2 ≈ 1.41) で割ってスケーリング。d_k が大きいと内積が大きくなりすぎ、softmax の勾配が消失するのを防ぐ。",
-      en: "Divide by √d_k (= √2 ≈ 1.41) for scaling. Without this, large d_k causes dot products to grow large, pushing softmax into regions with vanishing gradients.",
+      ja: "スコアを √d_k（= √2 ≈ 1.41）で割る。d_k が大きいと内積が大きくなりすぎて softmax が飽和し、勾配がほぼ 0 になる。この割り算でそれを防ぐ。",
+      en: "The scores are divided by √d_k (= √2 ≈ 1.41). With a large d_k, dot products grow large enough to saturate softmax, leaving gradients near zero; the division prevents this.",
     },
   },
   /* 4 */ {
     matrices: [
       {
         label: "softmax(scores) → Attention Weights",
+        labelJa: "softmax（スコア）→ 注意重み",
         rows: [
           { cells: ["0.35", "0.34", "0.31"], highlights: ["weight", "weight", "weight"] },
           { cells: ["0.39", "0.27", "0.34"], highlights: ["weight", "weight", "weight"] },
@@ -141,14 +147,15 @@ const steps: Step[] = [
       },
     ],
     desc: {
-      ja: "行ごとに softmax を適用し、確率分布に変換。各行の合計 = 1.0。これが注意重み（Attention Weights）で、各トークンが他のトークンにどれだけ注目するかを決定する。",
-      en: "Apply softmax row-wise to get probability distribution. Each row sums to 1.0. These are the attention weights — how much each token attends to every other token.",
+      ja: "行ごとに softmax を適用し、各行を合計 1.0 の確率分布にする。これが注意重み（Attention Weights）で、各トークンが自分を含む各トークンにどれだけ注意するかを表す。",
+      en: "Softmax is applied to each row, turning it into a probability distribution that sums to 1.0. These are the attention weights: how much each token attends to every token, including itself.",
     },
   },
   /* 5 */ {
     matrices: [
       {
         label: "Attention Weights",
+        labelJa: "注意重み",
         rows: [
           { cells: ["0.35", "0.34", "0.31"], highlights: ["weight", "weight", "weight"] },
           { cells: ["0.39", "0.27", "0.34"], highlights: ["weight", "weight", "weight"] },
@@ -167,14 +174,15 @@ const steps: Step[] = [
       },
     ],
     desc: {
-      ja: "注意重みと V 行列を掛け合わせて最終出力を得る。各トークンの出力は、全トークンの V ベクトルの重み付き平均になる。",
-      en: "Multiply attention weights by V to get the final output. Each token's output is a weighted average of all tokens' V vectors.",
+      ja: "注意重みと V 行列を掛け合わせて出力を得る。各トークンの出力は、全トークンの V ベクトルの重み付き平均になる。",
+      en: "The attention weights are multiplied by V. Each token's output is a weighted average of all tokens' V vectors.",
     },
   },
   /* 6 */ {
     matrices: [
       {
         label: "Output = Weights · V",
+        labelJa: "出力 = 注意重み · V",
         rows: [
           { cells: ["0.53", "0.47"], highlights: ["output", "output"] },
           { cells: ["0.55", "0.44"], highlights: ["output", "output"] },
@@ -184,15 +192,15 @@ const steps: Step[] = [
       },
     ],
     desc: {
-      ja: "自己注意機構の出力。各トークンは文脈を反映した新しいベクトルを持つ。例えば \"sat\" の出力には \"cat\" の情報が混ざっている（\"cat が sat した\" という関係を捉えている）。",
-      en: 'Self-attention output. Each token now has a context-aware vector. e.g., "sat" output blends in "cat" information (capturing "the cat sat" relationship).',
+      ja: "これが自己注意の出力で、各トークンは文脈を反映した新しいベクトルになる。例えば \"sat\" の出力 [0.54, 0.46] は、\"The\"、\"cat\"、\"sat\" の V を重み 0.37、0.31、0.32 で平均したもので、\"cat\" の情報も含む。",
+      en: 'This is the self-attention output: each token now has a context-aware vector. For example, the output for "sat", [0.54, 0.46], averages the V vectors of "The", "cat", and "sat" with weights 0.37, 0.31, and 0.32, so it includes information from "cat".',
     },
   },
   /* 7 */ {
     matrices: [],
     desc: {
-      ja: "マルチヘッドの場合、複数の注意ヘッド（例: 8個）が異なる W_Q, W_K, W_V で並行計算し、結果を連結→線形変換する。各ヘッドが異なる関係性パターン（主語-動詞、形容詞-名詞など）を学習する。",
-      en: "With multi-head attention, multiple heads (e.g., 8) compute in parallel with different W_Q, W_K, W_V, then concatenate → linear transform. Each head learns different relationship patterns (subject-verb, adjective-noun, etc.).",
+      ja: "マルチヘッド注意では、複数のヘッドが注意を並列に計算し、出力を連結して W_O で線形変換する。異なるヘッドが、主語と動詞、形容詞と名詞のような異なる関係を学習できる。",
+      en: "In multi-head attention, several heads compute attention in parallel; their outputs are concatenated and multiplied by W_O. Different heads can learn different relationships, such as subject-verb or adjective-noun.",
     },
   },
 ];
@@ -229,8 +237,8 @@ export function SelfAttentionVisualizer({ locale = "ja" }: Props) {
       title={lang === "en" ? "Self-Attention Mechanism" : "自己注意機構（Self-Attention）"}
       description={
         lang === "en"
-          ? 'Step through the self-attention computation on "The cat sat".'
-          : '"The cat sat" に対する自己注意の計算過程を見てみましょう。'
+          ? 'Self-attention on the three tokens of "The cat sat", computed step by step (d_k = 2, no causal mask, illustrative values).'
+          : '"The cat sat" の 3 トークンで自己注意を計算する過程を、1 ステップずつ示す（d_k = 2、因果マスクなし、値は説明用）。'
       }
     >
       <div className="space-y-4">
@@ -259,7 +267,7 @@ export function SelfAttentionVisualizer({ locale = "ja" }: Props) {
             {current.matrices.map((mat, mi) => (
               <div key={mi} className="flex-shrink-0">
                 <div className={`text-xs font-semibold mb-1.5 ${LABEL_COLORS[mat.color] ?? "text-foreground"}`}>
-                  {mat.label}
+                  {lang === "ja" && mat.labelJa ? mat.labelJa : mat.label}
                 </div>
                 <table className="border-collapse">
                   <tbody>
@@ -302,19 +310,22 @@ export function SelfAttentionVisualizer({ locale = "ja" }: Props) {
             <div className="flex gap-2 flex-wrap">
               {Array.from({ length: 8 }, (_, i) => (
                 <div key={i} className="px-2 py-1 rounded text-[10px] font-mono bg-muted text-foreground">
-                  Head {i + 1}
+                  {lang === "en" ? `Head ${i + 1}` : `ヘッド ${i + 1}`}
                 </div>
               ))}
             </div>
             <div className="text-xs text-muted-foreground">
               {lang === "en"
-                ? "Each head has independent W_Q, W_K, W_V and captures different patterns."
-                : "各ヘッドが独立した W_Q, W_K, W_V を持ち、異なるパターンを捉える。"}
+                ? "h is the number of heads (8 here). Each head has its own W_Q, W_K, and W_V."
+                : "h はヘッド数（ここでは 8）。各ヘッドが独自の W_Q, W_K, W_V を持つ。"}
             </div>
           </div>
         )}
 
-        <StepPlayerControls {...player} label={(s) => steps[s].desc[lang]} />
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {current.desc[lang]}
+        </p>
+        <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

@@ -28,7 +28,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
 
   const submitSQE = (op: string) => {
     if (sqFull) {
-      append(isJa ? "SQ が満杯です (backpressure)" : "SQ is full (backpressure)");
+      append(isJa ? "SQ が満杯 (backpressure)" : "SQ is full (backpressure)");
       return;
     }
     const id = nextId;
@@ -41,7 +41,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
     append(
       isJa
         ? `ユーザー空間が tail++ で ${op}#${id} を slot ${slot} に投入 (syscall なし)`
-        : `Userspace tail++ placed ${op}#${id} in slot ${slot} (no syscall)`,
+        : `User space placed ${op}#${id} in slot ${slot} with tail++ (no syscall)`,
     );
   };
 
@@ -61,7 +61,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
     append(
       isJa
         ? `カーネルが head++ で ${item.op}#${item.id} を取り出して処理開始`
-        : `Kernel head++ picked up ${item.op}#${item.id} and started work`,
+        : `Kernel picked up ${item.op}#${item.id} with head++ and started work`,
     );
     // Immediately complete for this toy demo (user still needs to "reap" CQE)
     setTimeout(() => {
@@ -102,8 +102,8 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
     setCqHead(cqHead + 1);
     append(
       isJa
-        ? `ユーザー空間が CQE#${item.id} を読み取り head++ (syscall なし)`
-        : `Userspace read CQE#${item.id} and head++ (no syscall)`,
+        ? `ユーザー空間が CQE#${item.id} を読み取り、head++ (syscall なし)`
+        : `User space read CQE#${item.id} and did head++ (no syscall)`,
     );
   };
 
@@ -120,11 +120,11 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "SQ/CQ リングを動かしてみる" : "Drive the SQ/CQ ring by hand"}
+      title={isJa ? "SQ/CQ リングを動かしてみる" : "Drive the SQ/CQ rings by hand"}
       description={
         isJa
-          ? "レストランの注文伝票に似ています。ウェイター (ユーザー空間) は伝票を『注文リング (SQ)』に並べるだけ。キッチン (カーネル) は伝票を取って調理し、『料理リング (CQ)』に完成品を並べる。ウェイターはキッチンを呼び鈴 (syscall) で起こす必要が原則ありません。"
-          : "It's like a restaurant's order slips. The waiter (userspace) just pins slips on the 'order ring' (SQ). The kitchen (kernel) pulls slips, cooks, and pushes dishes onto the 'completion ring' (CQ). No bell (syscall) is strictly required."
+          ? "レストランの注文伝票に似ています。ウェイター (ユーザー空間) は伝票を『注文リング (SQ)』に並べるだけです。キッチン (カーネル) は伝票を取って調理し、『料理リング (CQ)』に完成品を並べます。ウェイターが呼び鈴 (syscall) を鳴らすのは、たまった伝票をまとめて渡すときだけです。"
+          : "It's like a restaurant's order slips. The waiter (user space) just pins slips on the 'order ring' (SQ). The kitchen (kernel) pulls slips, cooks, and pushes dishes onto the 'dish ring' (CQ). The waiter rings the bell (syscall) only to hand over a batch of slips."
       }
     >
       <div className="flex flex-col gap-4">
@@ -200,8 +200,8 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
 
         <p className="text-xs text-muted-foreground">
           {isJa
-            ? "ポイント: ①③はユーザー空間のメモリー書込だけでカーネルに入りません。②は通常 syscall (io_uring_enter) ですが、SQPOLL 時はカーネル側スレッドが勝手に拾うので『呼び鈴』すら要りません。これが syscall ゼロ I/O の正体です。"
-            : "Note: ① and ③ are plain userspace memory writes — no kernel entry. ② is normally a syscall (io_uring_enter), but with SQPOLL the kernel thread picks slips on its own — not even a bell is needed. That's how 'zero-syscall I/O' works."}
+            ? "①と③はユーザー空間のメモリー操作だけで、カーネルに入りません。②には通常 syscall (io_uring_enter) が必要ですが、SQPOLL ではカーネルスレッドが起きているあいだ SQE を自分で取り出すので、呼び鈴も要りません。このデモの SQ と CQ はどちらも 8 スロットです (実際の CQ は既定で SQ の 2 倍)。"
+            : "① and ③ are plain user-space memory reads and writes, with no kernel entry. ② normally needs a syscall (io_uring_enter), but with SQPOLL the kernel thread fetches SQEs on its own while it is awake, so no bell is needed. Both rings here have 8 slots; by default, a real CQ is twice the size of the SQ."}
         </p>
       </div>
     </InteractiveDemo>

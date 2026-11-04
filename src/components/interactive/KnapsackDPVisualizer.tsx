@@ -62,7 +62,7 @@ function build2D(): Step[] {
     path: [],
     chosen: [],
     formula: "dp[0][w] = 0",
-    ja: "第 0 行は «品物を 1 つも見ていない» 状態。どの容量でも価値は 0 です。この行が漸化式の «底» になります。",
+    ja: "第 0 行は «品物を 1 つも見ていない» 状態。どの容量でも価値は 0 です。この行が漸化式の基底になります。",
     en: "Row 0 means “no items considered yet”: the value is 0 for every capacity. This row is the base of the recurrence.",
   });
 
@@ -94,12 +94,12 @@ function build2D(): Step[] {
           ? `品物 ${it.name}（重さ ${it.w}、価値 ${it.v}）を容量 ${w} で «使わない»(${skip}) か «使う»(${take}) か。${
               took ? "使ったほうが得です。" : "使わないほうが得か、同じです。"
             }`
-          : `容量 ${w} には品物 ${it.name}（重さ ${it.w}）が入りません。上の行をそのまま引き継ぎます。`,
+          : `容量 ${w} には品物 ${it.name}（重さ ${it.w}）が入りません。上の行の値をそのまま引き継ぎます。`,
         en: canTake
           ? `At capacity ${w}, compare skipping item ${it.name} (w=${it.w}, v=${it.v}) worth ${skip} against taking it, worth ${take}. ${
               took ? "Taking it wins." : "Skipping is at least as good."
             }`
-          : `Item ${it.name} (weight ${it.w}) does not fit in capacity ${w}, so we copy the row above.`,
+          : `Item ${it.name} (weight ${it.w}) does not fit in capacity ${w}, so we copy the value from the row above.`,
       });
     }
   }
@@ -139,13 +139,13 @@ function build2D(): Step[] {
         node.i === 0
           ? `answer = ${grid[N][CAP]},  items = { ${chosen.join(", ")} }`
           : taken
-            ? `dp[${node.i}][${node.w}] ≠ dp[${node.i - 1}][${node.w}] → ${it!.name} を採用`
-            : `dp[${node.i}][${node.w}] = dp[${node.i - 1}][${node.w}] → ${it!.name} は不採用`,
+            ? `dp[${node.i}][${node.w}] ≠ dp[${node.i - 1}][${node.w}] → ${it!.name} ∈ items`
+            : `dp[${node.i}][${node.w}] = dp[${node.i - 1}][${node.w}] → ${it!.name} ∉ items`,
       ja:
         node.i === 0
           ? `復元完了。選んだのは { ${chosen.join(", ")} }、合計価値 ${grid[N][CAP]}、合計重さ ${chosen.reduce((a, nm) => a + ITEMS.find((x) => x.name === nm)!.w, 0)} です。`
           : taken
-            ? `dp[${node.i}][${node.w}] が上の行と違う ⇒ 品物 ${it!.name} を使ったから値が変わった、と分かります。容量を ${it!.w} 戻して dp[${node.i - 1}][${node.w - it!.w}] へ移動します。`
+            ? `dp[${node.i}][${node.w}] が上の行と違う ⇒ 品物 ${it!.name} を使ったから値が変わった、と分かります。容量を ${it!.w} 減らして dp[${node.i - 1}][${node.w - it!.w}] へ移動します。`
             : `dp[${node.i}][${node.w}] が上の行と同じ ⇒ 品物 ${it!.name} は使っていません。容量はそのままで真上へ移動します。`,
       en:
         node.i === 0
@@ -210,7 +210,7 @@ function build1D(forward: boolean): Step[] {
           stale
             ? "⚠ この dp[" +
               (w - it.w) +
-              "] は、この品物ですでに書き換えられた値です — この候補は同じ品物を 2 個以上使っています。"
+              "] は、この品物ですでに書き換えられた値なので、この候補は同じ品物を 2 個以上使っています。"
             : forward
               ? "この参照元は今回の品物ではまだ書き換えられていないので、この品物を含まない値のままです。"
               : "逆順なので、参照元は必ず «前の品物までの値» のままです。"
@@ -220,7 +220,7 @@ function build1D(forward: boolean): Step[] {
             ? "⚠ That cell was already raised by this same item, so this candidate uses the item more than once."
             : forward
               ? "This source cell has not been raised by the current item, so it still holds a value without it."
-              : "Because we go downwards, the source is guaranteed to still hold the previous item's value."
+              : "Because we go downwards, the source still holds the value from the earlier items."
         }`,
       });
     }
@@ -240,8 +240,8 @@ function build1D(forward: boolean): Step[] {
       ? `順方向ループの答えは ${answer}。正しい 0-1 ナップサックの答え 90 より大きく、これは «同じ品物を何個でも使ってよい» 個数無制限ナップサックの答えです（B を 2 個、あるいは D を 4 個）。ループの向きひとつで問題そのものが変わります。`
       : `逆順ループの答えは ${answer}。2 次元表の右下と一致します。dp[w−w_i] を読む時点でその値が «前の品物まで» の状態であることが、0-1 制約そのものです。`,
     en: forward
-      ? `The forward loop reports ${answer}, larger than the correct 0-1 answer of 90. It is the unbounded-knapsack answer (two copies of B, or four of D). Loop direction alone changed the problem being solved.`
-      : `The downward loop reports ${answer}, matching the bottom-right cell of the 2-D table. Reading dp[w−w_i] while it still holds the previous item's value is precisely what enforces the 0-1 constraint.`,
+      ? `The upward loop reports ${answer}, larger than the correct 0-1 answer of 90. It is the unbounded-knapsack answer (two copies of B, or four of D). Loop direction alone changed the problem being solved.`
+      : `The downward loop reports ${answer}, matching the bottom-right cell of the 2-D table. Reading dp[w−w_i] while it still holds the value from the earlier items is what enforces the 0-1 constraint.`,
   });
 
   return steps;
@@ -295,8 +295,8 @@ export function KnapsackDPVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? `品物 ${ITEMS.map((i) => `${i.name}(w${i.w},v${i.v})`).join(" ")}、容量 ${CAP}。3 つのモードを切り替えると、同じ漸化式が «表» → «配列» → «バグ» と姿を変えるのが見えます。`
-          : `Items ${ITEMS.map((i) => `${i.name}(w${i.w},v${i.v})`).join(" ")} with capacity ${CAP}. Switch modes to watch the same recurrence turn into a table, an array, and a bug.`
+          ? `品物 ${ITEMS.map((i) => `${i.name}(w${i.w},v${i.v})`).join(" ")}、容量 ${CAP}。同じ漸化式を 3 つのモードで計算します。«1 次元・順方向» だけは同じ品物を何度も使えてしまい、答えが 90 ではなく 100 になります。`
+          : `Items ${ITEMS.map((i) => `${i.name}(w${i.w},v${i.v})`).join(" ")} with capacity ${CAP}, computed from the same recurrence in three modes. Only the “1-D, upward” mode lets an item be reused, so its answer is 100 instead of 90.`
       }
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -323,7 +323,7 @@ export function KnapsackDPVisualizer({ locale = "ja" }: Props) {
             <thead>
               <tr>
                 <th className="px-1.5 py-1 text-[10px] font-semibold text-muted-foreground text-right">
-                  {isJa ? "品物＼容量" : "item＼cap"}
+                  {isJa ? "品物＼容量" : "item \\ cap"}
                 </th>
                 {Array.from({ length: CAP + 1 }, (_, w) => (
                   <th
@@ -446,7 +446,7 @@ export function KnapsackDPVisualizer({ locale = "ja" }: Props) {
       <div className="mt-3 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
         <div className="rounded-lg border border-border bg-background p-3">
           <div className="text-[10px] font-semibold text-muted-foreground mb-1">
-            {isJa ? "いま適用している式" : "Recurrence applied now"}
+            {isJa ? "いま適用している式" : "Formula applied now"}
           </div>
           <code className="block text-[11px] font-mono text-foreground break-words">
             {s.formula}

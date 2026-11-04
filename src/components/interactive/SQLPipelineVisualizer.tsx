@@ -17,6 +17,8 @@ type Stage = {
   artifactLabel: string;
   artifactLabelEn: string;
   artifact: string;
+  /** English version of the artifact, when it contains Japanese text. */
+  artifactEn?: string;
   note: string;
   noteEn: string;
 };
@@ -85,9 +87,9 @@ KEYWORD(WHERE) IDENT(u) PUNCT(.) IDENT(age) OP(>) NUMBER(30)
 KEYWORD(AND) IDENT(o) PUNCT(.) IDENT(total) OP(>) NUMBER(100)
 KEYWORD(ORDER) KEYWORD(BY) IDENT(o) PUNCT(.) IDENT(total) KEYWORD(DESC)
 KEYWORD(LIMIT) NUMBER(10) PUNCT(;) EOF`,
-    note: "最長一致（maximal munch）で文字を語彙単位に切り分けます。ここで初めて「>=」が1トークンなのか「>」と「=」なのかが決まります。",
+    note: "最長一致（maximal munch）で文字列をトークンに切り分けます。ここで初めて「>=」が1トークンなのか「>」と「=」なのかが決まります。",
     noteEn:
-      "Characters are cut into lexemes using maximal munch. This is where it is decided whether >= is one token or > followed by =.",
+      "The lexer cuts the characters into tokens using maximal munch. This is where it is decided whether >= is one token or > followed by =.",
   },
   {
     id: "ast",
@@ -114,7 +116,7 @@ KEYWORD(LIMIT) NUMBER(10) PUNCT(;) EOF`,
   {
     id: "bind",
     layer: "frontend",
-    title: "意味解析・束縛（Binder）",
+    title: "束縛・意味解析（Binder）",
     titleEn: "Binding / semantic analysis",
     artifactLabel: "カタログ解決済みの式",
     artifactLabelEn: "Catalog-resolved expressions",
@@ -134,7 +136,7 @@ resolved expressions
   o.total > 100    → OpExpr(numeric_gt, Var(2,3), Const(100::numeric)) :: bool`,
     note: "名前が実体に結びつく工程です。存在しない列やあいまいな列名はここでエラーになり、演算子は型に応じた具体的な関数（int4gt / numeric_gt）へ解決されます。",
     noteEn:
-      "This is where names become entities. Missing or ambiguous columns fail here, and operators resolve to concrete type-specific functions (int4gt / numeric_gt).",
+      "This is where names are bound to entities. Missing or ambiguous columns fail here, and operators resolve to concrete type-specific functions (int4gt / numeric_gt).",
   },
   {
     id: "logical",
@@ -152,7 +154,7 @@ resolved expressions
             └─ Scan(orders AS o)`,
     note: "SQL の宣言的な記述を「何を計算するか」だけを表す関係代数の木に落とします。まだアルゴリズムは決まっていません。",
     noteEn:
-      "The declarative SQL text becomes a relational-algebra tree that states only *what* to compute. No algorithm has been chosen yet.",
+      "The declarative SQL text becomes a relational-algebra tree that states only what to compute. No algorithm has been chosen yet.",
   },
   {
     id: "rewrite",
@@ -171,11 +173,24 @@ resolved expressions
 適用した規則
   · 述語プッシュダウン  : AND を分解し、各連言項を参照テーブル直上へ降ろす
   · 列プルーニング      : 上位で使われない列を読み出し対象から外す
-  · 定数畳み込み        : now() のような安定関数をプラン時に1回だけ評価する
+  · 定数畳み込み        : 定数だけの式をプラン時に計算する（不変関数のみ。now() は対象外）
                           （このクエリーには対象が無いので何も起きない）`,
-    note: "結合前に行数を減らすほど後段は安くなります。AND を連言項に分解してから降ろすのが定石で、OR は分解できないため降ろせないことがあります。",
+    artifactEn: `Limit(10)
+└─ Sort(o.total DESC)
+   └─ Project(u.name, o.total)
+      └─ Join(u.id = o.user_id)
+         ├─ Scan(users)   filter: age > 30     output: id, name
+         └─ Scan(orders)  filter: total > 100  output: user_id, total
+
+Rules applied
+  · Predicate pushdown : split AND into conjuncts; push each down to its table
+  · Column pruning     : stop reading columns that no node above uses
+  · Constant folding   : evaluate constant-only expressions at plan time
+                         (immutable functions only; not now())
+                         (nothing to fold in this query)`,
+    note: "結合前に行数を減らすほど後段は安くなります。AND は連言項に分解してから個別に降ろします。両方のテーブルを参照する OR は分解できないので、結合より上に残ります。",
     noteEn:
-      "The fewer rows that reach the join, the cheaper everything above it becomes. Splitting AND into conjuncts before pushing is the standard trick; OR cannot be split the same way and often stays put.",
+      "The fewer rows that reach the join, the cheaper everything above it becomes. AND is split into conjuncts that are pushed down one by one; an OR that references both tables cannot be split and stays above the join.",
   },
   {
     id: "stats",
@@ -198,9 +213,9 @@ pg_statistic
 |σ(orders)| = 1,000,000 × 0.10 = 100,000
 join sel    = 1 / max(NDV(u.id), NDV(o.user_id)) = 1 / 100,000
 |u ⋈ o|     = 55,000 × 100,000 / 100,000 = 55,000`,
-    note: "オプティマイザーの品質はここで決まります。推定を誤ると、以降のコスト比較がどれだけ精密でも間違ったプランを選びます。",
+    note: "オプティマイザーの品質はここで決まります。推定が2桁ずれれば、以降のコスト比較がどれだけ精密でも役に立ちません。",
     noteEn:
-      "This step determines the optimizer's quality. If the estimate is wrong, no amount of precision in the later cost comparison will save the plan.",
+      "This step determines the optimizer's quality. If the estimate is off by two orders of magnitude, no amount of precision in the later cost comparison will help.",
   },
   {
     id: "cost",
@@ -223,6 +238,21 @@ join candidates
   B MergeJoin (Sort(users), Sort(orders))
       6,580 + 30,805 + 938                      ≈    38,323
   C HashJoin  (build = users, probe = orders)   ★ 採用
+      2,250 + 22,500 + 938                      ≈    25,688`,
+    artifactEn: `cost constants
+  seq_page_cost 1.0   random_page_cost 4.0
+  cpu_tuple_cost 0.01 cpu_operator_cost 0.0025 cpu_index_tuple_cost 0.005
+
+scan costs
+  SeqScan(users)  = 1,000×1.0 +   100,000×0.01 +   100,000×0.0025 =  2,250
+  SeqScan(orders) = 10,000×1.0 + 1,000,000×0.01 + 1,000,000×0.0025 = 22,500
+
+join candidates
+  A NestedLoop (users × IndexScan orders_user_id_idx)
+      2,250 + 55,000 × 48.175                   ≈ 2,651,875
+  B MergeJoin (Sort(users), Sort(orders))
+      6,580 + 30,805 + 938                      ≈    38,323
+  C HashJoin  (build = users, probe = orders)   ★ chosen
       2,250 + 22,500 + 938                      ≈    25,688`,
     note: "同じ結果を返すプランの中から、コストモデルが最小と判断したものを選びます。ここで比較しているのは実行時間そのものではなく、あくまで見積もりです。",
     noteEn:
@@ -263,6 +293,15 @@ join candidates
 
 pull 型なので、必要な行だけが上へ流れる。
 Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
+    artifactEn: `ExecutorRun()
+  Limit.next()
+    Sort.next()                 ← drains its whole input on the first call (blocking)
+      HashJoin.next()
+        build phase : Hash ← SeqScan(users).next() repeatedly until NULL
+        probe phase : SeqScan(orders).next() one tuple at a time
+
+Pull-based: only the rows that are needed flow upward.
+Once Limit has received 10 rows, the next() calls stop.`,
     note: "各演算子は「親から next() を呼ばれたら1タプル返す」という同じインタフェースを実装します。これがあらゆる演算子を自由に組み合わせられる理由です。",
     noteEn:
       "Every operator implements the same interface: return one tuple when the parent calls next(). That uniformity is what lets any operator be composed with any other.",
@@ -272,8 +311,8 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
     layer: "storage",
     title: "アクセスメソッド",
     titleEn: "Access method",
-    artifactLabel: "論理タプルから物理位置へ",
-    artifactLabelEn: "From logical tuple to physical location",
+    artifactLabel: "論理的な行から物理的な位置へ",
+    artifactLabelEn: "From logical row to physical location",
     artifact: `SeqScan(orders).next()
   heap_getnext(scan, ForwardScanDirection)
     現在ブロック内のラインポインターを 1 つ進める
@@ -284,6 +323,16 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
     t_xmax が未設定 / 未コミットか
 
   → 見つかった行の物理位置 = TID (block, offset) = (4271, 58)`,
+    artifactEn: `SeqScan(orders).next()
+  heap_getnext(scan, ForwardScanDirection)
+    advance to the next line pointer in the current block
+    when the block is used up, move to the next one  block = 0, 1, 2, …, 9,999
+
+  visibility check : HeapTupleSatisfiesMVCC(tuple, snapshot)
+    is t_xmin committed as seen from the snapshot?
+    is t_xmax unset or uncommitted?
+
+  → physical location of the row found = TID (block, offset) = (4271, 58)`,
     note: "ここで論理的な「行」が物理的な位置（TID）に対応づきます。MVCC のもとでは、ページ上に存在する行がすべて自分から見えるわけではありません。",
     noteEn:
       "This is where a logical row maps to a physical location (a TID). Under MVCC, not every row present on a page is visible to your snapshot.",
@@ -294,7 +343,7 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
     title: "バッファープール",
     titleEn: "Buffer pool",
     artifactLabel: "ページのキャッシュ管理",
-    artifactLabelEn: "Page cache management",
+    artifactLabelEn: "Caching pages",
     artifact: `ReadBuffer(orders, blockNum = 4271)
   BufTableLookup(tag = {db, relfilenode, fork = MAIN, block = 4271})
 
@@ -307,9 +356,21 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
            1. そのページの LSN まで WAL を flush   ← WAL 先行書き込み規則
            2. データページを書き出す
          smgrread() で 8KB を読み込む`,
-    note: "実行エンジンはページを直接ディスクから読みません。必ずバッファープールを経由し、pin されている間はそのページが追い出されないことが保証されます。",
+    artifactEn: `ReadBuffer(orders, blockNum = 4271)
+  BufTableLookup(tag = {db, relfilenode, fork = MAIN, block = 4271})
+
+  HIT  → pin frame 118 and return it (no disk I/O)
+  MISS → pick a victim frame with clock-sweep
+           pin_count > 0  → skip it
+           usage_count > 0 → decrement by 1 and move on
+           usage_count = 0 → this is the victim
+         if the victim is dirty
+           1. flush WAL up to that page's LSN   ← write-ahead logging rule
+           2. write the data page out
+         read 8KB with smgrread()`,
+    note: "実行エンジンはテーブルやインデックスのページを直接ディスクから読みません。必ずバッファープールを経由し、pin されている間はそのページが追い出されないことが保証されます。",
     noteEn:
-      "The execution engine never reads a page straight from disk. Everything goes through the buffer pool, and while a page is pinned it is guaranteed not to be evicted.",
+      "The execution engine never reads a table or index page straight from disk. Everything goes through the buffer pool, and while a page is pinned it is guaranteed not to be evicted.",
   },
   {
     id: "disk",
@@ -330,6 +391,21 @@ ItemIdData[57] = (lp_off = 5384, lp_flags = LP_NORMAL, lp_len = 48)
   buf[5384 … 5431]
     HeapTupleHeader 23B : t_xmin, t_xmax, t_ctid, t_infomask, t_hoff
     NULL bitmap          : 列数ぶんのビット（NULL が無ければ省略される）
+    column data          : id, user_id, total
+
+heap_deform_tuple() → Datum[]{ id = 8842, user_id = 317, total = 250.00 }`,
+    artifactEn: `pread(fd, buf, 8192, offset = 4271 × 8192 = 34,988,032)
+
+buf[0 … 8191]
+  +0     PageHeaderData (24B)   pd_lower = 396   pd_upper = 3120
+  +24    ItemIdData[0 … 92]     4B each: (lp_off, lp_flags, lp_len)
+   …     free space  (3120 − 396 = 2724 B)
+  +3120  tuples, growing downward from the end of the page
+
+ItemIdData[57] = (lp_off = 5384, lp_flags = LP_NORMAL, lp_len = 48)
+  buf[5384 … 5431]
+    HeapTupleHeader 23B : t_xmin, t_xmax, t_ctid, t_infomask, t_hoff
+    NULL bitmap          : one bit per column (omitted when there are no NULLs)
     column data          : id, user_id, total
 
 heap_deform_tuple() → Datum[]{ id = 8842, user_id = 317, total = 250.00 }`,
@@ -420,7 +496,7 @@ export function SQLPipelineVisualizer({ locale = "ja" }: Props) {
               {isJa ? current.artifactLabel : current.artifactLabelEn}
             </div>
             <pre className="max-h-[22rem] overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-[11px] leading-relaxed text-foreground sm:text-xs">
-              {current.artifact}
+              {isJa ? current.artifact : current.artifactEn ?? current.artifact}
             </pre>
           </div>
 

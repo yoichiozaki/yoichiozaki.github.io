@@ -1,7 +1,7 @@
 ---
 title: "The Same Idea with Microsoft Agent Framework — Building a Document Review Agent by Just Adding Tools with the Agent Harness"
 date: "2026-06-11"
-description: "We reimplement in C#, with Microsoft Agent Framework's Agent Harness (HarnessAgent), the document review agent we built with the GitHub Copilot SDK by leaving orchestration to the runtime and just adding tools. HarnessAgent sets up an autonomous agent with planning, todos, context compaction, and tool approval in one line. We also cover how the design differs from the Copilot SDK version, such as narrowing capability at configuration time instead of approving operations at runtime."
+description: "The document review agent from the GitHub Copilot SDK article leaves orchestration to the runtime and just adds tools; we rebuild it in C# with Microsoft Agent Framework's Agent Harness (HarnessAgent). HarnessAgent sets up an autonomous agent with planning, todos, context compaction, and tool approval in one line. The design difference with the most effect is that capability is narrowed at configuration time rather than by approving operations at runtime."
 tags: ["AI", "Agent", "Microsoft Agent Framework", "Agent Harness", "C#", ".NET", "Tools"]
 ---
 
@@ -13,7 +13,7 @@ In the companion article, "[Letting Go of Orchestration — Building a Document 
 
 Here we build the same document review agent with Microsoft Agent Framework's Agent Harness (`HarnessAgent`). As before, it works once you add tools and instructions, but the design decisions differ from the Copilot SDK version in two ways: the runtime you hand things to is a .NET library in your own process rather than a separate CLI process, and the agent's capabilities are narrowed by choosing them at configuration time rather than by approving operations at runtime.
 
-> For an overview of Microsoft Agent Framework itself, see "[Microsoft Agent Framework Deep Dive](/en/blog/agent-framework)." This post covers only the Agent Harness.
+> For an overview of Microsoft Agent Framework itself, see "[Microsoft Agent Framework Internals](/en/blog/agent-framework)." This article covers only the Agent Harness.
 
 ## What the Agent Harness Is
 
@@ -28,7 +28,7 @@ graph TB
         direction TB
         FN[Function-calling loop]
         PERSIST[Per-service-call history persistence]
-        COMPACT[Automatic context-window compaction]
+        COMPACT[Automatic context-window compaction, only with token limits set]
         TODO[TodoProvider, work-item tracking]
         MODE[AgentModeProvider, plan / execute modes]
         MEM[FileMemoryProvider, file memory]
@@ -42,11 +42,11 @@ graph TB
     HARNESS -.you add.-> CUSTOM[Custom tools]
 ```
 
-As with the Copilot SDK version, the developer writes only tools and instructions. You don't write the planning, todo, context-compaction, or tool-approval logic.
+As with the Copilot SDK version, the developer writes only tools and instructions.
 
-The `AgentModeProvider` has two default modes, "plan" and "execute," and the `TodoProvider` tracks work items. So the harness comes with a Claude-Code-style way of working: make a plan, break it into todos, then execute them in order. This explicit plan/todo subsystem is what sets the harness apart. The Copilot SDK's runtime also plans internally, but it doesn't expose anything like a plan mode or a todo provider.
+The `AgentModeProvider` has two default modes, "plan" and "execute," and the `TodoProvider` tracks work items. So the harness comes with a Claude-Code-style way of working: make a plan, break it into todos, then execute them in order. The Copilot CLI runtime has a plan mode and a todo list too, and the Copilot SDK exposes them through experimental RPCs (as of SDK 1.0.28, November 2026): `session.rpc.mode.set({ mode: "plan" })` switches the session into plan mode, and `session.rpc.plan.read()` and `session.rpc.plan.readSqlTodos()` read the plan and the todos. The difference is where these pieces live. In the harness they are context providers in your own process, which you configure or switch off with options; in the Copilot SDK they stay inside the CLI runtime, and you reach them over RPC.
 
-> <strong>Update (as of September 10, 2026)</strong>: at the time of writing, `HarnessAgent` was an experimental (preview) API that produced the diagnostic warning `MAAI001` at compile time. It now ships as a stable API in the `Microsoft.Agents.AI.Harness` package (1.20.0 at the time of this update), and the official documentation lists the Agent Harness as one of Agent Framework's foundational concepts (Agents / Workflows / Agent Harness). You no longer need `--prerelease` or a `MAAI001` suppression just to use the harness. `MAAI001` still exists as the framework-wide diagnostic for experimental features, though, so you still need to suppress it if you use file memory, A2A, Mem0, DevUI, declarative agents, shell execution, and similar features.
+> <strong>Update (as of September 10, 2026)</strong>: at the time of writing, `HarnessAgent` was an experimental (preview) API that produced the diagnostic warning `MAAI001` at compile time. It now ships as a stable API in the `Microsoft.Agents.AI.Harness` package ([1.20.0](https://www.nuget.org/packages/Microsoft.Agents.AI.Harness/1.20.0) at the time of this update), and the [official documentation](https://learn.microsoft.com/agent-framework/concepts/) lists the Agent Harness as one of Agent Framework's foundational concepts (Agents / Workflows / Agent Harness).
 
 ## Contrast with the Copilot SDK — Two Kinds of "Delegation"
 
@@ -57,12 +57,12 @@ In both, the runtime handles orchestration and the developer just adds tools. Bu
 | Runtime shape | Connects to a separate Copilot CLI process via JSON-RPC | A .NET library in your own process |
 | Model | Via Copilot, or your own model via BYOM/BYOK | You bring your own model (Azure OpenAI / OpenAI, etc.) |
 | Billing | Usage-based (GitHub AI Credits, metered by tokens) | You pay only the model provider you use |
-| Planning / todos | No explicit subsystem (the runtime plans internally; you steer it via instructions) | plan/execute modes and a TodoProvider are built in |
+| Planning / todos | The runtime has a plan mode and a todo list; experimental RPCs (`session.rpc.mode` / `session.rpc.plan`) switch the mode and read the plan | plan/execute modes and a TodoProvider are built in |
 | Narrowing capability | At runtime, approve/reject via `onPermissionRequest` | At configuration time, via `Disable*` flags and the tools you provide |
-| Languages | Node/Python/Go/.NET/Java/Rust | .NET is most mature (Python is officially supported too; Go is public preview) |
+| Languages | Node/Python/Go/.NET/Java/Rust | .NET is most mature (Python is officially supported too; Go has no packaged harness yet) |
 | Distribution | Bundled CLI runtime | NuGet library (stable) |
 
-The difference with the most effect on the design is how you narrow capability. In the Copilot SDK version, safety came from a <strong>dynamic gate</strong>: each time the powerful runtime requested an operation, we allowed or rejected it at runtime. With the harness, safety comes from <strong>static assembly</strong>: you choose at configuration time which capabilities to build in. You switch off built-in capabilities you don't need, as with `DisableWebSearch = true`, and you never pass opt-in ones such as `FileAccessStore`.
+The difference with the most effect on the design is how you narrow capability. In the Copilot SDK version, safety came from a <strong>dynamic gate</strong>: each time the runtime requested an operation with one of its built-in tools, such as shell execution or file writes, we allowed or rejected it at runtime. With the harness, safety comes from <strong>static assembly</strong>: you choose at configuration time which capabilities to build in. You switch off built-in capabilities you don't need, as with `DisableWebSearch = true`, and you never pass opt-in ones such as `FileAccessStore`.
 
 ## Design — the Same Five Tools
 
@@ -74,7 +74,7 @@ The tools are the same five as in the Copilot SDK version.
 4. `check_terminology` — check terminology variants
 5. `save_review` — save the review
 
-What differs is that the harness already knows how to make a plan, break it into todos, and execute them in order. In the Copilot SDK version we steered the agent toward that approach through the system message. With the harness, the `AgentModeProvider` (plan/execute) and `TodoProvider` supply that skeleton, so the instructions only need the review aspects (links, terminology, clarity) and the output format.
+What differs is that the harness already knows how to make a plan, break it into todos, and execute them in order. In the Copilot SDK version we didn't use the runtime's plan mode; we steered the agent toward that approach through the system message. With the harness, the `AgentModeProvider` (plan/execute) and `TodoProvider` supply that skeleton, so the instructions need only one sentence about the approach and can focus on the review aspects (links, terminology, clarity) and the output format.
 
 ```mermaid
 sequenceDiagram
@@ -125,7 +125,7 @@ dotnet add package Azure.AI.OpenAI
 dotnet add package Azure.Identity
 ```
 
-Because `HarnessAgent` was an experimental API at the time of writing, the `.csproj` suppresses the `MAAI001` warning. With current versions the harness alone doesn't need this, but other experimental features still do.
+`MAAI001` is the diagnostic ID that Agent Framework for .NET puts on its experimental APIs. `HarnessAgent` was one of them at the time of writing, so the `.csproj` suppresses it. Since the harness went stable in 1.14.0 (July 2026), the options this code uses no longer raise it, but some `HarnessAgentOptions` properties still do, such as `MaxContextWindowTokens` / `MaxOutputTokens` and `FileAccessStore`. The other ID, `OPENAI001`, is what the OpenAI .NET library puts on its experimental APIs, such as the Responses API client; the Chat Completions client used here doesn't raise it.
 
 ```xml
 <PropertyGroup>
@@ -268,7 +268,7 @@ AIAgent CreateReviewer(IChatClient client, Action<string, string> emit) =>
         DisableToolAutoApproval = true,   // no approval-required tools: leave out the auto-approval middleware
 
         // Keep TodoProvider and AgentModeProvider (plan/execute) → leverage planning
-        // FileAccessStore and ShellExecutor are not set → arbitrary file I/O and shell execution are impossible from the start
+        // No FileAccessStore and no shell tool (ShellExecutor) → arbitrary file I/O and shell execution are impossible from the start
 
         ChatOptions = new ChatOptions
         {
@@ -278,9 +278,10 @@ AIAgent CreateReviewer(IChatClient client, Action<string, string> emit) =>
     });
 ```
 
-With no `FileAccessStore` or `ShellExecutor` set, arbitrary file I/O and shell execution are never configured. The server uses no tools that require approval, only its own tools, so `DisableToolAutoApproval = true` also removes the auto-approval middleware. Rather than relying on runtime approval, we keep the agent safe by giving it only safe capabilities. That is the basic defense with the harness.
+With no `FileAccessStore` set and no shell tool added, arbitrary file I/O and shell execution are never configured. At the time of writing, `HarnessAgentOptions` had a `ShellExecutor` property; it was removed when the harness went stable in 1.14.0 (July 2026). `ShellExecutor` now lives in the separate prerelease package `Microsoft.Agents.AI.Tools.Shell` (namespace `Microsoft.Agents.AI.Tools.Shell`), and to give the agent a shell you add `ShellExecutor.AsAIFunction()` to `ChatOptions.Tools` yourself. The server uses no tools that require approval, only its own tools, so `DisableToolAutoApproval = true` also removes the auto-approval middleware. Rather than relying on runtime approval, we keep the agent safe by giving it only safe capabilities. That is the basic defense with the harness.
 
-The `Disable*` flags switch off only the harness's built-in providers, such as `HostedWebSearchTool` and `FileMemoryProvider` (`FileAccessProvider` is added only when you explicitly pass a `FileAccessStore`). Your own tools are `AIFunction`s you passed in, not harness providers, so even with the flags set, `save_review` still writes files and `check_links` still makes outbound requests. As in the Copilot SDK version, the guardrails for custom tools live inside the tool: the path-traversal check, the timeout, and an allowlist.
+The `Disable*` flags switch off only the harness's built-in components, such as `HostedWebSearchTool` and `FileMemoryProvider`. Your own tools are `AIFunction`s you passed in, not harness components, so even with the flags set, `save_review` still writes files and `check_links` still makes outbound requests. As in the Copilot SDK version, the defenses for custom tools live inside the tools: the path-traversal check, the timeout, and, if needed, a domain allowlist.
+
 ### The Server and Streaming
 
 Create the `IChatClient` (the model client) once at startup. Because the tools close over each request's `emit`, create a harness agent per request. Stream the response with `RunStreamingAsync` and push it to the UI over SSE.
@@ -365,7 +366,7 @@ The `.Text` of each update returned by `agent.RunStreamingAsync(instruction, ses
 
 ### Review Instructions
 
-The harness supplies the skeleton of the approach (plan → execute), so the instructions can stick to the review aspects and the output format.
+The harness supplies the skeleton of the approach (plan → execute), so the instructions center on the review aspects and the output format, with a single sentence on how to proceed.
 
 ```csharp
 // ReviewPrompt.cs
@@ -395,7 +396,7 @@ These instructions go into `HarnessAgentOptions.ChatOptions.Instructions` and ar
 
 ### The UI
 
-The server's SSE event shapes (`tool` / `delta` / `error`) match the Copilot SDK version, so the frontend changes only its title and accent color, and the SSE-handling script is reused as is. Being able to swap the runtime and keep the same tool set and UI is one advantage of leaving orchestration to the runtime.
+The server's SSE event shapes (`tool` / `delta` / `error`) match the Copilot SDK version, so the frontend changes only its title and accent color, and the SSE-handling script is reused as is. Being able to swap the runtime and keep the same tool set and UI is one advantage of the delegation approach, which leaves orchestration to the runtime.
 
 ```html
 <!-- wwwroot/index.html -->
@@ -473,9 +474,9 @@ dotnet run   # → open the URL printed at startup (e.g. http://localhost:5000)
 
 ## Pros
 
-The benefit shared by every approach that leaves orchestration to a runtime, not having to write it yourself, is covered in the companion article. Here are the benefits specific to the harness.
+The benefit shared by every delegation approach, not having to write orchestration yourself, is covered in the companion article. Here are the benefits of using the harness.
 
-1. <strong>Operational scaffolding is built in</strong> — planning (plan/execute modes), todo management, context compaction, tool approval, file memory, and telemetry are available without writing them yourself.
+1. <strong>Operational scaffolding is built in</strong> — planning (plan/execute modes), todo management, tool approval, and file memory are available without writing them yourself.
 2. <strong>In-process, with your own model</strong> — there is no separate CLI runtime process to depend on, and you can plug in Azure OpenAI or OpenAI as an `IChatClient`. No extra subscription is needed; you pay only your model provider.
 3. <strong>Capability is assembled by configuration</strong> — `Disable*` flags keep only the capabilities you need. Safety comes from choosing at configuration time rather than approving at runtime, which suits non-interactive environments such as a server, where no person is there to approve.
 4. <strong>Context compaction is built in</strong> — pass `MaxContextWindowTokens` / `MaxOutputTokens` and the harness compacts automatically so the function-calling loop doesn't overflow the context. Long reviews are less likely to fail on context limits.
@@ -484,33 +485,33 @@ The benefit shared by every approach that leaves orchestration to a runtime, not
 
 ## Cons and Caveats
 
-The costs shared by every approach that leaves orchestration to a runtime (non-determinism, harder testing, cost and latency) are covered in detail in the companion article. Here are the points to watch when you use the harness.
+The costs shared by every delegation approach (non-determinism, harder testing, cost and latency) are covered in detail in the companion article. Here are the points to watch when you use the harness.
 
-### API Stability (It Was an Experimental API at the Time of Writing)
+### API Stability
 
 At the time of writing, `HarnessAgent` was experimental (`MAAI001`), which set it apart from the generally available (GA) Copilot SDK. It now ships in the stable `Microsoft.Agents.AI.Harness` (1.20.0 at the time of this update) without the `[Experimental]` attribute, so that gap has closed.
 
-A stable harness doesn't mean every feature around it is stable, though. In .NET, A2A, Mem0, DevUI, declarative agents, and shell tools are still covered by `MAAI001`. In Python, background agents, file access, and looping are experimental, and shell tooling ships in a pre-release package. Before adopting it in production, check the stability of each feature you plan to use.
+The harness itself is stable, but some features around it are still experimental. In .NET (as of 1.27.0, October 2026), compaction, file access, a custom file-memory store (`FileMemoryStore`), background agents, and looping (`LoopEvaluators`) are still marked `MAAI001`. A2A, Mem0, DevUI, and shell tools ship as preview packages, and declarative agents as a release candidate. In Python, background agents, file access, and looping are experimental, and shell tooling ships in a pre-release package. Before adopting it in production, check the stability of each feature you plan to use.
 
-### Non-determinism and Cost Apply Either Way
+### Non-determinism and Cost
 
-The model decides which tools to call, in what order, and whether to call them at all, so there is no guarantee that the steps will be the same each run. The harness also tends to call the model more often for planning, todos, and compaction, which makes its token cost and latency harder to estimate than a homegrown loop's. Just as the Copilot SDK is billed by usage in GitHub AI Credits, the harness is billed by the tokens it consumes. The only difference is that you pay your own model provider instead of GitHub; the more you use it, the more it costs either way.
+The model decides which tools to call, in what order, and whether to call them at all, so there is no guarantee that the steps will be the same each run. The harness also tends to call the model more often for planning, todos, and compaction, which makes its token cost and latency harder to estimate than a homegrown loop's. Just as the Copilot SDK is billed by usage in GitHub AI Credits, harness usage is billed by the tokens consumed. The only difference is that you pay your own model provider instead of GitHub; the more you use it, the more it costs either way.
 
-### Security — the Defense Lives in the Configuration
+### Security
 
-Having a powerful runtime read untrusted documents carries the same risk as in the Copilot SDK version. What changes is where the defense goes.
+Letting an agent that can call tools read untrusted documents carries the same risk as in the Copilot SDK version. What changes is where the defense goes: with the harness, it lives in the configuration rather than in runtime approvals.
 
-- <strong>Prompt injection</strong> — with the harness, the defense against malicious instructions embedded in a document centers on minimizing capability. The more you enable `FileAccessStore` or web search, or pass a `ShellExecutor`, the more damage an injection can do.
-- <strong>SSRF</strong> — give tools that make outbound requests, such as `check_links`, a timeout and a domain allowlist. Don't enable web search or file access unless you need them.
+- <strong>Prompt injection</strong> — with the harness, the defense against malicious instructions embedded in a document centers on minimizing capability. The more you enable `FileAccessStore` or web search, or add a shell tool built on `ShellExecutor`, the more damage an injection can do.
+- <strong>SSRF</strong> — give tools that make outbound requests, such as `check_links`, a timeout and a domain allowlist.
 - <strong>Choosing an approval model</strong> — this implementation is a non-interactive server, so it sets `DisableToolAutoApproval = true` and narrows capability instead of relying on approval. For interactive use, you can instead enable tool approval and let a person decide.
 
-### .NET-Centric
+### Language Support
 
-The .NET implementation is the most mature. The Agent Framework harness is also officially available in Python (`create_harness_agent`; the repository has a [Python harness sample](https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents/harness)). Agent Framework itself has a Go implementation (public preview), but Go has no packaged harness yet, so you have to combine the individual packages yourself. Here we used C#, which we verified. For teams working in several languages, this can be a constraint.
+The .NET implementation is the most mature. The Agent Framework harness is also officially available in Python (`create_harness_agent`; the repository has a [Python harness sample](https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents/harness)). Agent Framework itself has a Go implementation (public preview), but Go has no packaged harness yet, so you have to combine the individual packages yourself. For teams working in several languages, these differences between languages can be a constraint. Here I used C#, the implementation I verified.
 
 ## Which to Choose
 
-The add-tools approach can now be implemented in more than one way, and writing the steps explicitly is also an option. Here is where each fits.
+The delegation approach can be implemented in more than one way, and an explicit workflow is also an option. Here is where each fits.
 
 | Option | When it fits |
 |--------|--------------|
@@ -524,11 +525,11 @@ In practice, <strong>combining them</strong> is also a strong option. Fix the ro
 
 Leaving orchestration to the runtime and just adding tools worked with the Agent Harness as well. We wrote the same five tools and review instructions as for the Copilot SDK version, and the harness handled planning, todos, context compaction, tool approval, and telemetry.
 
-The difference lies in the runtime you hand things to. The Copilot SDK hands them to a CLI in a separate process; the harness hands them to a .NET library in your own process and uses your own model. Capability is narrowed by choosing it at configuration time rather than by approving operations at runtime. Because the SSE event shapes match, the frontend was shared apart from its title and accent color.
+The difference lies in the runtime you hand things to. The Copilot SDK version hands orchestration to a CLI in a separate process; the harness version hands it to a .NET library in your own process and uses your own model. Capability is narrowed by choosing it at configuration time rather than by approving operations at runtime. Because the SSE event shapes match, the frontend was shared apart from its title and accent color.
 
 Non-determinism, cost, and security risk come with both approaches. The "experimental API" constraint the harness had at the time of writing is gone; it now ships as a stable release.
 
-Which to choose is not a question of which is better but of which fits your constraints: language, model, operations, and stability requirements. Read it alongside the companion article and pick the approach that fits your situation.
+Which to choose is not a question of which is better but of which fits your constraints: language, model, operations, and stability requirements. Read this article alongside the companion and pick the approach that fits your situation.
 
 ### References
 
@@ -536,4 +537,4 @@ Which to choose is not a question of which is better but of which fits your cons
 - Microsoft. *[Agent Harness samples (.NET)](https://github.com/microsoft/agent-framework/tree/main/dotnet/samples/02-agents/Harness)*.
 - Microsoft. *[Agent Harness samples (Python)](https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents/harness)*.
 - Yoichi Ozaki. *[Letting Go of Orchestration — Building a Document Review Agent by Just Adding Tools with the GitHub Copilot SDK](/en/blog/copilot-doc-reviewer)*.
-- Yoichi Ozaki. *[Microsoft Agent Framework Deep Dive](/en/blog/agent-framework)*.
+- Yoichi Ozaki. *[Microsoft Agent Framework Internals — From the Agent Execution Model to the Workflow Engine](/en/blog/agent-framework)*.

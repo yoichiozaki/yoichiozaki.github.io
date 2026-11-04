@@ -31,10 +31,10 @@ export function SearchEnginePipeline({ locale = "ja" }: DiagramProps) {
         ]
       : [
           { label: "収集", desc: "ドキュメント" },
-          { label: "解析", desc: "トークン化" },
-          { label: "索引構築", desc: "インデックス" },
-          { label: "検索処理", desc: "クエリー" },
-          { label: "順位付け", desc: "スコア計算" },
+          { label: "テキスト解析", desc: "トークン化" },
+          { label: "インデックス", desc: "構築" },
+          { label: "クエリー", desc: "処理" },
+          { label: "ランキング", desc: "スコア計算" },
           { label: "結果返却", desc: "レスポンス" },
         ];
 
@@ -128,17 +128,17 @@ export function TokenizationDiagram({ locale = "ja" }: DiagramProps) {
       color: border,
     },
     {
-      label: en ? "Lowercase" : "小文字化",
-      content: '"the cats were running"',
+      label: en ? "Lowercasing" : "小文字化",
+      content: '"the cats were running!"',
       color: accent,
     },
     {
-      label: en ? "Tokenize" : "トークン化",
+      label: en ? "Tokenization" : "トークン化",
       content: '["the", "cats", "were", "running"]',
       color: accent,
     },
     {
-      label: en ? "Remove Stopwords" : "ストップワード除去",
+      label: en ? "Stopword Removal" : "ストップワード除去",
       content: '["cats", "running"]',
       color: green,
     },
@@ -247,10 +247,10 @@ export function TFIDFDiagram({ locale = "ja" }: DiagramProps) {
           {en ? "Term Frequency" : "出現頻度（Term Frequency）"}
         </text>
         <text x={160} y={128} textAnchor="middle" fill={muted} fontSize={11} fontFamily="monospace">
-          {en ? "count(t in d)" : "文書 d 中のターム t の出現数"}
+          {en ? "count(t in d)" : "ドキュメント d 中のターム t の出現回数"}
         </text>
         <text x={160} y={145} textAnchor="middle" fill={muted} fontSize={10}>
-          {en ? "How often does t appear in d?" : "→ この文書でどれだけ出現するか"}
+          {en ? "How often does term t appear in document d?" : "→ このドキュメントにどれだけ出現するか"}
         </text>
 
         {/* × symbol */}
@@ -267,26 +267,26 @@ export function TFIDFDiagram({ locale = "ja" }: DiagramProps) {
           {en ? "Inverse Document Frequency" : "逆文書頻度（Inverse Doc Freq）"}
         </text>
         <text x={460} y={128} textAnchor="middle" fill={muted} fontSize={11} fontFamily="monospace">
-          log(N / df(t))
+          log₁₀(N / df(t))
         </text>
         <text x={460} y={145} textAnchor="middle" fill={muted} fontSize={10}>
-          {en ? "How rare is t across all docs?" : "→ 全文書中でどれだけ珍しいか"}
+          {en ? "How rare is t across all documents?" : "→ 全ドキュメント中でどれだけ珍しいか"}
         </text>
 
         {/* Insight box */}
         <rect x={80} y={185} width={460} height={80} rx={8} fill={bg} stroke={green} strokeWidth={2} strokeDasharray="6 3" />
         <text x={310} y={210} textAnchor="middle" fill={green} fontSize={13} fontWeight={600}>
-          {en ? "Key Insight" : "ポイント"}
+          {en ? "Reading the score" : "スコアの読み方"}
         </text>
         <text x={310} y={232} textAnchor="middle" fill={text} fontSize={12}>
           {en
-            ? "High TF-IDF = frequent in this document BUT rare overall"
-            : "TF-IDF が高い ＝ この文書に多く出現するが、全体では珍しいターム"}
+            ? "High TF-IDF = frequent in this document but rare overall"
+            : "TF-IDF が高い ＝ このドキュメントに多く出現するが、全体では珍しいターム"}
         </text>
         <text x={310} y={252} textAnchor="middle" fill={muted} fontSize={11}>
           {en
             ? '"the" → low IDF (common everywhere) vs "algorithm" → high IDF (rare, specific)'
-            : '"the" → IDF低（どこにでもある）  vs  "アルゴリズム" → IDF高（珍しい）'}
+            : '"the" → IDF低（どこにでもある）  vs  "algorithm" → IDF高（珍しい）'}
         </text>
       </svg>
     </div>
@@ -394,13 +394,13 @@ export function BooleanQueryDiagram({ locale = "ja" }: DiagramProps) {
         {/* Complexity note */}
         <rect x={420} y={42} width={200} height={70} rx={8} fill={bg} stroke={border} strokeWidth={1} />
         <text x={520} y={60} textAnchor="middle" dominantBaseline="central" fill={text} fontSize={11} fontWeight={600}>
-          {en ? "Sorted-merge algorithm" : "ソート済みマージ"}
+          {en ? "Merging lists sorted by ID" : "ID 順に並んだリストのマージ"}
         </text>
         <text x={520} y={77} textAnchor="middle" dominantBaseline="central" fill={muted} fontSize={11} fontFamily="monospace">
           O(n + m)
         </text>
         <text x={520} y={95} textAnchor="middle" dominantBaseline="central" fill={muted} fontSize={10}>
-          {en ? "Both lists are sorted by doc ID" : "両リストはDoc ID順にソート済み"}
+          {en ? "n, m: lengths of the two lists" : "n, m: 各リストの長さ"}
         </text>
 
         {/* NOT section hint */}

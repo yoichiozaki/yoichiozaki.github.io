@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -64,9 +65,9 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "idle",
       description:
-        "初期状態: ヒープ上に 11 個のオブジェクトが存在します。すべてのオブジェクトは白色（未探索）です。Root1 からは A, B へ、Root2 からは E への参照があります。G, H, I はどのルートからも到達不可能です。",
+        "初期状態: ヒープ上に 11 個のオブジェクトが存在します。すべてのオブジェクトは白色（未発見）です。Root1 からは A, B へ、Root2 からは E への参照があります。G, H, I はどのルートからも到達不可能です。",
       descriptionEn:
-        "Initial state: 11 objects exist on the heap. All are white (unvisited). Root1 references A and B; Root2 references E. G, H, and I are unreachable from any root.",
+        "Initial state: 11 objects exist on the heap. All are white (not yet discovered). Root1 references A and B; Root2 references E. G, H, and I are unreachable from any root.",
     },
     // Step 1: GC triggered — roots turn gray
     {
@@ -86,9 +87,9 @@ function buildScenario(): GCState[] {
       grayStack: ["root1", "root2"],
       phase: "mark",
       description:
-        "GC 開始: マークフェーズに入ります。GC ルート（グローバル変数、スタック上のポインター）を灰色に塗り、灰色スタックに追加します。灰色 = 「自分は発見されたが、参照先はまだ未探索」を意味します。",
+        "GC 開始: マークフェーズに入ります。ルート（グローバル変数やスタック上のポインター）が直接指す Root1 と Root2 を灰色にし、灰色スタックに追加します。灰色は「発見済みだが、参照先はまだスキャンしていない」状態です。",
       descriptionEn:
-        "GC starts: Entering the mark phase. GC roots (global variables, stack pointers) are colored gray and pushed onto the gray stack. Gray means 'discovered, but references not yet scanned'.",
+        "GC starts: Entering the mark phase. Root1 and Root2, which the roots (global variables, stack pointers) point to directly, are colored gray and pushed onto the gray stack. Gray means 'discovered, but references not yet scanned'.",
       highlight: ["root1", "root2"],
     },
     // Step 2: Scan Root1 — A, B become gray; Root1 becomes black
@@ -109,7 +110,7 @@ function buildScenario(): GCState[] {
       grayStack: ["root2", "A", "B"],
       phase: "mark",
       description:
-        "Root1 をスキャン: Root1 が参照するオブジェクト A, B を灰色に塗ります。Root1 自身はすべての参照先を灰色にしたので黒色に変わります。黒色 = 「自分も参照先も探索済み」を意味します。",
+        "Root1 をスキャン: Root1 が参照するオブジェクト A, B を灰色に塗ります。Root1 自身はすべての参照先を灰色にしたので黒色に変わります。黒色は「自身も参照先もスキャン済み」の状態です。",
       descriptionEn:
         "Scan Root1: Objects A and B (referenced by Root1) are colored gray. Root1 turns black since all its references have been grayed. Black means 'fully scanned'.",
       highlight: ["root1", "A", "B"],
@@ -132,9 +133,9 @@ function buildScenario(): GCState[] {
       grayStack: ["A", "B", "E"],
       phase: "mark",
       description:
-        "Root2 をスキャン: Root2 → E を灰色に。Root2 は黒色に。灰色スタックには A, B, E が残っています。三色不変条件（黒が白を直接参照しない）が常に維持されていることに注目してください。",
+        "Root2 をスキャン: Root2 → E を灰色に。Root2 は黒色に。灰色スタックには A, B, E が残っています。このデモでは最後まで、三色不変条件（黒が白を直接参照しない）が保たれます。",
       descriptionEn:
-        "Scan Root2: E turns gray. Root2 turns black. The gray stack still has A, B, E. Notice the tri-color invariant (black never directly references white) is always maintained.",
+        "Scan Root2: E turns gray. Root2 turns black. The gray stack still has A, B, E. The tri-color invariant (black never directly references white) holds throughout this demo.",
       highlight: ["root2", "E"],
     },
     // Step 4: Scan A — C becomes gray; A becomes black
@@ -155,7 +156,7 @@ function buildScenario(): GCState[] {
       grayStack: ["B", "E", "C"],
       phase: "mark",
       description:
-        "A をスキャン: A → C を灰色に。A は黒色に。灰色オブジェクトを一つずつ処理し、そのポインターフィールドをすべて走査するのがマークフェーズの基本動作です。",
+        "A をスキャン: A → C を灰色に。A は黒色に。灰色オブジェクトを 1 つずつ処理し、そのポインターフィールドをすべてスキャンするのがマークフェーズの基本動作です。",
       descriptionEn:
         "Scan A: C turns gray. A turns black. The mark phase processes gray objects one by one, scanning all their pointer fields.",
       highlight: ["A", "C"],
@@ -270,9 +271,9 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "mark",
       description:
-        "F をスキャン: F もリーフノード。黒色に。灰色スタックが空になりました！ マークフェーズが完了です。白色のまま残っている G, H, I はどのルートからも到達不可能 — つまりガベージです。",
+        "F をスキャン: F もリーフノード。黒色に。灰色スタックが空になり、マークフェーズが完了しました。白色のまま残っている G, H, I はどのルートからも到達不可能 — つまりガベージです。",
       descriptionEn:
-        "Scan F: Another leaf node — turns black. The gray stack is now empty! Mark phase complete. G, H, and I remain white — unreachable from any root — they are garbage.",
+        "Scan F: Another leaf node — turns black. The gray stack is now empty, so the mark phase is complete. G, H, and I remain white — unreachable from any root — so they are garbage.",
       highlight: ["F", "G", "H", "I"],
     },
     // Step 10: Sweep phase — free white objects (G)
@@ -293,9 +294,9 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "sweep",
       description:
-        "スイープフェーズ開始: ヒープを走査し白色オブジェクトを解放します。G はどこからも参照されていなかったため解放（free）されます。メモリーはフリーリストに戻されます。",
+        "スイープフェーズ開始: ヒープを走査し白色オブジェクトを解放します。G はルートから到達できなかったため解放（free）されます。メモリーはフリーリストに戻されます。",
       descriptionEn:
-        "Sweep phase begins: Walk the heap and free white objects. G was unreachable, so it is freed. Its memory returns to the free list.",
+        "Sweep phase begins: The collector walks the heap and frees white objects. G was unreachable, so it is freed. Its memory returns to the free list.",
       highlight: ["G"],
     },
     // Step 11: Sweep H and I
@@ -316,9 +317,9 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "sweep",
       description:
-        "H と I も白色のため解放されます。H→I の参照があっても、ルートから到達不可能なら「循環ゴミ」としてまとめて回収されます。これが参照カウント方式にはない、トレースGCの強みです。",
+        "H と I も白色なので解放されます。H は I を参照していますが、どちらもルートから到達できないので一緒に回収されます。トレース GC は到達できるかどうかで回収を判断するので、参照カウント方式では回収できない循環参照も同じように回収できます。",
       descriptionEn:
-        "H and I are also white, so they are freed. Even though H references I, both are unreachable from roots — they're collected as 'cyclic garbage'. This is an advantage of tracing GC over reference counting.",
+        "H and I are also white, so they are freed. H references I, but neither is reachable from a root, so both are collected. Because tracing GC decides what to collect by reachability, it also collects reference cycles, which reference counting cannot.",
       highlight: ["H", "I"],
     },
     // Step 12: Reset — all surviving objects back to white for next cycle
@@ -336,9 +337,9 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "done",
       description:
-        "GC サイクル完了: 生存オブジェクトの色を白にリセットし、次の GC サイクルに備えます。解放された G, H, I のメモリーは新しいオブジェクトの割り当てに再利用されます。Go では実際には黒→白のリセットにビットフリップを使い、O(1) で行います。",
+        "GC サイクル完了: 生存オブジェクトの色を白にリセットし、次の GC サイクルに備えます。解放された G, H, I のメモリーは新しいオブジェクトの割り当てに再利用されます。Go ではスイープ時に、スパンごとのマークビットを空のビットマップに差し替えて白に戻します。",
       descriptionEn:
-        "GC cycle complete: Surviving objects are reset to white, preparing for the next cycle. Freed memory from G, H, I can be reused. In Go, the black→white reset uses a bit flip for O(1) operation.",
+        "GC cycle complete: Surviving objects are reset to white, preparing for the next cycle. Freed memory from G, H, I can be reused. Go resets the colors during sweep by giving each span a fresh, cleared mark bitmap.",
     },
   ];
 }
@@ -455,15 +456,17 @@ function Arrow({
 function GrayStackDisplay({
   stack,
   objects,
+  isEn,
 }: {
   stack: string[];
   objects: Obj[];
+  isEn: boolean;
 }) {
   const objMap = new Map(objects.map((o) => [o.id, o]));
   return (
     <div className="rounded-lg border border-border bg-background p-3 min-w-[120px]">
       <div className="text-xs font-semibold text-muted-foreground mb-2 text-center">
-        Gray Stack
+        {isEn ? "Gray Stack" : "灰色スタック"}
       </div>
       <div className="flex flex-wrap gap-1.5 justify-center min-h-[28px] items-center">
         {stack.length > 0 ? (
@@ -479,19 +482,19 @@ function GrayStackDisplay({
             );
           })
         ) : (
-          <span className="text-[10px] text-muted-foreground/50">empty</span>
+          <span className="text-[10px] text-muted-foreground/50">{isEn ? "empty" : "空"}</span>
         )}
       </div>
     </div>
   );
 }
 
-function PhaseIndicator({ phase }: { phase: GCState["phase"] }) {
+function PhaseIndicator({ phase, isEn }: { phase: GCState["phase"]; isEn: boolean }) {
   const config = {
-    idle: { label: "Idle", color: "bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300" },
-    mark: { label: "Mark", color: "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300" },
-    sweep: { label: "Sweep", color: "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300" },
-    done: { label: "Done", color: "bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300" },
+    idle: { label: isEn ? "Idle" : "GC 開始前", color: "bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300" },
+    mark: { label: isEn ? "Mark phase" : "マークフェーズ", color: "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300" },
+    sweep: { label: isEn ? "Sweep phase" : "スイープフェーズ", color: "bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300" },
+    done: { label: isEn ? "Done" : "完了", color: "bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300" },
   };
   const c = config[phase];
   return (
@@ -502,29 +505,29 @@ function PhaseIndicator({ phase }: { phase: GCState["phase"] }) {
         phase === "sweep" ? "bg-red-500" :
         "bg-emerald-500"
       }`} />
-      {c.label} Phase
+      {c.label}
     </div>
   );
 }
 
-function Legend() {
+function Legend({ isEn }: { isEn: boolean }) {
   return (
     <div className="flex flex-wrap gap-3 text-[10px] sm:text-xs text-muted-foreground justify-center">
       <span className="flex items-center gap-1">
         <span className="inline-block w-3 h-3 rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800" />
-        White (未探索)
+        {isEn ? "White (undiscovered)" : "白（未発見）"}
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-3 h-3 rounded bg-neutral-400 dark:bg-neutral-500" />
-        Gray (発見済)
+        {isEn ? "Gray (discovered)" : "灰色（発見済み）"}
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-3 h-3 rounded bg-neutral-900 dark:bg-neutral-200" />
-        Black (走査済)
+        {isEn ? "Black (scanned)" : "黒（スキャン済み）"}
       </span>
       <span className="flex items-center gap-1">
         <span className="inline-block w-3 h-3 rounded border border-dashed border-red-300 dark:border-red-800 bg-red-100 dark:bg-red-950" />
-        Freed (解放)
+        {isEn ? "Freed" : "解放済み"}
       </span>
     </div>
   );
@@ -572,19 +575,19 @@ export function GCVisualizer({ locale = "ja" }: GCVisualizerProps) {
       title={
         isEn
           ? "Tri-color Mark & Sweep in Action"
-          : "三色マーク&スイープの動き"
+          : "三色マーク & スイープの動き"
       }
       description={
         isEn
-          ? "Step through how a tri-color mark-and-sweep garbage collector traces reachable objects and frees garbage."
-          : "三色マーク&スイープ GC がオブジェクトを辿り、ガベージを回収する過程をステップ実行で見てみましょう。"
+          ? "Step through how a tri-color mark & sweep garbage collector traces reachable objects and frees garbage."
+          : "三色マーク & スイープ GC が到達可能なオブジェクトをたどり、ガベージを回収する過程を 1 ステップずつ確認できます。"
       }
     >
       <div className="flex flex-col gap-4">
         {/* Phase + Legend row */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
-          <PhaseIndicator phase={state.phase} />
-          <Legend />
+          <PhaseIndicator phase={state.phase} isEn={isEn} />
+          <Legend isEn={isEn} />
         </div>
 
         {/* Object graph */}
@@ -650,7 +653,7 @@ export function GCVisualizer({ locale = "ja" }: GCVisualizerProps) {
         </div>
 
         {/* Gray Stack */}
-        <GrayStackDisplay stack={state.grayStack} objects={state.objects} />
+        <GrayStackDisplay stack={state.grayStack} objects={state.objects} isEn={isEn} />
 
         {/* Description */}
         <div className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground min-h-[3rem] flex items-center">
@@ -658,7 +661,7 @@ export function GCVisualizer({ locale = "ja" }: GCVisualizerProps) {
         </div>
 
         {/* Controls */}
-        <StepPlayerControls {...player} label={getLabel} />
+        <StepPlayerControls {...player} label={getLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

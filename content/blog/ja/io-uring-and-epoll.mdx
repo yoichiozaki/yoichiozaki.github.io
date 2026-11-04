@@ -5,7 +5,7 @@ description: "select・poll・epoll から io_uring まで、Linux の非同期 
 tags: ["Linux", "Kernel", "io_uring", "epoll", "Async I/O"]
 ---
 
-ネットワークサーバーやデータベースの性能を上げようとすると、多数の I/O を少ないスレッドでどう扱うかという <strong>I/O 多重化</strong>の問題に行き当たります。1 本のスレッドで 10 万本の TCP 接続を処理する場面や、1 台の SSD の IOPS（I/O Operations Per Second、1 秒あたりに発行できる I/O 回数）を使い切る場面では、`epoll` や `io_uring` といった Linux カーネルのインターフェースが性能を左右します。
+ネットワークサーバーやデータベースの性能を上げようとすると、多数の I/O を少ないスレッドでどう扱うかという <strong>I/O 多重化</strong>の問題に行き当たります。1 本のスレッドで 10 万本の TCP 接続を処理する場面や、1 台の SSD の IOPS（I/O Operations Per Second、1 秒あたりに処理できる I/O 回数）を使い切る場面では、`epoll` や `io_uring` といった Linux カーネルのインターフェースが性能を左右します。
 
 `select → poll → epoll → io_uring` の順に、カーネルがイベント通知を効率化し、システムコールを減らしてきた仕組みを、カーネルの構造体とソースファイルをもとに説明します。Node.js・nginx・PostgreSQL・ScyllaDB・tokio がこれらの API をどう採用してきたかも取り上げます。
 
@@ -28,7 +28,7 @@ tags: ["Linux", "Kernel", "io_uring", "epoll", "Async I/O"]
 素朴なブロッキング I/O では、`read(fd, buf, n)` がデータの到着まで呼び出し元のスレッドを眠らせます。`fd` はファイルディスクリプターの略で、カーネルが開いたソケット・ファイル・パイプなどのリソースを指す整数のハンドルです。1 接続に 1 スレッドを割り当てるモデルでは、接続数に比例して次のコストが積み上がります。
 
 - <strong>スレッドスタック</strong>: Linux の既定は 8MB（ユーザー空間の `ulimit -s`）。1 万接続で 80GB の仮想アドレス空間を使います。
-- <strong>コンテキストスイッチ</strong>: 1 回あたり典型的には 1-3µs かかります。メモリーアクセスが数十 ns、syscall が 1µs 未満であるのと比べると、スレッドが行う処理の中でも特に重い部類です。毎秒数十万回切り替わると、CPU 時間の多くがスイッチに取られます。
+- <strong>コンテキストスイッチ</strong>: 1 回あたり典型的には 1〜3µs かかります（キャッシュへの影響を除いた直接のコスト。Eli Bendersky の測定<sup>[8]</sup>では 1.2〜2.2µs）。メモリーアクセスが数十 ns、syscall が 1µs 未満であるのと比べると、スレッドが行う処理の中でも特に重い部類です。毎秒数十万回切り替わると、CPU 時間の多くがスイッチに取られます。
 - <strong>カーネルのスレッド構造体</strong>: `task_struct` がスレッドごとに数 KB 常駐します。
 
 このコストを避けるには、1 本のスレッドで複数の I/O を多重化する必要があります。方法は次の 3 つです。
@@ -46,7 +46,7 @@ Linux は長らく (1) を中心に最適化されてきましたが、2019 年�
 | Readiness | `select`, `poll`, `epoll`, `kqueue` (BSD) | カーネルが「準備できた」と通知し、ユーザーが実際の I/O を呼ぶ | 2 回（通知 + read/write） |
 | Completion | Windows IOCP, POSIX `aio`, `io_uring` | カーネルに I/O を依頼し、完了だけを受け取る | 0-1 回 |
 
-syscall（システムコール）は、ユーザー空間のプログラムがカーネルの機能を呼び出す仕組みで、CPU を特権モードに切り替えます。トラップ命令による CPU モードの遷移を伴うため、通常の関数呼び出しより桁違いに重い処理です。単純な syscall で 200–500 ns 程度、通常の関数呼び出しで 10 ns 未満という数字はオーダーの目安で、実際のコストは CPU・カーネル・脆弱性の緩和策・キャッシュや TLB の状態で大きく変わります。後述の KPTI が有効だと、さらに重くなることがあります。
+syscall（システムコール）は、ユーザー空間のプログラムがカーネルの機能を呼び出す仕組みで、CPU を特権モードに切り替えます。トラップ命令による CPU モードの遷移を伴うため、通常の関数呼び出しより桁違いに重い処理です。目安として、単純な syscall は 200〜500ns 程度、通常の関数呼び出しは 10ns 未満です。Ren らが 2.4GHz の Xeon で測った結果<sup>[9]</sup>では、短い `read` 1 回に 344ns かかりました。関数呼び出しは、引数が少なければ 15〜30 サイクル程度<sup>[10]</sup>で、数 GHz の CPU なら 10ns 未満に収まります。後述の KPTI が有効だと、syscall はさらに重くなります。
 
 Linux では通常ファイルが常に「読み込み可能」とみなされるため、readiness モデルはファイル I/O に使えません（`epoll` は通常ファイルの登録を受け付けません）。ファイル I/O を非同期にするには completion モデルの API が必要で、これが `io_uring` が生まれた大きな動機です。
 
@@ -86,7 +86,7 @@ struct pollfd {
 
 ### 2.3 C10K 問題と `epoll` — 2002 年、Linux 2.5.44
 
-1999 年、Dan Kegel は論考「The C10K problem」で、1 プロセスで 1 万接続を処理するという課題を提起しました。Davide Libenzi が実装した `epoll` は、次の 2 点でこの課題に応えました。
+1999 年、Dan Kegel は論考「The C10K problem」で、1 台のサーバーで 1 万のクライアントを同時に扱うという課題を提起しました。Davide Libenzi が実装した `epoll` は、次の 2 点でこの課題に応えました。
 
 - 監視対象の状態をカーネル側に保持し、呼び出しのたびにコピーしない。
 - 準備完了した fd だけを返し、全体を走査しない。
@@ -144,7 +144,7 @@ struct eppoll_entry {
 };
 ```
 
-各フィールドの役割は次のとおりです。
+主な要素の役割は次のとおりです。
 
 - <strong>赤黒木 `rbr`</strong>: 監視中の全 fd を保持する平衡二分探索木です。追加・削除・検索が $O(\log N)$ で済みます。
 - <strong>ready list `rdllist`</strong>: イベントが発生した `epitem` だけがつながる双方向リストです。`epoll_wait` はここから取り出すだけなので、準備完了した fd 1 個あたり $O(1)$ で返せます。
@@ -217,7 +217,7 @@ epoll でも解決できない問題が残ります。
 
 1. <strong>ファイル I/O に使えない</strong>: 通常ファイルは常に「読める」と報告されるので、ディスクからの読み込みでスレッドがブロックするのを防げません。
 2. <strong>I/O 1 回につき syscall が 2 回必要</strong>: `epoll_wait` と `read/write` です。どちらも vDSO で置き換えられません。
-3. <strong>Spectre/Meltdown 以降の syscall コスト増</strong>: KPTI（Kernel Page-Table Isolation。ユーザー空間とカーネル空間でページテーブルを分ける Meltdown 対策）による TLB フラッシュで、syscall 1 回あたり 0.1-1µs かかります。100 万 IOPS を出そうとすると、syscall だけで CPU 1 コアの 10–100% を使う計算になり、これが性能の上限を決めます。
+3. <strong>Spectre/Meltdown 以降の syscall コスト増</strong>: KPTI（Kernel Page-Table Isolation。ユーザー空間とカーネル空間でページテーブルを分ける Meltdown 対策）は、カーネルに出入りするたびにページテーブルを切り替えます。Ren らの測定<sup>[9]</sup>では、この切り替えの固定コストだけで出入り 1 回あたり 400〜500 サイクル（KPTI なしでは 100 サイクル未満）かかり、TLB ミスの増加分がこれに加わります。これらを合わせて syscall 1 回を 0.1〜1µs と見積もると、100 万 IOPS では I/O 1 回につき syscall 1 回と数えても、毎秒 0.1〜1 秒、つまり CPU 1 コアの 10〜100% を syscall だけに使う計算になり、これが性能の上限を決めます。
 4. <strong>I/O の連鎖を 1 回で依頼できない</strong>: `accept → read → parse → write` のような一連の処理を、まとめてカーネルに渡せません。
 
 これらが `io_uring` が作られた理由です。
@@ -244,14 +244,15 @@ Linux では、さまざまなサブシステムを fd として表し、`epoll`
 
 ### 5.1 設計目標
 
-Jens Axboe の文書「Efficient IO with io_uring」<sup>[1]</sup> が説明する設計の狙いは、おおむね次の 4 つです。
+Jens Axboe の文書「Efficient IO with io_uring」<sup>[1]</sup> は、設計目標を重要度の低いものから順に次のように挙げています。
 
-1. <strong>Truly asynchronous</strong>: どの I/O 操作もブロックせずに依頼できる。
-2. <strong>No copy, no allocation</strong>: ホットパスで syscall もメモリー確保もしない。
-3. <strong>Unified</strong>: ネットワーク・ファイル・ブロックデバイスを同じ API で扱う。
-4. <strong>Extensible</strong>: 新しい操作（opcode）を追加しやすい。
+1. 使いやすく、誤用しにくい。
+2. 拡張できる。ブロック単位のストレージ I/O だけでなく、ネットワークなどにも使える。
+3. 機能が豊富。一部のアプリケーションにしか使えない Linux AIO と違い、アプリケーションに必要な機能をそろえる。
+4. 効率的。リクエスト 1 件あたりのオーバーヘッドが小さい。
+5. スケーラブル。ピーク性能をアプリケーションまで引き出せる。
 
-これを実現するのが、カーネルと共有する<strong>リングバッファー</strong>です。
+初期の設計は効率を中心にしており、依頼と完了のどちらでもメモリーコピーをしないことを狙いました。これを実現するのが、カーネルと共有する<strong>リングバッファー</strong>です。
 
 ### 5.2 アーキテクチャ: SQ と CQ
 
@@ -268,7 +269,7 @@ graph LR
         CQ["CQ ring<br/>(head, tail)"]
         IO["I/O backend<br/>(block, net, fs)"]
     end
-    APP -->|"1. 書込"| SQE
+    APP -->|"1. 書き込み"| SQE
     APP -->|"2. tail++"| SQ
     APP -->|"3. io_uring_enter (省略可)"| K
     SQ --> IO
@@ -329,7 +330,7 @@ struct io_uring_cqe {
 2. `mmap` で SQ リング、CQ リング、SQE 配列をプロセスに割り当てます。カーネル 5.4 以降は `IORING_FEAT_SINGLE_MMAP` により SQ と CQ を 1 回の `mmap` でまとめて割り当てられるので、mmap は合計 2 回で済みます（それより古いカーネルでは 3 回）。
 3. リングのヘッダーから `sq_head`/`sq_tail`/`cq_head`/`cq_tail` の位置を取得します。
 
-典型的なサイズは SQ が 128〜4096 エントリー、CQ がその 2 倍です。
+SQ のエントリー数は、`io_uring_setup` に渡した `entries` を 2 のべき乗に切り上げた値です（上限 32768）。CQ は既定でその 2 倍の大きさになり、`IORING_SETUP_CQSIZE` を指定すれば別の大きさにできます<sup>[5]</sup>。
 
 ### 5.5 送信と完了のフロー
 
@@ -350,7 +351,7 @@ process_completion(cqe);
 io_uring_cqe_seen(&ring, cqe);    /* head++ */
 ```
 
-複数の SQE を 1 回の `io_uring_enter` でまとめて送れるので、1000 個の read を 1 回の syscall で依頼でき、syscall のコストが依頼の数で割られます。epoll 風のループでは I/O 1 回ごとに syscall を 2 回払うのに対し、io_uring では 1000 件の依頼を 1 回の submit にまとめられます。
+複数の SQE を 1 回の `io_uring_enter` でまとめて送れるので、1000 個の read を 1 回の syscall で依頼でき、syscall のコストが依頼の数で割られます。epoll 風のループでは、I/O 1 回ごとに syscall を 2 回払います。
 
 ### 5.6 メモリー順序とリング操作
 
@@ -365,7 +366,7 @@ io_uring_cqe_seen(&ring, cqe);    /* head++ */
 
 ## 6. 高度なモード
 
-ここで紹介する SQPOLL・IOPOLL・Linked SQE・registered files/buffers・multishot は、syscall や準備のコストをさらに減らすためのオプションです。基本 API で足りないときに使うもので、全部を使う必要はありません。
+ここで紹介する SQPOLL・IOPOLL・Linked SQE・registered files/buffers・multishot・provided buffers は、syscall や準備のコストをさらに減らすためのオプションで、基本 API で足りないときに使います。
 
 ### 6.1 `IORING_SETUP_SQPOLL` — カーネルスレッドでポーリング
 
@@ -403,14 +404,14 @@ sqe2 = io_uring_get_sqe(); io_uring_prep_write(sqe2, fd, buf, len, 0);
 io_uring_submit(&ring);
 ```
 
-先行する操作が失敗する（`res < 0`）と、後続の操作は自動でキャンセルされます。`IOSQE_IO_LINK` が保証するのは実行順序だけで、前の SQE の結果の fd を次の SQE に渡す仕組みはありません。`accept → read` のように accept で得た fd をそのまま使う処理を 1 回の submit で行いたい場合は、<strong>direct descriptor</strong> を使います（`IORING_FILE_INDEX_ALLOC` と `IOSQE_FIXED_FILE`、およびカーネル 5.17+ の `IORING_FEAT_LINKED_FILE` による fd の遅延解決）。
+先行する操作が失敗する（`res < 0`）と、後続の操作は自動でキャンセルされます。`IOSQE_IO_LINK` 自体が保証するのは実行順序だけで、前の SQE の結果を次の SQE に渡すことはしません。`accept → read` のように accept で得た fd をそのまま使う処理を 1 回の submit で行いたい場合は、<strong>direct descriptor</strong> を使います（`IORING_FILE_INDEX_ALLOC` と `IOSQE_FIXED_FILE`、およびカーネル 5.17+ の `IORING_FEAT_LINKED_FILE` による fd の遅延解決）。
 
 ### 6.4 Registered files / buffers
 
 - <strong>`io_uring_register_files()`</strong>: fd の配列をカーネルに事前登録します。SQE で fd の代わりにインデックスを指定すると、`fget()/fput()` による参照カウントの操作を省けます。
 - <strong>`io_uring_register_buffers()`</strong>: ユーザーバッファーを事前にピン留めして登録し、I/O ごとの `get_user_pages` を省きます。`get_user_pages` は、ユーザー空間の仮想アドレスに対応する物理ページを固定し、カーネルやデバイスが安全に DMA できるようにするカーネル関数です。
 
-高い IOPS が必要な場合の定番の最適化です。ScyllaDB のベンチマークでは 20-40% の性能向上が報告されています。
+高い IOPS が必要な場合の定番の最適化です。ScyllaDB が公開した fio のベンチマーク<sup>[11]</sup>（Direct I/O で 1KB のランダムリード、CPU が飽和する条件）では、バッファーとファイルの登録などの機能を使った io_uring が、基本的な使い方より 4.9% 多い IOPS を出しました。
 
 ### 6.5 Multishot (`IORING_ACCEPT_MULTISHOT`, Linux 5.19+)
 
@@ -437,7 +438,7 @@ io_uring_submit(&ring);
 
 1 つの SQE は、カーネル内で `io_kiocb` というリクエスト構造体になります。すぐ実行できればその場で実行し、ブロックしそうなら専用のスレッドプール `io-wq` に回します。完了したら共有の CQ リングに結果を書き込み、待っているタスクを起こします。
 
-Linux 5.19 で、`fs/io_uring.c` の単一ファイルだった実装がトップレベルの `io_uring/` ディレクトリーに分割されました。主なファイルは次のとおりです。
+Linux 6.0 で、`fs/io_uring.c` の単一ファイルだった実装がトップレベルの `io_uring/` ディレクトリーに分割されました。主なファイルは次のとおりです。
 
 ```text
 io_uring/
@@ -478,7 +479,7 @@ slab キャッシュ（`req_cachep`）から確保され、完了後は再利用
 
 ディスクの `read` でページキャッシュに当たらなかったときのように、実際にブロックしうる操作は、カーネルのスレッドプール `io-wq` に回されます。Linux 5.12 以降、`io-wq` はリングごとではなく submit したタスクごとに作られ、ディスク用の `bounded` とネットワーク用の `unbounded` の 2 種類のワーカーを持ちます。アイドル状態のワーカーは終了するので、負荷が高いときに `ps` で多数の `iou-wrk` スレッドが見えても、負荷が下がれば減ります。
 
-汎用の `workqueue` を使わずに専用のプールを持つのは、`io-wq` のワーカーが submit したタスクのクレデンシャル（uid/gid、cgroup、nsproxy など）を引き継ぐ必要があり、NUMA ローカリティーと優先度も制御したいためです。汎用の workqueue はこれらの要件に合いません。
+汎用の `workqueue` を使わずに専用のプールを持つのは、`io-wq` のワーカーが submit したタスクのクレデンシャル（uid/gid、cgroup、nsproxy など）を引き継ぐ必要があり、NUMA ローカリティーと優先度も制御したいためです。
 
 この仕組みはユーザーからは見えません。非同期に完了できない操作はワーカースレッドで待つので、どの opcode でも submit した側がブロックすることはありません。epoll は、ブロックしない操作だけを通知の対象にすることでブロックを避けていました。io_uring は、ブロックする操作も裏のスレッドで引き受けるという点で、epoll とは考え方が違います。
 
@@ -517,7 +518,7 @@ CQ リングへの書き込みは `spin_lock` で保護したうえで、ユー�
 
 ### 8.3 バッファー所有権
 
-ユーザーが submit したバッファーは、完了するまでカーネルが使い続けます。このため Rust で安全にラップするのが難しく、`tokio-uring` が独自のバッファートレイト（`IoBuf`）を導入したのもこれが理由です。Rust の借用モデルでは、所有権をカーネルに渡している期間を表現しにくいためです。
+ユーザーが submit したバッファーは、完了するまでカーネルが使い続けます。Rust の借用モデルでは、所有権をカーネルに渡している期間を表現しにくいので、安全なラッパーを書くのが難しくなります。`tokio-uring` が独自のバッファートレイト（`IoBuf`）を導入したのはこのためです。
 
 ### 8.4 対応状況（2026 年時点）
 
@@ -543,15 +544,15 @@ CQ リングへの書き込みは `spin_lock` で保護したうえで、ユー�
 
 ### 9.1 ベンチマーク例 (概観)
 
-公開されている報告から読み取れるおおよその傾向は次の表のとおりです。測定条件は報告ごとに異なります。
+次の表のうち、ネットワークと DB の行の倍率は差の出方を示すための説明用の目安で、測定値ではありません。実際の差はカーネル、CPU、io_uring の使い方で大きく変わり、echo サーバーでは epoll のほうが速かったという報告もあります<sup>[12]</sup>。NVMe の行は、Axboe が 2019 年に 1 つの CPU コアで 4KB のランダムリードを測った値です<sup>[1]</sup>。
 
 | ワークロード | epoll | io_uring (ポーリングなし) | io_uring (SQPOLL + registered) |
 | --- | --- | --- | --- |
 | ネットワーク echo 1M conn | 基準 | ~1.2x | ~2-3x |
-| NVMe random read 4KB | ~800k IOPS | ~1.5-2M IOPS | ~3-5M IOPS |
+| NVMe random read 4KB | —（通常ファイルには使えない） | ~1.2M IOPS | ~1.7M IOPS（IOPOLL） |
 | DB commit (fsync-heavy) | 基準 | ~1.1x | ~1.3-1.5x |
 
-差が大きく出るのは、IOPS が高くレイテンシーが低い領域です。低負荷では epoll との差がごく小さく、移行の手間に見合わないことも多くあります。
+NVMe の行の右端の値は、SQPOLL ではなく、完了をポーリングする `IORING_SETUP_IOPOLL` を使ったときのものです。同じ測定で libaio は 60.8 万 IOPS でした。差が大きく出るのは IOPS が高くレイテンシーが低い領域で、低負荷では移行の手間に見合わないことも多くあります。
 
 ### 9.2 いつ `io_uring` を選ぶべきか
 
@@ -592,3 +593,8 @@ epoll はこれからも安定した選択肢です。1 ノードで NVMe を使
 5. [Linux kernel source: `io_uring/`](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/io_uring)
 6. [`liburing`](https://github.com/axboe/liburing) — ユーザー空間ヘルパーと公式ドキュメント。
 7. LWN: "The rapid growth of io_uring", 2020 / "Security considerations for io_uring", 2023.
+8. E. Bendersky, "Measuring context switching and memory overheads for Linux threads", 2018. [eli.thegreenplace.net](https://eli.thegreenplace.net/2018/measuring-context-switching-and-memory-overheads-for-linux-threads/)
+9. X. Ren et al., "An Analysis of Performance Evolution of Linux's Core Operations", *SOSP*, 2019. [doi:10.1145/3341301.3359640](https://doi.org/10.1145/3341301.3359640)
+10. ITHare, "Infographics: Operation Costs in CPU Clock Cycles", 2016. [ithare.com](http://ithare.com/infographics-operation-costs-in-cpu-clock-cycles/)
+11. G. Costa, "How io_uring and eBPF Will Revolutionize Programming in Linux", ScyllaDB blog, 2020. [scylladb.com](https://www.scylladb.com/2020/05/05/how-io_uring-and-ebpf-will-revolutionize-programming-in-linux/)
+12. axboe/liburing issue #189, "io_uring is slower than epoll", 2020. [github.com](https://github.com/axboe/liburing/issues/189)

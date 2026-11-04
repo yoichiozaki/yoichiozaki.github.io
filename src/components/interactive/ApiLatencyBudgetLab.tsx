@@ -21,7 +21,7 @@ const SEGMENTS = [
   { key: "rtt", color: "bg-[#5db8a6]", ja: "RTT", en: "RTT" },
   { key: "backend", color: "bg-[#8e8b82]", ja: "バックエンド処理", en: "backend work" },
   { key: "transfer", color: "bg-[#e8a55a]", ja: "転送", en: "transfer" },
-  { key: "codec", color: "bg-[#5db872]", ja: "直列化 + 復元", en: "serialize + parse" },
+  { key: "codec", color: "bg-[#5db872]", ja: "直列化 + パース", en: "serialise + parse" },
 ] as const;
 
 type SegKey = (typeof SEGMENTS)[number]["key"];
@@ -75,26 +75,26 @@ export function ApiLatencyBudgetLab({ locale = "ja" }: Props) {
   const verdict = (() => {
     if (savedPct < 5) {
       return isJa
-        ? "総レイテンシーの支配項は RTT とバックエンド処理です。ここでフォーマットを替えても体感は変わりません — まず DB とネットワーク経路を疑ってください。"
-        : "RTT and backend work dominate. Swapping the wire format here will not be felt — look at the database and the network path first.";
+        ? "フォーマットを替えても短縮は 5% 未満です。時間の大半を占めるのは、RTT やバックエンド処理などフォーマットで変わらない項です。まず DB とネットワーク経路を調べてください。"
+        : "Changing the format cuts total latency by less than 5%. Most of the time goes to terms the format does not change, such as RTT and backend work, so look at the database and the network path first.";
     }
     if (savedPct < 20) {
       return isJa
-        ? "効果はありますが桁は変わりません。可視化・LB・ブラウザー対応など運用コストと天秤にかけて判断すべき領域です。"
-        : "There is a real gain, but not an order of magnitude. Weigh it against the operational cost: observability, load balancing, browser support.";
+        ? "短縮は 5〜20% で、桁が変わるほどではありません。可観測性・ロードバランシング・ブラウザー対応などの運用コストと比べて判断してください。"
+        : "The format cuts total latency by 5–20%, not an order of magnitude. Weigh that against the operational cost: observability, load balancing, browser support.";
     }
     return isJa
-      ? "ペイロードが支配的な領域です。ここでは直列化フォーマットの選択が効きます — ただし先に gzip/brotli を試す価値があります。"
-      : "You are in the payload-dominated regime, where the wire format really matters — though gzip/brotli is worth trying first.";
+      ? "転送と直列化、つまりペイロードの大きさに比例する項が大きな割合を占めます。フォーマットの選択が効きますが、先に gzip / brotli を試す価値があります。"
+      : "Transfer and serialisation, the terms that scale with payload size, take a large share. The format choice matters here, though gzip or brotli is worth trying first.";
   })();
 
   return (
     <InteractiveDemo
-      title={isJa ? "レイテンシー予算はどこに消えるのか" : "Where does the latency budget actually go?"}
+      title={isJa ? "レイテンシー予算はどこに消えるのか" : "Where does the latency budget go?"}
       description={
         isJa
           ? "「gRPC は REST より N 倍速い」というベンチマークが何を測っているのかを分解します。スライダーを動かして、直列化コストが全体に占める割合を確かめてください。"
-          : "Decompose what \"gRPC is N× faster than REST\" benchmarks actually measure. Move the sliders and watch how small the serialization slice usually is."
+          : "Decompose what \"gRPC is N× faster than REST\" benchmarks measure. Move the sliders to see what share of the total goes to serialisation."
       }
     >
       <div className="flex flex-col gap-4">
@@ -103,7 +103,7 @@ export function ApiLatencyBudgetLab({ locale = "ja" }: Props) {
           <Slider label={isJa ? "バックエンド処理 (ms)" : "backend work (ms)"} min={0} max={200} step={0.5} value={backend} onChange={setBackend} suffix="ms" />
           <Slider label={isJa ? "JSON ペイロード (KB)" : "JSON payload (KB)"} min={1} max={2000} step={1} value={payloadKb} onChange={setPayloadKb} suffix="KB" />
           <Slider label={isJa ? "帯域 (Mbps)" : "bandwidth (Mbps)"} min={10} max={10000} step={10} value={mbps} onChange={setMbps} suffix="Mbps" />
-          <Slider label={isJa ? "Protobuf のサイズ比" : "protobuf size ratio"} min={15} max={100} step={1} value={protoRatio} onChange={setProtoRatio} suffix="%" />
+          <Slider label={isJa ? "Protobuf / JSON のサイズ比" : "protobuf / JSON size ratio"} min={15} max={100} step={1} value={protoRatio} onChange={setProtoRatio} suffix="%" />
           <label className="flex cursor-pointer items-center gap-2 self-end text-sm">
             <input
               type="checkbox"
@@ -111,7 +111,7 @@ export function ApiLatencyBudgetLab({ locale = "ja" }: Props) {
               onChange={(e) => setColdConnection(e.target.checked)}
             />
             <span className="text-muted-foreground">
-              {isJa ? "毎回新規接続 (TCP + TLS1.3 = 2 RTT)" : "cold connection each call (TCP + TLS 1.3 = 2 RTT)"}
+              {isJa ? "毎回新規接続 (TCP + TLS 1.3 = 2 RTT)" : "cold connection each call (TCP + TLS 1.3 = 2 RTT)"}
             </span>
           </label>
         </div>
@@ -155,8 +155,8 @@ export function ApiLatencyBudgetLab({ locale = "ja" }: Props) {
 
         <p className="text-xs leading-relaxed text-muted-foreground">
           {isJa
-            ? `前提: 直列化スループットを JSON ${JSON_MBPS} MB/s、Protobuf ${PROTO_MBPS} MB/s とし、送信側の符号化と受信側の復号の 2 回分を計上しています (いずれも桁感の目安で、ランタイムとスキーマ形状で大きく変わります)。転送は帯域だけの単純モデルで、TCP の輻輳制御・スロースタート・HTTP/2 のフロー制御ウィンドウは無視しています。実測ではこれらが効くため、大きなレスポンスでは転送項がここより大きくなりがちです。`
-            : `Assumptions: serialization throughput of ${JSON_MBPS} MB/s for JSON and ${PROTO_MBPS} MB/s for protobuf, counted twice (encode on the server, decode on the client). Both are order-of-magnitude figures that vary a lot by runtime and schema shape. Transfer is a naive bandwidth model that ignores congestion control, slow start, and HTTP/2 flow-control windows — real measurements of large responses will show a bigger transfer slice than this.`}
+            ? `前提: 直列化スループットを JSON ${JSON_MBPS} MB/s、Protobuf ${PROTO_MBPS} MB/s とし、送信側の直列化と受信側のパースの 2 回分を計上しています (いずれも桁の目安で、ランタイムとスキーマ形状で大きく変わります)。転送は帯域だけの単純モデルで、TCP の輻輳制御・スロースタート・HTTP/2 のフロー制御ウィンドウは無視しています。実測ではこれらが効くため、大きなレスポンスでは転送項がここより大きくなりがちです。ヘッダーのバイト数 (HPACK による圧縮) も計上していません。`
+            : `Assumptions: serialisation throughput of ${JSON_MBPS} MB/s for JSON and ${PROTO_MBPS} MB/s for protobuf, counted twice (encode on the server, decode on the client). Both are order-of-magnitude figures that vary a lot by runtime and schema shape. Transfer is a naive bandwidth model that ignores congestion control, slow start, and HTTP/2 flow-control windows, so real measurements of large responses tend to show a bigger transfer slice than this. Header bytes (and HPACK compression) are not counted either.`}
         </p>
       </div>
     </InteractiveDemo>
@@ -223,7 +223,7 @@ function Slider({
         <span className="text-foreground">{label}</span>
         <span className="font-mono text-accent">
           {value}
-          {suffix ? ` ${suffix}` : ""}
+          {suffix ? (suffix === "%" ? suffix : ` ${suffix}`) : ""}
         </span>
       </div>
       <input

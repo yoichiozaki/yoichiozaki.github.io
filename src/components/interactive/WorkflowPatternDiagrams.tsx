@@ -59,7 +59,7 @@ export function SequentialPatternDiagram({ locale = "ja" }: PatternDiagramProps)
   return (
     <div className="not-prose my-4 flex justify-center">
       <svg viewBox="0 0 520 60" className="w-full max-w-lg" role="img"
-        aria-label={isJa ? "Sequential パターン図" : "Sequential pattern diagram"}>
+        aria-label={isJa ? "Sequential パターン図: Input が Agent A、Agent B、Agent C を順に通り、Output になる" : "Sequential pattern diagram: Input passes through Agent A, Agent B, and Agent C in turn to become Output"}>
         <ArrowDefs />
         <Node x={40} y={30} label="Input" color="#6366f1" icon="📝" w={70} />
         <Arrow x1={75} y1={30} x2={105} y2={30} />
@@ -79,11 +79,11 @@ export function SequentialPatternDiagram({ locale = "ja" }: PatternDiagramProps)
 
 export function ConcurrentPatternDiagram({ locale = "ja" }: PatternDiagramProps) {
   const isJa = locale === "ja";
-  const aggLabel = isJa ? "集約" : "Agg.";
+  const aggLabel = isJa ? "集約" : "Aggregate";
   return (
     <div className="not-prose my-4 flex justify-center">
       <svg viewBox="0 0 460 160" className="w-full max-w-md" role="img"
-        aria-label={isJa ? "Concurrent パターン図" : "Concurrent pattern diagram"}>
+        aria-label={isJa ? "Concurrent パターン図: Input を Agent A、B、C に同時に渡し、3 つの結果を集約して Output にする" : "Concurrent pattern diagram: Input goes to Agents A, B, and C at the same time, and their three results are aggregated into Output"}>
         <ArrowDefs />
         <Node x={50} y={80} label="Input" color="#6366f1" icon="📝" w={70} />
         {/* Fan-out arrows */}
@@ -113,7 +113,7 @@ export function ConditionalPatternDiagram({ locale = "ja" }: PatternDiagramProps
   return (
     <div className="not-prose my-4 flex justify-center">
       <svg viewBox="0 0 440 120" className="w-full max-w-md" role="img"
-        aria-label={isJa ? "Conditional パターン図" : "Conditional pattern diagram"}>
+        aria-label={isJa ? "Conditional パターン図: Classifier が Input を判定し、true なら Agent B、false なら Agent C に送る" : "Conditional pattern diagram: a Classifier checks Input and sends it to Agent B if true or to Agent C if false"}>
         <ArrowDefs />
         <Node x={50} y={60} label="Input" color="#6366f1" icon="📝" w={70} />
         <Arrow x1={85} y1={60} x2={135} y2={60} />
@@ -134,18 +134,18 @@ export function ConditionalPatternDiagram({ locale = "ja" }: PatternDiagramProps
 
 export function HandoffPatternDiagram({ locale = "ja" }: PatternDiagramProps) {
   const isJa = locale === "ja";
-  const mathLabel = isJa ? "数学" : "Math";
-  const histLabel = isJa ? "歴史" : "History";
+  const mathLabel = isJa ? "数学チューター" : "Math Tutor";
+  const histLabel = isJa ? "歴史チューター" : "History Tutor";
   return (
     <div className="not-prose my-4 flex justify-center">
       <svg viewBox="0 0 440 130" className="w-full max-w-md" role="img"
-        aria-label={isJa ? "Handoff パターン図" : "Handoff pattern diagram"}>
+        aria-label={isJa ? "Handoff パターン図: Triage が数学チューターか歴史チューターに委任し、委任先の回答が Output になる" : "Handoff pattern diagram: Triage hands off to the Math Tutor or the History Tutor, whose answer becomes Output"}>
         <ArrowDefs />
         <Node x={60} y={65} label="Triage" color="#6366f1" icon="🎯" w={80} />
         <Arrow x1={100} y1={50} x2={170} y2={30} />
         <Arrow x1={100} y1={80} x2={170} y2={100} />
-        <Node x={230} y={30} label={`${mathLabel} Tutor`} color="#3b82f6" icon="🔢" w={100} />
-        <Node x={230} y={100} label={`${histLabel} Tutor`} color="#f59e0b" icon="📚" w={100} />
+        <Node x={230} y={30} label={mathLabel} color="#3b82f6" icon="🔢" w={100} />
+        <Node x={230} y={100} label={histLabel} color="#f59e0b" icon="📚" w={100} />
         <Arrow x1={280} y1={30} x2={350} y2={60} />
         <Arrow x1={280} y1={100} x2={350} y2={70} />
         <Node x={390} y={65} label="Output" color="#10b981" icon="💡" w={70} />
@@ -163,7 +163,7 @@ export function WriterCriticPatternDiagram({ locale = "ja" }: PatternDiagramProp
   return (
     <div className="not-prose my-4 flex justify-center">
       <svg viewBox="0 0 520 120" className="w-full max-w-lg" role="img"
-        aria-label={isJa ? "Writer-Critic パターン図" : "Writer-Critic pattern diagram"}>
+        aria-label={isJa ? "Writer-Critic パターン図: Writer の出力を Critic が審査し、拒否なら Writer に戻し、承認なら Summary を経て Output にする" : "Writer-Critic pattern diagram: Critic reviews Writer's output; a rejected draft goes back to Writer, and an approved one goes through Summary to Output"}>
         <ArrowDefs />
         <Node x={50} y={60} label="Input" color="#6366f1" icon="📝" w={70} />
         <Arrow x1={85} y1={60} x2={115} y2={60} />
@@ -197,7 +197,7 @@ export function GroupChatPatternDiagram({ locale = "ja" }: PatternDiagramProps) 
   return (
     <div className="not-prose my-4 flex justify-center">
       <svg viewBox="0 0 460 160" className="w-full max-w-md" role="img"
-        aria-label={isJa ? "Group Chat パターン図" : "Group Chat pattern diagram"}>
+        aria-label={isJa ? "Group Chat パターン図: Manager が Agent A、B、C から次の発言者を選び、発言のたびに Manager に戻る流れを繰り返してから、Output に進む" : "Group Chat pattern diagram: the Manager picks the next speaker from Agents A, B, and C, and control returns to the Manager after each turn; after repeated rounds, the result goes to Output"}>
         <ArrowDefs />
         <Node x={55} y={80} label="Manager" color="#6366f1" icon="🎯" w={85} />
         {/* Fan-out */}
@@ -213,7 +213,7 @@ export function GroupChatPatternDiagram({ locale = "ja" }: PatternDiagramProps) 
         <Arrow x1={238} y1={80} x2={290} y2={80} />
         <Arrow x1={238} y1={125} x2={290} y2={88} />
         <Node x={335} y={80} label="Manager" color="#6366f1" icon="🔄" w={80} />
-        <EdgeLabel x={335} y={110} text="repeat..." />
+        <EdgeLabel x={335} y={110} text={isJa ? "繰り返し…" : "repeat…"} />
         <Arrow x1={375} y1={80} x2={400} y2={80} />
         <Node x={430} y={80} label="Output" color="#8b5cf6" icon="📤" w={55} />
       </svg>

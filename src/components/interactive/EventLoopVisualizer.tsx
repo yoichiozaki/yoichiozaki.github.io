@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type EventLoopVisualizerProps = { locale?: string };
@@ -38,8 +39,8 @@ const steps: LoopState[] = [
     log: [],
     phase: "stack",
     description: {
-      ja: "スクリプトの実行開始。main() がコールスタックにプッシュされます。",
-      en: "Script execution begins. main() is pushed onto the call stack.",
+      ja: "スクリプトの実行開始。スクリプト全体を表す main() がコールスタックにプッシュされます。",
+      en: "Script execution begins. main(), standing for the whole script, is pushed onto the call stack.",
     },
   },
   // Step 1: console.log("1")
@@ -66,12 +67,12 @@ const steps: LoopState[] = [
     ],
     microtaskQueue: [],
     macrotaskQueue: [],
-    webApi: [{ id: "timer", label: "Timer (0ms)", type: "macrotask" }],
+    webApi: [{ id: "timer", label: "Timer (0 ms)", type: "macrotask" }],
     log: ["1"],
     phase: "webapi",
     description: {
-      ja: "setTimeout(cb, 0) を呼び出し。コールバックはWeb APIのタイマーに登録され、0ms後にマクロタスクキューに入ります。",
-      en: "Call setTimeout(cb, 0). The callback is registered with the Web API timer and will be added to the macrotask queue after 0ms.",
+      ja: "setTimeout(cb, 0) を呼び出し。コールバックは Web API のタイマーに登録され、タイマーが切れるとマクロタスクキューに入ります。",
+      en: "Call setTimeout(cb, 0). The callback is registered with the Web API timer and is added to the macrotask queue when the timer expires.",
     },
   },
   // Step 3: Promise.resolve().then(cb2) 
@@ -82,11 +83,11 @@ const steps: LoopState[] = [
     ],
     microtaskQueue: [{ id: "micro1", label: 'cb2: log("3")', type: "microtask" }],
     macrotaskQueue: [],
-    webApi: [{ id: "timer", label: "Timer (0ms)", type: "macrotask" }],
+    webApi: [{ id: "timer", label: "Timer (0 ms)", type: "macrotask" }],
     log: ["1"],
     phase: "stack",
     description: {
-      ja: "Promise.resolve().then(cb2) を実行。既に解決済みのPromiseなので、cb2 は即座にマイクロタスクキューに入ります。",
+      ja: "Promise.resolve().then(cb2) を実行。既に解決済みの Promise なので、cb2 は即座にマイクロタスクキューに入ります。",
       en: "Execute Promise.resolve().then(cb2). The Promise is already resolved, so cb2 is immediately enqueued in the microtask queue.",
     },
   },
@@ -102,8 +103,8 @@ const steps: LoopState[] = [
     log: ["1", "2"],
     phase: "stack",
     description: {
-      ja: 'console.log("2") を実行 → 出力。タイマーが完了し、コールバックがマクロタスクキューに移動しました。',
-      en: 'Execute console.log("2") → outputs. The timer has completed and the callback moved to the macrotask queue.',
+      ja: 'console.log("2") を実行 → 出力。タイマーが切れ、コールバックがマクロタスクキューに移動しました。',
+      en: 'Execute console.log("2") → outputs. The timer has expired and the callback has moved to the macrotask queue.',
     },
   },
   // Step 5: main() completes, stack empty → microtask check
@@ -116,7 +117,7 @@ const steps: LoopState[] = [
     phase: "microtask",
     description: {
       ja: "main() が完了し、コールスタックが空に。イベントループはまずマイクロタスクキューをチェックします。",
-      en: "main() completes, call stack is empty. The event loop checks the microtask queue first.",
+      en: "main() completes and the call stack is empty. The event loop checks the microtask queue first.",
     },
   },
   // Step 6: execute microtask
@@ -128,8 +129,8 @@ const steps: LoopState[] = [
     log: ["1", "2", "3"],
     phase: "microtask",
     description: {
-      ja: 'マイクロタスク cb2 を実行 → "3" を出力。マイクロタスクキューが空になるまで全て実行します。',
-      en: 'Execute microtask cb2 → outputs "3". All microtasks run until the queue is empty.',
+      ja: 'マイクロタスク cb2 を実行 → "3" を出力。マイクロタスクキューが空になるまですべて実行します。',
+      en: 'Execute microtask cb2 → outputs "3". Microtasks keep running until the queue is empty.',
     },
   },
   // Step 7: microtask done, pick macrotask
@@ -141,8 +142,8 @@ const steps: LoopState[] = [
     log: ["1", "2", "3"],
     phase: "macrotask",
     description: {
-      ja: "マイクロタスクキューが空になりました。次にマクロタスクキューから1つ取り出します。",
-      en: "Microtask queue is empty. Now pick one task from the macrotask queue.",
+      ja: "マイクロタスクキューが空になりました。次にマクロタスクキューから 1 つ取り出します。",
+      en: "The microtask queue is empty. Next, the event loop takes one task from the macrotask queue.",
     },
   },
   // Step 8: execute macrotask
@@ -167,8 +168,8 @@ const steps: LoopState[] = [
     log: ["1", "2", "3", "4"],
     phase: "idle",
     description: {
-      ja: "すべてのタスクが完了。イベントループは次のイベントを待機します。重要: マイクロタスク（Promise）はマクロタスク（setTimeout）より常に先に実行されます。",
-      en: "All tasks complete. The event loop waits for the next event. Key insight: microtasks (Promise) always run before macrotasks (setTimeout).",
+      ja: "すべてのタスクが完了。イベントループは次のイベントを待機します。マイクロタスクは次のマクロタスクの前にすべて実行されるため、Promise のコールバックが setTimeout のコールバックより先に実行されました。",
+      en: "All tasks complete. The event loop waits for the next event. Because all microtasks run before the next macrotask, the Promise callback ran before the setTimeout callback.",
     },
   },
 ];
@@ -213,12 +214,14 @@ function QueueColumn({
   dark,
   color,
   active,
+  emptyLabel,
 }: {
   title: string;
   items: TaskItem[];
   dark: boolean;
   color: string;
   active: boolean;
+  emptyLabel: string;
 }) {
   const borderColor = dark ? "#404040" : "#d4d4d4";
   const textColor = dark ? "#e5e5e5" : "#171717";
@@ -245,7 +248,7 @@ function QueueColumn({
       <div className="flex flex-col gap-1 flex-1">
         {items.length === 0 ? (
           <div className="text-xs italic" style={{ color: mutedColor }}>
-            (empty)
+            {emptyLabel}
           </div>
         ) : (
           items.map((item) => (
@@ -272,6 +275,7 @@ function QueueColumn({
 export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps) {
   const player = useStepPlayer({ totalSteps: steps.length, intervalMs: 1500 });
   const state = steps[player.step];
+  const emptyLabel = locale === "en" ? "(empty)" : "（空）";
 
   // Simple dark mode detection via CSS class
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
@@ -283,7 +287,7 @@ export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps)
 
   return (
     <InteractiveDemo
-      title={locale === "en" ? "JavaScript Event Loop" : "JavaScriptイベントループ"}
+      title={locale === "en" ? "JavaScript Event Loop" : "JavaScript のイベントループ"}
       description={
         locale === "en"
           ? "Step through: console.log('1'), setTimeout(cb,0), Promise.resolve().then(cb2), console.log('2')"
@@ -292,6 +296,7 @@ export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps)
     >
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <QueueColumn
+          emptyLabel={emptyLabel}
           title={locale === "en" ? "Call Stack" : "コールスタック"}
           items={state.callStack}
           dark={isDark}
@@ -299,6 +304,7 @@ export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps)
           active={state.phase === "stack"}
         />
         <QueueColumn
+          emptyLabel={emptyLabel}
           title={locale === "en" ? "Web APIs" : "Web API"}
           items={state.webApi}
           dark={isDark}
@@ -306,14 +312,16 @@ export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps)
           active={state.phase === "webapi"}
         />
         <QueueColumn
-          title={locale === "en" ? "Microtask Q" : "マイクロタスクQ"}
+          emptyLabel={emptyLabel}
+          title={locale === "en" ? "Microtask Queue" : "マイクロタスクキュー"}
           items={state.microtaskQueue}
           dark={isDark}
           color={purple}
           active={state.phase === "microtask"}
         />
         <QueueColumn
-          title={locale === "en" ? "Macrotask Q" : "マクロタスクQ"}
+          emptyLabel={emptyLabel}
+          title={locale === "en" ? "Macrotask Queue" : "マクロタスクキュー"}
           items={state.macrotaskQueue}
           dark={isDark}
           color={amber}
@@ -357,7 +365,7 @@ export function EventLoopVisualizer({ locale = "ja" }: EventLoopVisualizerProps)
         </span>
       </div>
 
-      <StepPlayerControls {...player} />
+      <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }

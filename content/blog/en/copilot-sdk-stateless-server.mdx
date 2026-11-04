@@ -59,7 +59,7 @@ You choose the transport with the `RuntimeConnection` factories.
 
 For server-side work, use `forUri`: run the runtime as a resident server with `copilot --headless --port 4321` and connect to it from your API processes. The runtime then has its own lifecycle, separate from your request handlers, so you can restart and deploy each independently.
 
-By default, the headless server accepts connections only from loopback (`127.0.0.1`). To reach it from another container you must bind with `--host 0.0.0.0`, and then the documented limitation "there is no built-in auth between the SDK and the CLI" becomes a real exposure. `forUri` and `forTcp` accept a `connectionToken`, but the docs still list missing auth as a limitation, because one shared secret is not a substitute for authentication. Protect the connection at the network boundary (same pod, sidecar, mTLS inside a VPC).
+By default, the headless server accepts connections only from loopback (`127.0.0.1`). To reach it from another container you must bind with `--host 0.0.0.0`, and then the documented limitation "there is no built-in auth between the SDK and the CLI" becomes a real exposure. `forUri` and `forTcp` accept a `connectionToken`, but the docs still list missing auth as a limitation. One shared secret is not a substitute for authentication, so protect the connection at the network boundary (same pod, sidecar, mTLS inside a VPC).
 
 ### Taking inventory of state
 
@@ -132,17 +132,17 @@ flowchart TB
 - <strong>L2 (runtime tier)</strong> is inherently stateful because the process holds live sessions. Trying to make it stateless is the same category error as trying to make PostgreSQL stateless.
 - <strong>L3 (durable tier)</strong> consists of shared storage (or object storage via `sessionFs`) plus a session registry you own.
 
-The registry is the piece designs most easily overlook. The SDK offers `listSessions()`, but it only enumerates sessions visible on the runtime's storage. It will not tell you who owns a session, which runtime currently holds it, or whether it is still valid. <strong>Ownership and routing are your database's responsibility.</strong>
+Designs often leave out the registry. The SDK offers `listSessions()`, but it only enumerates sessions visible on the runtime's storage. It will not tell you who owns a session, which runtime currently holds it, or whether it is still valid. <strong>Ownership and routing are your database's responsibility.</strong>
 
 ## Four levels of statelessness
 
-Statelessness comes in degrees. The flowchart picks a level from your requirements.
+Statelessness comes in degrees. The flowchart picks a level from your requirements. Its 20-second cutoff is an illustrative rule of thumb, not a value from the SDK or CLI docs. By the resume-cost ratio later in this article, if a resume takes 1–5 s, a 20-second turn under Level 1 has 5–25% more turns in flight than under Level 2. Set your own cutoff from the resume time you measure.
 
 ```mermaid
 flowchart TD
     Q1{Multi-turn conversation required}
     Q1 -->|No| L0[Level 0 - ephemeral session per request]
-    Q1 -->|Yes| Q2{Typical turn latency 20 seconds or more}
+    Q1 -->|Yes| Q2{Typical turn latency 20 seconds or more - illustrative cutoff}
     Q2 -->|Yes| L1[Level 1 - shared storage plus resume per turn]
     Q2 -->|No| Q3{Can you operate a session registry and drain logic}
     Q3 -->|Yes| L2[Level 2 - lease routed warm sessions]
@@ -222,7 +222,7 @@ app.post("/api/chat", async (req, res) => {
 });
 ```
 
-The handler stays simple, but each turn now takes longer in wall-clock time:
+The API tier stays stateless, but each turn now takes longer in wall-clock time:
 
 $$
 W_{\text{L1}} = W_{\text{lease}} + W_{\text{resume}} + W_{\text{turn}} + W_{\text{disconnect}}
@@ -255,6 +255,8 @@ Do <strong>not rely on load balancer sticky sessions</strong> for this. LB affin
 ### Level 3: runtime per tenant
 
 If compliance requirements are strict, or each tenant's runtime needs distinct credentials, run a separate runtime per tenant. This gives the strongest isolation and the worst density, because you pay for the processes and memory of idle tenants.
+
+The four levels compare as follows. Operational complexity is a rough rating of how much you have to build and run yourself at that level: shared storage, leases, the registry and drain logic, or per-tenant runtimes.
 
 | | Level 0 | Level 1 | Level 2 | Level 3 |
 |---|---|---|---|---|
@@ -322,12 +324,12 @@ export type FactoryResumeErrorCode =
     | "factory_storage_corrupt";
 ```
 
-So leaving <strong>session exclusion to the application</strong> looks like a deliberate decision rather than an oversight. A library cannot know the layer above it (how many pods exist, how the LB routes), so it cannot provide exclusion itself. Doing so would require the SDK to depend on Redis or etcd, which is a bad dependency for a library to impose.
+So leaving session exclusion to the application looks like a deliberate decision rather than an oversight. A library cannot know the layer above it (how many pods exist, how the LB routes), so it cannot provide exclusion itself. Doing so would require the SDK to depend on Redis or etcd, which is a bad dependency for a library to impose.
 
 Layers that leave exclusion to their callers usually still provide conflict detection: HTTP's `If-Match`, conditional writes on object storage, and `git push` rejecting non-fast-forward updates. The Copilot SDK gives you `modifiedTime` from `listSessions()`, but <strong>no compare-and-swap that validates a version at write time</strong>. As a result:
 
 - You cannot prevent double writes (reasonable for this layer)
-- You have little means to detect that a double write happened (this part is weak)
+- You have few ways to detect that a double write happened (this part is weak)
 
 The responsibilities divide like this:
 
@@ -429,7 +431,7 @@ A Redis lock is advisory, so it does not prove mutual exclusion. A long GC pause
 
 There are two practical answers.
 
-<strong>(a) Make single-writer structural.</strong> Use a queue partitioned by session ID (a Kafka partition, an SQS FIFO `MessageGroupId`, a Redis Streams consumer group) so the same worker always processes a session's turns in order. Mutual exclusion then follows from how messages are delivered rather than from whether a lock was acquired, which is far more robust.
+<strong>(a) Make single-writer structural.</strong> Use a queue partitioned by session ID (a Kafka partition, an SQS FIFO `MessageGroupId`, Redis Streams sharded by a hash of the session ID) so the same worker always processes a session's turns in order. Mutual exclusion then follows from how messages are delivered rather than from whether a lock was acquired, which is far more robust.
 
 <strong>(b) Make corruption detectable.</strong> Assume double writes can still happen. Track the `modifiedTime` returned by `listSessions()` or your own turn counter, and treat any unexpected advance as an anomaly. Agent sessions are not financial transactions, so detecting the problem, quarantining the session, and asking the user to start over is usually enough.
 
@@ -447,7 +449,7 @@ $$
 
 where $\lambda$ is the turn arrival rate [turns/sec], $W$ is time in system per turn [sec], and $L$ is the number of turns in flight.
 
-For a chat backend with $\lambda = 3\ \text{turns/sec}$ and $W = 25\ \text{s}$, $L = 75$. Divide by the measured per-runtime concurrency $C$ to get the runtime count.
+For example, a chat backend with $\lambda = 3\ \text{turns/sec}$ and $W = 25\ \text{s}$ has $L = 75$. Divide by the measured per-runtime concurrency $C$ to get the runtime count.
 
 $$
 N = \left\lceil \frac{L}{C} \right\rceil \times (1 + \text{headroom})
@@ -460,6 +462,8 @@ $$
 $$
 
 $W_{\text{lease}}$ applies to both Level 1 and Level 2, but it does not cancel out of the ratio; it is omitted because it is small next to $W_{\text{turn}}$. $W_{\text{disconnect}}$ is likewise dropped as small next to $W_{\text{resume}}$.
+
+The table shows how much larger $L$ is under Level 1 than under Level 2, assuming $W_{\text{resume}}$ of 1 s or 5 s.
 
 | $W_{\text{turn}}$ | $W_{\text{resume}} = 1\text{s}$ | $W_{\text{resume}} = 5\text{s}$ |
 |---|---|---|
@@ -483,7 +487,7 @@ Look for the concurrency at which latency rises sharply, rather than for the max
 
 ## Streaming breaks statelessness
 
-Implementations most often get stuck on streaming. With `createSession({ streaming: true })` the runtime emits `assistant.message_delta` events carrying `deltaContent`. Those events are delivered to the process holding that SDK client, but the browser's SSE or WebSocket connection may terminate on a different API pod.
+Implementations most often get stuck on streaming. With `createSession({ streaming: true })` the runtime emits `assistant.message_delta` events carrying `deltaContent`. Those events go to the SDK client process that holds the session, but the browser's SSE or WebSocket connection may terminate on a different API pod.
 
 ```mermaid
 flowchart LR
@@ -526,8 +530,6 @@ For a stateless design, this means `getEvents()` cannot reconstruct a partially 
 
 So streaming also requires designing for durability, not only delivery. Once you publish events through a broker, your pipeline holds the only record of them, and the append-only buffer described below becomes the store for events that cannot be recovered if lost.
 
-Events also carry a `parentId` that forms "a linked chain to the chronologically preceding event". This chain records order and causality, so keeping `parentId` in your own buffer makes reconstruction much easier.
-
 There are three ways to deliver events across pods.
 
 | Approach | Mechanism | Fits | Cost |
@@ -538,15 +540,17 @@ There are three ways to deliver events across pods.
 
 If you use a broker, add an append-only turn buffer. Publish each delta and append it to a Redis List or Stream at the same time. A new SSE connection replays the buffer before switching to the subscription, which prevents the bug where a client reconnects and loses the middle of a response. With SSE `Last-Event-ID`, the client's resume point is also well defined.
 
+Events also carry a `parentId` that forms "a linked chain to the chronologically preceding event". This chain records order and causality, so keeping `parentId` in your own buffer makes reconstruction easier.
+
 The final `assistant.message` is always sent regardless of the `streaming` setting, so you can reconcile the buffer against the complete content that arrives at the end.
 
 Cloud sessions (`cloud: { repository: ... }`) add another trap. `createSession` resolves as soon as Mission Control reserves a task, but the remote worker connects a second or two later. If you `send` before that, the runtime throws `"Remote session is still starting"`. <strong>The schema wrapper swallows that error and returns a fresh messageId</strong>, so the call appears to succeed while the prompt is dropped on the server. Wait for a `session.start` event whose `producer === "copilot-agent"` before sending. In a stateless handler, either split "create session" and "send first prompt" into two requests, or wait for readiness before responding to the create call.
 
 ## `sessionFs` — peeling state off the local disk
 
-`baseDirectory` sets `COPILOT_HOME`, which defaults to `~/.copilot`. When you connect to an external runtime with `RuntimeConnection.forUri`, the SDK client's `baseDirectory` is <strong>ignored</strong>; set `COPILOT_HOME` as an environment variable on the runtime process instead.
+Without `sessionFs`, session state lives on the runtime's local disk under `COPILOT_HOME` (default `~/.copilot`). The SDK client sets that location with `baseDirectory`, but when you connect to an external runtime with `RuntimeConnection.forUri`, `baseDirectory` is <strong>ignored</strong>; set `COPILOT_HOME` as an environment variable on the runtime process instead.
 
-The same applies to `sessionIdleTimeoutSeconds` and `enableRemoteSessions`. With an external runtime, the client ignores these options without an exception or warning, and the runtime process's own configuration applies. The resident headless topology recommended in this article is exactly the case where they are ignored.
+The same applies to `sessionIdleTimeoutSeconds` and `enableRemoteSessions`. With an external runtime, the client ignores these options without an exception or warning, and the runtime process's own configuration applies. The resident headless topology recommended in this article is exactly the case where they are ignored. Set the idle timeout on the runtime process instead, with `--session-idle-timeout <seconds>`; without it, sessions never time out (checked against SDK v1.0.28, November 2026). `enableRemoteSessions` itself was removed in v1.0.26 (October 2026).
 
 The usual way to get shared storage is to mount `COPILOT_HOME/session-state` on a PVC or Azure File; the docs show Kubernetes and ACI examples. But mounting a network filesystem into several runtimes at once brings locking, consistency, and latency problems.
 
@@ -580,17 +584,17 @@ Java currently has no verified public `sessionFs` option. If you are on a JVM st
 
 1. <strong>Local disk can be ephemeral.</strong> State survives pod deletion. This is mandatory on Cloud Run or Container Apps, where disks are volatile.
 2. <strong>Tenant boundaries can be enforced by path.</strong> If the provider implementation forces a tenant prefix, the storage layer stops a mixed-up session ID from reaching another tenant's data. This adds a second layer of defense behind authorization.
-3. <strong>Lifecycle management moves to your tooling.</strong> Object storage lifecycle policies give you TTL deletion, versioning, and audit logs without extra code.
+3. <strong>Lifecycle management moves to your tooling.</strong> Object storage gives you TTL deletion through lifecycle policies, plus versioning and audit logs, without extra code.
 
 The cost is latency, because checkpoint reads and writes go over the network. With Level 1's per-turn resume, that latency adds directly to $W_{\text{resume}}$. Level 2 warm sessions, which resume less often, feel it less.
 
 ## `mode: "empty"` — the precondition for multi-tenancy
 
-Whether a shared runtime can serve multiple tenants safely depends on this one setting.
+Whether a shared runtime can serve multiple tenants safely depends first on this one setting.
 
 `CopilotClient`'s `mode` is either `"copilot-cli"` (default) or `"empty"`, and the docs are explicit: do not use the default `"copilot-cli"` on a shared server. That mode targets CLI-style coding agents and <strong>can expose ambient tools with host filesystem access</strong>.
 
-The runtime runs as a process on your server, so anything that process can read is potentially exposed to every tenant: `.env` files, service account tokens, other tenants' session directories, `/proc`, cloud instance metadata endpoints. Leaving tools that let an agent read files on the server implicitly enabled leads straight to OWASP A01 (broken access control) and A05 (security misconfiguration).
+The runtime runs as a process on your server, so anything that process can read is potentially exposed to every tenant: `.env` files, service account tokens, other tenants' session directories, `/proc`, cloud instance metadata endpoints. Leaving tools that let an agent read files on the server implicitly enabled leads straight to [OWASP Top 10:2025](https://top10.owasp.org/2025/0x00_2025-Introduction/) A01 (broken access control) and A02 (security misconfiguration).
 
 ```typescript
 const client = new CopilotClient({
@@ -629,7 +633,11 @@ The docs summarize session-level isolation as follows.
 
 The last row explains why the shared-runtime pattern depends on `mode: "empty"`: with host tools available, every session shares the runtime process's filesystem.
 
-### `mode: "empty"` is validation, not just a defaults switch
+`onPermissionRequest` has a subtle trap too. If you omit the handler, permission requests are emitted as events and left pending, and the session does not advance until something resolves them. In a backend service without the handler, sessions hang silently, and because there is no idle timeout by default, they stay until you disconnect or delete them. Always set the handler explicitly.
+
+The scopes `approve-for-session`, `approve-for-location`, and `approve-permanently` keep an approval beyond a single request. In a multi-tenant deployment, an `approve-for-location` `locationKey` or an `approve-permanently` domain approval can be shared unintentionally. On a shared runtime, use only `approve-once` and `reject`.
+
+### `mode: "empty"` also validates your configuration
 
 The guides present `mode: "empty"` as a switch for defaults. The type definitions show that it also validates your configuration.
 
@@ -649,7 +657,7 @@ The guides present `mode: "empty"` as a switch for defaults. The type definition
 1. Either `baseDirectory` or `sessionFs` must be set (validated when `CopilotClient` is constructed)
 2. Every session must specify `availableTools` (validated on `createSession`)
 
-The first requirement has a catch. As noted earlier, `baseDirectory` is ignored under `RuntimeConnection.forUri`. So in the topology this article recommends (an external runtime with `mode: "empty"`), <strong>you should supply `sessionFs`</strong>. Passing `baseDirectory` satisfies the validation but configures nothing.
+The first requirement has a catch. As noted earlier, `baseDirectory` is ignored under `RuntimeConnection.forUri`. So in the topology this article recommends (an external runtime with `mode: "empty"`), <strong>you effectively need `sessionFs`</strong>. Passing `baseDirectory` satisfies the validation but configures nothing.
 
 The second requirement errs on the safe side: instead of recommending an allowlist, the SDK refuses to create a session without one.
 
@@ -694,10 +702,6 @@ The SDK itself names multi-tenant deployments as the use case for this field: it
 
 `mode: "empty"` closes the tool exposure surface, but <strong>the type definitions document no mode-specific default for either field</strong>. For a multi-tenant SaaS, set `skipEmbeddingRetrieval: true` explicitly, or at minimum `embeddingCacheStorage: "in-memory"`.
 
-`onPermissionRequest` has a subtle trap too. If you omit the handler, permission requests are emitted as events and left pending, and the session does not advance until something resolves them. In a backend service without the handler, sessions hang silently until the idle timeout, so always set it explicitly.
-
-The scopes `approve-for-session`, `approve-for-location`, and `approve-permanently` keep an approval beyond a single request. In a multi-tenant deployment, an `approve-for-location` `locationKey` or an `approve-permanently` domain approval can be shared unintentionally. On a shared runtime, use only `approve-once` and `reject`.
-
 ## Authentication and token lifecycles
 
 Server-side, authentication has two layers.
@@ -711,7 +715,7 @@ Credentials are resolved in this order: explicit SDK token → direct Copilot AP
 
 The client option `useLoggedInUser` cannot be combined with `RuntimeConnection.forUri`, and neither can a client-level `gitHubToken`. So in an external-runtime deployment this accident happens on the runtime process, not on the SDK client, and the fix belongs there. Keep `~/.copilot` out of your container image and pin the runtime process's `COPILOT_HOME` to a dedicated directory. (The SDK client's `baseDirectory` has no effect under `forUri`.)
 
-The hardest issue for stateless handlers is that <strong>token lifetime and session lifetime do not match</strong>. A user's OAuth token may expire in hours, while a session can live for days. So:
+A particularly tricky issue for stateless handlers is that <strong>token lifetime and session lifetime do not match</strong>. A user's OAuth token may expire in hours, while a session can live for days. So:
 
 - Do not store the token itself in the session record.
 - On every resume, fetch a fresh token from your auth system and pass it as `gitHubToken`.
@@ -762,7 +766,7 @@ Look up a symptom in the first column during a design review.
 | Stream stops mid-answer | The SSE-terminating pod is not the session owner | Event broker, or route to the owning pod |
 | Cloud session's first prompt disappears | `send` before `session.start` with `producer` `copilot-agent` | Await readiness before sending, with roughly a 60 s timeout |
 | Disk slowly fills up | Unbounded `session-state` accumulation | TTL-based `deleteSession`; `sessionFs` plus lifecycle policies |
-| Idle sessions accumulate | No idle timeout configured | Set one explicitly (15–30 minutes is a good start for chat). With an external runtime the client-side `sessionIdleTimeoutSeconds` is ignored — configure it on the runtime process |
+| Idle sessions accumulate | No idle timeout configured (none by default) | Set one explicitly (15–30 minutes is a good start for chat). With an external runtime the client-side `sessionIdleTimeoutSeconds` is ignored — start the runtime process with `--session-idle-timeout <seconds>` |
 | One tenant consumes the budget | No per-session budget | `sessionLimits.maxAiCredits` plus `session_limits_exhausted.requested` handling |
 | Another tenant's files get read | Shared runtime left on `mode: "copilot-cli"` | `mode: "empty"` plus an `availableTools` allowlist |
 | Another tenant's content shows up in retrieval | Shared embedding cache, or the cross-session store | `skipEmbeddingRetrieval: true`, `embeddingCacheStorage: "in-memory"`, `enableSessionStore: false` |
@@ -832,7 +836,7 @@ The chargeback design follows from this:
 
 `serviceRequestId` (`x-copilot-service-request-id`) and `providerCallId` (`x-github-request-id`) let you correlate a call with GitHub's own logs. You need them when you ask support about a specific slow or failed request, so store them alongside cost.
 
-`quotaSnapshots` and `toolCounts` are marked `@internal` in the type definitions. You can access them, but they are outside the backward-compatibility contract.
+`quotaSnapshots` and `toolCounts` are marked `@internal` in the type definitions. You can access them, but assume they are outside the backward-compatibility contract.
 
 On cost, `sessionLimits.maxAiCredits` sets a soft cap for the session's current accounting window. Usage is checked after model calls return, so <strong>one response can exceed the configured value</strong>. Treat it as a brake against runaway spend, not a hard ceiling.
 
@@ -863,7 +867,7 @@ Compaction affects stateless design because it runs asynchronously in the backgr
 - Hitting `bufferExhaustionThreshold` blocks the session until compaction completes. Your concurrency cap needs to account for that.
 - If the process dies mid-compaction, you cannot control which checkpoint the next resume starts from.
 
-To mitigate this, subscribe to `session.compaction_start` / `session.compaction_complete` and turn them into metrics. When compaction becomes frequent, have the application close the long-running session and start a fresh one. An infinite session also has an ever-growing resume cost.
+To mitigate this, subscribe to `session.compaction_start` / `session.compaction_complete` and turn them into metrics. When compaction becomes frequent, have the application close the long-running session and start a fresh one. As a session keeps growing, so does its resume cost.
 
 ## Watch for documentation drift
 
@@ -871,7 +875,7 @@ The SDK changes quickly, and the official docs contradict themselves in places. 
 
 | Item | Statement A | Statement B | How to treat it |
 |---|---|---|---|
-| Default idle timeout | Session Persistence: "sessions have no idle timeout by default" | Scaling / Backend Services limits tables: "30-minute idle timeout" | Do not rely on the default. Note that under `RuntimeConnection.forUri` the client-side `sessionIdleTimeoutSeconds` is ignored and the runtime process's own setting applies |
+| Default idle timeout | Session Persistence: "sessions have no idle timeout by default" | Scaling / Backend Services limits tables: "30-minute idle timeout" | Resolved on September 1, 2026 ([copilot-sdk #2417](https://github.com/github/copilot-sdk/pull/2417)): both tables now say there is no idle timeout by default. Set one explicitly; under `RuntimeConnection.forUri` the client-side `sessionIdleTimeoutSeconds` is ignored, so use the runtime's `--session-idle-timeout <seconds>` |
 | External runtime connection | npm README (v1.0.13): no top-level `cliUrl`; use `RuntimeConnection.forUri` | Scaling guide sample: `new CopilotClient({ cliUrl })` | Node uses `RuntimeConnection.forUri`; Java's `setCliUrl` is correct |
 | Session metadata | npm README: `startTime` / `modifiedTime` | Backend Services / Session Persistence cleanup samples: `session.createdAt` | Check the type definitions; the README is newer |
 | Health check | npm README: `ping()` | Backend Services: `client.getStatus()` | Use `ping()` |
@@ -928,9 +932,9 @@ The answer to "can you write a stateless backend on the Copilot SDK" is: yes, bu
 
 Agents are inherently stateful. Conversation history, plans, tool side effects, and compacted context cannot be designed away, and they should not be. The architect's job is to <strong>choose deliberately where state lives, measure the cost of crossing that boundary, and design how the system fails when the boundary is violated</strong>.
 
-The Copilot SDK exposes each of these choices as configuration. `sessionFs` lets you choose where state physically lives. `mode: "empty"` lets you choose the tool exposure surface. Per-session tokens let you choose the identity boundary. `sessionLimits` lets you choose the cost ceiling. In exchange, session locking, ownership, routing, and event delivery are explicitly left to you. If you design with that division of responsibility in mind, the Copilot SDK works as a production multi-tenant backend.
+The Copilot SDK exposes the relevant choices as configuration. `sessionFs` lets you choose where state physically lives. `mode: "empty"` lets you choose the tool exposure surface. Per-session tokens let you choose the identity boundary. `sessionLimits` lets you choose the cost ceiling. In exchange, session locking, ownership, routing, and event delivery are explicitly left to you. If you design with that division of responsibility in mind, the Copilot SDK works as a production multi-tenant backend.
 
-If you ship without understanding it, double writers corrupt conversations, `mode: "copilot-cli"` breaks tenant boundaries, and resume-time auth errors linger as bugs you cannot reproduce.
+If you ship without understanding it, double writers corrupt conversations, `mode: "copilot-cli"` breaks tenant boundaries, and resume-time auth errors linger as bugs that are hard to reproduce.
 
 ## References
 

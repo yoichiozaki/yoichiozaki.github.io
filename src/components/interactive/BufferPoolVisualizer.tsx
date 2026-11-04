@@ -45,8 +45,8 @@ const SCRIPT: Access[] = [
   {
     page: "IDX:0",
     mode: "pin",
-    why: "インデックスのルートページ。走査中はずっと pin したままにする",
-    whyEn: "The index root page — kept pinned for the whole scan.",
+    why: "インデックスのルートページ。この例では走査が終わるまで pin したままにする",
+    whyEn: "The index root page — in this example it stays pinned for the whole scan.",
   },
   {
     page: "IDX:7",
@@ -93,8 +93,8 @@ const SCRIPT: Access[] = [
   {
     page: "HEAP:12",
     mode: "read",
-    why: "さっき追い出したページをまた要求してしまった（スラッシング）",
-    whyEn: "The page we just evicted is requested again — thrashing.",
+    why: "さっき追い出したページをまた要求した。これが繰り返される状態をスラッシングと呼ぶ",
+    whyEn: "The page we just evicted is requested again; when this keeps happening, it is called thrashing.",
   },
   {
     page: "IDX:0",
@@ -200,7 +200,7 @@ function simulate(): Ev[] {
       "miss",
       a.page,
       null,
-      `BufTableLookup(${a.page}) がミス。置換対象のフレームを探す必要がある`,
+      `BufTableLookup(${a.page}) がミス。ページを読み込むフレームを探す必要がある`,
       `BufTableLookup(${a.page}) missed — a frame must be found to hold it.`,
     );
 
@@ -315,8 +315,8 @@ export function BufferPoolVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "4フレームのバッファープールに対する実行エンジンからのページ要求を1イベントずつ追います。pin されたページが追い出されないこと、dirty なページの追い出しが WAL の flush を伴うことに注目してください。"
-          : "Page requests from the execution engine against a four-frame buffer pool, one event at a time. Note that pinned pages are never evicted, and that evicting a dirty page forces a WAL flush first."
+          ? "4フレームのバッファープールに対する実行エンジンからのページ要求を1イベントずつ追います。pin されたページは追い出されず、dirty なページを追い出す前には WAL を flush します。"
+          : "Page requests from the execution engine against a four-frame buffer pool, one event at a time. Pinned pages are never evicted, and evicting a dirty page forces a WAL flush first."
       }
     >
       <div className="space-y-4">

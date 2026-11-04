@@ -1,19 +1,19 @@
 ---
-title: "Inside DuckDB — Vectorized Execution, Morsel Parallelism and a Single-File Store, Read From the Code"
+title: "Inside DuckDB — Vectorized Execution, Morsel Parallelism and a Single-File Store, Read from the Code"
 date: "2026-08-25"
-description: "How does DuckDB, often called 'the SQLite of OLAP', run fast analytics entirely inside your process? This article traces its vectorized execution engine, push-based pipelines, morsel-driven parallelism, columnar storage, MVCC and ART index through the source code."
+description: "How does DuckDB, often called 'the SQLite of OLAP', run fast analytics entirely inside your process? Through design decisions at every layer, from vectorized execution, push-based pipelines and morsel-driven parallelism to columnar storage, MVCC and the ART index, each traced to the source code that implements it."
 tags: ["DuckDB", "Database", "OLAP", "Vectorized Execution", "Storage Engine", "C++"]
 ---
 
-`pip install duckdb`, and three seconds later you are running `SELECT`. No server to start. No config file. And yet it aggregates a hundred million rows of Parquet in seconds. The first time, that speed is almost unsettling, and it has concrete technical causes.
+`pip install duckdb`, and you can run `SELECT` as soon as the install finishes. No server to start. No config file. And yet, in [a 2022 benchmark by the DuckDB developers](https://duckdb.org/2022/03/07/aggregate-hashtable.html), it grouped and aggregated a hundred million rows of a pandas DataFrame in under three seconds on a laptop (a 2021 MacBook Pro with an M1 Max). The first time, that speed is almost unsettling; it comes from design decisions at every layer, from the execution engine down to the storage format.
 
-This article looks at how DuckDB is built rather than how to use it: the data representation of its vectorized execution engine, its push-based pipelines, parallelism without exchange operators, a columnar store in a single file, HyPer-style MVCC, and the ART index. For each, I trace the work down to the struct and file in [`duckdb/duckdb`](https://github.com/duckdb/duckdb) that does it.
+This article looks at how DuckDB is built rather than how to use it, chiefly the data representation of its vectorized execution engine, its push-based pipelines, parallelism without exchange operators, a columnar store in a single file, HyPer-style MVCC, and the ART index. For each, I trace the work down to the struct and file in [`duckdb/duckdb`](https://github.com/duckdb/duckdb) that does it.
 
-> As a kitchen: if a row-oriented OLTP database is a counter that cooks one dish per order, DuckDB is a kitchen that preps 2048 plates of the same dish at once.
+> In kitchen terms: if a row-oriented OLTP database is a counter that cooks one dish per order, DuckDB is a kitchen that preps 2048 plates of the same dish at once.
 >
 > - <strong>Vectorization</strong>: instead of asking "is this an int? is it NULL?" again for every row, decide once for 2048 values of the same type.
 > - <strong>Push-based</strong>: the customer (the parent operator) does not call for "the next plate"; the kitchen (the child operator) pushes finished plates onto the pass.
-> - <strong>Morsel-driven</strong>: split the prep work into small units (row groups) and let any free cook grab the next one — nobody waits to be assigned.
+> - <strong>Morsel-driven</strong>: split the prep work into small units (row groups) and let any free cook grab the next one.
 > - <strong>Columnar + compression</strong>: box the ingredients by ingredient, not by dish. Identical things sit together, so whole boxes compress.
 >
 > Together, these four make analytical queries on a single machine much faster.
@@ -44,7 +44,7 @@ Query engines fall into three groups by how many rows each operator call process
 | Model | Granularity per call | Examples | Weakness |
 | --- | --- | --- | --- |
 | Tuple-at-a-time (Volcano) | 1 row | PostgreSQL, SQLite | Call and branch overhead scales with row count |
-| Column-at-a-time | Whole column | MonetDB, early Pandas | Intermediates balloon and spill to DRAM |
+| Column-at-a-time | Whole column | MonetDB, early pandas | Intermediates balloon and spill to DRAM |
 | Vector-at-a-time | A batch of N rows | DuckDB, Vectorwise, Velox | — |
 
 Vector-at-a-time sits between the other two. The idea comes from Boncz, Zukowski and Nes, "MonetDB/X100: Hyper-Pipelining Query Execution" (CIDR 2005), and DuckDB descends directly from it.
@@ -74,7 +74,7 @@ The value 2048 keeps intermediates inside the CPU cache.
 
 <VectorSizeTradeoff />
 
-For an 8-byte type, 2048 × 8 = 16 KB. A typical L1 data cache is 32–48 KB and L2 runs from a few hundred KB to a few MB, so an operator's input, output and scratch space still fit in L2. At the same time, 2048 rows amortise the per-call overhead — virtual dispatch, type switching, state loading — down to 1/2048 per row.
+For an 8-byte type, one vector takes 2048 × 8 = 16 KB. A typical L1 data cache is 32–48 KB and L2 runs from a few hundred KB to a few MB, so an operator's input, output and scratch space still fit in L2. At the same time, 2048 rows amortize the per-call overhead — virtual dispatch, type switching, state loading — down to 1/2048 per row.
 
 DuckDB can also be built with `STANDARD_VECTOR_SIZE=512` or even `=2`, and the test suite runs at tiny vector sizes; that is why you occasionally see `#if STANDARD_VECTOR_SIZE > 2` guards in the code.
 
@@ -96,9 +96,9 @@ It is a thin box holding a `vector<Vector>` plus a cardinality; the interesting 
 
 `DataChunk::Slice()` shows how DuckDB avoids copying. When a filter "removes" rows, no values move: DuckDB builds a `SelectionVector` listing the surviving indices and layers it on top of each `Vector`.
 
-### 2.4 A Vector has more than one shape
+### 2.4 Vector — several physical encodings of the same logical data
 
-A `Vector` is not "an array of 2048 values". It can switch between <strong>several physical encodings of the same logical data</strong>, and much of DuckDB's code is easier to read once that is clear.
+A `Vector` is not necessarily "an array of 2048 values". It can switch between <strong>several physical encodings of the same logical data</strong>, and much of DuckDB's code is easier to read once that is clear.
 
 ```cpp
 // duckdb/common/enums/vector_type.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/common/enums/vector_type.hpp
@@ -114,12 +114,12 @@ enum class VectorType : uint8_t {
 
 Take `SELECT * FROM t WHERE country = 'JP'`.
 
-- The literal `'JP'` is a `CONSTANT_VECTOR`: one materialised value, so a comparison operator can compute once and broadcast the result over 2048 rows.
+- The literal `'JP'` is a `CONSTANT_VECTOR`: one materialized value, so a comparison operator can compute once and broadcast the result over 2048 rows.
 - If the `country` column is dictionary-compressed, the scan hands back a `DICTIONARY_VECTOR` as-is; only the dictionary entries exist as strings.
 - An FSST-compressed string column reaches the operator as an `FSST_VECTOR` and is not decompressed until something actually needs the bytes.
-- `range(0, 1000000)` and rowid columns are `SEQUENCE_VECTOR`s: two integers, start and increment.
+- `range(0, 1000000)` and rowid columns are `SEQUENCE_VECTOR`s: two integers, start and increment (plus the row count).
 
-Switch encodings in the playground below. All four hold the same 2048 logical rows, stored as one value, as a list of indices, or as two integers.
+The playground below switches an 8-row Vector between four of these encodings. Every tab holds eight logical rows, but the physical buffer holds all eight values, a single value, a dictionary plus a list of indices, or just two integers, a start and an increment.
 
 <DuckDBVectorPlayground />
 
@@ -139,7 +139,7 @@ struct UnifiedVectorFormat {
 };
 ```
 
-Reader code always takes this shape:
+Code that reads through `UnifiedVectorFormat` always takes this shape:
 
 ```cpp
 UnifiedVectorFormat vdata;
@@ -159,7 +159,7 @@ for (idx_t i = 0; i < count; i++) {
 - For CONSTANT, `sel` is an all-zeros vector (`ConstantVector::ZeroSelectionVector()`), so everything resolves to `data[0]`.
 - For DICTIONARY, `sel` is the dictionary index itself.
 
-The view is a <strong>compromise</strong> because `ToUnifiedFormat()` does not cover every encoding:
+The view is a compromise because `ToUnifiedFormat()` does not cover every encoding:
 
 ```cpp
 // src/common/types/vector.cpp — https://github.com/duckdb/duckdb/blob/main/src/common/types/vector.cpp
@@ -175,7 +175,7 @@ void Vector::ToUnifiedFormat(UnifiedVectorFormat &format) const {
 }
 ```
 
-FSST and SEQUENCE cannot be reduced to `sel` + `data`, so they are flattened into 2048 materialised values first, and calling `ToUnifiedFormat()` on them gives up the benefit of the compact encoding. DuckDB's hot operators — comparison, hashing, aggregation — therefore carry dedicated fast paths that detect CONSTANT and DICTIONARY alongside the generic path.
+FSST and SEQUENCE cannot be reduced to `sel` + `data`, so they are flattened into 2048 materialized values first, and calling `ToUnifiedFormat()` on them gives up the benefit of the compact encoding. CONSTANT and DICTIONARY avoid flattening, but the generic path still computes row by row, as in the loop above, so it cannot turn their few distinct values into less work. DuckDB's hot operators — comparison, hashing, aggregation — therefore carry dedicated fast paths that detect CONSTANT and DICTIONARY alongside the generic path.
 
 ### 2.6 string_t — design decisions packed into 16 bytes
 
@@ -231,7 +231,7 @@ struct StringComparisonOperators {
 };
 ```
 
-The first eight bytes (4-byte `length` + 4-byte `prefix`) are compared as a single `uint64_t`. If the lengths or the first four characters differ, the function returns false immediately, and in real workloads that one comparison settles the vast majority of mismatches.
+The first eight bytes (4-byte `length` + 4-byte `prefix`) are compared as a single `uint64_t`. If the lengths or the first four characters differ, the function returns false immediately, and in real workloads that one comparison settles most mismatches.
 
 The next eight bytes are compared the same way. If those match too, the pair is either "both inlined with identical contents" or "two pointers to the same string", so equality on strings of 12 bytes or fewer resolves in four loads and two comparisons. The pointer chase — and its cache miss — only happens for long strings whose length and prefix already matched.
 
@@ -251,22 +251,20 @@ Reading four bytes as a `uint32_t` on a little-endian machine reverses their ord
 
 A `SelectionVector` is a thin wrapper over `sel_t*` (`uint32_t*`), yet the execution model relies on it throughout.
 
-- <strong>Filters</strong> write the indices of surviving rows.
-- <strong>Hash joins</strong> express matches as two selection vectors, one into the probe side and one into the build side.
+- Filters write the indices of surviving rows.
+- Hash joins express matches as two selection vectors, one into the probe side and one into the build side.
 
 (Sorting is the one exception: it reorders the sort keys themselves rather than a selection vector. §6.6 has the details.)
 
-`ValidityMask` is the NULL bitmap: one bit per row, and <strong>a set bit means valid (not NULL)</strong>. When a vector has no NULLs at all, no mask is allocated (`GetData()` returns `nullptr`), and if `CannotHaveNull()` (formerly `AllValid()`) holds, the NULL-checking loop can be skipped entirely. Most real columns contain no NULLs, so this shortcut applies often.
+`ValidityMask` is the NULL bitmap: one bit per row, and <strong>a set bit means valid (not NULL)</strong>. When a vector has no NULLs at all, no mask is allocated (`GetData()` returns `nullptr`), and if `CannotHaveNull()` (formerly `AllValid()`) holds, the NULL-checking loop can be skipped entirely. Many real columns contain no NULLs, so this shortcut applies often.
 
 ### 2.8 `Value` versus `Vector` — representations inside and outside the engine
 
 Open the source and you meet a type called `Value` almost immediately, and it is not "one element of a `Vector`". <strong>`Vector` is the execution engine's representation; `Value` is the representation everywhere else</strong>. Constant folding, min/max statistics, `SET` option values, catalog defaults, and the runtime-filter bounds of §8.4 are all `Value`s: a simple but heavyweight object carrying one type tag and one value.
 
-A fixed set of functions crosses the boundary. `Vector::GetValue(i)` boxes one row into a `Value`; the other direction is `Vector::Reference(const Value &, count_t)` or turning the vector into a `ConstantVector`. Calling `GetValue()` in a hot loop is slow, and DuckDB's own code uses it only where a single value is pulled out at finalize time.
+A fixed set of functions crosses the boundary. `Vector::GetValue(i)` boxes one row into a `Value`; the other direction is `Vector::Reference(const Value &, count_t)` or turning the vector into a `ConstantVector`. Calling `GetValue()` in a hot loop is slow, and DuckDB's own code uses it only in places such as finalize, where a single value is pulled out.
 
-Casting likewise comes in two flavours. On a `Value`, `value.DefaultTryCastAs(type)` returns a failable result. On a `Vector`, `BoundCastExpression::AddCastToType()` splices a cast operator into the expression tree, and at runtime a function resolved from `CastFunctionSet` runs vector-at-a-time. Treating casts as first-class, failable operations also shapes runtime filter pushdown, which is one reason it only passes through integral casts and records, via `RuntimeFilterCastMode { DEFAULT_CAST, TRY_CAST }`, whether each cast could fail.
-
-Function resolution is `FunctionBinder`'s job: given the candidate set for a name, it picks the best overload by implicit-cast cost. Scalar functions registered by extensions go through the same path as built-ins, so when an extension registers functions into the catalog (§10.1), they join the same overload-resolution candidate set.
+Casting likewise comes in two flavors. On a `Value`, `value.DefaultTryCastAs(type)` returns a failable result. On a `Vector`, `BoundCastExpression::AddCastToType()` splices a cast operator into the expression tree, and at runtime a function resolved from `CastFunctionSet` runs vector-at-a-time. Treating casts as first-class, failable operations also shapes runtime filter pushdown, which is one reason it only passes through integral casts and records, via `RuntimeFilterCastMode { DEFAULT_CAST, TRY_CAST }`, whether each cast could fail.
 
 ## 3. The Push-Based Execution Model
 
@@ -284,7 +282,7 @@ DuckDB runs the other way. Data is pushed upward, and every operator plays one o
 | Operator | `Execute()` | Middle; takes a chunk and returns a chunk. State, if any, is bounded (see below). |
 | Sink | `Sink()` / `Combine()` / `Finalize()` | End of a pipeline; accumulates all input. |
 
-An Operator may keep state, but never an unbounded amount. Operators whose output row count differs from their input are filters and joins: `PhysicalFilter`, `PhysicalJoin`, `PhysicalCrossProduct` and `PhysicalRecursiveCTEKeyJoin` (four in all; `PhysicalProjection` is not one of them). They derive from `CachingPhysicalOperator`, which coalesces small output chunks in a `cached_chunk` until they approach 2048 rows (`CanCacheType()` excludes LIST / MAP / ARRAY / VARIANT). Rows can therefore still be sitting inside an operator after the source is exhausted, so a pipeline has a fourth entry point beyond Source / Operator / Sink: `FinalExecute()`, which `PipelineExecutor::TryFlushCachingOperators()` drains at the end.
+An Operator may keep state, but never an unbounded amount. Among operators whose output row count differs from their input, four filter and join operators derive from `CachingPhysicalOperator`: `PhysicalFilter`, `PhysicalJoin`, `PhysicalCrossProduct` and `PhysicalRecursiveCTEKeyJoin`. They coalesce small output chunks in a `cached_chunk` until they approach 2048 rows (`CanCacheType()` excludes LIST / MAP / ARRAY / VARIANT). Rows can therefore still be sitting inside an operator after the source is exhausted, so a pipeline has a fourth entry point beyond Source / Operator / Sink: `FinalExecute()`, which `PipelineExecutor::TryFlushCachingOperators()` drains at the end.
 
 The same physical operator can play different roles in different pipelines. `PhysicalHashJoin` is a Sink in the build pipeline, an Operator in the probe pipeline, and a Source both when the join type propagates the build side (`PropagatesBuildSide`: RIGHT / FULL OUTER / RIGHT_SEMI / RIGHT_ANTI) and when it spills and becomes an external join. The code does not separate the three statically: `IsSource()` returns true unconditionally, and `GetDataInternal()` short-circuits to `FINISHED` when `!sink.external && !PropagatesBuildSide(join_type)`.
 
@@ -329,7 +327,7 @@ The two branches of a `UNION ALL`, for instance, are separate pipelines that pou
 
 ### 3.3 HAVE_MORE_OUTPUT — when output expands
 
-Push-based execution has a problem pull-based execution does not: one input chunk can produce more than 2048 output rows. If a hash join matches one row against a hundred, a 2048-row input becomes 200,000 output rows.
+Push-based execution has a problem pull-based execution does not: one input chunk can produce more than 2048 output rows. If each input row of a hash join matches a hundred rows, a 2048-row input becomes about 200,000 output rows.
 
 DuckDB handles this with `OperatorResultType`:
 
@@ -353,7 +351,7 @@ On `HAVE_MORE_OUTPUT`, the `PipelineExecutor` pushes that operator onto an `in_p
 stack<idx_t> in_process_operators;
 ```
 
-While the stack is non-empty, the executor does not return to the source: it re-enters the same operator with the same input chunk. One pipeline can contain several expanding operators, because the stack records how far back to rewind. This one stack is how the push model resumes in the middle of a chunk.
+While the stack is non-empty, the executor does not return to the source: it re-enters the same operator with the same input chunk. This works even with several expanding operators in one pipeline, because the stack records how far back to rewind. The push model resumes in the middle of a chunk through this one stack.
 
 ### 3.4 BLOCKED — waiting for I/O without wasting a thread
 
@@ -376,13 +374,13 @@ This <strong>re-entrancy</strong> is why `PipelineExecutor` is full of flags lik
 
 ### 4.1 What is wrong with the traditional approach
 
-Traditional parallel databases parallelise plans with <strong>exchange operators</strong> (Volcano parallelism): insert operators that scatter data into N partitions and run the downstream N ways.
+Traditional parallel databases parallelize plans with <strong>exchange operators</strong> (Volcano parallelism): insert operators that scatter data into N partitions and run the downstream N ways.
 
 That brings three problems:
 
 1. Degree of parallelism is fixed at plan time, so CPUs that become idle mid-query cannot be put to work.
 2. It is fragile under skew: one heavy partition slows the whole query.
-3. Scattering itself has a cost, because the data must be materialised.
+3. Scattering is costly, because the data must be materialized.
 
 ### 4.2 Morsels
 
@@ -392,7 +390,7 @@ DuckDB follows Leis et al., "Morsel-Driven Parallelism" (SIGMOD 2014):
 - Launch N identical tasks per pipeline.
 - Each task advances a global cursor (under a short lock) to claim its next morsel.
 
-In code, `RowGroupCollection::NextParallelScan()` is what advances that cursor, and the resulting parallelism is:
+In code, `RowGroupCollection::NextParallelScan()` is what advances that cursor, and `DataTable::MaxThreads()` caps the number of threads a scan can use:
 
 ```cpp
 // src/storage/data_table.cpp — https://github.com/duckdb/duckdb/blob/main/src/storage/data_table.cpp
@@ -413,7 +411,7 @@ No exchange operator appears in the plan; `Pipeline::GetMaxThreads()` decides pa
 
 Row groups suit both the execution engine and storage as a morsel size. A row group is the smallest unit that owns its own per-column `ColumnSegment`s and min/max statistics, so aligning morsels to row groups makes segment-level pruning (§5.3) line up exactly with task assignment. And 122,880 rows is 60 vectors' worth of work per cursor advance, which keeps the lock around the global cursor from becoming a bottleneck. The downside is that for a table smaller than one row group, `MaxThreads()` returns 1 and the scan is effectively single-threaded.
 
-Vary the thread count below and slow one thread down: the other threads take more morsels, which addresses the skew problem from §4.1.
+The visualization below runs twelve morsels with deliberately skewed costs on four threads and compares a static split with morsel-driven scheduling. While one thread is busy with a heavy morsel, the idle threads take the remaining morsels, which eases the skew problem from §4.1.
 
 <DuckDBMorselVisualizer />
 
@@ -530,7 +528,7 @@ A table is a `RowGroupCollection`, whose contents are a sequence of row groups.
 #define DEFAULT_ROW_GROUP_SIZE 122880ULL
 ```
 
-122,880 = 60 × 2048, so one row group is exactly 60 vectors. That invariant is checked at compile time:
+122,880 = 60 × 2048, so one row group is exactly 60 vectors. The compiler checks that the row group size is a multiple of the vector size:
 
 ```cpp
 // duckdb/storage/storage_info.hpp
@@ -543,17 +541,17 @@ Within a row group, each column has a `ColumnData`, whose contents are a sequenc
 
 <RowGroupLayout />
 
-A `ColumnSegment` lives in a block (256 KB by default via [`DEFAULT_BLOCK_ALLOC_SIZE 262144ULL`](https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/storage/storage_info.hpp), of which the first 8 bytes are a checksum, leaving 262,136 bytes of payload; 256 KB is also the maximum, `MAX_BLOCK_ALLOC_SIZE`) and picks its own compression scheme independently. The same column can be compressed differently in different row groups, for example with RLE where its values are sequential and with bit packing where they are random.
+Each `ColumnSegment` lives in a block and picks its own compression scheme independently. A block is 256 KB by default ([`DEFAULT_BLOCK_ALLOC_SIZE 262144ULL`](https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/storage/storage_info.hpp)); its first 8 bytes are a checksum, leaving 262,136 bytes of payload, and 256 KB is also the maximum, `MAX_BLOCK_ALLOC_SIZE`. The same column can be compressed differently in different row groups, for example with RLE in a row group where one value repeats in long runs and with bit packing in one where the values rise almost monotonically.
 
 ### 5.3 Zone maps — reading nothing at all
 
 Every segment carries min/max statistics (`BaseStatistics`). For `WHERE l_shipdate > DATE '1998-01-01'`, any segment whose `max(l_shipdate) <= '1998-01-01'` can be <strong>skipped without reading a single byte</strong>.
 
-These statistics form a zone map (a min-max index), but DuckDB never builds it as a separate step: the statistics are collected as a by-product of writing. Every compression scheme's compress state embeds a [`StatsWriter<T>`](https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/storage/statistics/stats_writer.hpp) that updates min/max as the values go by, and so do the uncompressed path (`string_uncompressed.hpp`) and in-place updates to existing rows (`update_segment.cpp`). On naturally sorted columns, such as time series, this alone removes most of the I/O.
+These statistics form a zone map (a min-max index), but DuckDB never builds it as a separate step: the statistics are collected as a by-product of writing. Every compression scheme's compress state embeds a [`StatsWriter<T>`](https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/storage/statistics/stats_writer.hpp) that updates min/max as the values go by, and so do the uncompressed path (`string_uncompressed.hpp`) and in-place updates to existing rows (`update_segment.cpp`). For range filters on naturally sorted columns, such as time series, this alone removes most of the I/O.
 
 ### 5.4 Compression is decided by a contest
 
-DuckDB does <strong>not fix a compression scheme per column; candidate schemes compete for each segment</strong>.
+In DuckDB, <strong>candidate compression schemes compete for each segment</strong>.
 
 At checkpoint time, `ColumnDataCheckpointer` runs three phases for every candidate that supports the physical type (`DBConfig::GetCompressionFunctions(physical_type)`):
 
@@ -561,7 +559,7 @@ At checkpoint time, `ColumnDataCheckpointer` runs three phases for every candida
 2. `Analyze(vector)` — stream every vector of the segment through it (returning `false` drops the candidate)
 3. `FinalAnalyze` — return an estimated byte count
 
-The smallest estimate wins. The losers are discarded, and only the winner goes through `InitCompression` → `Compress` → `FinalizeCompress`. The design is expensive, because the data is scanned twice, but in analytical workloads one write is followed by hundreds of reads, so the extra scan pays for itself.
+The smallest estimate wins. The losers are discarded, and only the winner goes through `InitCompression` → `Compress` → `FinalizeCompress`. The design is expensive, because the data is scanned twice, but in analytical workloads data written once is read many times, so the extra scan pays for itself.
 
 Change the input pattern in the lab below to see which scheme wins and where the intuition "sequential → RLE, random → bit packing" stops holding.
 
@@ -576,14 +574,14 @@ The main schemes, from [`src/storage/compression/`](https://github.com/duckdb/du
 | BitPacking | integers | Re-picks among `CONSTANT` / `CONSTANT_DELTA` / `DELTA_FOR` / `FOR` for every group of `BITPACKING_METADATA_GROUP_SIZE` values (which defaults to `STANDARD_VECTOR_SIZE` = 2048). |
 | Dictionary | strings | Dictionary plus bit-packed indices. |
 | FSST | strings | A static symbol table mapping frequent 1–8 byte substrings to single bytes; compressed data stays randomly accessible. |
-| DICT_FSST | strings | Dictionary and FSST folded into one segment format. |
+| DICT_FSST | strings | Dictionary and FSST folded into one segment format. When writing with storage version v1.3.0 or later, it is the candidate in place of both. |
 | ALP / ALPRD | floating point | A scheme that bets each double is really a decimal, plus a splitting fallback for when the bet loses. |
 | Roaring | validity mask | Roaring-bitmap compression of the NULL bitmap. |
 | Zstd | strings, etc. | General-purpose fallback. |
 
-FSST (Fast Static Symbol Table) comes from Boncz, Neumann and Leis (VLDB 2020), and its defining property is that you can search the data while it is still compressed. LZ4 or Zstd must decompress a whole block before you can read one row; FSST decodes each string independently. For string compression in a columnar engine, that property is particularly important.
+FSST (Fast Static Symbol Table) comes from Boncz, Neumann and Leis (VLDB 2020), and its defining property is that you can search the data while it is still compressed. LZ4 or Zstd must decompress a whole block before you can read one row; FSST decodes each string independently. That is what lets an FSST-compressed column travel as an `FSST_VECTOR` and stay compressed until an operator needs the bytes (§2.4).
 
-ALP (Adaptive Lossless floating-Point, SIGMOD 2024) starts from the observation that most real-world `DOUBLE`s, such as prices and measurements, are really decimals. `938.71` is `93871 × 10^-2`. ALP picks an exponent `e` and factor `f` per 1024 values, rounds `value × 10^e` to an integer, verifies the round trip, and on success stores it as FOR plus bit packing. Outliers go into an exception list.
+ALP (Adaptive Lossless floating-Point, SIGMOD 2024) starts from the observation that many real-world `DOUBLE`s, such as prices and measurements, are really decimals. `938.71` is `93871 × 10^-2`. ALP picks an exponent `e` and factor `f` per 1024 values, rounds `value × 10^e` to an integer, verifies the round trip, and on success stores it as FOR plus bit packing. Outliers go into an exception list.
 
 ```cpp
 // duckdb/storage/compression/alp/alp_constants.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/storage/compression/alp/alp_constants.hpp
@@ -605,19 +603,19 @@ As `RG_SAMPLES = 8` and `SAMPLES_PER_VECTOR = 32` indicate, ALP does not scan a 
 DuckDB can process data larger than memory, and `BufferManager` makes that possible.
 
 - Blocks are managed as `BlockHandle`s; `Pin()` brings one into physical memory and `Unpin()` makes it an eviction candidate.
-- Eviction starts above the memory limit (by default 80% of <strong>available</strong> system memory, cgroup-aware). It is not a true LRU but a FIFO concurrent queue of unpin events: unpinning appends an entry, re-pinning and unpinning again appends a newer one, and the stale entry is skipped as a "dead node" because its sequence number no longer matches. This approximates LRU without locks; the comment in `EvictionQueue::Purge()` says *we want to keep the LRU characteristic alive*.
-- There are three queues, ordered by eviction cost: `BLOCK` / `EXTERNAL_FILE` first (cheap, just free), then `MANAGED_BUFFER` (has to be written to storage), and `TINY_BUFFER` last.
-- Persistent blocks are written back to (or simply dropped from) the database file; temporary blocks — hash tables, sort buffers — are spilled to `temp_directory`.
+- Eviction starts above the memory limit (by default 80% of physical memory, cgroup-aware). It is not a true LRU but a FIFO concurrent queue of unpin events: unpinning appends an entry, re-pinning and unpinning again appends a newer one, and the stale entry is skipped as a "dead node" because its sequence number no longer matches. This approximates LRU without locks; the comment in `EvictionQueue::Purge()` says *we want to keep the LRU characteristic alive*.
+- The queues come in three tiers, ordered by eviction cost: `BLOCK` / `EXTERNAL_FILE` first (cheap, just free), then `MANAGED_BUFFER` (has to be written to storage), and `TINY_BUFFER` last.
+- Persistent blocks are already in the database file, so evicting one simply drops it from memory; temporary blocks — hash tables, sort buffers — are spilled to `temp_directory`.
 
 `MemoryTag` (`BASE_TABLE`, `HASH_TABLE`, `ORDER_BY`, `TRANSACTION` and others) classifies memory use, and the `duckdb_memory()` table function shows the breakdown.
 
 ## 6. The Heavy Operators — Aggregation, Join, Sort, Window
 
-Hash aggregation, hash join, sorting and window functions are pipeline breakers. None of them can emit a row until they have seen all their input, so each has to solve <strong>what to do when memory runs out</strong> for itself, which makes them some of the most intricate parts of the engine. Two pieces they share are covered along the way: the hash-table entry representation (§6.2) and the memory arbiter (§6.4).
+Hash aggregation, hash join, sorting and window functions are pipeline breakers. None of them can emit a row until they have seen all their input, so each has to decide for itself what to do when memory runs out, which makes them some of the most intricate parts of the engine. Two pieces they share are covered along the way: the hash-table entry representation (§6.2) and the memory arbiter (§6.4).
 
 ### 6.1 Radix-partitioned hash aggregation
 
-`GROUP BY` is implemented in [`src/execution/radix_partitioned_hashtable.cpp`](https://github.com/duckdb/duckdb/blob/main/src/execution/radix_partitioned_hashtable.cpp). As the name says the partition comes from bits of the group-key hash — but not the topmost ones.
+`GROUP BY` is implemented in [`src/execution/radix_partitioned_hashtable.cpp`](https://github.com/duckdb/duckdb/blob/main/src/execution/radix_partitioned_hashtable.cpp). As the name says, the partition comes from bits of the group-key hash — but not the topmost ones.
 
 ```cpp
 // duckdb/common/radix_partitioning.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/common/radix_partitioning.hpp
@@ -630,7 +628,7 @@ static inline constexpr idx_t Shift(idx_t radix_bits) {
 }
 ```
 
-The partition index is therefore taken from the `radix_bits` bits immediately below the top 16. Those top 16 bits are left alone because they are the hash-table salt of §6.2; if the two overlapped, every entry inside one partition would carry an identical salt and the salt pre-filter would be worthless.
+The partition index is therefore taken from the `radix_bits` bits immediately below the top 16. Those top 16 bits are left alone because they are the hash-table salt of §6.2; if the two overlapped, every entry in a partition would share those salt bits, and the salt pre-filter would lose much of its power.
 
 `MAX_RADIX_BITS = 12` (4096 partitions) is the ceiling of the radix-partitioning framework as a whole, though; hash aggregation uses far fewer. Its own cap is `RadixHTConfig::MAXIMUM_FINAL_SINK_RADIX_BITS = 8` (256 partitions), trimmed further for wide rows — one bit at or above `ROW_WIDTH_THRESHOLD_ONE = 32` bytes, two at or above `ROW_WIDTH_THRESHOLD_TWO = 64` — because otherwise, as the comment says, cache misses get out of hand.
 
@@ -638,8 +636,8 @@ The partition index is therefore taken from the `radix_bits` bits immediately be
 
 The partitioning serves two purposes:
 
-1. <strong>Parallelism</strong>: a given group key always lands in one partition, so partitions are fully independent and the finalize step needs no cross-partition synchronisation.
-2. <strong>A spilling unit</strong>: under memory pressure you can pin one partition at a time and leave the rest on disk.
+1. Parallelism: a given group key always lands in one partition, so partitions are fully independent and the finalize step needs no cross-partition synchronization.
+2. A spilling unit: under memory pressure you can pin one partition at a time and leave the rest on disk.
 
 Pressure is detected by `MaybeRepartition()`:
 
@@ -657,7 +655,7 @@ Above the per-thread limit, `SetRadixBitsToExternal()` flips the operator into e
 
 Newer DuckDB versions add spilling of the aggregate states themselves (`AggregateStateSpilling`). For aggregates whose state grows large, such as `string_agg` and `list`, spilling the row data still leaves the arena allocator resident. DuckDB therefore "exports" the states into a `ColumnDataCollection` so the arena can be freed, and "imports" them back during finalize.
 
-The hash aggregation is also adaptive. Each thread starts with a deliberately small hash table, counts distinct keys with HyperLogLog as it goes, and after 1,048,576 rows (`RadixHTLocalSinkState::ADAPTIVITY_THRESHOLD`) calls `DecideAdaptation()`:
+The hash aggregation is also adaptive. Each thread starts with a deliberately small hash table, estimates distinct keys with HyperLogLog as it goes, and after 1,048,576 rows (`RadixHTLocalSinkState::ADAPTIVITY_THRESHOLD`) calls `DecideAdaptation()`:
 
 - If the estimated unique ratio exceeds 95% (`SKIP_LOOKUP_UNIQUE_PERCENTAGE_THRESHOLD`), meaning almost nothing is being aggregated, it stops probing the hash table and only appends, deferring all deduplication to the GetData phase (`ht.SkipLookups()`).
 - If it finds that a larger table would have deduplicated more than twice as well, it grows the capacity and rebuilds.
@@ -687,9 +685,9 @@ x86-64 user-space pointers effectively use only 48 bits, so the top 16 bits are 
 
 When linear probing inspects a slot, it compares the salt first. On a mismatch it moves on without dereferencing the pointer. The most expensive step in hash-table probing is the cache miss behind that dereference, so a 16-bit pre-filter that cuts false positives to 1 in 65,536 saves a lot.
 
-(On Android the optimisation is disabled because of the virtual address space layout; `DUCKDB_DISABLE_POINTER_SALT` switches to salt-free entries. The source comment there includes some grumbling about it.)
+(On Android the optimization is disabled because of the virtual address space layout; `DUCKDB_DISABLE_POINTER_SALT` switches to salt-free entries. The source comment there includes some grumbling about it.)
 
-The salt comparison also only pays off once the hash table is big enough.
+In the join hash table, the salt comparison also only pays off once the table is big enough.
 
 ```cpp
 // duckdb/execution/join_hashtable.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/join_hashtable.hpp
@@ -698,9 +696,9 @@ The salt comparison also only pays off once the hash table is big enough.
 static constexpr const idx_t USE_SALT_THRESHOLD = 8192;
 ```
 
-If the table already fits in cache, dereferencing is cheap and the pre-filter only adds work, so `JoinHashTable::UseSalt()` returns false and the salt comparison is skipped. The code thus acknowledges that even an optimisation has a break-even point.
+If the table already fits in cache, dereferencing is cheap and the pre-filter only adds work, so `JoinHashTable::UseSalt()` returns false and the salt comparison is skipped. The code thus acknowledges that even an optimization has a break-even point.
 
-The same header also contains a branch-free modulo helper:
+`ht_entry.hpp` also contains a branch-free modulo helper:
 
 ```cpp
 // uses an AND operation to apply the modulo operation instead of an if condition that could be branch mispredicted
@@ -710,6 +708,15 @@ inline void IncrementAndWrap(idx_t &offset, const uint64_t &capacity_mask) {
 ```
 
 Capacities are kept at powers of two so that this one line works.
+
+The join hash table sizes itself with a load factor that is the inverse of the usual ratio (entries ÷ capacity): it sets the minimum capacity as a multiple of the row count.
+
+```cpp
+//! For a LOAD_FACTOR of 2.0, the HT is between 25% and 50% full
+static constexpr double DEFAULT_LOAD_FACTOR = 2.0;
+```
+
+Capacity is at least twice the row count, rounded up to a power of two, so actual occupancy sits between 25% and 50%. The table is kept sparse on purpose to keep probe sequences short.
 
 ### 6.3 External hash joins and ProbeSpill
 
@@ -725,7 +732,7 @@ struct ProbeSpill {
 };
 ```
 
-The split during probing is one call to `RadixPartitioning::Select()`, which sorts matching and spilling rows into two selection vectors:
+The split during probing is one call to `RadixPartitioning::Select()`, which writes matching rows and spilling rows into two separate selection vectors:
 
 ```cpp
 // src/execution/join_hashtable.cpp — https://github.com/duckdb/duckdb/blob/main/src/execution/join_hashtable.cpp
@@ -736,24 +743,15 @@ const auto true_count =
 
 As the comment says, if one more round will finish the job, the spilled data is not partitioned at all, which avoids unnecessary partitioning work.
 
-The load factor is defined like this:
-
-```cpp
-//! For a LOAD_FACTOR of 2.0, the HT is between 25% and 50% full
-static constexpr double DEFAULT_LOAD_FACTOR = 2.0;
-```
-
-Capacity is at least twice the row count, rounded up to a power of two, so actual occupancy sits between 25% and 50%. The table is kept sparse on purpose to keep probe sequences short.
-
 ### 6.4 TemporaryMemoryManager
 
-When several operators compete for memory, a fixed per-operator cap wastes memory: if a hash join and a sort run concurrently and one is idle, the other should get all of it.
+When several operators compete for memory, a fixed per-operator cap wastes memory: if a hash join and a sort run concurrently and one needs little memory, the other should be able to use the rest.
 
 `TemporaryMemoryManager` is the global arbiter. Each operator registers a `TemporaryMemoryState` and declares "I need at least this much" (`SetMinimumReservation`) and "I would like this much more" (`SetRemainingSizeAndUpdateReservation`). The manager looks at total demand, hands out reservations, and each operator decides from its reservation whether to fall back to external mode.
 
 ### 6.5 The external hash join's state machine
 
-The Source-side stages show how the `ProbeSpill` from §6.3 cycles:
+The Source-side stages show how the `ProbeSpill` from §6.3 is used:
 
 ```cpp
 // src/execution/operator/join/physical_hash_join.cpp — https://github.com/duckdb/duckdb/blob/main/src/execution/operator/join/physical_hash_join.cpp
@@ -782,11 +780,11 @@ if (gstate.TryPrepareNextStage(sink) || gstate.global_stage == HashJoinSourceSta
 
 "Wait until the other threads finish this stage" uses the same mechanism as "wait for an S3 read": the thread goes back to the scheduler and the task is rescheduled later. So `BLOCKED` is not specific to async I/O; it is <strong>the general way to express any wait inside a pipeline</strong>.
 
-### 6.6 Sorting — binary keys first, radix sort second
+### 6.6 Sorting — byte-comparable keys first, radix sort second
 
-`ORDER BY` is one of the parts of DuckDB that was rewritten wholesale. It lives in [`src/common/sort/`](https://github.com/duckdb/duckdb/tree/main/src/common/sort), while its headers are under `src/include/duckdb/common/sorting/` (the directory names differ).
+`ORDER BY` is one of the parts of DuckDB that were recently rewritten wholesale. It lives in [`src/common/sort/`](https://github.com/duckdb/duckdb/tree/main/src/common/sort), while its headers are under `src/include/duckdb/common/sorting/`.
 
-The sort starts by doing without a comparator. `Sort` holds an expression for a scalar function called `create_sort_key`, runs it on every sink chunk, and folds all the ORDER BY columns into <strong>one binary-comparable byte string</strong>. After that the comparison itself never looks at column types, ASC/DESC or NULLS FIRST/LAST again: a `memcmp`-style comparison already yields the right order. (The type and the sort specifier are needed again only to decode a key back into values — `Sort::Sort` binds a matching `decode_sort_key` expression right next to `create_sort_key`.)
+The sort starts by doing without a comparator. `Sort` holds an expression for a scalar function called `create_sort_key`, runs it on every sink chunk, and folds all the ORDER BY columns into <strong>one byte-comparable byte string</strong>. After that the comparison itself never looks at column types, ASC/DESC or NULLS FIRST/LAST again: a `memcmp`-style comparison already yields the right order. (The type and the sort specifier are needed again only to decode a key back into values — `Sort::Sort` binds a matching `decode_sort_key` expression right next to `create_sort_key`.)
 
 The physical shape of that byte string is a `SortKeyType`:
 
@@ -832,7 +830,7 @@ const auto fallback = [ska_extract_key](const BLOCK_ITERATOR &fb_begin, const BL
 duckdb_vergesort::vergesort(begin, end, std::less<SORT_KEY>(), fallback);
 ```
 
-The per-thread sorted runs are then merged by `SortedRunMerger`, again without an exchange operator. The output is cut into partitions, and each thread independently computes where its slice starts and ends inside every run using K-way Merge Path (`COMPUTE_BOUNDARIES` → `ACQUIRE_BOUNDARIES` → `MERGE_PARTITION` → `SCAN_PARTITION`). Once the boundaries are known the partitions are fully independent, so the merge parallelises.
+The per-thread sorted runs are then merged by `SortedRunMerger`, again without an exchange operator. The output is cut into partitions, and each thread independently computes where its slice starts and ends inside every run using K-way Merge Path (`COMPUTE_BOUNDARIES` → `ACQUIRE_BOUNDARIES` → `MERGE_PARTITION` → `SCAN_PARTITION`). Once the boundaries are known the partitions are fully independent, so the merge parallelizes.
 
 Inside a partition, DuckDB does not merge at all; it sorts again (except in special cases such as a single remaining run):
 
@@ -844,11 +842,17 @@ static const auto fallback = [](SORT_KEY *begin, SORT_KEY *end) {
 };
 ```
 
-Here too the actual call is `duckdb_vergesort::vergesort(..., std::less<SORT_KEY>(), fallback)`, with `pdqsort_branchless` as the fallback, the same shape as the run sort. As the comment says, modern sorting algorithms already detect and merge pre-sorted subsequences, which is faster than a hand-written K-way merge.
+Here too the actual call is `duckdb_vergesort::vergesort(..., std::less<SORT_KEY>(), fallback)`, with `pdqsort_branchless` as the fallback, the same shape as the run sort. As the comment says, modern sorting algorithms already detect and merge pre-sorted subsequences, and the developers judged this to be faster than a hand-written K-way merge.
 
 When the sort exceeds memory, `BlockIteratorStateType` flips from `IN_MEMORY` to `EXTERNAL` and the same templated code starts reading keys through the buffer manager instead.
 
-`Sort` is also what window functions run on. `SortStrategy::Factory()` returns one of three implementations: `FullSort` (`OVER (ORDER BY ...)`), `HashedSort` (`OVER (PARTITION BY ...)`: hash the partition keys, radix-partition into hash groups, and give each group its own sort state, `sort_global` / `sort_source`, driven by a single shared `Sort` that the header calls the "Common sort description") and `NaturalSort` (`OVER ()`, no sorting at all). This reuses the "hash-partition, then process each partition independently" structure from §6.1.
+`Sort` is also what window functions run on. `SortStrategy::Factory()` returns one of three implementations:
+
+- `FullSort`: for `OVER (ORDER BY ...)`.
+- `HashedSort`: for `OVER (PARTITION BY ...)`. It hashes the partition keys, radix-partitions the rows into hash groups, and gives each group its own sort state (`sort_global` / `sort_source`). All groups share a single `Sort`, which the header calls the *"Common sort description"*.
+- `NaturalSort`: for `OVER ()`; it does no sorting at all.
+
+`HashedSort` reuses the "hash-partition, then process each partition independently" structure from §6.1.
 
 ### 6.7 Window functions — hash groups and segment trees
 
@@ -859,7 +863,7 @@ When the sort exceeds memory, `BlockIteratorStateType` flips from `IN_MEMORY` to
 enum WindowGroupStage : uint8_t { SORT, MATERIALIZE, MASK, SINK, FINALIZE, GETDATA, DONE };
 ```
 
-A `WindowHashGroup` owns one group's sorted data, its boundary masks, the per-function global states and the per-thread local states. The key stage is MASK: it fills `partition_mask` and `order_masks`, both `ValidityMask`s. Because "the partition changes at this row" and "the ORDER BY peer group changes at this row" are recorded as single bits, every later frame-boundary computation is bit arithmetic.
+A `WindowHashGroup` owns one group's sorted data, its boundary masks, the per-function global states and the per-thread local states. The MASK stage fills `partition_mask` and `order_masks`, both `ValidityMask`s. Because "the partition changes at this row" and "the ORDER BY peer group changes at this row" are recorded as single bits, every later frame-boundary computation is bit arithmetic.
 
 Task assignment extends the morsel approach: groups are ordered largest-first, and a single group is split by block across several threads, so parallelism holds up even with fewer groups than threads. Waiting for a stage transition uses `TryPrepareNextStage()` / `UnblockTasks()` / `BlockSource`, the same `BLOCKED` machinery as the external hash join in §6.5.
 
@@ -875,9 +879,9 @@ vector<idx_t> levels_flat_start;
 std::atomic<idx_t> build_level;
 ```
 
-The tree's nodes are aggregate states themselves (raw states produced by `WindowAggregateStates::Initialize()`), packed into one flat array per level. `build_level` is atomic because the tree is built level by level across several threads. If the aggregate is order-insensitive, the upper levels can all be combined and the leaves handled in one `FramePart::FULL` pass. If it is not, the leaves are evaluated `LEFT` → upper levels → `RIGHT`, with the upper levels' right-hand ranges cached and drained in reverse. (Splitting the frame itself into a left and a right half is a separate axis, driven by the `EXCLUDE` clause.)
+The tree's nodes are aggregate states themselves (raw states produced by `WindowAggregateStates::Initialize()`), and all levels are packed into one flat array, with `levels_flat_start` recording where each level begins. `build_level` is atomic because the tree is built level by level across several threads. If the aggregate is order-insensitive, the upper levels can all be combined and the leaves handled in one `FramePart::FULL` pass. If it is not, the leaves are evaluated `LEFT` → upper levels → `RIGHT`, with the upper levels' right-hand ranges cached and drained in reverse. (Splitting the frame itself into a left and a right half is a separate axis, driven by the `EXCLUDE` clause.)
 
-Functions that need a rank within the frame, such as `median`, `quantile`, and value functions with an argument `ORDER BY` like `first_value(x ORDER BY y)`, take a different route via `MergeSortTree` (`WindowMergeSortTree` / `WindowIndexTree`). It is an index that can answer `SelectNth(frames, n)`, and it owns a `Sort` from §6.6 outright (`sort = make_uniq<Sort>(...)`). Window functions use sorting, hash partitioning, segment trees and `BLOCKED`, nearly every part covered so far, which is why they are the most intricate operator in the engine.
+Functions that need a rank within the frame, such as `median` and `quantile`, and value functions with an argument `ORDER BY`, such as `first_value(x ORDER BY y)`, take a different route via `MergeSortTree` (`WindowMergeSortTree` / `WindowIndexTree`). It is an index that can answer `SelectNth(frames, n)`, and it owns a `Sort` from §6.6 outright (`sort = make_uniq<Sort>(...)`). Window functions use sorting, hash partitioning, segment trees and `BLOCKED`, nearly every part covered so far, which is why they are the most intricate operator in the engine.
 
 ## 7. MVCC — Never Blocking a Reader
 
@@ -925,7 +929,7 @@ One field carries two meanings, and a single comparison tells them apart. Uncomm
 
 `NOT_DELETED_ID` is `MAX - 1` for the same reason: "not deleted" is treated as "deleted infinitely far in the future".
 
-(The `// 2^63` and `// 2^64 - 1` comments in the source are approximations. `transaction_t` is a `uint64_t`, so `MAX_TRANSACTION_ID` is 2^64 − 1, `NOT_DELETED_ID` is 2^64 − 2, and `TRANSACTION_ID_START` is 2^62 + 96.)
+(The values in the source comments are not exact. `transaction_t` is a `uint64_t`, so `MAX_TRANSACTION_ID` is 2^64 − 1, `NOT_DELETED_ID` is 2^64 − 2, and `TRANSACTION_ID_START` is 2^62 + 96.)
 
 ### 7.2 Compressing version ids
 
@@ -1004,9 +1008,9 @@ During a bulk insert, DuckDB uses <strong>optimistic writing</strong>: it writes
 - If the transaction commits, the WAL only needs pointers to those blocks, so the payload is never written twice.
 - If it rolls back, the blocks return to the free list.
 
-A hundred-million-row `COPY` therefore writes its data only once. `DuckTransaction::PreFlushOptimisticBlocks()` also runs before the commit locks are taken, which keeps slow operations like `fsync` out of the critical section.
+`DuckTransaction::PreFlushOptimisticBlocks()` also runs before the commit locks are taken, which keeps slow operations like `fsync` out of the critical section.
 
-Checkpoints run automatically once the WAL exceeds the public `checkpoint_threshold` setting (16 MiB by default; internally stored as `checkpoint_wal_size`), and `RowGroupCollection::Checkpoint()` flushes all row groups. Unchanged row groups reuse their existing metadata and are skipped (`RowGroupWriteAction::REUSE_EXISTING_ROW_GROUP_METADATA`), so updating one row does not rewrite the whole table.
+Checkpoints run automatically once the WAL exceeds the public `checkpoint_threshold` setting (16 MiB by default; internally stored as `checkpoint_wal_size`), and `RowGroupCollection::Checkpoint()` flushes the row groups to disk. Unchanged row groups reuse their existing metadata and are skipped (`RowGroupWriteAction::REUSE_EXISTING_ROW_GROUP_METADATA`), so updating one row does not rewrite the whole table.
 
 The flush is also column-at-a-time:
 
@@ -1016,7 +1020,7 @@ The flush is also column-at-a-time:
 // i.e. we first write column #0 of all row groups, then column #1, ...
 ```
 
-This places data for the same column contiguously on disk, which minimises seek distance for a single-column scan.
+This places data for the same column contiguously on disk, which minimizes seek distance for a single-column scan.
 
 ## 8. The Optimizer
 
@@ -1024,13 +1028,13 @@ The execution engine described so far runs a given physical plan efficiently. Th
 
 ### 8.1 A sequence of passes
 
-DuckDB's optimizer is a sequence of transformations over the logical plan ([`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)): expression rewriting, filter pushdown, unused-column removal, statistics propagation, join ordering, common subexpression elimination, and regex range extraction (`regex_range`).
+DuckDB's optimizer is a sequence of transformations over the logical plan ([`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)), including expression rewriting, filter pushdown, unused-column removal, statistics propagation, join ordering, common subexpression elimination and regex range extraction (`regex_range`).
 
 For example, when `regex_range` finds a two-argument `regexp_full_match` with a constant pattern, it asks RE2's `PossibleMatchRange` for bounds, and if it gets them it inserts `col >= min AND col <= max` as an extra filter below the original. The regex is still evaluated, but the zone maps of §5.3 can prune first.
 
 Individual passes can be turned off with a comma-separated list (`SET disabled_optimizers='join_order'`), and `SELECT * FROM duckdb_optimizers();` lists every valid name, so you can measure what each pass contributes.
 
-### 8.2 Join ordering — DPccp
+### 8.2 Join ordering — DPhyp
 
 Join ordering lives in [`src/optimizer/join_order/plan_enumerator.cpp`](https://github.com/duckdb/duckdb/blob/main/src/optimizer/join_order/plan_enumerator.cpp), and the comment names its source:
 
@@ -1059,7 +1063,7 @@ if (query_graph_manager.relation_manager.NumRelations() >= swap_to_approximate_t
 }
 ```
 
-Past a relation-count threshold, or once the budget of examined pairs (`pairs`) runs out, it switches to a greedy algorithm (`SolveJoinOrderApproximately`), giving up optimality to keep optimization time bounded.
+When the relation count reaches a threshold, or once the budget of examined pairs (`pairs`) runs out, it switches to a greedy algorithm (`SolveJoinOrderApproximately`), giving up optimality to keep optimization time bounded.
 
 ### 8.3 Cardinality estimation
 
@@ -1072,13 +1076,13 @@ $$
 |R_1 \bowtie R_2 \bowtie \cdots| \approx \frac{\prod_i |R_i|}{\prod_j \mathrm{TD}_j}
 $$
 
-This generalises the classic "equi-join selectivity = 1 / max(distinct)" to subgraphs. The implementation builds equivalence classes (if `a.x = b.x` and `b.x = c.x`, all three share one total domain) and uses `EquivalenceGroupApplied` to avoid double-counting transitively redundant predicates.
+This generalizes the classic "equi-join selectivity = 1 / max(distinct)" to subgraphs. The implementation builds equivalence classes (if `a.x = b.x` and `b.x = c.x`, all three share one total domain) and uses `EquivalenceGroupApplied` to avoid double-counting transitively redundant predicates.
 
 DuckDB keeps HyperLogLog distinct-count estimates on join columns, which feed total domains as a `DistinctCountSource`. When the source is neither `HLL` nor `EXACT`, that is, when `IsReliableDistinctCount` returns false, it falls back to a precomputed, conservative `fallback_distinct_count`.
 
 ### 8.4 Runtime filter propagation
 
-DuckDB also builds filters while the query runs. Planning only decides where a filter will later be injected (which column of which `LogicalGet`) and leaves the slot empty until the build finishes. The reserved slot is a `DynamicTableFilterSet`; the reservation itself is a `JoinFilterPushdownInfo`.
+DuckDB also builds filters while the query runs. Planning only decides where a filter will later be injected (which column of which `LogicalGet`) and leaves the slot empty until the build finishes. The reserved slot is a `DynamicTableFilterSet`; what goes into it is specified by a `JoinFilterPushdownInfo`.
 
 ```cpp
 // duckdb/execution/operator/join/join_filter_pushdown.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/operator/join/join_filter_pushdown.hpp
@@ -1107,7 +1111,7 @@ At finalize time DuckDB pushes more than min/max. `FinalizeFilters()` inspects t
 
 Bloom and prefix-range filters add cost on the build side, so the gates are strict. `CanUseBloomFilter()` gives the reason in a comment: *building the bloom filter is costly on the build to make probing faster, so only use it if there are less build tuples than probing tuples*.
 
-Bloom and prefix-range filters are also always wrapped as <strong>selectivity-optional</strong> filters, and min/max filters are too for non-equality comparisons. After the scan starts, if the first few vectors show the filter is not rejecting much, it switches itself off and is no longer evaluated. A wrong planning-time estimate therefore has a bounded cost rather than one that grows with the data. (IN lists are the exception: they hold the actual values, so their selectivity is already known.)
+Bloom and prefix-range filters are also always wrapped as <strong>selectivity-optional</strong> filters, and min/max filters are too for non-equality comparisons. After the scan starts, if the first few vectors show the filter is not rejecting much, it switches itself off and is no longer evaluated. A wrong planning-time estimate therefore has a bounded cost rather than one that grows with the data. (IN lists are never wrapped: they hold the actual values, so their selectivity is already known.)
 
 For queries shaped like "small dimension table × huge fact table", such as TPC-H Q3, a narrow build-side range means most of the fact table's row groups can be rejected on min/max alone.
 
@@ -1149,7 +1153,7 @@ Alongside the paper's `Node4` / `Node16` / `Node48` / `Node256`, several DuckDB-
 - `LEAF_INLINED`: with exactly one row id, no leaf node is allocated; the row id is embedded in the pointer. In a unique index this is the common case.
 - `NODE_7_LEAF` / `NODE_15_LEAF` / `NODE_256_LEAF`: nodes that hold only the present bytes and no child pointers.
 
-Add children one at a time in the visualisation below to watch Node4 → Node16 → Node48 → Node256 change in place.
+Add children one at a time in the visualization below to watch the node switch Node4 → Node16 → Node48 → Node256.
 
 <ARTNodeVisualizer />
 
@@ -1188,7 +1192,7 @@ static constexpr idx_t AND_ROW_ID = 0x00FFFFFFFFFFFFFF;
 
 Setting the top bit of the `NodePtr` metadata byte marks everything below as a nested ART. Like `ht_entry_t`, this uses the spare bits of a pointer.
 
-The leaf-specialised nodes such as `NODE_7_LEAF` exist for the inside of that nested tree. Row ids are a fixed eight bytes, so the bottom level only needs the set of final bytes and no child pointers. `Node256Leaf` is therefore just a 256-bit mask:
+The leaf-specialized nodes such as `NODE_7_LEAF` exist for the inside of that nested tree. Row ids are a fixed eight bytes, so the bottom level only needs the set of final bytes and no child pointers. `Node256Leaf` is therefore just a 256-bit mask:
 
 ```cpp
 // duckdb/execution/index/art/node256_leaf.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/index/art/node256_leaf.hpp
@@ -1200,7 +1204,7 @@ class Node256Leaf {
 };
 ```
 
-2048 bytes of child pointers collapse into a 256-bit mask. (Only 256 bits, or 32 bytes, are logically needed, but the declaration `validity_t mask[CAPACITY / sizeof(validity_t)]` reserves 32 × 8 = 256 bytes, so `sizeof(Node256Leaf)` is 264.) The same ART framework thus applies different optimizations to the outer tree and the nested one.
+2048 bytes of child pointers collapse into a 256-bit mask. (Only 256 bits, or 32 bytes, are logically needed, but the declaration `validity_t mask[CAPACITY / sizeof(validity_t)]` reserves 32 × 8 = 256 bytes, so `sizeof(Node256Leaf)` is 264. v2.0.0 changed the declaration to `mask[CAPACITY / ValidityMask::BITS_PER_VALUE]`, which shrinks the mask to 32 bytes.) The same ART framework thus applies different optimizations to the outer tree and the nested one.
 
 ### 9.4 Where ART nodes are allocated
 
@@ -1212,15 +1216,15 @@ ART nodes are not allocated with `new`; they come from a per-node-type `FixedSiz
 shared_ptr<array<unsafe_unique_ptr<FixedSizeAllocator>, ALLOCATOR_COUNT>> allocators;
 ```
 
-`NodePtr` is not a raw pointer but an `IndexPointer`, a 64-bit value meaning "buffer X, slot Y". This has three benefits:
+`NodePtr` is not a raw pointer but an `IndexPointer`, a 64-bit value meaning "buffer X, slot Y". Combined with the per-type allocators, this indirection has three benefits:
 
-- Nodes of the same type sit contiguously, improving cache behaviour.
+- Nodes of the same type sit contiguously, improving cache behavior.
 - The whole index can live under the buffer manager, so indexes larger than memory work.
-- Serialising to disk needs no pointer rewriting.
+- Serializing to disk needs no pointer rewriting.
 
 This indirection is what allows an ART to be persisted.
 
-## 10. Extensibility — a Small Core Plus Extensions
+## 10. Extensibility — a Small Core plus Extensions
 
 ### 10.1 Extensions
 
@@ -1229,11 +1233,13 @@ DuckDB keeps its core small. Parquet, JSON, httpfs (S3/HTTP access), spatial, ic
 Some of them still ship inside the binary: in the standard Python and CLI distributions, parquet, json and some others are statically linked into the binary and loaded through `DBConfig::linked_extensions`.
 
 ```cpp
-// duckdb/main/config.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/main/config.hpp
-//! An extension linked into the binary, and how to load it into a database.
+// duckdb/main/extension/linked_extension_registry.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/main/extension/linked_extension_registry.hpp
+//! An extension compiled into this binary, as a name and the callable that loads it.
 struct LinkedExtension {
 	string name;
+	//! empty when what was registered is not an extension
 	std::function<void(DuckDB &)> load;
+	// ...
 };
 ```
 
@@ -1245,7 +1251,9 @@ LOAD httpfs;
 SELECT count(*) FROM 's3://bucket/data/*.parquet';
 ```
 
-An extension is a dynamically linked shared library (`.duckdb_extension`) that registers scalar functions, table functions, types, optimizer passes and storage backends into the catalog at load time. To keep ABI compatibility across versions, extension binaries are built per core version and platform, and their signatures are verified.
+A dynamically loaded extension is a shared library (`.duckdb_extension`) that registers scalar functions, table functions, types, optimizer passes and storage backends into the catalog at load time. To keep ABI compatibility across versions, extension binaries are built per core version and platform, and their signatures are verified.
+
+Function resolution is `FunctionBinder`'s job: given the candidate set for a name, it picks the best overload by implicit-cast cost. Scalar functions registered by extensions go through the same path as built-ins, so they join the same overload-resolution candidate set.
 
 `DBConfig` carries the hooks that receive them:
 
@@ -1259,7 +1267,7 @@ vector<ReplacementScan> replacement_scans;
 
 The comment above describes the mechanism. When the binder cannot resolve a table name, DuckDB tries the registered replacement scans in order before reporting an error.
 
-- Name ends in `.parquet`: rewrite to `parquet_scan('...')` (an alias of the same function set as `read_parquet`). The parquet extension's own `LoadInternal()` registers this hook into `config.replacement_scans`, so <strong>it only exists once that extension is loaded</strong>.
+- Name ends in `.parquet`: rewrite to `parquet_scan('...')` (an alias of the same function set as `read_parquet`). The parquet extension's own `LoadInternal()` registers this hook into `config.replacement_scans`, so it only exists once that extension is loaded.
 - Name ends in `.csv` or `.tsv`: rewrite to `read_csv_auto('...')`. A `.gz` / `.zst` suffix is stripped first, so `data.csv.gz` works too.
 - In the Python client, look through the caller's local variables for a pandas DataFrame or Arrow table and rewrite to a function that scans it. (PyArrow and Polars objects become an arrow scan; a `DuckDBPyRelation` becomes a subquery, not a table function. By default only the immediate calling frame is searched; `python_scan_all_frames` widens it to ancestor frames.)
 
@@ -1269,7 +1277,7 @@ df = pd.DataFrame({"a": [1, 2, 3]})
 duckdb.sql("SELECT sum(a) FROM df")   # df is not a table, yet this works
 ```
 
-This behaviour comes from one design decision: <strong>make name-resolution failure hookable</strong>. Because the rewrite happens at the logical plan level, the substituted table function still receives the usual optimizations, such as filter pushdown and projection pruning. That is why `SELECT a FROM 'huge.parquet' WHERE b = 1` can consult the Parquet footer and skip the row groups and columns it does not need.
+This behavior comes from one design decision: <strong>make name-resolution failure hookable</strong>. Because the rewrite happens at the logical plan level, the substituted table function still receives the usual optimizations, such as filter pushdown and projection pruning. That is why `SELECT a FROM 'huge.parquet' WHERE b = 1` can consult the Parquet footer and skip the row groups and columns it does not need.
 
 The inbound zero copy mentioned in §1 also goes through this mechanism. On the pandas route, `ScanNumpyColumn` / `ScanNumpyFpColumn` hand the NumPy buffer straight to `FlatVector::SetData` only when `stride == sizeof(T)`; a strided array falls into a gather loop, and object columns are always converted (that code lives in the separate [`duckdb/duckdb-python`](https://github.com/duckdb/duckdb-python) repository, `src/numpy/numpy_scan.cpp`). On the Arrow route, `DirectConversion` in [`src/function/table/arrow_conversion.cpp`](https://github.com/duckdb/duckdb/blob/main/src/function/table/arrow_conversion.cpp) calls `FlatVector::SetData` with no stride test at all, because for fixed-width primitives the Arrow layout is already one contiguous values buffer and only an offset is needed. That applies to fixed-width numerics and some temporal types only: `BOOLEAN` is bit-unpacked, and `TIME` and nanosecond timestamps are converted row by row.
 
@@ -1336,7 +1344,7 @@ scan.validator.Verify();
 
 Every scanner registers the first line it read, and the validator checks that it lines up with the previous scanner's last line, failing the query if it does not. The reader guesses fast and verifies afterwards, like the selectivity-optional filters in §8.4.
 
-Parallel reading has a limit: with `null_padding` enabled, a quoted newline makes the line start <strong>impossible to determine</strong> in parallel, so DuckDB raises `CSVError::NullPaddingFail`.
+Parallel reading has a limit: with `null_padding` enabled, a quoted newline makes the line start impossible to determine in parallel, so DuckDB raises `CSVError::NullPaddingFail`.
 
 ## 11. Decomposing the Speed
 
@@ -1346,9 +1354,9 @@ DuckDB's speed comes from decisions at every layer.
 | --- | --- | --- |
 | Deployment | In-process library | No serialization, no IPC; contiguous fixed-width numeric columns are scanned without copying (§10.2) |
 | Data representation | 2048-row vectors, polymorphic `Vector` | Intermediates fit L1/L2; hot operators can work on the compressed form |
-| Execution model | Push-based, decomposed into pipelines | Minimal intermediate materialisation |
+| Execution model | Push-based, decomposed into pipelines | Minimal intermediate materialization |
 | Parallelism | Morsel-driven, no exchange | Skew-tolerant, dynamically adjustable |
-| Ordering | Binary sort keys plus Merge-Path parallel merging | Comparator calls disappear and even the merge parallelises |
+| Ordering | Byte-comparable sort keys plus Merge-Path parallel merging | Comparator calls disappear and even the merge parallelizes |
 | Storage | Single file, row groups, per-segment compression | Less I/O; zone maps skip reads entirely |
 | Memory | Radix partitioning plus spilling | Larger-than-memory queries do not fail |
 | Concurrency | HyPer-style MVCC | Readers never block on writers |
@@ -1356,7 +1364,7 @@ DuckDB's speed comes from decisions at every layer.
 
 These decisions <strong>share each other's assumptions</strong>. `STANDARD_VECTOR_SIZE` was chosen for the execution engine, but `DEFAULT_ROW_GROUP_SIZE` must be a multiple of it, MVCC's `ChunkVectorInfo` is cut at the same granularity, and compression analysis runs in the same unit.
 
-Many of the decisions also <strong>give something up</strong>. `ToUnifiedFormat()` flattening FSST trades speed for a simpler abstraction; cutting off join-order search with a budget gives up optimality. DuckDB aims to be fast in almost every case rather than optimal in all of them. For an embedded database that must keep startup time and binary size small, it had to draw that line.
+Many of the decisions also <strong>give something up</strong>. `ToUnifiedFormat()` flattening FSST trades speed for a simpler abstraction; cutting off join-order search with a budget gives up optimality. DuckDB aims to be fast in almost every case rather than optimal in all of them.
 
 ## 12. A Map for Reading the Source
 
@@ -1372,17 +1380,17 @@ SELECT * FROM pragma_storage_info('my_table');
 -- memory usage broken down by MemoryTag
 SELECT * FROM duckdb_memory();
 
--- the three tiers of the buffer eviction queue
+-- each buffer eviction queue with its tier (queue_type) and size
 SELECT * FROM duckdb_eviction_queues();
 
 -- every valid optimizer pass name
 SELECT * FROM duckdb_optimizers();
 
--- loaded extensions
+-- extensions, with whether each is installed and loaded
 SELECT * FROM duckdb_extensions();
 ```
 
-When `pragma_storage_info` shows `RLE` and `FSST` in the `compression` column, you are seeing the result of the per-segment compression contest. Starting from that output makes the code easier to navigate.
+When `pragma_storage_info` shows `RLE` and `FSST` in the `compression` column, you are seeing the result of the per-segment compression contest from §5.4.
 
 The table below lists where each topic lives in the source.
 
@@ -1424,4 +1432,4 @@ The table below lists where each topic lives in the source.
 - Azim Afroozeh, Leonardo X. Kuffo, Peter Boncz. "ALP: Adaptive Lossless floating-Point Compression." Proc. ACM Manag. Data 1(4), Article 230, 2023 (presented at SIGMOD 2024).
 - Mark Raasveldt, Hannes Mühleisen. "DuckDB: an Embeddable Analytical Database." SIGMOD 2019 (Demo).
 - Mark Raasveldt, Hannes Mühleisen. "Data Management for Data Science — Towards Embedded Analytics." CIDR 2020.
-- [duckdb/duckdb](https://github.com/duckdb/duckdb) — all code quoted here is from the `main` branch.
+- [duckdb/duckdb](https://github.com/duckdb/duckdb) — all code quoted here is from the `main` branch as of writing (August 2026, the v1.5 series). Some of the quoted code, such as the `Node256Leaf` mask declaration, changed in v2.0.0 (October 2026).

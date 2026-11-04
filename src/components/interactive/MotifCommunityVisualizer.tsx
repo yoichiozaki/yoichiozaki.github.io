@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -114,9 +115,9 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: allEdges,
       description:
-        "元のグラフ: 8 ノード・13 辺。左側クラスター {0,1,2,3} と右側クラスター {4,5,6,7} が辺 3-4 で繋がっています。通常の辺密度ではどちらのクラスターも密に見えますが、「三角形」の分布はどうでしょうか？",
+        "元のグラフ: 8 ノード・13 辺。左のクラスター A {0,1,2,3} と右のクラスター B {4,5,6,7} が、辺 3-4 でつながっています。どちらのクラスターも辺が密です。",
       descriptionEn:
-        "Original graph: 8 nodes, 13 edges. Left cluster {0,1,2,3} and right cluster {4,5,6,7} connected by edge 3-4. Both clusters look dense in terms of edges, but what about triangle distribution?",
+        "Original graph: 8 nodes, 13 edges. The left cluster A {0,1,2,3} and the right cluster B {4,5,6,7} are connected by edge 3-4. Both clusters are dense in edges.",
       phase: "graph",
     },
     // Step 1: Enumerate triangles in cluster A
@@ -124,9 +125,9 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: allEdges,
       description:
-        "ステップ 1: 三角形モチーフの列挙（左クラスター）。クラスター A には 4 つの三角形が存在します: {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3}。4 ノードの完全グラフ (K₄) なので三角形が密に詰まっています。",
+        "三角形モチーフを列挙します。クラスター A には {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3} の 4 つの三角形があります。A は 4 ノードの完全グラフ (K₄) なので、どの 3 ノードも三角形を作ります。",
       descriptionEn:
-        "Step 1: Enumerate triangle motifs (left cluster). Cluster A contains 4 triangles: {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3}. As a complete graph K₄, triangles are densely packed.",
+        "Enumerate the triangle motifs. Cluster A contains 4 triangles: {0,1,2}, {0,1,3}, {0,2,3}, and {1,2,3}. Because A is the complete graph K₄, every three of its nodes form a triangle.",
       phase: "count",
       highlightTriangles: clusterATriangles,
     },
@@ -135,9 +136,9 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: allEdges,
       description:
-        "ステップ 2: 三角形モチーフの列挙（右クラスター）。クラスター B にも同様に 4 つの三角形: {4,5,6}, {4,5,7}, {4,6,7}, {5,6,7}。一方、ブリッジ辺 3-4 を含む三角形は存在しません。",
+        "クラスター B にも同じく 4 つの三角形 {4,5,6}, {4,5,7}, {4,6,7}, {5,6,7} があります。一方、ブリッジ辺 3-4 を含む三角形はありません。",
       descriptionEn:
-        "Step 2: Enumerate triangle motifs (right cluster). Cluster B similarly has 4 triangles: {4,5,6}, {4,5,7}, {4,6,7}, {5,6,7}. Note: no triangle contains the bridge edge 3-4.",
+        "Cluster B likewise has 4 triangles: {4,5,6}, {4,5,7}, {4,6,7}, and {5,6,7}. No triangle contains the bridge edge 3-4.",
       phase: "count",
       highlightTriangles: clusterBTriangles,
       highlightEdges: [[3, 4]],
@@ -147,9 +148,9 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: weightedEdges,
       description:
-        "ステップ 3: モチーフ重み付き隣接行列の構築。各辺の重みを「その辺が属する三角形の数」に設定。クラスター内の辺は重み 2（各辺が 2 つの三角形に属する）に対し、ブリッジ辺 3-4 の重みは 0。この差が高次構造の情報を捉えています。",
+        "モチーフ重み付き隣接行列を作ります。各辺の重みは、その辺を含む三角形の数です。クラスター内の辺は 2 つの三角形に含まれるので重み 2、ブリッジ辺 3-4 は重み 0 です。三角形で見ると、2 つのクラスターはつながっていません。",
       descriptionEn:
-        "Step 3: Build motif-weighted adjacency. Set each edge weight to the number of triangles it participates in. Intra-cluster edges have weight 2, while bridge edge 3-4 has weight 0. This difference captures higher-order structural information.",
+        "Build the motif-weighted adjacency matrix: each edge's weight is the number of triangles that contain it. Intra-cluster edges lie in 2 triangles and get weight 2; the bridge edge 3-4 gets weight 0. Seen through triangles, the two clusters are not connected.",
       phase: "weight",
     },
     // Step 4: Spectral clustering on motif-weighted graph
@@ -157,9 +158,9 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: weightedEdges,
       description:
-        "ステップ 4: モチーフ加重ラプラシアンによるスペクトラルクラスタリング。ラプラシアン L(M) = D(M) - W(M) を構成し、Fiedler ベクトルで 2 分割。ブリッジ辺の重みが 0 なので、クラスター間のカットコストが極めて低く、明確な分割が得られます。",
+        "モチーフ重み付きラプラシアン L(M) = D(M) - W(M) を作り、Fiedler ベクトルでグラフを 2 分割します。ブリッジ辺の重みが 0 なので、この分割で切れる三角形はありません（Motif Conductance は 0）。",
       descriptionEn:
-        "Step 4: Spectral clustering on motif-weighted Laplacian. Construct L(M) = D(M) - W(M) and bipartition via Fiedler vector. Since the bridge edge has weight 0, the cut cost is minimal, yielding a clear partition.",
+        "Construct the motif-weighted Laplacian L(M) = D(M) - W(M) and split the graph in two with the Fiedler vector. Because the bridge edge has weight 0, the split cuts no triangle (Motif Conductance is 0).",
       phase: "spectral",
     },
     // Step 5: Final result
@@ -167,9 +168,9 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes([1, 1, 1, 1, 2, 2, 2, 2]),
       edges: weightedEdges,
       description:
-        "結果: 三角形モチーフに基づくコミュニティーが検出されました。通常の辺ベースの手法では辺 3-4 があるためにクラスターの分離がやや曖昧になり得ますが、モチーフベースの手法では「三角形のない辺」であるブリッジが明確にカットされ、2 つのコミュニティー {0,1,2,3} と {4,5,6,7} が鮮明に分離されます。",
+        "結果: 三角形モチーフに基づいて、2 つのコミュニティー {0,1,2,3} と {4,5,6,7} が得られました。辺で数えるとこの分割はブリッジ 3-4 の 1 本を切りますが、三角形で数えると切れるモチーフは 0 個です。",
       descriptionEn:
-        "Result: Communities detected based on triangle motifs. Edge-based methods might find the bridge 3-4 ambiguous, but motif-based methods cut the 'triangle-free' bridge cleanly, producing two clear communities {0,1,2,3} and {4,5,6,7}.",
+        "Result: the triangle motifs give two communities, {0,1,2,3} and {4,5,6,7}. Counted in edges, the split cuts one edge (the bridge 3-4); counted in triangles, it cuts none.",
       phase: "result",
       communityColors: { 1: "#3b82f6", 2: "#ef4444" },
     },
@@ -373,6 +374,7 @@ export function MotifCommunityVisualizer({
             ? `ステップ ${step + 1} / ${steps.length}`
             : `Step ${step + 1} / ${steps.length}`
         }
+        ariaLabels={stepPlayerAriaLabels(locale)}
       />
     </InteractiveDemo>
   );

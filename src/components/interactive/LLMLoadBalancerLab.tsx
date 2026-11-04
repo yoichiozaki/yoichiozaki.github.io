@@ -29,8 +29,8 @@ const TEXT = {
   ja: {
     title: "LLM ルーティング・ラボ",
     description:
-      "同じ到着列に対してルーティング方式だけを差し替え、TTFT の裾、キャッシュヒット率、レプリカ間の偏りがどう動くかを比べます。",
-    policy: "ルーティング方式",
+      "同じ到着列に対して選択規則だけを差し替え、TTFT の裾、キャッシュヒット率、レプリカ間の偏りがどう動くかを比べます。",
+    policy: "選択規則",
     arrivalRate: "到着率 λ（件/ティック）",
     heavyRatio: "長文リクエストの割合",
     replicas: "レプリカ数",
@@ -42,7 +42,7 @@ const TEXT = {
     cv: "プロンプト長の変動係数 CV",
     range: "最小 / 最大",
     tokens: "トークン",
-    metrics: "この方式の結果",
+    metrics: "この規則の結果",
     ttftP50: "TTFT 中央値",
     ttftP95: "TTFT P95",
     e2eP95: "E2E P95",
@@ -59,10 +59,10 @@ const TEXT = {
     utilization: "稼働率",
     prefillShare: "うちプレフィル",
     queueTimeline: "待ち行列の推移（各レプリカの未完了件数）",
-    compare: "全方式の比較（同じ到着列・同じ設定）",
+    compare: "すべての規則の比較（同じ到着列・同じ設定）",
     best: "最良",
     caution:
-      "これは教育用の離散イベントモデルです。1 ティックは 1 エンジン反復ぶんの予算で、実測のミリ秒ではありません。レプリカは 1 ティックでプレフィルかデコードのどちらか一方だけを行い（チャンク化プレフィルは未実装）、キャッシュ済みブロックは KV 容量を消費しないものとして扱っています。テンソル並列、投機的デコード、プリエンプション、ネットワーク遅延も含みません。絶対値ではなく方式間の相対差を読んでください。",
+      "これは教育用の離散イベントモデルです。1 ティックは 1 エンジン反復ぶんの予算で、実測のミリ秒ではありません。TTFT SLO 達成率は、TTFT が 80 ティック以内だったリクエストの割合です。レプリカは 1 ティックでプレフィルかデコードのどちらか一方だけを行い（チャンク化プレフィルは未実装）、キャッシュ済みブロックは KV 容量を消費しないものとして扱っています。テンソル並列、投機的デコード、プリエンプション、ネットワーク遅延も含みません。絶対値ではなく規則間の相対差を読んでください。",
     policyNames: {
       random: "ランダム",
       "round-robin": "ラウンドロビン",
@@ -75,7 +75,7 @@ const TEXT = {
       random: "毎回一様ランダムに選びます。実装は最も簡単ですが、たまたま重いリクエストが同じレプリカに集中すると裾が伸びます。",
       "round-robin": "順番に配ります。件数は完全に揃いますが、1 件あたりの仕事量が違うため資源は揃いません。",
       "least-outstanding": "未完了件数（待機＋実行中）が最小のレプリカを選びます。全レプリカを毎回走査します。",
-      "power-of-two": "ランダムに 2 台選び、未完了件数の少ない方を採用します。2 回の観測で最小選択にほぼ追いつきます。",
+      "power-of-two": "ランダムに 2 台選び、未完了件数の少ない方を採用します。2 台を見るだけで、全台走査の効果の大半が得られます。",
       "least-kv": "実行中および現在プレフィル中のシーケンスが占有する KV ブロック数が最小のレプリカを選びます。まだ実行が始まっていない待機中の仕事は、同点時の副次的な判定材料としてしか効きません。",
       "prefix-aware": "負荷差が閾値以内なら同じプレフィックスを持つレプリカへ、閾値を超えたら最小未完了数へ切り替えます。",
     } satisfies Record<RoutingPolicy, string>,
@@ -83,8 +83,8 @@ const TEXT = {
   en: {
     title: "LLM Routing Lab",
     description:
-      "Replay one arrival trace under different routing policies and compare TTFT tails, cache hit rates, and replica skew.",
-    policy: "Routing policy",
+      "Replay one arrival trace under different selection rules and compare TTFT tails, cache hit rates, and replica skew.",
+    policy: "Selection rule",
     arrivalRate: "Arrival rate λ (requests/tick)",
     heavyRatio: "Share of long requests",
     replicas: "Replicas",
@@ -96,7 +96,7 @@ const TEXT = {
     cv: "Prompt-length CV",
     range: "min / max",
     tokens: "tokens",
-    metrics: "Result for this policy",
+    metrics: "Result for this rule",
     ttftP50: "TTFT median",
     ttftP95: "TTFT P95",
     e2eP95: "E2E P95",
@@ -113,10 +113,10 @@ const TEXT = {
     utilization: "Utilization",
     prefillShare: "of which prefill",
     queueTimeline: "Queue evolution (outstanding requests per replica)",
-    compare: "All policies on the same trace and settings",
+    compare: "All rules on the same trace and settings",
     best: "best",
     caution:
-      "This is a teaching-scale discrete-event model. One tick is one engine-iteration budget, not a measured millisecond. A replica performs either a prefill step or a decode step in a tick (no chunked prefill), and cached blocks are assumed not to consume KV capacity. Tensor parallelism, speculative decoding, preemption, and network latency are out of scope. Read the relative gaps between policies, not the absolute values.",
+      "This is a discrete-event model built for teaching. One tick is one engine-iteration budget, not a measured millisecond. TTFT SLO attainment is the share of requests whose TTFT was 80 ticks or less. A replica performs either a prefill step or a decode step in a tick (no chunked prefill), and cached blocks are assumed not to consume KV capacity. Tensor parallelism, speculative decoding, preemption, and network latency are out of scope. Read the relative gaps between rules, not the absolute values.",
     policyNames: {
       random: "Random",
       "round-robin": "Round robin",
@@ -130,8 +130,8 @@ const TEXT = {
       "round-robin": "Deal requests in turn. Counts are perfectly even; resource usage is not, because request cost varies.",
       "least-outstanding": "Choose the replica with the fewest outstanding requests (waiting plus running), scanning the whole pool.",
       "power-of-two": "Sample two replicas at random and take the less loaded one. Two probes get most of the benefit of a full scan.",
-      "least-kv": "Choose the replica whose running and currently-prefilling sequences occupy the fewest KV blocks. Work that is queued but not yet admitted only acts as a secondary tie-breaker.",
-      "prefix-aware": "Prefer the replica holding the prompt prefix while the load gap stays under threshold; fall back to least outstanding above it.",
+      "least-kv": "Choose the replica whose running and currently prefilling sequences occupy the fewest KV blocks. Work that is queued but not yet admitted only acts as a secondary tie-breaker.",
+      "prefix-aware": "Prefer the replica holding the prompt prefix while the load gap stays under the threshold; fall back to least outstanding above it.",
     } satisfies Record<RoutingPolicy, string>,
   },
 } as const;

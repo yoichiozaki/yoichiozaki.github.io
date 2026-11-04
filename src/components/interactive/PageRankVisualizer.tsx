@@ -142,8 +142,8 @@ export function PageRankVisualizer({
       title={isJa ? "PageRank シミュレーション" : "PageRank Simulation"}
       description={
         isJa
-          ? "ランダムサーファーモデルに基づく PageRank のべき乗法。ノードの大きさがスコアに比例"
-          : "Power iteration PageRank based on the random surfer model. Node size proportional to score"
+          ? "ランダムサーファーモデルの PageRank をべき乗法で計算する。ノードが大きいほどスコアが高い"
+          : "PageRank under the random surfer model, computed by power iteration. Larger nodes have higher scores"
       }
     >
       <div className="flex flex-col md:flex-row gap-4">
@@ -243,13 +243,13 @@ export function PageRankVisualizer({
                   {isJa ? "ページ" : "Page"}
                 </th>
                 <th className="text-right py-1 px-2 text-muted-foreground font-medium">
-                  PR(n)
+                  PR(t)
                 </th>
                 <th className="text-right py-1 px-2 text-muted-foreground font-medium">
-                  {isJa ? "収束値" : "converged"}
+                  {isJa ? "収束値" : "Converged"}
                 </th>
                 <th className="text-right py-1 px-2 text-muted-foreground font-medium">
-                  {isJa ? "差" : "diff"}
+                  {isJa ? "誤差" : "Error"}
                 </th>
               </tr>
             </thead>
@@ -273,7 +273,7 @@ export function PageRankVisualizer({
             </tbody>
           </table>
           <div className="mt-2 text-xs text-muted-foreground">
-            {isJa ? "反復回数" : "Iteration"}:{" "}
+            {isJa ? "反復回数 t" : "Iteration t"}:{" "}
             <span className="font-mono text-foreground">{iteration}</span>
             {" / "}
             <span className="font-mono">{MAX_ITERATIONS}</span>

@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -68,12 +69,12 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 2, target: 3 },
       ],
       description:
-        "t=1: 初期状態。2 つのコミュニティー（青・赤）が存在。辺 C-D がコミュニティー間のブリッジ。",
+        "t=1: 初期状態。2 つのコミュニティー（青・赤）があり、辺 C-D がその間のブリッジです。",
       descriptionEn:
         "t=1: Initial state. Two communities (blue, red) exist. Edge C-D bridges them.",
       event: "none",
-      eventLabelJa: "安定",
-      eventLabelEn: "Stable",
+      eventLabelJa: "初期状態",
+      eventLabelEn: "Initial",
     },
     // t=2: Growth — new node G joins blue community
     {
@@ -99,9 +100,9 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 2, target: 3 },
       ],
       description:
-        "t=2: 成長 — ノード G が青コミュニティーに参加。A, C と接続。コミュニティーが拡大。",
+        "t=2: 成長 — ノード G が A, C と接続し、青コミュニティーに加わります。",
       descriptionEn:
-        "t=2: Growth — Node G joins the blue community, connecting to A and C. Community expands.",
+        "t=2: Growth — Node G connects to A and C and joins the blue community.",
       event: "growth",
       eventLabelJa: "成長",
       eventLabelEn: "Growth",
@@ -137,9 +138,9 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 4, target: 7 },
       ],
       description:
-        "t=3: 誕生 — 新しい緑コミュニティー {H,I,J} が出現。E-H のブリッジで赤コミュニティーと接続。",
+        "t=3: 誕生 — 新しい緑コミュニティー {H,I,J} が現れ、ブリッジ E-H で赤コミュニティーとつながります。",
       descriptionEn:
-        "t=3: Birth — A new green community {H,I,J} emerges, connected to the red community via E-H bridge.",
+        "t=3: Birth — A new green community {H,I,J} emerges, connected to the red community via the bridge E-H.",
       event: "birth",
       eventLabelJa: "誕生",
       eventLabelEn: "Birth",
@@ -173,9 +174,9 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 4, target: 7 },
       ],
       description:
-        "t=4: 分裂 — A-C, B-C の辺が消失し、青コミュニティーが分裂。C はノード D との接続から黄コミュニティー（赤寄り）に。{A,B,G} が残存コミュニティーとなる。",
+        "t=4: 分裂 — 辺 A-C, B-C, C-G が消え、辺 B-G が現れて、青コミュニティーが {A,B,G} と {C} に分裂します。D とだけつながった C は、単独の黄コミュニティーになります。",
       descriptionEn:
-        "t=4: Split — Edges A-C and B-C disappear. Blue community splits. C migrates toward D, forming a yellow-ish community. {A,B,G} remains.",
+        "t=4: Split — Edges A-C, B-C, and C-G disappear and edge B-G appears, so the blue community splits into {A,B,G} and {C}. C, now linked only to D, forms its own yellow community.",
       event: "split",
       eventLabelJa: "分裂",
       eventLabelEn: "Split",
@@ -210,9 +211,9 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 4, target: 7 },
       ],
       description:
-        "t=5: 統合 — C と赤コミュニティーの間に辺 C-E が出現。C は完全に赤コミュニティーに吸収され、{C,D,E,F} の拡大コミュニティーに。",
+        "t=5: 統合 — 辺 C-E が現れ、黄の {C} と赤の {D,E,F} が統合されて {C,D,E,F} になります。",
       descriptionEn:
-        "t=5: Merge — Edge C-E appears. C is fully absorbed into the red community, forming the expanded community {C,D,E,F}.",
+        "t=5: Merge — Edge C-E appears, and the yellow {C} merges with the red {D,E,F} into {C,D,E,F}.",
       event: "merge",
       eventLabelJa: "統合",
       eventLabelEn: "Merge",
@@ -243,9 +244,9 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 5, target: 7 },
       ],
       description:
-        "t=6: 消滅 — ノード I, J が離脱し、H は赤コミュニティーに吸収。緑コミュニティーが消滅。ネットワークは 2 コミュニティー構造に回帰。動的ネットワークではこうしたライフサイクルイベントの追跡が課題となります。",
+        "t=6: 消滅 — ノード I, J が離脱し、辺 F-H が現れて H が赤コミュニティーに吸収され、緑コミュニティーが消滅します。ネットワークは再び 2 コミュニティーになります。こうしたイベントは、連続する時刻のコミュニティーを対応付けて同定します。",
       descriptionEn:
-        "t=6: Death — Nodes I, J leave; H is absorbed into the red community. The green community ceases to exist. The network returns to a 2-community structure. Tracking such lifecycle events is a key challenge in dynamic networks.",
+        "t=6: Death — Nodes I and J leave, and H, now also linked to F, is absorbed into the red community; the green community ceases to exist. The network returns to two communities. Events like these are identified by matching communities across consecutive time steps.",
       event: "death",
       eventLabelJa: "消滅",
       eventLabelEn: "Death",
@@ -379,6 +380,7 @@ export function TemporalCommunityVisualizer({
         label={(step) =>
           isJa ? `t = ${steps[step].t}` : `t = ${steps[step].t}`
         }
+        ariaLabels={stepPlayerAriaLabels(locale)}
       />
     </InteractiveDemo>
   );

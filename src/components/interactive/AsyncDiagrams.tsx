@@ -26,8 +26,8 @@ export function ConcurrencyTaxonomy({ locale = "ja" }: DiagramProps) {
       x: 20,
       color: accent,
       label: locale === "en" ? "Multi-threading" : "マルチスレッド",
-      desc: locale === "en" ? "OS threads, preemptive" : "OSスレッド、プリエンプティブ",
-      langs: "Java, C++, C#",
+      desc: locale === "en" ? "OS threads, preemptive" : "OS スレッド、プリエンプティブ",
+      langs: "C#",
     },
     {
       x: 200,
@@ -73,7 +73,7 @@ export function ConcurrencyTaxonomy({ locale = "ja" }: DiagramProps) {
         <text x={280} y={160} textAnchor="middle" fill={muted} fontSize={10}>
           {locale === "en"
             ? "async/await syntax works across all three models"
-            : "async/await構文は3つのモデルすべてで使える"}
+            : "async/await 構文は 3 つのモデルすべてで使える"}
         </text>
       </svg>
     </div>
@@ -100,8 +100,8 @@ export function EventLoopCycle({ locale = "ja" }: DiagramProps) {
   const phases = [
     { angle: -90, color: green, label: locale === "en" ? "1. Run stack" : "1. スタック実行" },
     { angle: 0, color: purple, label: locale === "en" ? "2. Microtasks" : "2. マイクロタスク" },
-    { angle: 90, color: amber, label: locale === "en" ? "3. One macrotask" : "3. マクロタスク1つ" },
-    { angle: 180, color: blue, label: locale === "en" ? "4. Render?" : "4. レンダリング?" },
+    { angle: 90, color: amber, label: locale === "en" ? "3. Render if needed" : "3. 必要ならレンダリング" },
+    { angle: 180, color: blue, label: locale === "en" ? "4. One macrotask" : "4. マクロタスク 1 つ" },
   ];
 
   return (
@@ -128,15 +128,17 @@ export function EventLoopCycle({ locale = "ja" }: DiagramProps) {
           const rad = (p.angle * Math.PI) / 180;
           const px = cx + r * Math.cos(rad);
           const py = cy + r * Math.sin(rad);
-          const labelX = cx + (r + 65) * Math.cos(rad);
-          const labelY = cy + (r + 65) * Math.sin(rad);
+          // Top and bottom labels go beside their node; placed radially they would leave the viewBox.
+          const vertical = Math.abs(Math.sin(rad)) > 0.9;
+          const labelX = vertical ? px + 22 : cx + (r + 65) * Math.cos(rad);
+          const labelY = vertical ? py : cy + (r + 65) * Math.sin(rad);
           return (
             <g key={i}>
               <circle cx={px} cy={py} r={14} fill={p.color} opacity={0.2} stroke={p.color} strokeWidth={2} />
               <text x={px} y={py + 1} textAnchor="middle" dominantBaseline="middle" fill={p.color} fontSize={11} fontWeight={700}>
                 {i + 1}
               </text>
-              <text x={labelX} y={labelY} textAnchor="middle" dominantBaseline="middle" fill={text} fontSize={10} fontWeight={500}>
+              <text x={labelX} y={labelY} textAnchor={vertical ? "start" : "middle"} dominantBaseline="middle" fill={text} fontSize={10} fontWeight={500}>
                 {p.label}
               </text>
             </g>
@@ -147,8 +149,8 @@ export function EventLoopCycle({ locale = "ja" }: DiagramProps) {
         <rect x={60} y={230} width={320} height={28} rx={6} fill={bg} stroke={purple} strokeWidth={1} />
         <text x={220} y={248} textAnchor="middle" fill={purple} fontSize={10} fontWeight={500}>
           {locale === "en"
-            ? "Microtasks run to exhaustion before any macrotask"
-            : "マイクロタスクはマクロタスクより常に先にすべて実行される"}
+            ? "All microtasks run before the next macrotask"
+            : "マイクロタスクは次のマクロタスクの前にすべて実行される"}
         </text>
 
         <defs>
@@ -248,7 +250,7 @@ export function AsyncComparison({ locale = "ja" }: DiagramProps) {
   const langs = [
     {
       name: "JavaScript",
-      runtime: locale === "en" ? "Event Loop (V8)" : "イベントループ (V8)",
+      runtime: locale === "en" ? "Built-in event loop" : "内蔵のイベントループ",
       syntax: "async/await, Promise",
       model: locale === "en" ? "Single-threaded" : "シングルスレッド",
       color: amber,
@@ -262,7 +264,7 @@ export function AsyncComparison({ locale = "ja" }: DiagramProps) {
     },
     {
       name: "Rust",
-      runtime: "tokio / async-std",
+      runtime: "tokio / smol",
       syntax: "async/await, Future",
       model: locale === "en" ? "Multi-threaded runtime" : "マルチスレッドランタイム",
       color: accent,
@@ -278,7 +280,7 @@ export function AsyncComparison({ locale = "ja" }: DiagramProps) {
       name: "Kotlin",
       runtime: "Dispatchers",
       syntax: "suspend, coroutine",
-      model: locale === "en" ? "Structured concurrency" : "構造化並行性",
+      model: locale === "en" ? "Depends on dispatcher" : "ディスパッチャーによる",
       color: green,
     },
   ];
@@ -287,7 +289,7 @@ export function AsyncComparison({ locale = "ja" }: DiagramProps) {
     <div className="not-prose my-6 flex justify-center">
       <svg viewBox="0 0 580 220" className="w-full max-w-xl">
         <text x={290} y={20} textAnchor="middle" fill={text} fontSize={13} fontWeight={700}>
-          {locale === "en" ? "async/await Across Languages" : "言語ごとのasync/await実装"}
+          {locale === "en" ? "async/await Across Languages" : "言語ごとの async/await 実装"}
         </text>
         {/* Header */}
         {[

@@ -61,7 +61,7 @@ const STEPS: Step[] = [
   {
     pipeline: -1,
     slot: -1,
-    ja: "オプティマイザーが出した物理プランを、Executor が MetaPipeline に分解する。パイプラインの切れ目は「パイプラインブレーカー」— 入力を全部受け取るまで 1 行も返せない演算子（ハッシュ結合の build、集約、ソート）の位置に入る。",
+    ja: "物理プランを Executor が MetaPipeline に分解する。パイプラインの切れ目は「パイプラインブレーカー」— 入力を全部受け取るまで 1 行も返せない演算子（ハッシュ結合の build、集約、ソート）の位置に入る。",
     en: "The Executor decomposes the physical plan into MetaPipelines. The cut points are pipeline breakers — operators that cannot emit a single row until they have consumed all input (hash-join build, aggregation, sort).",
   },
   {
@@ -74,7 +74,7 @@ const STEPS: Step[] = [
     pipeline: 0,
     slot: 0,
     ret: "SourceResultType::HAVE_MORE_OUTPUT",
-    ja: "PipelineExecutor::FetchFromSource() が source の GetData() を呼び、orders から 2048 行の DataChunk を 1 つ受け取る。ここが「プル」なのはパイプラインの先頭だけ。",
+    ja: "PipelineExecutor::FetchFromSource() が source の GetData() を呼び、orders から 2048 行の DataChunk を 1 つ受け取る。パイプラインの中で「プル」するのは、この先頭だけ。",
     en: "PipelineExecutor::FetchFromSource() calls the source's GetData(), pulling one 2048-row DataChunk out of orders. This is the only place in the pipeline that pulls.",
   },
   {
@@ -82,32 +82,32 @@ const STEPS: Step[] = [
     slot: 1,
     ret: "OperatorResultType::NEED_MORE_INPUT",
     ja: "FILTER の Execute() が chunk を受け取り、合致行の添字を SelectionVector に書いて Slice する。行はコピーされない。返り値 NEED_MORE_INPUT は「この入力は使い切った、次をくれ」の意味。",
-    en: "FILTER's Execute() receives the chunk, writes matching indices into a SelectionVector and slices. No rows are copied. NEED_MORE_INPUT means \"I am done with this input, give me the next one\".",
+    en: "FILTER's Execute() receives the chunk, writes matching indices into a SelectionVector and slices. No rows are copied. NEED_MORE_INPUT means \"I am done with this input, give me the next one.\"",
   },
   {
     pipeline: 0,
     slot: 2,
     ret: "SinkResultType::NEED_MORE_INPUT",
-    ja: "sink の Sink() が結合キーをハッシュし、行を TupleDataCollection（行指向レイアウト）に追記する。build 側だけは列指向をやめて行指向にするのが定石 — probe 時に 1 タプルを丸ごと触るから。",
+    ja: "sink の Sink() が結合キーをハッシュし、行を TupleDataCollection（行指向レイアウト）に追記する。build 側はあえて列指向をやめて行指向にする — probe 時に 1 タプルを丸ごと触るから。",
     en: "The sink's Sink() hashes the join keys and appends rows into a TupleDataCollection (row-major layout). The build side deliberately abandons columnar layout because probing touches whole tuples.",
   },
   {
     pipeline: 0,
     slot: -1,
-    ja: "source が枯れると各スレッドが Combine() でローカル状態を global sink state にマージし、全員が終わったところで Executor の finish event が Finalize() を呼ぶ。ここでポインターテーブルが確保され、ハッシュテーブルが完成する。",
+    ja: "source を読み切ると、各スレッドが Combine() でローカル状態を GlobalSinkState にマージし、全スレッドが終わったところで Executor の finish event が Finalize() を呼ぶ。ここでポインターテーブルが確保され、ハッシュテーブルが完成する。",
     en: "Once the source is exhausted each thread merges its local state via Combine(), and when every thread is done the executor's finish event calls Finalize(), which allocates the pointer table and completes the hash table.",
   },
   {
     pipeline: 1,
     slot: -1,
-    ja: "依存が解けたので P2 がスケジュールされる。P2 の中間演算子は HASH_JOIN の probe 側 — 同じ PhysicalHashJoin オブジェクトが、P1 では sink、P2 では operator として二役を演じている。",
+    ja: "依存が満たされたので P2 がスケジュールされる。P2 の中間演算子は HASH_JOIN の probe 側 — 同じ PhysicalHashJoin オブジェクトが、P1 では sink、P2 では operator として二役を演じている。",
     en: "With its dependency satisfied, P2 is scheduled. Its intermediate operator is the probe side of the join — the very same PhysicalHashJoin object acts as a sink in P1 and as an operator in P2.",
   },
   {
     pipeline: 1,
     slot: 0,
     ret: "SourceResultType::HAVE_MORE_OUTPUT",
-    ja: "lineitem から 2048 行。この chunk はスレッドローカルで、他スレッドと共有されない。共有されるのは GlobalSourceState 内の「次に読む row group はどれか」というカーソルだけ。",
+    ja: "lineitem から 2048 行。この chunk はスレッドローカルで、スレッド間で共有されるのは GlobalSourceState 内の「次に読む row group」を指すカーソルだけ。",
     en: "2048 rows from lineitem. The chunk is thread-local; the only shared state is the cursor in GlobalSourceState saying which row group to read next.",
   },
   {
@@ -121,14 +121,14 @@ const STEPS: Step[] = [
     pipeline: 1,
     slot: 2,
     ret: "SinkResultType::NEED_MORE_INPUT",
-    ja: "RadixPartitionedHashTable に流し込む。ハッシュ上位 16 ビット（ソルト用に予約）のすぐ下の radix_bits ビットでパーティションを決め、スレッドローカル HT に書く。ロックは取らない。",
+    ja: "probe の出力 chunk を RadixPartitionedHashTable に流し込む。ハッシュ上位 16 ビット（ソルト用に予約）のすぐ下の radix_bits ビットでパーティションを決め、スレッドローカルなハッシュテーブルに書く。ロックは取らない。",
     en: "The chunk is sunk into the RadixPartitionedHashTable: the radix_bits just below the hash's top 16 salt bits choose a partition, and the row lands in a thread-local hash table. No locks are taken.",
   },
   {
     pipeline: 1,
     slot: 1,
     ret: "OperatorResultType::NEED_MORE_INPUT",
-    ja: "in_process_operators が空でないので、source には戻らず同じ入力 chunk で probe を再入する。残りのマッチが吐き出され、今度こそ NEED_MORE_INPUT。",
+    ja: "in_process_operators が空でないので、source には戻らず、同じ入力 chunk のまま probe を再び呼び出す。残りのマッチが吐き出され、今度こそ NEED_MORE_INPUT。",
     en: "Because in_process_operators is non-empty, the executor re-enters the probe with the same input chunk instead of going back to the source. The remaining matches come out and it finally returns NEED_MORE_INPUT.",
   },
   {
@@ -146,8 +146,8 @@ const STEPS: Step[] = [
   {
     pipeline: 3,
     slot: 1,
-    ja: "P4 でソート結果を読み出し、RESULT_COLLECTOR に渡してクエリー完了。パイプラインごとに source と sink の役割が入れ替わっていくのが push ベースモデルの骨格。",
-    en: "P4 reads the sorted output and hands it to the RESULT_COLLECTOR — query complete. Roles flipping between source and sink from pipeline to pipeline is the skeleton of the push-based model.",
+    ja: "P4 でソート結果を読み出し、RESULT_COLLECTOR に渡してクエリー完了。HASH_GROUP_BY と ORDER_BY は前のパイプラインの sink と次のパイプラインの source を兼ね、P2〜P4 をつないでいる。",
+    en: "P4 reads the sorted output and hands it to the RESULT_COLLECTOR — query complete. HASH_GROUP_BY and ORDER_BY each act as the sink of one pipeline and the source of the next, linking P2 through P4.",
   },
 ];
 
@@ -187,7 +187,7 @@ export function DuckDBPipelineVisualizer({ locale = "ja" }: Props) {
                   <span className="font-mono text-xs font-semibold text-accent">{p.id}</span>
                   {p.dependsOn.length > 0 && (
                     <span className="font-mono text-[10px] text-muted-foreground">
-                      depends on {p.dependsOn.join(", ")}
+                      {isJa ? `${p.dependsOn.join("、")} に依存` : `depends on ${p.dependsOn.join(", ")}`}
                     </span>
                   )}
                   {done && (

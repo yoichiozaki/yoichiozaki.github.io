@@ -78,12 +78,12 @@ function buildSteps(mode: "pull" | "push"): Step[] {
         writes: [i],
         phase: "fill",
         formula: `dp[${i}] = min( ${expr} ) = ${best.v}`,
-        ja: `dp[${i}] を «自分に入ってくる辺» から決めます。候補は ${cands
+        ja: `dp[${i}] を «自分に入ってくる辺» から決めます。参照するのは ${cands
           .map((j) => `dp[${j}]`)
-          .join(" と ")}。小さいほうを採用して dp[${i}] = ${best.v}、直前の石は ${best.j} と記録します。`,
-        en: `Fill dp[${i}] from the edges that point into it. The candidates are ${cands
+          .join(" と ")} で、候補の最小値 ${best.v} を dp[${i}] に入れ、直前の石 ${best.j} を記録します。`,
+        en: `Fill dp[${i}] from the edges that point into it, reading ${cands
           .map((j) => `dp[${j}]`)
-          .join(" and ")}. Take the smaller: dp[${i}] = ${best.v}, coming from stone ${best.j}.`,
+          .join(" and ")}. The smallest candidate, ${best.v} via stone ${best.j}, becomes dp[${i}].`,
       });
     }
   } else {
@@ -109,14 +109,14 @@ function buildSteps(mode: "pull" | "push"): Step[] {
         writes: improved,
         phase: "fill",
         formula: parts.join(",  "),
-        ja: `石 ${i} が確定したので、そこから «出ていく辺» を配ります。${targets
+        ja: `石 ${i} が確定したので、«出ていく辺» の先へ値を配ります。${targets
           .map((j) => `石 ${j}`)
           .join(" と ")} の暫定値を更新できるか調べます。${
           improved.length === 0
             ? "今回はどちらも改善しませんでした。"
             : `${improved.map((j) => `dp[${j}]`).join(" と ")} が改善しました。`
         }`,
-        en: `Stone ${i} is final, so we push along its outgoing edges and try to improve ${targets
+        en: `Stone ${i} is final, so we push along its outgoing edges and try to improve the tentative values at ${targets
           .map((j) => `stone ${j}`)
           .join(" and ")}. ${
           improved.length === 0
@@ -155,8 +155,8 @@ function buildSteps(mode: "pull" | "push"): Step[] {
           : `dp[${node}] を作った直前の石は ${full[k - 1]} でした。from 配列を末尾から辿ると経路が逆順に出てきます。`,
       en:
         k === 0
-          ? `Reconstruction done: the path is ${full.join(" → ")} with total cost ${dp[N - 1]}. The table itself stores only values; the choices come back from the parent array (or by recomputing the argmin).`
-          : `dp[${node}] was produced from stone ${full[k - 1]}. Walking the parent array backwards yields the path in reverse.`,
+          ? `Reconstruction done: the path is ${full.join(" → ")} with total cost ${dp[N - 1]}. The table itself stores only values; from[] (or recomputing the argmin) recovers the choices.`
+          : `dp[${node}] was produced from stone ${full[k - 1]}. Following from[] back from the last stone yields the path in reverse.`,
     });
   }
 
@@ -210,8 +210,8 @@ export function DPTableFillVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "同じ漸化式でも、ループの中で «読む» のか «書く» のかで実装の形が変わります。両方を切り替えて、矢印の向きを比べてください。"
-          : "The same recurrence can be written as a loop that reads into the current cell or one that writes out of it. Toggle between them and watch the arrows flip."
+          ? "同じ漸化式でも、ループの中で «読む» のか «書く» のかで実装の形が変わります。切り替えると、もらう DP では矢印が注目中の石に集まり、配る DP ではそこから出ていきます。"
+          : "The same recurrence can be written as a loop that reads into the current cell or one that writes out of it. Switch modes: in pull DP the arrows converge on the current stone; in push DP they leave it."
       }
     >
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -386,7 +386,7 @@ export function DPTableFillVisualizer({ locale = "ja" }: Props) {
       <div className="mt-3 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
         <div className="rounded-lg border border-border bg-background p-3">
           <div className="text-[10px] font-semibold text-muted-foreground mb-1">
-            {isJa ? "いま適用している式" : "Recurrence applied now"}
+            {isJa ? "いま適用している式" : "Formula applied now"}
           </div>
           <code className="block text-[11px] font-mono text-foreground break-words">
             {s.formula ?? "—"}

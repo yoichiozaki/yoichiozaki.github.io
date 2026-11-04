@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type BPlusTreeVisualizerProps = { locale?: string };
@@ -38,8 +39,8 @@ const steps: TreeState[] = [
     internals: [],
     leaves: [{ id: "L0", keys: [] }],
     description: {
-      ja: "空のB+木（次数4: 各ノード最大3キー）。これからキーを挿入していきます。",
-      en: "Empty B+ tree (order 4: max 3 keys per node). We will insert keys one by one.",
+      ja: "空のB+木（次数4: 各ノード最大3キー）。キーを 1, 4, 7, 10, 17, 21, 31, 25, 19, 20 の順に挿入します。",
+      en: "Empty B+ tree (order 4: max 3 keys per node). Keys are inserted in this order: 1, 4, 7, 10, 17, 21, 31, 25, 19, 20.",
     },
   },
   // Step 1: insert 1
@@ -79,8 +80,8 @@ const steps: TreeState[] = [
       { id: "L1", keys: [7, 10], highlight: "split" },
     ],
     description: {
-      ja: "キー 10 を挿入 → リーフが溢れたので分割！中央値 7 が新しいルート（内部ノード）に昇格します。リーフは [1,4] と [7,10] に分かれます。",
-      en: "Insert key 10 → leaf overflows, so it splits! The middle key 7 is promoted to a new root (internal node). Leaves become [1,4] and [7,10].",
+      ja: "キー 10 を挿入 → リーフが溢れ、[1,4] と [7,10] に分割。新しいルートを作り、そこへ区切りキー 7（右リーフの先頭キー）をコピーします。木の高さが1段増えました。",
+      en: "Insert key 10 → the leaf overflows and splits into [1,4] and [7,10]. Create a new root and copy the separator key 7 (the first key of the right leaf) into it. The tree height increases by one.",
     },
   },
   // Step 5: insert 17
@@ -91,8 +92,8 @@ const steps: TreeState[] = [
       { id: "L1", keys: [7, 10, 17], highlight: "insert" },
     ],
     description: {
-      ja: "キー 17 を挿入。17 ≥ 7 なので右のリーフへ。まだ空きがあります。",
-      en: "Insert key 17. Since 17 ≥ 7, it goes to the right leaf. Still has room.",
+      ja: "キー 17 を挿入。17 ≥ 7 なので右のリーフに入り、このリーフは満杯（3キー）になりました。",
+      en: "Insert key 17. Since 17 ≥ 7, it goes to the right leaf, which is now full (3 keys).",
     },
   },
   // Step 6: insert 21 → split right leaf
@@ -111,8 +112,8 @@ const steps: TreeState[] = [
       { id: "L2", keys: [17, 21], highlight: "split" },
     ],
     description: {
-      ja: "キー 21 を挿入 → 右リーフが溢れて分割。中央値 17 がルートに昇格し、ルートのキーは [7, 17] に。",
-      en: "Insert key 21 → right leaf overflows and splits. Middle key 17 is promoted to root, which becomes [7, 17].",
+      ja: "キー 21 を挿入 → 右リーフが溢れ、[7,10] と [17,21] に分割。区切りキー 17 をルートにコピーし、ルートは [7, 17] になりました。",
+      en: "Insert key 21 → the right leaf overflows and splits into [7,10] and [17,21]. Copy the separator key 17 into the root, which becomes [7, 17].",
     },
   },
   // Step 7: insert 31
@@ -128,12 +129,15 @@ const steps: TreeState[] = [
       en: "Insert key 31. Since 31 ≥ 17, it goes to the rightmost leaf, which is now full.",
     },
   },
-  // Step 8: insert 25 → split rightmost leaf → root splits
+  // Step 8: insert 25 → split rightmost leaf (the root still fits)
   {
     internals: [
-      { id: "I0", keys: [17], children: ["I1", "I2"], highlight: "split" },
-      { id: "I1", keys: [7], children: ["L0", "L1"] },
-      { id: "I2", keys: [25], children: ["L2", "L3"] },
+      {
+        id: "I0",
+        keys: [7, 17, 25],
+        children: ["L0", "L1", "L2", "L3"],
+        highlight: "split",
+      },
     ],
     leaves: [
       { id: "L0", keys: [1, 4], next: "L1" },
@@ -142,16 +146,14 @@ const steps: TreeState[] = [
       { id: "L3", keys: [25, 31], highlight: "split" },
     ],
     description: {
-      ja: "キー 25 を挿入 → リーフ分割 & ルートも満杯なのでルートも分割！木の高さが1段増えました。新ルートは [17]、左子 [7]、右子 [25]。",
-      en: "Insert key 25 → leaf splits AND root is full, so root splits too! Tree height increases by 1. New root is [17], left child [7], right child [25].",
+      ja: "キー 25 を挿入 → 一番右のリーフ [17,21,25,31] が溢れ、[17,21] と [25,31] に分割。区切りキー 25 をルートにコピーし、ルートは [7, 17, 25] になりました。3キーは上限内なので、ルートは分割されません。",
+      en: "Insert key 25 → the rightmost leaf [17,21,25,31] overflows and splits into [17,21] and [25,31]. Copy the separator key 25 into the root, which becomes [7, 17, 25]. Three keys are within the limit, so the root does not split.",
     },
   },
   // Step 9: insert 19
   {
     internals: [
-      { id: "I0", keys: [17], children: ["I1", "I2"] },
-      { id: "I1", keys: [7], children: ["L0", "L1"] },
-      { id: "I2", keys: [25], children: ["L2", "L3"] },
+      { id: "I0", keys: [7, 17, 25], children: ["L0", "L1", "L2", "L3"] },
     ],
     leaves: [
       { id: "L0", keys: [1, 4], next: "L1" },
@@ -161,20 +163,15 @@ const steps: TreeState[] = [
     ],
     description: {
       ja: "キー 19 を挿入。17 ≤ 19 < 25 なのでリーフ [17,21] へ → [17,19,21] に。",
-      en: "Insert key 19. Since 17 ≤ 19 < 25, it goes to leaf [17,21] → becomes [17,19,21].",
+      en: "Insert key 19. Since 17 ≤ 19 < 25, it goes to leaf [17,21], which becomes [17,19,21].",
     },
   },
-  // Step 10: insert 20 → split leaf [17,19,20,21]
+  // Step 10: insert 20 → leaf split propagates to the root
   {
     internals: [
-      { id: "I0", keys: [17], children: ["I1", "I2"] },
-      { id: "I1", keys: [7], children: ["L0", "L1"] },
-      {
-        id: "I2",
-        keys: [20, 25],
-        children: ["L2", "L2b", "L3"],
-        highlight: "split",
-      },
+      { id: "I0", keys: [20], children: ["I1", "I2"], highlight: "split" },
+      { id: "I1", keys: [7, 17], children: ["L0", "L1", "L2"], highlight: "split" },
+      { id: "I2", keys: [25], children: ["L2b", "L3"], highlight: "split" },
     ],
     leaves: [
       { id: "L0", keys: [1, 4], next: "L1" },
@@ -184,16 +181,16 @@ const steps: TreeState[] = [
       { id: "L3", keys: [25, 31] },
     ],
     description: {
-      ja: "キー 20 を挿入 → リーフ [17,19,21] が溢れて分割。中央値 20 が親ノードへ昇格し [20, 25] に。リーフは [17,19] と [20,21] に分かれます。",
-      en: "Insert key 20 → leaf [17,19,21] overflows and splits. Middle key 20 promoted to parent, which becomes [20, 25]. Leaves split into [17,19] and [20,21].",
+      ja: "キー 20 を挿入 → リーフ [17,19,20,21] が溢れ、[17,19] と [20,21] に分割。区切りキー 20 をコピーするとルートが [7,17,20,25]（4キー）になって溢れるので、ルートも分割します。内部ノードの分割では中央のキー 20 をコピーせず新しいルートへ移し、[7,17] と [25] がその子になります。木の高さが1段増えました。",
+      en: "Insert key 20 → leaf [17,19,20,21] overflows and splits into [17,19] and [20,21]. Copying the separator key 20 gives the root four keys, [7,17,20,25], so the root overflows and splits too. An internal split moves the middle key 20 up into a new root instead of copying it, and [7,17] and [25] become its children. The tree height increases by one.",
     },
   },
   // Step 11: range search 10..21
   {
     internals: [
-      { id: "I0", keys: [17], children: ["I1", "I2"], highlight: "search" },
-      { id: "I1", keys: [7], children: ["L0", "L1"], highlight: "search" },
-      { id: "I2", keys: [20, 25], children: ["L2", "L2b", "L3"] },
+      { id: "I0", keys: [20], children: ["I1", "I2"], highlight: "search" },
+      { id: "I1", keys: [7, 17], children: ["L0", "L1", "L2"], highlight: "search" },
+      { id: "I2", keys: [25], children: ["L2b", "L3"] },
     ],
     leaves: [
       { id: "L0", keys: [1, 4], next: "L1" },
@@ -203,8 +200,8 @@ const steps: TreeState[] = [
       { id: "L3", keys: [25, 31] },
     ],
     description: {
-      ja: "範囲検索 [10, 21]：まずルートから 10 を含むリーフへ下り、そこからリーフの連結リストを右に辿ります（→印）。B+木ではリーフが連結されているため、範囲検索が高速です。",
-      en: "Range search [10, 21]: First descend from root to the leaf containing 10, then follow the leaf linked list rightward (→). In B+ trees, linked leaves make range scans fast.",
+      ja: "範囲検索 [10, 21]：ルートから 10 を含むリーフへ下り、リーフの連結リスト（→）を右へたどって、21 を超えるキー（25）で止まります。リーフが連結されているので、内部ノードに戻る必要がありません。",
+      en: "Range scan [10, 21]: descend from the root to the leaf containing 10, then follow the linked leaves (→) to the right, stopping at the first key above 21 (25). Because the leaves are linked, the scan does not need to go back up to the internal nodes.",
     },
   },
 ];
@@ -385,11 +382,11 @@ export function BPlusTreeVisualizer({ locale = "ja" }: BPlusTreeVisualizerProps)
 
   return (
     <InteractiveDemo
-      title={locale === "en" ? "B+ Tree Insert & Range Search" : "B+木の挿入と範囲検索"}
+      title={locale === "en" ? "B+ Tree Insertion and Range Scan" : "B+木の挿入と範囲検索"}
       description={
         locale === "en"
           ? "Step through insertions into an order-4 B+ tree, then see a range scan."
-          : "次数4のB+木へのキー挿入をステップ実行し、最後に範囲検索を確認します。"
+          : "次数4のB+木へのキー挿入をステップ実行し、最後に範囲検索します。"
       }
     >
       <div className="flex justify-center overflow-x-auto">
@@ -579,6 +576,7 @@ export function BPlusTreeVisualizer({ locale = "ja" }: BPlusTreeVisualizerProps)
           const text = locale === "en" ? d.en : d.ja;
           return text.length > 60 ? text.slice(0, 57) + "…" : text;
         }}
+        ariaLabels={stepPlayerAriaLabels(locale)}
       />
     </InteractiveDemo>
   );

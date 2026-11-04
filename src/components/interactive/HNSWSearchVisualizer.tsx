@@ -4,6 +4,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 type Props = { locale?: string };
@@ -90,21 +91,21 @@ const STEPS: Step[] = [
     layer: 2,
     current: "b",
     visited: ["b"],
-    descJa: "最上層 L2 に entry point b から入る。隣人を広く見てクエリーに最も近いノードへジャンプする。",
-    descEn: "Enter at entry point b on the topmost layer L2. Greedily move to the neighbour closest to the query.",
+    descJa: "最上層 L2 にエントリーポイント b から入る。隣人のうちクエリーに最も近いノードへ貪欲に移動する。",
+    descEn: "Enter at entry point b on the topmost layer L2. Greedily move to the neighbor closest to the query.",
   },
   {
     layer: 2,
     current: "f",
     visited: ["b", "f"],
-    descJa: "L2 の隣人 f を評価。クエリーに b より近いので f に移動。L2 は 2 ノードしかないのでここで終了。",
-    descEn: "Evaluate neighbour f in L2. It is closer to the query than b, so move to f. With only 2 nodes in L2, we stop here.",
+    descJa: "L2 の隣人 f を評価。b よりクエリーに近いので f に移動。f の隣人には f よりクエリーに近いものがないので、L2 での探索はここで終了。",
+    descEn: "Evaluate neighbor f in L2. It is closer to the query than b, so move to f. f has no neighbor closer to the query, so the search on L2 stops here.",
   },
   {
     layer: 1,
     current: "f",
     visited: ["f"],
-    descJa: "L2 の最良ノード f を L1 に持ち込み、新しい出発点にする。スカスカなグラフから徐々に濃いグラフへ降りていく。",
+    descJa: "L2 の最良ノード f を L1 に持ち込み、新しい出発点にする。疎なグラフから徐々に密なグラフへ降りていく。",
     descEn: "Carry the best node f down to L1 as the new entry point. We descend from sparse to denser graphs.",
   },
   {
@@ -112,35 +113,35 @@ const STEPS: Step[] = [
     current: "k",
     visited: ["f", "k"],
     descJa: "L1 で f の隣人 d, k を見る。k のほうがクエリーに近いので k へ移動。",
-    descEn: "In L1, inspect neighbours d and k of f. k is closer to the query, so move to k.",
+    descEn: "In L1, inspect neighbors d and k of f. k is closer to the query, so move to k.",
   },
   {
     layer: 1,
     current: "k",
     visited: ["f", "k", "d", "h"],
-    descJa: "k の隣人 d, h も確認したが、どれも k より遠い。L1 での貪欲探索はここで停止。",
-    descEn: "Inspect k's neighbours d and h too, but none beats k. Greedy search on L1 stops here.",
+    descJa: "k の隣人 d, h も確認したが、どちらも k より遠い。L1 での貪欲探索はここで停止。",
+    descEn: "Inspect k's neighbors d and h too, but neither is closer to the query than k. Greedy search on L1 stops here.",
   },
   {
     layer: 0,
     current: "k",
     visited: ["k"],
-    descJa: "最終層 L0 に降りる。ここから ef 個の候補を保つビーム探索に切り替えて、真の top-k を精密化する。",
-    descEn: "Descend to the bottom layer L0. Switch to a beam search that keeps ef candidates and refines the true top-k.",
+    descJa: "最終層 L0 に降りる。ここからは ef 個の候補を保つビームサーチに切り替え、上位 k 件を絞り込む。",
+    descEn: "Descend to the bottom layer L0. Switch to a beam search that keeps ef candidates to refine the top-k results.",
   },
   {
     layer: 0,
     current: "j",
     visited: ["k", "j", "l"],
-    descJa: "k の隣人 j, l を評価。j がクエリーに最接近なので暫定解を j に更新。",
-    descEn: "Evaluate k's neighbours j and l. j is closest to the query so far; update the candidate to j.",
+    descJa: "k の隣人 j, l を評価。j がクエリーに最も近いので、暫定解を j に更新。",
+    descEn: "Evaluate k's neighbors j and l. j is the closest to the query so far, so update the best candidate to j.",
   },
   {
     layer: 0,
     current: "j",
     visited: ["k", "j", "l", "i", "e"],
-    descJa: "j の隣人 i, e も候補プールに追加するが、j 以上に近いものは無い。ef 候補を保持しながら停止条件 (closest-in-candidates ≥ worst-in-top-k) が成立。",
-    descEn: "j's neighbours i and e are pushed into the candidate pool, but none beats j. Keeping ef candidates, the stop condition (closest-in-candidates ≥ worst-in-top-k) holds.",
+    descJa: "j の隣人 i, e も候補集合に加えるが、j より近いものはない。最も近い候補でも、保持している上位 ef 件の最遠より遠くなったので、探索を終える。",
+    descEn: "j's neighbors i and e join the candidate set, but neither is closer than j. Even the closest candidate is now farther than the worst of the ef results kept, so the search stops.",
   },
 ];
 
@@ -154,8 +155,8 @@ export function HNSWSearchVisualizer({ locale = "ja" }: Props) {
       title={isJa ? "HNSW: 3 階層を降りながら最近傍を探す" : "HNSW: greedy descent through 3 layers"}
       description={
         isJa
-          ? "地図の縮尺が切り替わるイメージです。まず世界地図 (L2) で大雑把に近づき、国地図 (L1)、市街地図 (L0) と段階的にズームしていきます。"
-          : "Think of zoom levels on a map. First navigate on the world map (L2), then the country map (L1), then the street map (L0)."
+          ? "赤い q がクエリー、大きな丸が現在の最良ノード、黄色がその層で評価したノードです。上の層ほどノードが少なく、各層の最良ノードが 1 つ下の層の出発点になります。"
+          : "Red q is the query, the large dot is the current best node, and yellow dots are nodes evaluated on that layer. Upper layers have fewer nodes, and each layer's best node becomes the entry point one layer down."
       }
     >
       <div className="flex flex-col gap-4">
@@ -191,7 +192,7 @@ export function HNSWSearchVisualizer({ locale = "ja" }: Props) {
           {isJa ? s.descJa : s.descEn}
         </div>
 
-        <StepPlayerControls {...player} />
+        <StepPlayerControls {...player} ariaLabels={stepPlayerAriaLabels(locale)} />
       </div>
     </InteractiveDemo>
   );

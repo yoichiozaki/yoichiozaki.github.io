@@ -176,7 +176,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
             ? "受理側は «いちばん良い申し込み» を仮に保持し、それ以外を断ります。"
             : "即時受入では、受理側は受け入れた申し込みを «その場で確定» します。"
         }`,
-        en: `Everyone starts free. The proposers (${pName(0)}–${pName(P.length - 1)}) apply down their lists from the top. ${
+        en: `Everyone starts free. The proposers (${pName(0)}–${pName(P.length - 1)}) propose down their lists from the top. ${
           mechanism === "da"
             ? "Each receiver tentatively holds the best offer so far and rejects the rest."
             : "Under immediate acceptance, a receiver's acceptance is final on the spot."
@@ -192,7 +192,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
         const losers = incoming.filter((x) => x.outcome !== "held").map((x) => pName(x.p));
         if (won) {
           parts.push({
-            ja: `${rName(r)} は ${incoming.map((x) => pName(x.p)).join("・")} の中から ${pName(won.p)} を確定で受け入れ${
+            ja: `${rName(r)} は ${incoming.map((x) => pName(x.p)).join("・")} から申し込みを受け、${pName(won.p)} の受け入れを確定し${
               losers.length ? `、${losers.join("・")} を断ります` : "ます"
             }。`,
             en: `${rName(r)} accepts ${pName(won.p)} for good${
@@ -201,7 +201,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
           });
         } else {
           parts.push({
-            ja: `${rName(r)} はすでに ${pName(held[r][0])} で埋まっているので、${losers.join("・")} を断ります（席が空いていない）。`,
+            ja: `${rName(r)} はすでに ${pName(held[r][0])} で埋まっているので、${losers.join("・")} のほうを好んでいても断ります。`,
             en: `${rName(r)} is already filled by ${pName(held[r][0])}, so it turns away ${losers.join(", ")} — no matter how much it would prefer them.`,
           });
         }
@@ -235,7 +235,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
       }
       return {
         ja: `ラウンド ${step.round}: フリーな全員が同時に申し込みます — ${list}。${parts.map((x) => x.ja).join("")}`,
-        en: `Round ${step.round}: every free proposer applies at once — ${list}. ${parts
+        en: `Round ${step.round}: every free proposer proposes at once — ${list}. ${parts
           .map((x) => x.en)
           .join(" ")}`,
       };
@@ -245,7 +245,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
     const d = step.displaced[0];
     if (outcome === "held" && d) {
       return {
-        ja: `${pName(p)} が ${rName(r)} に申し込み（${ord(k)}）。${rName(r)} は ${pName(d.p)} を仮保持していましたが、${rName(r)} の好みでは ${pName(p)}（${rankR[r][p] + 1} 位）が ${pName(d.p)}（${rankR[r][d.p] + 1} 位）より上。${pName(d.p)} を手放して ${pName(p)} に乗り換えます。${pName(d.p)} はフリーに戻り、リストの次の相手へ進みます。`,
+        ja: `${pName(p)} が ${rName(r)} に申し込み（${ord(k)}）。${rName(r)} は ${pName(d.p)} を仮に保持していましたが、${rName(r)} の好みでは ${pName(p)}（${rankR[r][p] + 1} 位）が ${pName(d.p)}（${rankR[r][d.p] + 1} 位）より上。${pName(d.p)} を手放して ${pName(p)} に乗り換えます。${pName(d.p)} はフリーに戻り、リストの次の相手へ進みます。`,
         en: `${pName(p)} proposes to ${rName(r)} (${ord(k)}). ${rName(r)} was holding ${pName(d.p)}, but ranks ${pName(p)} #${rankR[r][p] + 1} above ${pName(d.p)} #${rankR[r][d.p] + 1}, so it trades up. ${pName(d.p)} is free again and moves on down their list.`,
       };
     }
@@ -419,7 +419,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "提案側・提案順序・受入方式を切り替えて再生できます。好みのチップをクリックすると 1 つ上に繰り上がり、好みを自由に編集できます。"
+          ? "提案側・提案の順序・受入方式を切り替えて再生できます。好みのチップをクリックすると 1 つ上に繰り上がり、好みを自由に編集できます。"
           : "Switch the proposing side, the proposal order and the acceptance rule, then play. Click any chip in a list to move it up one place and edit preferences."
       }
     >
@@ -496,8 +496,8 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
             role="img"
             aria-label={
               isJa
-                ? `現在の仮マッチング: ${code}`
-                : `Current tentative matching: ${code}`
+                ? `現在の組: ${code}`
+                : `Current pairs: ${code}`
             }
           >
             <defs>
@@ -607,7 +607,9 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
           {isJa ? "次に申し込む相手" : "next proposal"}
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block w-5 border-t-2 border-dashed border-foreground/50" />
+          <span
+            className={`inline-block w-5 border-t-2 ${mechanism === "da" ? "border-dashed" : "border-solid"} border-foreground/50`}
+          />
           {mechanism === "da"
             ? isJa
               ? "仮の保持（まだ覆りうる）"
@@ -620,7 +622,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
           <span className="font-bold" style={{ color: REJECT_HEX }}>
             ×
           </span>
-          {isJa ? "拒否・手放し" : "rejection / dropped"}
+          {isJa ? "拒否・手放し" : "rejected / dropped"}
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="inline-block h-0.5 w-5" style={{ backgroundColor: STABLE_HEX }} />
@@ -650,7 +652,7 @@ export function GaleShapleyVisualizer({ locale = "ja" }: Props) {
               {mechanism === "da" && (
                 <span className="text-muted-foreground">
                   {isJa
-                    ? ` / 上限 ${n * n - n + 1}（n²−n+1）`
+                    ? ` / 上界 ${n * n - n + 1}（n²−n+1）`
                     : ` / bound ${n * n - n + 1} (n²−n+1)`}
                 </span>
               )}

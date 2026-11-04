@@ -81,7 +81,7 @@ export function SchoolChoiceTradeoff({ locale = "ja" }: Props) {
       description={
         isJa
           ? "学校 a, b, c（定員 1）と生徒 1, 2, 3。受入保留の結果、1 と 2 が交換した結果、トップ・トレーディング・サイクル（TTC）の結果を切り替え、«正当な羨望»（ブロッキングペア）と «誰も損をしない改善» の有無を比べます。"
-          : "Schools a, b, c (one seat each) and students 1, 2, 3. Switch between the deferred-acceptance outcome, the outcome after 1 and 2 swap, and top trading cycles (TTC), and compare justified envy (blocking pairs) with the existence of an improvement that hurts nobody."
+          : "Schools a, b, c (one seat each) and students 1, 2, 3. Switch between the deferred-acceptance outcome, the outcome after 1 and 2 swap, and top trading cycles (TTC), and check each for justified envy (blocking pairs) and for an improvement that hurts nobody."
       }
     >
       <div className="mb-3 flex flex-col gap-2">
@@ -126,7 +126,7 @@ export function SchoolChoiceTradeoff({ locale = "ja" }: Props) {
               {inst.hospitals.map((list, h) => (
                 <tr key={`h${h}`}>
                   <td className="py-0.5 pr-2 font-sans text-muted-foreground">
-                    {isJa ? `学校 ${SCHOOLS[h]} の優先順位` : `school ${SCHOOLS[h]} priority`}
+                    {isJa ? `学校 ${SCHOOLS[h]} の優先順位` : `school ${SCHOOLS[h]} prioritizes`}
                   </td>
                   <td className="py-0.5">{list.map((s) => STUDENTS[s]).join(" > ")}</td>
                 </tr>
@@ -145,8 +145,8 @@ export function SchoolChoiceTradeoff({ locale = "ja" }: Props) {
             aria-label={
               view === "ttc"
                 ? isJa
-                  ? `TTC ラウンド ${round + 1} の指し先`
-                  : `TTC round ${round + 1} pointers`
+                  ? `TTC ラウンド ${round + 1} で各生徒・各学校が指す相手`
+                  : `Who points to whom in TTC round ${round + 1}`
                 : code(match)
             }
           >
@@ -318,8 +318,8 @@ export function SchoolChoiceTradeoff({ locale = "ja" }: Props) {
           >
             {improvement === null
               ? isJa
-                ? "✓ 誰も損をせずに誰かが得をする組み替えはない — パレート効率的"
-                : "✓ No reassignment makes someone better off without hurting anyone — Pareto efficient"
+                ? "✓ 誰も損をせずに誰かが得をする組み替えはない — 生徒にとってパレート効率的"
+                : "✓ No reassignment makes someone better off without hurting anyone — Pareto efficient for students"
               : isJa
                 ? `✗ 誰も損をしない改善がある: ${code(improvement)}`
                 : `✗ An improvement that hurts nobody exists: ${code(improvement)}`}

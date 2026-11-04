@@ -40,7 +40,7 @@ const paradigms: Paradigm[] = [
     strengths: "直感的・ハードウェアに近い・高速",
     strengthsEn: "Intuitive, close to hardware, fast",
     weaknesses: "状態管理が複雑化・並行処理が困難",
-    weaknessesEn: "Complex state management, hard concurrency",
+    weaknessesEn: "Complex state management, difficult concurrency",
     languages: "C, Pascal, FORTRAN, BASIC",
   },
   {
@@ -53,10 +53,10 @@ const paradigms: Paradigm[] = [
     stateModel: "オブジェクト内にカプセル化された状態",
     stateModelEn: "State encapsulated within objects",
     controlFlow: "メッセージパッシング + メソッド呼び出し",
-    controlFlowEn: "Message passing + method dispatch",
+    controlFlowEn: "Message passing + method calls",
     composition: "継承・コンポジション・委譲",
     compositionEn: "Inheritance, composition, delegation",
-    strengths: "現実世界のモデル化・再利用性・設計パターン",
+    strengths: "現実世界のモデル化・再利用性・デザインパターン",
     strengthsEn: "Real-world modeling, reusability, design patterns",
     weaknesses: "深い継承階層・過剰設計のリスク",
     weaknessesEn: "Deep hierarchies, over-engineering risk",
@@ -75,10 +75,10 @@ const paradigms: Paradigm[] = [
     controlFlowEn: "Recursion + pattern matching + higher-order functions",
     composition: "関数合成（f ∘ g）",
     compositionEn: "Function composition (f ∘ g)",
-    strengths: "テスト容易・並行安全・数学的推論",
-    strengthsEn: "Easy testing, concurrency-safe, mathematical reasoning",
-    weaknesses: "学習曲線・パフォーマンスの予測が困難",
-    weaknessesEn: "Learning curve, harder performance prediction",
+    strengths: "テスト容易・並行処理が安全・等式推論",
+    strengthsEn: "Easy testing, safe concurrency, equational reasoning",
+    weaknesses: "習得に時間がかかる・性能を予測しにくい",
+    weaknessesEn: "Steep learning curve, hard-to-predict performance",
     languages: "Haskell, Erlang, Elixir, OCaml, F#",
   },
   {
@@ -86,18 +86,18 @@ const paradigms: Paradigm[] = [
     name: "論理型",
     nameEn: "Logic",
     color: "#f59e0b",
-    coreIdea: "事実とルールから推論エンジンが解を探索",
+    coreIdea: "事実と規則から推論エンジンが解を探索",
     coreIdeaEn: "Inference engine searches for solutions from facts and rules",
     stateModel: "知識ベース（事実の集合）",
     stateModelEn: "Knowledge base (set of facts)",
     controlFlow: "ユニフィケーション + バックトラッキング",
     controlFlowEn: "Unification + backtracking",
-    composition: "ルールの連鎖",
+    composition: "規則の連鎖",
     compositionEn: "Rule chaining",
     strengths: "宣言的な問題記述・探索問題に強い",
     strengthsEn: "Declarative problem description, strong at search problems",
     weaknesses: "汎用用途には非効率・デバッグが困難",
-    weaknessesEn: "Inefficient for general-purpose, hard debugging",
+    weaknessesEn: "Inefficient for general-purpose tasks, hard to debug",
     languages: "Prolog, Datalog, Mercury",
   },
   {
@@ -115,9 +115,9 @@ const paradigms: Paradigm[] = [
     compositionEn: "Stream composition",
     strengths: "非同期処理・UI・リアルタイムデータ",
     strengthsEn: "Async processing, UI, real-time data",
-    weaknesses: "デバッグが困難・学習コスト",
-    weaknessesEn: "Hard debugging, learning cost",
-    languages: "RxJS, Elm, React (部分的)",
+    weaknesses: "デバッグが困難・学習コストが高い",
+    weaknessesEn: "Hard to debug, steep learning curve",
+    languages: "RxJS, Elm, React",
   },
 ];
 
@@ -128,7 +128,7 @@ const fields = [
   { key: "composition", label: "合成の仕方", labelEn: "Composition" },
   { key: "strengths", label: "強み", labelEn: "Strengths" },
   { key: "weaknesses", label: "弱み", labelEn: "Weaknesses" },
-  { key: "languages", label: "代表的な言語", labelEn: "Languages" },
+  { key: "languages", label: "代表例", labelEn: "Examples" },
 ] as const;
 
 type ParadigmComparisonProps = { locale?: string };
@@ -157,7 +157,7 @@ export function ParadigmComparison({ locale = "ja" }: ParadigmComparisonProps) {
       description={
         isEn
           ? "Select 1–3 paradigms to compare side by side."
-          : "1〜3 つのパラダイムを選んで比較しましょう。"
+          : "1〜3 つのパラダイムを選ぶと、表に並べて比較できます。"
       }
     >
       <div className="flex flex-col gap-4">

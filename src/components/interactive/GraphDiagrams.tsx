@@ -65,13 +65,13 @@ export function GraphRepresentationDiagram({ locale = "ja" }: DiagramProps) {
             </p>
             <p>
               {locale === "ja"
-                ? "辺の存在確認: O(degree)"
-                : "Edge lookup: O(degree)"}
+                ? "隣接頂点の列挙・辺の存在確認: O(degree)"
+                : "Neighbor listing, edge lookup: O(degree)"}
             </p>
             <p>
               {locale === "ja"
-                ? "✅ 疎グラフに最適"
-                : "✅ Best for sparse graphs"}
+                ? "✅ 疎グラフ向き"
+                : "✅ Suited to sparse graphs"}
             </p>
           </div>
         </div>
@@ -125,13 +125,13 @@ export function GraphRepresentationDiagram({ locale = "ja" }: DiagramProps) {
             </p>
             <p>
               {locale === "ja"
-                ? "辺の存在確認: O(1)"
-                : "Edge lookup: O(1)"}
+                ? "隣接頂点の列挙: O(V)、辺の存在確認: O(1)"
+                : "Neighbor listing: O(V); edge lookup: O(1)"}
             </p>
             <p>
               {locale === "ja"
-                ? "✅ 密グラフに最適"
-                : "✅ Best for dense graphs"}
+                ? "✅ 密グラフ向き"
+                : "✅ Suited to dense graphs"}
             </p>
           </div>
         </div>
@@ -165,17 +165,17 @@ export function TraversalComparisonTable({ locale = "ja" }: DiagramProps) {
           },
           {
             aspect: "メモリー使用量",
-            bfs: "O(V) — 幅が広いと大量に",
+            bfs: "O(V) — 幅が広いと大きくなる",
             dfs: "O(V) — 深さ分のスタック",
           },
           {
-            aspect: "計算量",
+            aspect: "時間計算量",
             bfs: "O(V + E)",
             dfs: "O(V + E)",
           },
           {
             aspect: "代表的な用途",
-            bfs: "最短経路、レベル探索、ネットワーク解析",
+            bfs: "最短経路、k ホップ以内のノード列挙、二部グラフ判定",
             dfs: "サイクル検出、トポロジカルソート、迷路生成",
           },
           {
@@ -212,7 +212,7 @@ export function TraversalComparisonTable({ locale = "ja" }: DiagramProps) {
           },
           {
             aspect: "Typical Uses",
-            bfs: "Shortest path, level traversal, network analysis",
+            bfs: "Shortest path, nodes within k hops, bipartiteness testing",
             dfs: "Cycle detection, topological sort, maze generation",
           },
           {
@@ -271,7 +271,7 @@ export function TraversalApplicationsDiagram({ locale = "ja" }: DiagramProps) {
           {
             icon: "🗺️",
             title: "最短経路探索",
-            desc: "カーナビ、ゲームAI のパスファインディング",
+            desc: "カーナビ、ゲーム AI のパスファインディング",
             algo: "BFS / Dijkstra / A*",
             color: "blue",
           },
@@ -405,31 +405,31 @@ export function GraphComplexityTable({ locale = "ja" }: DiagramProps) {
             algo: "BFS",
             time: "O(V + E)",
             space: "O(V)",
-            note: "全頂点+全辺を1回ずつ処理",
+            note: "各頂点と隣接リストの各要素を 1 回ずつ処理",
           },
           {
             algo: "DFS",
             time: "O(V + E)",
             space: "O(V)",
-            note: "再帰の深さは最大V",
+            note: "再帰の深さは最大 V",
           },
           {
             algo: "Dijkstra (二分ヒープ)",
             time: "O((V + E) log V)",
             space: "O(V)",
-            note: "ヒープ操作が log V",
+            note: "ヒープ操作 1 回が O(log V)",
           },
           {
             algo: "Dijkstra (フィボナッチヒープ)",
             time: "O(V log V + E)",
             space: "O(V)",
-            note: "理論的に最速だが実装が複雑",
+            note: "二分ヒープ版より理論上の計算量が小さいが、実装が複雑",
           },
           {
             algo: "Bellman-Ford",
             time: "O(VE)",
             space: "O(V)",
-            note: "負の辺に対応。V-1回の緩和",
+            note: "負の辺に対応。全辺の緩和を V-1 回繰り返す",
           },
         ]
       : [
@@ -437,7 +437,7 @@ export function GraphComplexityTable({ locale = "ja" }: DiagramProps) {
             algo: "BFS",
             time: "O(V + E)",
             space: "O(V)",
-            note: "Processes each vertex and edge once",
+            note: "Processes each vertex and adjacency-list entry once",
           },
           {
             algo: "DFS",
@@ -449,13 +449,13 @@ export function GraphComplexityTable({ locale = "ja" }: DiagramProps) {
             algo: "Dijkstra (binary heap)",
             time: "O((V + E) log V)",
             space: "O(V)",
-            note: "Heap operations cost log V",
+            note: "Each heap operation costs O(log V)",
           },
           {
             algo: "Dijkstra (Fibonacci heap)",
             time: "O(V log V + E)",
             space: "O(V)",
-            note: "Theoretically fastest but complex",
+            note: "Smaller theoretical bound than the binary heap, but complex to implement",
           },
           {
             algo: "Bellman-Ford",

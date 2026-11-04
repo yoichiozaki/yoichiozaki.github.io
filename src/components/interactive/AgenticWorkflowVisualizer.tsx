@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -50,10 +51,20 @@ const NODES: ExecutorNode[] = [
 const EDGES: [string, string, string][] = [
   ["input", "writer", ""],
   ["writer", "critic", ""],
-  ["critic", "writer", "❌ reject"],
-  ["critic", "summary", "✅ approve"],
+  ["critic", "writer", "❌ 拒否"],
+  ["critic", "summary", "✅ 承認"],
   ["summary", "output", ""],
 ];
+
+const EDGE_LABEL_EN: Record<string, string> = {
+  "❌ 拒否": "❌ reject",
+  "✅ 承認": "✅ approve",
+  数学: "Math",
+  歴史: "History",
+  戻る: "Back",
+};
+
+const isLoopEdge = (from: string, to: string) => from === "critic" && to === "writer";
 
 function buildWriterCriticScenario(): WorkflowStep[] {
   return [
@@ -62,9 +73,9 @@ function buildWriterCriticScenario(): WorkflowStep[] {
       activeEdges: [],
       messages: [],
       description:
-        "ワークフロー開始: ユーザーが「AI倫理に関する200語のブログ記事を書いて」と入力します。WorkflowBuilder が構築したグラフに従い、最初の Executor（Writer）にメッセージが送られます。",
+        "ワークフロー開始: ユーザーが「AI 倫理に関する 200 語のブログ記事を書いて」と入力します。このメッセージは、WorkflowBuilder のコンストラクターでエントリーポイントに指定した Writer に送られます。",
       descriptionEn:
-        "Workflow start: The user inputs 'Write a 200-word blog post about AI ethics.' The message is routed to the first Executor (Writer) following the graph built by WorkflowBuilder.",
+        "Workflow start: The user enters 'Write a 200-word blog post about AI ethics.' The message goes to Writer, the entry point passed to the WorkflowBuilder constructor.",
     },
     {
       activeNodes: ["input", "writer"],
@@ -82,15 +93,15 @@ function buildWriterCriticScenario(): WorkflowStep[] {
       activeEdges: [],
       messages: [],
       description:
-        "Writer（イテレーション1）: ChatClientAgent が LLM からストリーミングレスポンスを受け取り、記事を生成中。FlowState の共有ステートに会話履歴を保存します。IWorkflowContext.ReadStateAsync / QueueStateUpdateAsync で Executor 間のステート共有が実現されています。",
+        "Writer（イテレーション 1）: ChatClientAgent が LLM のストリーミング応答を受け取り、記事を生成します。Writer は共有ステートの FlowState を ReadStateAsync で読み、生成した記事を History に追加して QueueStateUpdateAsync で書き戻します。",
       descriptionEn:
-        "Writer (Iteration 1): ChatClientAgent receives a streaming response from the LLM and generates the article. Conversation history is saved to FlowState shared state via IWorkflowContext.ReadStateAsync / QueueStateUpdateAsync for cross-executor state sharing.",
+        "Writer (Iteration 1): ChatClientAgent receives a streaming response from the LLM and generates the article. Writer reads the shared FlowState with ReadStateAsync, adds the article to FlowState.History, and writes the state back with QueueStateUpdateAsync.",
     },
     {
       activeNodes: ["writer", "critic"],
       activeEdges: [["writer", "critic"]],
       messages: [
-        { id: 2, from: "writer", to: "critic", label: "記事v1", labelEn: "Article v1", color: "#3b82f6" },
+        { id: 2, from: "writer", to: "critic", label: "記事 v1", labelEn: "Article v1", color: "#3b82f6" },
       ],
       description:
         "Writer が記事 v1 を出力。AddEdge(writer, critic) で定義された Direct Edge に沿って、ChatMessage が Critic Executor に配送されます。",
@@ -102,7 +113,7 @@ function buildWriterCriticScenario(): WorkflowStep[] {
       activeEdges: [],
       messages: [],
       description:
-        "Critic（イテレーション1）: CriticExecutor が記事を受け取り、ChatClientAgent に Structured Output（ChatResponseFormat.ForJsonSchema<CriticDecision>()）でレビューを依頼。LLM は { approved: false, feedback: \"具体例を追加してください\" } を返します。",
+        "Critic（イテレーション 1）: CriticExecutor が記事を受け取り、ChatClientAgent に Structured Output（ChatResponseFormat.ForJsonSchema<CriticDecision>()）でレビューを依頼。LLM は { approved: false, feedback: \"具体例を追加してください\" } を返します。",
       descriptionEn:
         "Critic (Iteration 1): CriticExecutor receives the article and requests a review from ChatClientAgent with Structured Output (ChatResponseFormat.ForJsonSchema<CriticDecision>()). The LLM returns { approved: false, feedback: 'Add specific examples' }.",
     },
@@ -113,24 +124,24 @@ function buildWriterCriticScenario(): WorkflowStep[] {
         { id: 3, from: "critic", to: "writer", label: "❌ 修正要求", labelEn: "❌ Revise", color: "#ef4444" },
       ],
       description:
-        "Critic が拒否判定。AddSwitch で定義された条件分岐 cd.Approved == false により、CriticDecision が Writer に戻されます。Writer の HandleRevisionRequestAsync（CriticDecision 型のメッセージハンドラー）がフィードバック付きで再実行されます。",
+        "Critic が拒否判定。FlowState.Iteration（1）は、自動承認の安全弁が働く MaxIterations（3）未満なので、Critic は Iteration を 2 に増やします。AddSwitch の条件 cd.Approved == false により CriticDecision が Writer に戻り、CriticDecision 型を受け取る HandleRevisionAsync が呼ばれます。",
       descriptionEn:
-        "Critic rejects. The conditional branch defined by AddSwitch (cd.Approved == false) routes the CriticDecision back to Writer. Writer's HandleRevisionRequestAsync (a [MessageHandler] for CriticDecision type) re-executes with feedback.",
+        "Critic rejects. FlowState.Iteration (1) is below MaxIterations (3), where the safety valve would auto-approve, so the Critic increments Iteration to 2. The AddSwitch condition cd.Approved == false routes the CriticDecision back to Writer, whose HandleRevisionAsync (the [MessageHandler] for CriticDecision) runs with the feedback.",
     },
     {
       activeNodes: ["writer"],
       activeEdges: [],
       messages: [],
       description:
-        "Writer（イテレーション2）: フィードバック「具体例を追加してください」を受けて、修正プロンプトを生成し LLM に再送信します。FlowState.Iteration がインクリメントされ、安全弁として MaxIterations（3回）チェックが行われます。",
+        "Writer（イテレーション 2）: フィードバック「具体例を追加してください」と元の記事から修正プロンプトを組み立て、LLM にもう一度送ります。",
       descriptionEn:
-        "Writer (Iteration 2): Receives the feedback 'Add specific examples', generates a revision prompt, and re-sends to the LLM. FlowState.Iteration is incremented, with a MaxIterations (3) safety check.",
+        "Writer (Iteration 2): Builds a revision prompt from the feedback 'Add specific examples' and the original article, and sends it to the LLM again.",
     },
     {
       activeNodes: ["writer", "critic"],
       activeEdges: [["writer", "critic"]],
       messages: [
-        { id: 4, from: "writer", to: "critic", label: "記事v2", labelEn: "Article v2", color: "#3b82f6" },
+        { id: 4, from: "writer", to: "critic", label: "記事 v2", labelEn: "Article v2", color: "#3b82f6" },
       ],
       description:
         "Writer が改善された記事 v2 を出力。再び Direct Edge 経由で Critic に配送されます。",
@@ -142,7 +153,7 @@ function buildWriterCriticScenario(): WorkflowStep[] {
       activeEdges: [],
       messages: [],
       description:
-        "Critic（イテレーション2）: 再度 Structured Output でレビュー。今回は具体例が追加されており、{ approved: true, feedback: \"\" } を返します。",
+        "Critic（イテレーション 2）: 再度 Structured Output でレビュー。今回は具体例が追加されており、{ approved: true, feedback: \"\" } を返します。",
       descriptionEn:
         "Critic (Iteration 2): Reviews again with Structured Output. This time specific examples are added, and it returns { approved: true, feedback: '' }.",
     },
@@ -153,7 +164,7 @@ function buildWriterCriticScenario(): WorkflowStep[] {
         { id: 5, from: "critic", to: "summary", label: "✅ 承認", labelEn: "✅ Approved", color: "#10b981" },
       ],
       description:
-        "Critic が承認。AddSwitch の cd.Approved == true 条件により、CriticDecision が Summary Executor にルーティングされます。条件分岐はラムダ式 (cd => cd?.Approved == true) で表現され、型安全にメッセージの内容で分岐できます。",
+        "Critic が承認。AddSwitch の cd.Approved == true 条件により、CriticDecision が Summary Executor にルーティングされます。条件分岐はラムダ式（cd => cd?.Approved == true）で表現され、型安全にメッセージの内容で分岐できます。",
       descriptionEn:
         "Critic approves. The AddSwitch condition cd.Approved == true routes the CriticDecision to the Summary Executor. Conditional branching is expressed as a lambda (cd => cd?.Approved == true), enabling type-safe routing based on message content.",
     },
@@ -162,9 +173,9 @@ function buildWriterCriticScenario(): WorkflowStep[] {
       activeEdges: [],
       messages: [],
       description:
-        "Summary Executor: 最終承認されたコンテンツを整形して出力します。context.YieldOutputAsync() でワークフローの最終出力としてマークします。WithOutputFrom(summary) の設定により、この Executor の出力がワークフロー全体の出力となります。",
+        "Summary Executor: 承認された記事を整形し、context.YieldOutputAsync() で出力します。WithOutputFrom(summary) を指定しているので、この Executor の出力がワークフロー全体の出力になります。",
       descriptionEn:
-        "Summary Executor: Formats and outputs the final approved content. context.YieldOutputAsync() marks it as the workflow's final output. The WithOutputFrom(summary) configuration makes this executor's output the workflow's overall output.",
+        "Summary Executor: Formats the approved article and outputs it with context.YieldOutputAsync(). Because of WithOutputFrom(summary), this Executor's output becomes the workflow's overall output.",
     },
     {
       activeNodes: ["summary", "output"],
@@ -173,9 +184,9 @@ function buildWriterCriticScenario(): WorkflowStep[] {
         { id: 6, from: "summary", to: "output", label: "完成記事", labelEn: "Final Article", color: "#10b981" },
       ],
       description:
-        "ワークフロー完了: WorkflowOutputEvent が発火し、ストリーミングモードで最終コンテンツがクライアントに配信されます。InProcessExecution.RunStreamingAsync() が StreamingRun を返し、WatchStreamAsync() でリアルタイムにイベントを購読できます。",
+        "ワークフロー完了: 最終コンテンツは WorkflowOutputEvent でクライアントに届きます（InProcessExecution.RunStreamingAsync() が返す StreamingRun の WatchStreamAsync() で受信）。配送待ちのメッセージがなくなり、外部入力も待っていないので、ワークフローは完了します。",
       descriptionEn:
-        "Workflow complete: WorkflowOutputEvent fires, and the final content is delivered to the client in streaming mode. InProcessExecution.RunStreamingAsync() returns a StreamingRun, and WatchStreamAsync() subscribes to events in real-time.",
+        "Workflow complete: The final content reaches the client in a WorkflowOutputEvent, received through WatchStreamAsync() on the StreamingRun returned by InProcessExecution.RunStreamingAsync(). No messages remain to be delivered and the workflow is not waiting for external input, so it completes.",
     },
   ];
 }
@@ -236,18 +247,20 @@ function EdgeLine({
   label,
   active,
   nodes,
+  paired = false,
 }: {
   from: string;
   to: string;
   label: string;
   active: boolean;
   nodes: ExecutorNode[];
+  paired?: boolean;
 }) {
   const fromNode = nodes.find((n) => n.id === from);
   const toNode = nodes.find((n) => n.id === to);
   if (!fromNode || !toNode) return null;
 
-  const isLoop = from === "critic" && to === "writer";
+  const isLoop = isLoopEdge(from, to);
 
   let path: string;
   let labelX: number;
@@ -264,13 +277,16 @@ function EdgeLine({
     const dist = Math.sqrt(dx * dx + dy * dy);
     const nx = dx / dist;
     const ny = dy / dist;
-    const startX = fromNode.x + nx * 50;
-    const startY = fromNode.y + ny * 28;
-    const endX = toNode.x - nx * 50;
-    const endY = toNode.y - ny * 28;
+    // A pair of opposite edges would share one segment, so shift each to its own side.
+    const ox = paired ? -ny * 6 : 0;
+    const oy = paired ? nx * 6 : 0;
+    const startX = fromNode.x + nx * 50 + ox;
+    const startY = fromNode.y + ny * 28 + oy;
+    const endX = toNode.x - nx * 50 + ox;
+    const endY = toNode.y - ny * 28 + oy;
     path = `M ${startX} ${startY} L ${endX} ${endY}`;
-    labelX = (startX + endX) / 2;
-    labelY = (startY + endY) / 2 - 8;
+    labelX = (startX + endX) / 2 + (paired ? -ny * 10 : 0);
+    labelY = (startY + endY) / 2 + (paired ? nx * 10 : -8);
   }
 
   return (
@@ -289,6 +305,7 @@ function EdgeLine({
           x={labelX}
           y={labelY}
           textAnchor="middle"
+          dominantBaseline={paired ? "middle" : undefined}
           fill={active ? "var(--color-foreground)" : "var(--color-muted-foreground)"}
           fontSize={9}
           className="transition-colors duration-300"
@@ -335,9 +352,9 @@ function MessageBubble({ msg, nodes }: { msg: Message; nodes: ExecutorNode[] }) 
 
 const SEQ_NODES: ExecutorNode[] = [
   { id: "input", label: "入力", labelEn: "Input", color: "#6366f1", x: 50, y: 120, icon: "💬" },
-  { id: "fr", label: "French翻訳", labelEn: "French", color: "#3b82f6", x: 190, y: 120, icon: "🇫🇷" },
-  { id: "es", label: "Spanish翻訳", labelEn: "Spanish", color: "#f59e0b", x: 350, y: 120, icon: "🇪🇸" },
-  { id: "en", label: "English翻訳", labelEn: "English", color: "#10b981", x: 510, y: 120, icon: "🇬🇧" },
+  { id: "fr", label: "French", labelEn: "French", color: "#3b82f6", x: 190, y: 120, icon: "🇫🇷" },
+  { id: "es", label: "Spanish", labelEn: "Spanish", color: "#f59e0b", x: 350, y: 120, icon: "🇪🇸" },
+  { id: "en", label: "English", labelEn: "English", color: "#10b981", x: 510, y: 120, icon: "🇬🇧" },
   { id: "output", label: "出力", labelEn: "Output", color: "#8b5cf6", x: 640, y: 120, icon: "📤" },
 ];
 
@@ -361,15 +378,15 @@ function buildSequentialScenario(): WorkflowStep[] {
       activeNodes: ["input", "fr"],
       activeEdges: [["input", "fr"]],
       messages: [{ id: 1, from: "input", to: "fr", label: "Hello!", labelEn: "Hello!", color: "#6366f1" }],
-      description: "入力 'Hello, world!' がフランス語翻訳エージェントに送信されます。",
-      descriptionEn: "Input 'Hello, world!' is sent to the French translation agent.",
+      description: "入力「Hello, world!」がフランス語翻訳エージェントに送信されます。",
+      descriptionEn: "The input 'Hello, world!' is sent to the French translation agent.",
     },
     {
       activeNodes: ["fr"],
       activeEdges: [],
       messages: [],
-      description: "French Agent: ChatClientAgent が 'Bonjour, le monde !' を生成。Sequential では出力が自動的に次の Executor に Edge で接続されます。",
-      descriptionEn: "French Agent: ChatClientAgent generates 'Bonjour, le monde !'. In Sequential mode, output is automatically connected to the next Executor via Edges.",
+      description: "French Agent: ChatClientAgent が「Bonjour, le monde !」を生成。この出力は、BuildSequential が自動生成した Edge で次の Executor に渡されます。",
+      descriptionEn: "French Agent: ChatClientAgent generates 'Bonjour, le monde !'. The output goes to the next Executor over an Edge that BuildSequential generated automatically.",
     },
     {
       activeNodes: ["fr", "es"],
@@ -389,8 +406,8 @@ function buildSequentialScenario(): WorkflowStep[] {
       activeNodes: ["en", "output"],
       activeEdges: [["en", "output"]],
       messages: [{ id: 4, from: "en", to: "output", label: "Hello!", labelEn: "Hello!", color: "#10b981" }],
-      description: "全 3 エージェントが順次実行完了。最終結果が WorkflowOutputEvent として返されます。BuildSequential は内部でチェーン状の Edge を自動生成しています。",
-      descriptionEn: "All 3 agents complete sequentially. The final result is returned as a WorkflowOutputEvent. BuildSequential internally auto-generates chained Edges.",
+      description: "全 3 エージェントが順次実行完了。最終結果が WorkflowOutputEvent として返されます。",
+      descriptionEn: "All 3 agents complete sequentially. The final result is returned as a WorkflowOutputEvent.",
     },
   ];
 }
@@ -431,15 +448,15 @@ function buildConcurrentScenario(): WorkflowStep[] {
         { id: 2, from: "input", to: "es", label: "Hello!", labelEn: "Hello!", color: "#6366f1" },
         { id: 3, from: "input", to: "en", label: "Hello!", labelEn: "Hello!", color: "#6366f1" },
       ],
-      description: "Fan-out: 同じ入力が全エージェントに同時に送信されます。スーパーステップ方式により、同一ステップ内の Executor は並行実行されます。",
-      descriptionEn: "Fan-out: The same input is sent to all agents simultaneously. The superstep execution model runs Executors within the same step concurrently.",
+      description: "Fan-out: 同じ入力が全エージェントに同時に送信されます。スーパーステップ方式により、同一スーパーステップ内の Executor は並行実行されます。",
+      descriptionEn: "Fan-out: The same input is sent to all agents simultaneously. The superstep execution model runs Executors within the same superstep concurrently.",
     },
     {
       activeNodes: ["fr", "es", "en"],
       activeEdges: [],
       messages: [],
-      description: "3 つの翻訳エージェントが並行して LLM を呼び出し中。Sequential と違い、待ち時間が重なるため全体のレイテンシーが大幅に削減されます。",
-      descriptionEn: "Three translation agents call the LLM concurrently. Unlike Sequential, latencies overlap, significantly reducing total wall-clock time.",
+      description: "3 つの翻訳エージェントが並行して LLM を呼び出し中。Sequential では全体のレイテンシーが各エージェントの処理時間の合計になりますが、ここでは最も遅いエージェントの処理時間で決まります。",
+      descriptionEn: "Three translation agents call the LLM concurrently. In Sequential, total latency is the sum of the agents' processing times; here it is set by the slowest agent.",
     },
     {
       activeNodes: ["fr", "es", "en", "output"],
@@ -487,28 +504,28 @@ function buildHandoffScenario(): WorkflowStep[] {
       activeEdges: [],
       messages: [],
       description: "ユーザーが「二次方程式の解き方を教えて」と質問。トリアージエージェントが内容を分析し、数学チューターにハンドオフすることを決定します。",
-      descriptionEn: "User asks 'How do I solve quadratic equations?'. The triage agent analyzes the content and decides to hand off to the Math Tutor.",
+      descriptionEn: "The user asks 'How do I solve quadratic equations?' The triage agent analyzes the content and decides to hand off to the Math Tutor.",
     },
     {
       activeNodes: ["triage", "math"],
       activeEdges: [["triage", "math"]],
       messages: [{ id: 1, from: "triage", to: "math", label: "Handoff", labelEn: "Handoff", color: "#3b82f6" }],
-      description: "トリアージ → 数学チューターへのハンドオフが実行されます。LLM の応答に handoff ツール呼び出しが含まれており、ワークフローが自動的にルーティングを行います。",
-      descriptionEn: "Handoff from Triage → Math Tutor is executed. The LLM response includes a handoff tool call, and the workflow automatically performs the routing.",
+      description: "トリアージから数学チューターにハンドオフします。トリアージの LLM が handoff_to_math_tutor のような handoff ツールを呼び出すと、ワークフローエンジンがそれを検知し、数学チューターにメッセージをルーティングします。",
+      descriptionEn: "Triage hands off to the Math Tutor. When the triage agent's LLM calls a handoff tool such as handoff_to_math_tutor, the workflow engine detects the call and routes the message to the Math Tutor.",
     },
     {
       activeNodes: ["math"],
       activeEdges: [],
       messages: [],
-      description: "数学チューターが二次方程式の解法を詳しく説明します。専門エージェントはその領域に特化した instructions を持っているため、高品質な回答を生成できます。",
-      descriptionEn: "The Math Tutor explains quadratic equation solutions in detail. The specialist agent has domain-specific instructions, enabling high-quality responses.",
+      description: "数学チューターが、instructions（\"You help with math. Explain step by step.\"）に従って二次方程式の解き方を順を追って説明します。",
+      descriptionEn: "The Math Tutor follows its instructions (\"You help with math. Explain step by step.\") and explains how to solve quadratic equations step by step.",
     },
     {
       activeNodes: ["math", "output"],
       activeEdges: [["math", "output"]],
       messages: [{ id: 2, from: "math", to: "output", label: "回答", labelEn: "Answer", color: "#10b981" }],
-      description: "数学チューターが回答を完了。ワークフロー出力として結果を返します。ハンドオフパターンは「適切な専門家に仕事を委任する」人間のチームワークを AI に再現します。",
-      descriptionEn: "Math Tutor completes the answer. The result is returned as workflow output. The Handoff pattern replicates 'delegating to the right expert' — mirroring human teamwork in AI.",
+      description: "数学チューターが回答を完了し、その結果がワークフローの出力として返されます。",
+      descriptionEn: "The Math Tutor completes the answer, and the result is returned as the workflow output.",
     },
   ];
 }
@@ -543,7 +560,7 @@ const SCENARIOS: Record<ScenarioKey, {
     svgHeight: 240,
   },
   "concurrent": {
-    label: "Concurrent (Fan-out/in)",
+    label: "Concurrent（Fan-out/in）",
     labelEn: "Concurrent (Fan-out/in)",
     nodes: CONC_NODES,
     edges: CONC_EDGES,
@@ -583,11 +600,11 @@ export function AgenticWorkflowVisualizer({
 
   return (
     <InteractiveDemo
-      title={isJa ? "Agentic Workflow パターン シミュレーター" : "Agentic Workflow Pattern Simulator"}
+      title={isJa ? "Agentic Workflow パターンシミュレーター" : "Agentic Workflow Pattern Simulator"}
       description={
         isJa
-          ? "Microsoft Agent Framework のワークフローパターンをステップ実行で視覚化します"
-          : "Visualize Microsoft Agent Framework workflow patterns step by step"
+          ? "Microsoft Agent Framework の 4 つのワークフローパターンで、Executor 間をメッセージがどう流れるかを 1 ステップずつ示します"
+          : "Steps through how messages flow between Executors in four Microsoft Agent Framework workflow patterns"
       }
     >
       {/* Scenario selector */}
@@ -647,11 +664,16 @@ export function AgenticWorkflowVisualizer({
               key={`${from}-${to}`}
               from={from}
               to={to}
-              label={label}
+              label={isJa ? label : (EDGE_LABEL_EN[label] ?? label)}
               active={current.activeEdges.some(
                 ([a, b]) => a === from && b === to
               )}
               nodes={sc.nodes}
+              paired={
+                sc.edges.some(([a, b]) => a === to && b === from) &&
+                !isLoopEdge(from, to) &&
+                !isLoopEdge(to, from)
+              }
             />
           ))}
 
@@ -659,7 +681,7 @@ export function AgenticWorkflowVisualizer({
           {sc.nodes.map((node) => (
             <NodeBox
               key={node.id}
-              node={node}
+              node={isJa ? node : { ...node, label: node.labelEn }}
               active={current.activeNodes.includes(node.id)}
               highlight={node.id === current.highlight}
             />
@@ -688,6 +710,7 @@ export function AgenticWorkflowVisualizer({
             ? `ステップ ${step + 1} / ${sc.steps.length}`
             : `Step ${step + 1} / ${sc.steps.length}`
         }
+        ariaLabels={stepPlayerAriaLabels(locale)}
       />
     </InteractiveDemo>
   );

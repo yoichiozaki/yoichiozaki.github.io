@@ -44,7 +44,7 @@ export function MapReduceArchitecture({
       color: "#10b981",
       items: isJa
         ? [
-            "64–128 MB ブロック単位の分割",
+            "64〜128 MB ブロック単位の分割",
             "3重レプリケーション",
             "データローカリティーの活用",
           ]
@@ -60,7 +60,7 @@ export function MapReduceArchitecture({
       color: "#64748b",
       items: isJa
         ? ["安価なサーバー群", "故障は日常 (年間数%のディスク障害)"]
-        : ["Inexpensive servers", "Failures are routine (several % disk failures/year)"],
+        : ["Inexpensive servers", "Failures are routine (a few % of disks fail per year)"],
     },
   ];
 
@@ -69,8 +69,8 @@ export function MapReduceArchitecture({
       title={isJa ? "MapReduce アーキテクチャ" : "MapReduce Architecture"}
       description={
         isJa
-          ? "MapReduce のレイヤー構造 — プログラマーが書くのは最上位の2関数だけ"
-          : "MapReduce layer architecture — programmers only write the top two functions"
+          ? "MapReduce のレイヤー構造 — プログラマーが書くのは最上位の 2 つの関数だけ"
+          : "MapReduce layer architecture — programmers write only the two functions in the top layer"
       }
     >
       <div className="flex flex-col gap-3">
@@ -144,11 +144,11 @@ export function FaultToleranceDiagram({
       icon: "⚙️",
       title: isJa ? "Worker 障害" : "Worker Failure",
       description: isJa
-        ? "Master が定期的に ping し、応答がなければ障害と判断。そのWorkerの完了済み Map タスクも含め再実行。"
-        : "Master pings workers periodically. No response = failure. Re-executes all tasks (including completed Map tasks) on that worker.",
+        ? "Master が定期的に ping し、応答がなければ障害と判断。その Worker の実行中タスクと完了済み Map タスクを再実行。"
+        : "Master pings workers periodically; no response = failure. That worker's in-progress tasks and its completed Map tasks are re-executed.",
       mechanism: isJa
-        ? "Map の出力はローカルディスクにあるため、障害時はアクセス不可 → 再実行が必要。Reduce の出力は GFS に書かれるため再実行不要。"
-        : "Map output is on local disk, inaccessible after failure → must re-execute. Reduce output is on GFS, so no re-execution needed.",
+        ? "Map の出力はローカルディスクにあるため、障害時はアクセス不可 → 再実行が必要。完了済み Reduce タスクの出力は GFS にあるため再実行不要。"
+        : "Map output is on local disk, inaccessible after failure → must re-execute. Completed Reduce tasks' output is on GFS, so they need no re-execution.",
       color: "#ef4444",
     },
     {
@@ -156,21 +156,21 @@ export function FaultToleranceDiagram({
       title: isJa ? "Master 障害" : "Master Failure",
       description: isJa
         ? "初期実装ではジョブ全体を中止。チェックポイントから再開も可能だが、Master は 1 台なので障害確率は低い。"
-        : "In the original implementation, abort the entire job. Checkpoint-based recovery is possible, but Master failure is rare (single machine).",
+        : "The original implementation aborts the entire job. Recovery from a checkpoint is possible, but with only one Master, its failure is unlikely.",
       mechanism: isJa
-        ? "Master の状態（タスク割り当て、進捗）を定期的にチェックポイント保存 → 別のマシンで再開可能。"
-        : "Master state (task assignments, progress) is periodically checkpointed → can resume on another machine.",
+        ? "Master の状態（タスク割り当て、進捗）を定期的にチェックポイントに保存しておけば、別のマシンで再開できる。"
+        : "If the Master periodically checkpoints its state (task assignments, progress), a new copy can resume on another machine.",
       color: "#f59e0b",
     },
     {
       icon: "🐢",
       title: isJa ? "Straggler 対策" : "Straggler Mitigation",
       description: isJa
-        ? "一部のタスクが異常に遅い場合（ディスク劣化、ネットワーク輻輳）、ジョブ全体のボトルネックになる。"
-        : "Some tasks run abnormally slow (degraded disk, network congestion), becoming a bottleneck for the entire job.",
+        ? "終盤に残ったタスクの 1 つに異常に時間をかけるマシン（Straggler）が、ジョブ全体を遅らせる。原因はディスク劣化やネットワーク輻輳など。"
+        : "A straggler, a machine that is unusually slow on one of the last few tasks, delays the whole job. Causes include a degraded disk or network congestion.",
       mechanism: isJa
-        ? "ジョブ終盤で残りのin-progressタスクのバックアップタスクを起動。先に完了した方の結果を採用（投機的実行）。"
-        : 'Near job completion, launch backup copies of remaining in-progress tasks. Use whichever finishes first (speculative execution).',
+        ? "ジョブ終盤で、実行中のタスクのバックアップを別のマシンで起動。先に完了した方の結果を採用（投機的実行）。"
+        : "Near job completion, launch backup copies of the remaining in-progress tasks on other machines. Use whichever copy finishes first (speculative execution).",
       color: "#8b5cf6",
     },
   ];
@@ -180,8 +180,8 @@ export function FaultToleranceDiagram({
       title={isJa ? "耐障害性メカニズム" : "Fault Tolerance Mechanisms"}
       description={
         isJa
-          ? "MapReduce が数千台規模のクラスターで信頼性を確保する仕組み"
-          : "How MapReduce ensures reliability in clusters of thousands of machines"
+          ? "数千台規模のクラスターで、マシンが故障したり遅くなったりしてもジョブを完了させる仕組み"
+          : "How MapReduce finishes jobs on clusters of thousands of machines even when some machines fail or slow down"
       }
     >
       <div className="flex flex-col gap-4">
@@ -234,15 +234,15 @@ export function MapReduceComparison({
         { aspect: "並列化", before: "プログラマーが手動で管理", after: "フレームワークが自動処理" },
         { aspect: "障害復旧", before: "アプリケーション固有のロジック", after: "フレームワークが透過的に再実行" },
         { aspect: "データ分散", before: "明示的なパーティショニング", after: "分散FS + 自動スプリット" },
-        { aspect: "スケーラビリティー", before: "アーキテクチャの再設計が必要", after: "マシン追加で線形にスケール" },
-        { aspect: "プログラミングモデル", before: "ソケット/RPC/スレッド管理", after: "map() と reduce() の2関数" },
+        { aspect: "スケーラビリティー", before: "アーキテクチャの再設計が必要", after: "マシン追加でスケールアウト" },
+        { aspect: "プログラミングモデル", before: "ソケット/RPC/スレッド管理", after: "map() と reduce() の 2 つの関数" },
         { aspect: "デバッグ", before: "分散デバッグは極めて困難", after: "個々の map/reduce を単体テスト可能" },
       ]
     : [
         { aspect: "Parallelization", before: "Manually managed by programmer", after: "Automatically handled by framework" },
         { aspect: "Fault Recovery", before: "Application-specific logic", after: "Framework transparently re-executes" },
         { aspect: "Data Distribution", before: "Explicit partitioning", after: "Distributed FS + auto-splitting" },
-        { aspect: "Scalability", before: "Requires architecture redesign", after: "Linear scaling by adding machines" },
+        { aspect: "Scalability", before: "Requires architecture redesign", after: "Scales out by adding machines" },
         { aspect: "Programming Model", before: "Sockets/RPC/thread management", after: "Just map() and reduce()" },
         { aspect: "Debugging", before: "Distributed debugging is very hard", after: "Unit test individual map/reduce" },
       ];
@@ -317,40 +317,40 @@ export function MapReduceTimeline({ locale = "ja" }: MapReduceTimelineProps) {
       year: "2006",
       title: "Hadoop",
       description: isJa
-        ? "Yahoo! が Hadoop をオープンソース化。MapReduce の OSS 実装"
-        : "Yahoo! open-sources Hadoop. OSS implementation of MapReduce",
+        ? "Hadoop 登場（Yahoo! が開発を支援）。MapReduce の OSS 実装"
+        : "Hadoop emerges, with Yahoo! backing its development. OSS implementation of MapReduce",
       color: "#f59e0b",
     },
     {
       year: "2008",
       title: "Hadoop @ Scale",
       description: isJa
-        ? "Yahoo! が 10,000 ノードの Hadoop クラスターを運用"
-        : "Yahoo! operates a 10,000-node Hadoop cluster",
+        ? "Yahoo! が 10,000 コア超の Hadoop クラスターを運用"
+        : "Yahoo! operates a Hadoop cluster with more than 10,000 cores",
       color: "#f59e0b",
     },
     {
       year: "2010",
       title: "Spark",
       description: isJa
-        ? "Apache Spark 登場。インメモリー処理で MapReduce の 10–100 倍高速化"
-        : "Apache Spark emerges. In-memory processing, 10–100x faster than MapReduce",
+        ? "Apache Spark 登場。インメモリー処理で、反復処理が Hadoop より最大 20 倍高速に（NSDI'12）"
+        : "Apache Spark emerges. In-memory processing makes iterative jobs up to 20x faster than Hadoop (NSDI'12)",
       color: "#ef4444",
     },
     {
       year: "2014",
       title: isJa ? "Google 社内で非推奨" : "Deprecated at Google",
       description: isJa
-        ? "Google が社内で MapReduce を Cloud Dataflow に移行開始"
-        : "Google begins migrating from MapReduce to Cloud Dataflow internally",
+        ? "Google が MapReduce の後継として Cloud Dataflow を発表。社内では MapReduce をほぼ使っていないと説明"
+        : "Google announces Cloud Dataflow as MapReduce's successor and says it no longer really uses MapReduce internally",
       color: "#64748b",
     },
     {
       year: "2015+",
       title: isJa ? "レガシー化" : "Legacy",
       description: isJa
-        ? "Spark, Flink, Beam が主流に。MapReduce は教育・歴史的意義として残る"
-        : "Spark, Flink, Beam become mainstream. MapReduce remains for education & historical significance",
+        ? "Spark・Flink・Beam が主流に。MapReduce の考え方はこれらに受け継がれる"
+        : "Spark, Flink, and Beam become mainstream and carry MapReduce's ideas forward",
       color: "#64748b",
     },
   ];
@@ -360,7 +360,7 @@ export function MapReduceTimeline({ locale = "ja" }: MapReduceTimelineProps) {
       title={isJa ? "MapReduce とビッグデータの年表" : "MapReduce & Big Data Timeline"}
       description={
         isJa
-          ? "2003年の GFS から始まるビッグデータ処理の進化"
+          ? "2003 年の GFS から始まるビッグデータ処理の進化"
           : "The evolution of big data processing starting from GFS in 2003"
       }
     >

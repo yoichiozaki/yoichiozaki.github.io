@@ -53,19 +53,19 @@ const TEXT = {
   ja: {
     title: "プレフィックスキャッシュ考慮ルーティング",
     description:
-      "同じ到着列を「最小未完了数だけを見るルーター」と「プレフィックス親和性を優先するルーター」に流し、プレフィルすべきトークン数の差を追います。レプリカ 3 台、各レプリカのキャッシュ枠は 1 系列ぶんです。",
+      "同じ到着列を 2 つのルーターに流し、プレフィルすべきトークン数の差を追います。一方は最小未完了数だけを見て、もう一方はプレフィックス親和性を優先し、負荷差が閾値を超えたら最小負荷へ逃がします。レプリカ 3 台、各レプリカのキャッシュ枠は 1 プレフィックスぶんです。",
     baseline: "最小未完了数のみ",
     aware: "プレフィックス考慮",
     request: "リクエスト",
     prefix: "プレフィックス",
     promptLen: "プロンプト長",
-    routedTo: "配送先",
+    routedTo: "振り分け先",
     replica: "レプリカ",
     hit: "キャッシュヒット",
     miss: "キャッシュミス",
     prefill: "このリクエストのプレフィル",
     cumulative: "累積プレフィルトークン",
-    saving: "削減率",
+    saving: "プレフィル削減率",
     cacheState: "各レプリカのキャッシュ（LRU 1 枠）",
     loads: "累積割当件数",
     empty: "空",
@@ -74,7 +74,7 @@ const TEXT = {
     affinity: "親和性で選択",
     tokens: "トークン",
     caution:
-      "キャッシュ枠を 1 系列ぶんに絞ることで競合を強調しています。実装ではキャッシュ状態の追跡がルーター側の近似木（SGLang）、KV イベント購読（Dynamo）、外部インデクサーのいずれかになり、粒度もブロック単位です。",
+      "キャッシュ枠を 1 プレフィックスぶんに絞ることで競合を強調しています。実装ではキャッシュ状態の追跡がルーター側の近似木（SGLang）、KV イベント購読（Dynamo）、外部インデクサーのいずれかになり、一致の粒度も文字・トークン・KV ブロックのいずれかです。",
   },
   en: {
     title: "Prefix-cache-aware routing",
@@ -91,7 +91,7 @@ const TEXT = {
     miss: "cache miss",
     prefill: "Prefill for this request",
     cumulative: "Cumulative prefill tokens",
-    saving: "Reduction",
+    saving: "Prefill reduction",
     cacheState: "Per-replica cache (LRU, 1 slot)",
     loads: "Cumulative assignments",
     empty: "empty",
@@ -100,7 +100,7 @@ const TEXT = {
     affinity: "chosen by affinity",
     tokens: "tokens",
     caution:
-      "The single cache slot exaggerates contention on purpose. Real routers track cache state through a router-side approximate tree (SGLang), a KV-event subscription (Dynamo), or an external indexer, and they work at block granularity.",
+      "The single cache slot exaggerates contention on purpose. Real routers track cache state through a router-side approximate tree (SGLang), a KV-event subscription (Dynamo), or an external indexer, and they match prefixes at character, token, or KV-block granularity.",
   },
 } as const;
 

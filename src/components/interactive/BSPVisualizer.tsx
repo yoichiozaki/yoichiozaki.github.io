@@ -5,6 +5,7 @@ import {
   InteractiveDemo,
   StepPlayerControls,
   useStepPlayer,
+  stepPlayerAriaLabels,
 } from "@/components/interactive";
 
 // ── Types ───────────────────────────────────────────────────
@@ -55,8 +56,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]" },
       ],
-      description: "ワークフロー開始前。Input Executor のメッセージキュー（StepContext）に「Hello!」が入っている。AdvanceAsync() で _nextStep がアトミックにスワップされ、スーパーステップ 1 が始まる。",
-      descriptionEn: "Before workflow starts. 'Hello!' is in the Input Executor's message queue (StepContext). AdvanceAsync() atomically swaps _nextStep, and superstep 1 begins.",
+      description: "ワークフロー開始前です。StepContext の Input 宛てのキューに「Hello!」が入っています。AdvanceAsync() が _nextStep をアトミックにスワップすると、スーパーステップ 1 が始まります。",
+      descriptionEn: "Before the workflow starts, 'Hello!' waits in the StepContext queue for Input. When AdvanceAsync() atomically swaps _nextStep, superstep 1 begins.",
     },
     // Step 1: Superstep 1 — Compute (Input processes)
     {
@@ -73,8 +74,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]" },
       ],
-      description: "スーパーステップ 1: Input Executor が [MessageHandler] でメッセージを処理中。Task.WhenAll で同一ステップのアクティブな Executor が並行実行される（この場合は Input のみ）。",
-      descriptionEn: "Superstep 1: Input Executor processes the message via [MessageHandler]. Task.WhenAll runs active Executors in the same step concurrently (only Input is active here).",
+      description: "スーパーステップ 1: Input Executor が [MessageHandler] でメッセージを処理しています。Task.WhenAll は同じスーパーステップのアクティブな Executor を並行に実行します（ここでは Input だけ）。",
+      descriptionEn: "Superstep 1: Input Executor processes the message via [MessageHandler]. Task.WhenAll runs active Executors in the same superstep concurrently (only Input is active here).",
     },
     // Step 2: Superstep 1 — Send (Input sends to French & Spanish via Fan-out Edge)
     {
@@ -91,8 +92,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]" },
       ],
-      description: "Input が context.SendMessageAsync() を呼び出し。Fan-out Edge がメッセージを French と Spanish の両方に配信予定としてキューする。この時点ではまだ _nextStep（次のスーパーステップ用 StepContext）にエンキューされるだけ。",
-      descriptionEn: "Input calls context.SendMessageAsync(). The Fan-out Edge queues the message for delivery to both French and Spanish. At this point, messages are only enqueued into _nextStep (the StepContext for the next superstep).",
+      description: "Input が context.SendMessageAsync() を呼ぶと、Fan-out Edge が French 宛てと Spanish 宛てのメッセージを _nextStep（次のスーパーステップ用の StepContext）に入れます。French と Spanish がこれを受け取るのは次のスーパーステップです。",
+      descriptionEn: "Input calls context.SendMessageAsync(), and the Fan-out Edge enqueues the message for both French and Spanish in _nextStep (the StepContext for the next superstep). French and Spanish receive it in the next superstep.",
     },
     // Step 3: Superstep 1 — Barrier
     {
@@ -110,8 +111,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]" },
       ],
-      description: "バリア同期: 全 Executor の完了を確認。StateManager.PublishUpdatesAsync() でキューされたステート更新をバッチ適用（今回はステート変更なし）。チェックポイントを作成。SuperStepCompletedEvent を発火。",
-      descriptionEn: "Barrier sync: Confirm all Executors are done. StateManager.PublishUpdatesAsync() batch-applies queued state updates (no state changes this step). Checkpoint created. SuperStepCompletedEvent fires.",
+      description: "バリア同期: 全 Executor が完了すると、StateManager.PublishUpdatesAsync() がキューされたステート更新をまとめて適用します（今回は更新なし）。チェックポイントが有効なら、ここで作成されます。最後に SuperStepCompletedEvent が発火します。",
+      descriptionEn: "Barrier sync: Once all Executors are done, StateManager.PublishUpdatesAsync() batch-applies queued state updates (no state changes this superstep). If checkpointing is enabled, a checkpoint is created here. Then SuperStepCompletedEvent fires.",
     },
     // Step 4: Deliver messages for Superstep 2
     {
@@ -128,8 +129,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]" },
       ],
-      description: "AdvanceAsync() が _nextStep をスワップし、前ステップでキューされたメッセージが French と Spanish の inbox に配信される。Interlocked.Exchange(ref _nextStep, new StepContext()) でアトミックに切り替え。",
-      descriptionEn: "AdvanceAsync() swaps _nextStep. Messages queued in the previous step are delivered to French and Spanish inboxes. Interlocked.Exchange(ref _nextStep, new StepContext()) performs the atomic swap.",
+      description: "AdvanceAsync() が _nextStep をスワップし、前のスーパーステップでキューされたメッセージが French と Spanish に届きます。スワップは Interlocked.Exchange(ref _nextStep, new StepContext()) によるアトミックな操作です。",
+      descriptionEn: "AdvanceAsync() swaps _nextStep. Messages queued in the previous superstep are delivered to French and Spanish inboxes. Interlocked.Exchange(ref _nextStep, new StepContext()) performs the atomic swap.",
     },
     // Step 5: Superstep 2 — Compute (French & Spanish in parallel)
     {
@@ -146,8 +147,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]" },
       ],
-      description: "スーパーステップ 2: French と Spanish が Task.WhenAll で並行実行！ これが Fan-out パターンの核心。各 Executor の [MessageHandler] が同時に LLM を呼び出し、翻訳を生成する。",
-      descriptionEn: "Superstep 2: French and Spanish run in parallel via Task.WhenAll! This is the core of the Fan-out pattern. Each Executor's [MessageHandler] calls the LLM simultaneously to generate translations.",
+      description: "スーパーステップ 2: Task.WhenAll が French と Spanish を並行に実行します。Fan-out で複数のエージェントが同時に動くのは、この並行実行によるものです。各 Executor の [MessageHandler] が LLM を呼び出し、翻訳を生成します。",
+      descriptionEn: "Superstep 2: Task.WhenAll runs French and Spanish in parallel, which is why the agents in a Fan-out run simultaneously. Each Executor's [MessageHandler] calls the LLM to generate its translation.",
     },
     // Step 6: Superstep 2 — Send (both send results)
     {
@@ -164,8 +165,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[]", pending: "[\"Bonjour!\",\"¡Hola!\"]" },
       ],
-      description: "French が「Bonjour!」、Spanish が「¡Hola!」を出力。各 Executor が QueueStateUpdateAsync() でステート更新をキュー。Fan-in Barrier Edge が「全ソースから 1 つ以上のメッセージを受信」するまでバッファリング。",
-      descriptionEn: "French outputs 'Bonjour!', Spanish outputs '¡Hola!'. Each Executor queues state updates via QueueStateUpdateAsync(). The Fan-in Barrier Edge buffers until 'at least one message from every source' is received.",
+      description: "French が「Bonjour!」、Spanish が「¡Hola!」を出力し、それぞれ QueueStateUpdateAsync() でステート更新をキューします。Fan-in Barrier Edge は、すべてのソースから少なくとも 1 つずつメッセージが届くまで、Aggregator への配信を保留します。",
+      descriptionEn: "French outputs 'Bonjour!' and Spanish outputs '¡Hola!'. Each Executor queues state updates via QueueStateUpdateAsync(). The Fan-in Barrier Edge holds delivery to the Aggregator until every source has sent at least one message.",
     },
     // Step 7: Superstep 2 — Barrier
     {
@@ -183,8 +184,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[\"Bonjour!\",\"¡Hola!\"]" },
       ],
-      description: "バリア同期: PublishUpdatesAsync() で pending ステート更新がバッチ適用される。translations が空配列から [\"Bonjour!\",\"¡Hola!\"] に更新。Fan-in Barrier の条件が満たされ、Aggregator へのメッセージ配信が次ステップで開始される。",
-      descriptionEn: "Barrier sync: PublishUpdatesAsync() batch-applies pending state updates. translations updates from empty to [\"Bonjour!\",\"¡Hola!\"]. Fan-in Barrier condition met — message delivery to Aggregator begins next step.",
+      description: "バリア同期: PublishUpdatesAsync() が pending のステート更新をまとめて適用し、translations は空配列から [\"Bonjour!\",\"¡Hola!\"] になります。Fan-in Barrier の条件が満たされたので、Aggregator へのメッセージは次のスーパーステップで配信されます。",
+      descriptionEn: "Barrier sync: PublishUpdatesAsync() batch-applies the pending state updates, and translations changes from an empty array to [\"Bonjour!\",\"¡Hola!\"]. The Fan-in Barrier condition is met, so the messages reach the Aggregator in the next superstep.",
     },
     // Step 8: Deliver to Aggregator
     {
@@ -201,8 +202,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[\"Bonjour!\",\"¡Hola!\"]" },
       ],
-      description: "Fan-in Barrier Edge がリリース: French と Spanish 両方のメッセージが Aggregator の inbox に配信される。",
-      descriptionEn: "Fan-in Barrier Edge releases: Both French and Spanish messages are delivered to the Aggregator's inbox.",
+      description: "Fan-in Barrier Edge が保留していた French と Spanish のメッセージが、まとめて Aggregator に届きます。",
+      descriptionEn: "The Fan-in Barrier Edge releases the held messages: both the French and Spanish messages are delivered to the Aggregator's inbox.",
     },
     // Step 9: Superstep 3 — Aggregator computes
     {
@@ -219,8 +220,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[\"Bonjour!\",\"¡Hola!\"]" },
       ],
-      description: "スーパーステップ 3: Aggregator が全翻訳結果を集約。YieldOutputAsync() でワークフロー出力としてマーク。WorkflowOutputEvent が Event Queue（ConcurrentEventSink）に発火される。",
-      descriptionEn: "Superstep 3: Aggregator aggregates all translation results. YieldOutputAsync() marks them as workflow output. WorkflowOutputEvent fires into the Event Queue (ConcurrentEventSink).",
+      description: "スーパーステップ 3: Aggregator が 2 つの翻訳結果を集約し、YieldOutputAsync() で出力します。これにより WorkflowOutputEvent が Event Queue（ConcurrentEventSink）に流れます。",
+      descriptionEn: "Superstep 3: The Aggregator combines both translation results and outputs them with YieldOutputAsync(), which raises a WorkflowOutputEvent in the Event Queue (ConcurrentEventSink).",
     },
     // Step 10: Done
     {
@@ -237,8 +238,8 @@ function buildScenario(): BSPStep[] {
       stateEntries: [
         { key: "translations", value: "[\"Bonjour!\",\"¡Hola!\"]" },
       ],
-      description: "全 Executor のキューが空。WithOutputFrom(aggregator) で指定された Executor が出力を生成したため、ワークフローが完了。3 スーパーステップで Fan-out → 並行計算 → Fan-in → 集約の全サイクルが完了した。",
-      descriptionEn: "All Executor queues are empty. The Executor specified by WithOutputFrom(aggregator) produced output, so the workflow completes. The full Fan-out → parallel computation → Fan-in → aggregation cycle completed in 3 supersteps.",
+      description: "全 Executor 宛てのキューが空になりました。配送待ちのメッセージがなく、外部入力も待っていないので、ワークフローは完了します。Fan-out → 並行計算 → Fan-in → 集約の一巡を、3 スーパーステップで実行しました。",
+      descriptionEn: "All Executor queues are empty. No messages remain to be delivered and the workflow is not waiting for external input, so it completes. The full Fan-out → parallel computation → Fan-in → aggregation cycle took 3 supersteps.",
     },
   ];
 }
@@ -256,7 +257,7 @@ const STATUS_LABELS: Record<ExecutorState["status"], { ja: string; en: string }>
   idle: { ja: "待機", en: "Idle" },
   computing: { ja: "計算中", en: "Computing" },
   sending: { ja: "送信中", en: "Sending" },
-  waiting: { ja: "同期待ち", en: "Syncing" },
+  waiting: { ja: "同期待ち", en: "Waiting" },
 };
 
 function ExecutorCard({ executor, locale }: { executor: ExecutorState; locale: string }) {
@@ -413,8 +414,8 @@ export function BSPVisualizer({ locale = "ja" }: BSPVisualizerProps) {
       title={isJa ? "BSP スーパーステップ実行シミュレーター" : "BSP Superstep Execution Simulator"}
       description={
         isJa
-          ? "Concurrent 翻訳ワークフローを例に、スーパーステップ方式の実行フローを視覚化します"
-          : "Visualizes the superstep execution flow using a Concurrent translation workflow example"
+          ? "2 言語に翻訳する Concurrent ワークフローで、スーパーステップ（SS）ごとに各 Executor の受信・送信メッセージと共有ステートがどう変わるかを示します"
+          : "How each Executor's inbox and outbox and the shared state change in each superstep (SS) of a Concurrent workflow that translates into two languages"
       }
     >
       {/* Phase indicator */}
@@ -449,7 +450,7 @@ export function BSPVisualizer({ locale = "ja" }: BSPVisualizerProps) {
         {isJa ? current.description : current.descriptionEn}
       </div>
 
-      <StepPlayerControls {...player} label={getStepLabel} />
+      <StepPlayerControls {...player} label={getStepLabel} ariaLabels={stepPlayerAriaLabels(locale)} />
     </InteractiveDemo>
   );
 }
