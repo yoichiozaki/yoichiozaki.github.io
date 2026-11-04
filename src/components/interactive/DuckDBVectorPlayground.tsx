@@ -78,7 +78,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
 
   const explanation: Record<VType, { ja: string; en: string }> = {
     FLAT: {
-      ja: "1 論理行 = 1 物理エントリ。もっとも素直な表現で、書き込み可能な唯一の型です。`Flatten()` はどの型もこの形に落とします。",
+      ja: "1 論理行 = 1 物理エントリー。もっとも素直な表現で、書き込み可能な唯一の型です。`Flatten()` はどの型もこの形に落とします。",
       en: "One logical row = one physical entry. The plainest layout, and the only writable one. `Flatten()` lowers every other type into this shape.",
     },
     CONSTANT: {
@@ -86,7 +86,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
       en: "Every row shares one value. Literals like the 'ap' in `WHERE x = 'ap'`, `SELECT 1`, or an all-NULL column. Operators can compute once and broadcast.",
     },
     DICTIONARY: {
-      ja: "辞書 + 選択ベクトル。低カーディナリティ列のスキャンや、フィルタ後の行の絞り込みで現れます。データをコピーせず「見え方」だけ変えるのがポイント。",
+      ja: "辞書 + 選択ベクトル。低カーディナリティー列のスキャンや、フィルター後の行の絞り込みで現れます。データをコピーせず「見え方」だけ変えるのがポイント。",
       en: "Dictionary + selection vector. Produced by low-cardinality column scans and by filters. The key property: it changes the view without copying data.",
     },
     SEQUENCE: {
@@ -102,7 +102,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
       title={isJa ? "Vector の 4 つの姿を触ってみる" : "Play with the four faces of a Vector"}
       description={
         isJa
-          ? "DuckDB の Vector は「2048 行ぶんの配列」ではなく、同じ論理データを表す複数の物理表現を持ちます。タブを切り替えて、論理ビュー・物理バッファ・UnifiedVectorFormat の対応を見比べてください。"
+          ? "DuckDB の Vector は「2048 行ぶんの配列」ではなく、同じ論理データを表す複数の物理表現を持ちます。タブを切り替えて、論理ビュー・物理バッファー・UnifiedVectorFormat の対応を見比べてください。"
           : "A DuckDB Vector is not simply an array of 2048 values — it is one of several physical encodings of the same logical data. Switch tabs to compare the logical view, the physical buffer, and the UnifiedVectorFormat mapping."
       }
     >
@@ -134,7 +134,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
           >
             {filtered
               ? isJa
-                ? "フィルタ解除"
+                ? "フィルター解除"
                 : "Clear filter"
               : isJa
                 ? vtype === "SEQUENCE"
@@ -175,7 +175,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
         <div>
           <div className="mb-1 font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
             {isJa
-              ? `物理バッファ（実際に確保される ${physical.length} エントリ / 約 ${bytes} バイト）`
+              ? `物理バッファー（実際に確保される ${physical.length} エントリー / 約 ${bytes} バイト）`
               : `Physical buffer (${physical.length} entries actually allocated / ~${bytes} bytes)`}
           </div>
           <div className="flex flex-wrap gap-1">
@@ -204,7 +204,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
           {vtype === "SEQUENCE" ? (
             <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-foreground">
               {isJa
-                ? "SEQUENCE は ToUnifiedFormat() が直接扱えません。Vector::ToUnifiedFormat() は FLAT / CONSTANT / DICTIONARY 以外を検出すると、まず Flatten() してベクタ内の全値を実体化します。"
+                ? "SEQUENCE は ToUnifiedFormat() が直接扱えません。Vector::ToUnifiedFormat() は FLAT / CONSTANT / DICTIONARY 以外を検出すると、まず Flatten() してベクター内の全値を実体化します。"
                 : "ToUnifiedFormat() cannot read a SEQUENCE directly. Vector::ToUnifiedFormat() detects anything other than FLAT / CONSTANT / DICTIONARY and calls Flatten() first, materialising every value in the vector."}
             </div>
           ) : (
@@ -226,7 +226,7 @@ export function DuckDBVectorPlayground({ locale = "ja" }: Props) {
         {filtered && (
           <div className="rounded-md border border-accent/50 bg-accent/5 px-3 py-2 text-xs leading-relaxed text-foreground">
             {isJa
-              ? `フィルタは値をコピーしません。合致した ${matches.length} 行の添字を SelectionVector に書き、DataChunk::Slice() でその選択を被せるだけです。${
+              ? `フィルターは値をコピーしません。合致した ${matches.length} 行の添字を SelectionVector に書き、DataChunk::Slice() でその選択を被せるだけです。${
                   vtype === "FLAT"
                     ? "FLAT はここで DICTIONARY になります。"
                     : vtype === "DICTIONARY"

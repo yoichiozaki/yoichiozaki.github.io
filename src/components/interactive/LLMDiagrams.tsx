@@ -27,7 +27,7 @@ export function LLMTimeline({ locale = "ja" }: DiagramProps) {
     { year: "2013", label: "Word2Vec", desc: en ? "Word embeddings" : "単語埋め込み", color: border, x: 40 },
     { year: "2017", label: "Transformer", desc: en ? "Attention Is All You Need" : "Attention Is All You Need", color: accent, x: 140 },
     { year: "2018", label: "BERT / GPT-1", desc: en ? "Pre-training era begins" : "事前学習時代の幕開け", color: green, x: 250 },
-    { year: "2020", label: "GPT-3", desc: en ? "175B params, few-shot" : "1750億パラメータ", color: orange, x: 380 },
+    { year: "2020", label: "GPT-3", desc: en ? "175B params, few-shot" : "1750億パラメーター", color: orange, x: 380 },
     { year: "2022", label: "ChatGPT", desc: en ? "RLHF + Instruction tuning" : "RLHF + 指示チューニング", color: purple, x: 500 },
     { year: "2024–", label: en ? "GPT-4o / Gemini / Claude" : "GPT-4o / Gemini / Claude", desc: en ? "Multimodal, reasoning" : "マルチモーダル・推論", color: purple, x: 640 },
   ];
@@ -253,7 +253,7 @@ export function ScalingLawsDiagram({ locale = "ja" }: DiagramProps) {
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
 
   const factors = [
-    { label: en ? "Parameters (N)" : "パラメータ数 (N)", color: accent },
+    { label: en ? "Parameters (N)" : "パラメーター数 (N)", color: accent },
     { label: en ? "Data (D)" : "データ量 (D)", color: green },
     { label: en ? "Compute (C)" : "計算量 (C)", color: orange },
   ];
@@ -266,7 +266,7 @@ export function ScalingLawsDiagram({ locale = "ja" }: DiagramProps) {
         <line x1={pad} y1={h - pad} x2={pad} y2={15} stroke={border} strokeWidth={1.5} />
         {/* Axis labels */}
         <text x={pad + pw / 2} y={h - 8} textAnchor="middle" fill={muted} fontSize={10}>
-          {en ? "log(Compute / Parameters / Data)" : "log(計算量 / パラメータ数 / データ量)"}
+          {en ? "log(Compute / Parameters / Data)" : "log(計算量 / パラメーター数 / データ量)"}
         </text>
         <text x={14} y={15 + ph / 2} textAnchor="middle" fill={muted} fontSize={10} transform={`rotate(-90, 14, ${15 + ph / 2})`}>
           {en ? "log(Loss)" : "log(損失)"}
@@ -329,7 +329,7 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
         {/* Encoder-only */}
         <rect x={30} y={80} width={140} height={30} rx={6} fill={bg} stroke={green} strokeWidth={2} />
         <text x={100} y={95} textAnchor="middle" dominantBaseline="central" fill={green} fontSize={11} fontWeight={700}>
-          {en ? "Encoder-only" : "エンコーダ系"}
+          {en ? "Encoder-only" : "エンコーダー系"}
         </text>
         {[
           { label: "BERT", year: "2018", desc: en ? "Masked LM" : "マスク言語モデル" },
@@ -351,7 +351,7 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
         {/* Encoder-Decoder */}
         <rect x={240} y={80} width={140} height={30} rx={6} fill={bg} stroke={orange} strokeWidth={2} />
         <text x={310} y={95} textAnchor="middle" dominantBaseline="central" fill={orange} fontSize={11} fontWeight={700}>
-          {en ? "Encoder-Decoder" : "エンコーダ・デコーダ系"}
+          {en ? "Encoder-Decoder" : "エンコーダー・デコーダー系"}
         </text>
         {[
           { label: "T5", year: "2019", desc: en ? "Text-to-Text" : "テキスト→テキスト" },
@@ -373,7 +373,7 @@ export function LLMFamilyTree({ locale = "ja" }: DiagramProps) {
         {/* Decoder-only */}
         <rect x={450} y={80} width={140} height={30} rx={6} fill={bg} stroke={purple} strokeWidth={2} />
         <text x={520} y={95} textAnchor="middle" dominantBaseline="central" fill={purple} fontSize={11} fontWeight={700}>
-          {en ? "Decoder-only" : "デコーダ系"}
+          {en ? "Decoder-only" : "デコーダー系"}
         </text>
         {[
           { label: "GPT-2/3", year: "2019–20", desc: en ? "Autoregressive LM" : "自己回帰型LM" },
@@ -442,7 +442,7 @@ export function BPETokenizationDiagram({ locale = "ja" }: DiagramProps) {
 
         {/* Arrow */}
         <text x={310} y={78} textAnchor="middle" fill={muted} fontSize={11}>
-          ↓ BPE {en ? "Tokenizer" : "トークナイザ"}
+          ↓ BPE {en ? "Tokenizer" : "トークナイザー"}
         </text>
 
         {/* Tokens */}

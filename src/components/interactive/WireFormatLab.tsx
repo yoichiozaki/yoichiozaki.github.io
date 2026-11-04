@@ -112,10 +112,10 @@ export function WireFormatLab({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "同じデータ、違うワイヤ表現" : "Same data, different wire formats"}
+      title={isJa ? "同じデータ、違うワイヤー表現" : "Same data, different wire formats"}
       description={
         isJa
-          ? "ユーザ一覧レスポンスを JSON と Protobuf で符号化したときのバイト数を、実際に符号化規則を適用して数えています (推定値ではありません)。"
+          ? "ユーザー一覧レスポンスを JSON と Protobuf で符号化したときのバイト数を、実際に符号化規則を適用して数えています (推定値ではありません)。"
           : "Byte counts for a user-list response encoded as JSON and as protobuf, computed by actually applying the encoding rules — not estimates."
       }
     >

@@ -84,7 +84,7 @@ const TIMELINE_EVENTS: TimelineEvent[] = [
     year: "2018",
     title: "ANGEL",
     titleEn: "ANGEL",
-    desc: "Rossetti がマージベースの増分的重複コミュニティ検出を提案",
+    desc: "Rossetti がマージベースの増分的重複コミュニティー検出を提案",
     descEn: "Rossetti proposes merge-based incremental overlapping CD",
     color: "#f97316",
   },
@@ -100,7 +100,7 @@ const TIMELINE_EVENTS: TimelineEvent[] = [
     year: "2021",
     title: "EvoGNN",
     titleEn: "EvoGNN",
-    desc: "GNN ベースの動的コミュニティ検出が本格化",
+    desc: "GNN ベースの動的コミュニティー検出が本格化",
     descEn: "GNN-based dynamic community detection gains traction",
     color: "#a855f7",
   },
@@ -121,7 +121,7 @@ export function StreamingCDTimeline({ locale = "ja" }: Props) {
       title={isJa ? "ストリーミング CD の歴史" : "History of Streaming CD"}
       description={
         isJa
-          ? "辺ストリームに対するコミュニティ検出研究の主要マイルストーン"
+          ? "辺ストリームに対するコミュニティー検出研究の主要マイルストーン"
           : "Key milestones in community detection for edge streams"
       }
     >
@@ -249,7 +249,7 @@ const ALGO_DATA: AlgoRow[] = [
     overlap: false,
     edgeDel: true,
     complexity: "O(k·d)",
-    strength: "高速、パラメータ不要",
+    strength: "高速、パラメーター不要",
     strengthEn: "Fast, parameter-free",
   },
   {
@@ -271,7 +271,7 @@ const ALGO_DATA: AlgoRow[] = [
     overlap: true,
     edgeDel: false,
     complexity: "O(d²)",
-    strength: "局所的、重複コミュニティ",
+    strength: "局所的、重複コミュニティー",
     strengthEn: "Local, overlapping communities",
   },
   {
@@ -385,7 +385,7 @@ export function StreamingCDComparisonTable({ locale = "ja" }: Props) {
       </div>
       <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-500">
         {isJa
-          ? "d = 端点の次数, c = コミュニティサイズ, k = 反復回数 (2–5), deg = ノード次数"
+          ? "d = 端点の次数, c = コミュニティーサイズ, k = 反復回数 (2–5), deg = ノード次数"
           : "d = endpoint degree, c = community size, k = iterations (2–5), deg = node degree"}
       </p>
     </InteractiveDemo>
@@ -435,15 +435,15 @@ export function StreamingDesignSpaceDiagram({ locale = "ja" }: Props) {
       color: "#10b981",
     },
     {
-      axis: isJa ? "コミュニティの性質" : "Community Property",
+      axis: isJa ? "コミュニティーの性質" : "Community Property",
       options: [
         {
           label: isJa ? "排他的" : "Disjoint",
-          desc: isJa ? "各ノードは 1 コミュニティ" : "Each node in 1 community",
+          desc: isJa ? "各ノードは 1 コミュニティー" : "Each node in 1 community",
         },
         {
           label: isJa ? "重複" : "Overlapping",
-          desc: isJa ? "複数コミュニティに所属可" : "Node in multiple communities",
+          desc: isJa ? "複数コミュニティーに所属可" : "Node in multiple communities",
         },
         {
           label: isJa ? "ファジー" : "Fuzzy",
@@ -544,23 +544,23 @@ export function TILESProcessDiagram({ locale = "ja" }: Props) {
     },
     {
       icon: "🏠",
-      label: isJa ? "コミュニティ更新" : "Community update",
+      label: isJa ? "コミュニティー更新" : "Community update",
       desc: isJa
-        ? "三角形が存在 → u, v, w を同一コミュニティにマージ or 既存を拡張"
+        ? "三角形が存在 → u, v, w を同一コミュニティーにマージ or 既存を拡張"
         : "Triangle exists → merge u, v, w into same community or extend existing",
     },
     {
       icon: "⏳",
       label: isJa ? "TTL チェック" : "TTL check",
       desc: isJa
-        ? "辺の TTL（生存時間）を確認。期限切れの辺を除去し、コミュニティを再評価"
+        ? "辺の TTL（生存時間）を確認。期限切れの辺を除去し、コミュニティーを再評価"
         : "Check edge TTL. Remove expired edges and re-evaluate communities",
     },
     {
       icon: "📤",
       label: isJa ? "結果を出力" : "Emit result",
       desc: isJa
-        ? "現在のコミュニティ構造を出力（随時更新）"
+        ? "現在のコミュニティー構造を出力（随時更新）"
         : "Output current community structure (continuously updated)",
     },
   ];

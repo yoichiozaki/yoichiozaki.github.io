@@ -17,11 +17,11 @@ export const EDGES: EdgeDef[] = [
     label: t("ハードウェア効率", "Hardware efficiency"),
     detail: {
       summary: t(
-        "1 ドル・1 ワットあたりに得られる計算量。チップの世代、低精度化、メモリ、パッケージ、運用の効率で決まる。",
+        "1 ドル・1 ワットあたりに得られる計算量。チップの世代、低精度化、メモリー、パッケージ、運用の効率で決まる。",
         "Compute per dollar and per watt, set by chip generation, lower precision, memory, packaging and how well the fleet is run.",
       ),
       note: t(
-        "長期的には指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリを積むことで得られた。ただし、電力を増やして得た分は、1 チップあたりの性能を上げても 1 ワットあたりの効率は上げない。世代交代が 1〜2 年で進むと、古いチップは減価償却が終わる前に経済的に古くなる。",
+        "長期的には指数関数的に改善するが、新しい世代が出るたびに段階的に進む。H100 から Rubin までの 1 チップあたりの性能の伸びの多くは、微細化ではなく、ダイと電力を増やし、精度を下げ、メモリーを積むことで得られた。ただし、電力を増やして得た分は、1 チップあたりの性能を上げても 1 ワットあたりの効率は上げない。世代交代が 1〜2 年で進むと、古いチップは減価償却が終わる前に経済的に古くなる。",
         "It improves exponentially over the long run, but in steps with each generation. Most of the per-chip performance gain from H100 to Rubin came not from smaller transistors but from more dies and power, lower precision and more memory — and the added power raises performance per chip, not per watt. With a new generation every one to two years, older chips become economically obsolete before they are fully depreciated.",
       ),
       refs: ["4.3:gains", "4.7:tokens", "3.5:depreciation"],
@@ -57,10 +57,10 @@ export const EDGES: EdgeDef[] = [
     fromSide: "right",
     toSide: "left",
     kind: "flow",
-    label: t("パラメータ効率", "Parameter efficiency"),
+    label: t("パラメーター効率", "Parameter efficiency"),
     detail: {
       summary: t(
-        "モデルの大きさを、どれだけ少ない計算で能力に変えられるか。MoE は総パラメータを増やしながら、1 トークンの計算に使うパラメータ（稼働パラメータ）を絞り、学習と推論の計算を減らす。その代わり、重みを置くメモリと、エキスパート間の通信の負担は増える。",
+        "モデルの大きさを、どれだけ少ない計算で能力に変えられるか。MoE は総パラメーターを増やしながら、1 トークンの計算に使うパラメーター（稼働パラメーター）を絞り、学習と推論の計算を減らす。その代わり、重みを置くメモリーと、エキスパート間の通信の負担は増える。",
         "How little compute it takes to turn model size into capability. MoE grows the total parameter count while using only a few parameters (the active ones) per token, cutting training and inference compute at the cost of more memory for the weights and more communication between experts.",
       ),
       note: t(
@@ -152,7 +152,7 @@ export const EDGES: EdgeDef[] = [
         "Inference cost per token — equivalently, tokens per watt and per dollar — lowered by KV-cache compression, lower precision and MoE.",
       ),
       note: t(
-        "長く考えさせ、サブエージェントで分担するほど、1 件あたりのトークンは増える。電力と HBM が上限を決めるなかでは、1 ワットあたりのトークンが、推論時計算を伸ばせる上限を決める。業界の対応は、KV キャッシュを小さくするモデル側の工夫（GQA、MLA）、プリフィルとデコードを別の GPU に割り当てる処理の分離（NVIDIA Dynamo）、KV キャッシュを GPU の外の階層に逃がすメモリ階層の拡張、SRAM を大量に積んだ推論専用チップ（Groq、Cerebras）の 4 つに分かれる。",
+        "長く考えさせ、サブエージェントで分担するほど、1 件あたりのトークンは増える。電力と HBM が上限を決めるなかでは、1 ワットあたりのトークンが、推論時計算を伸ばせる上限を決める。業界の対応は、KV キャッシュを小さくするモデル側の工夫（GQA、MLA）、プリフィルとデコードを別の GPU に割り当てる処理の分離（NVIDIA Dynamo）、KV キャッシュを GPU の外の階層に逃がすメモリー階層の拡張、SRAM を大量に積んだ推論専用チップ（Groq、Cerebras）の 4 つに分かれる。",
         "Longer thinking and more subagents mean more tokens per job. With power and HBM setting the ceiling, tokens per watt decide how far inference compute can grow. The industry has responded in four ways: model-side designs that shrink the KV cache (GQA, MLA), splitting prefill and decode onto different GPUs (NVIDIA Dynamo), offloading the KV cache to memory tiers outside the GPU, and inference chips packed with SRAM (Groq, Cerebras).",
       ),
       refs: ["4.4:kvCache", "4.4:responses", "5.3:hbm"],

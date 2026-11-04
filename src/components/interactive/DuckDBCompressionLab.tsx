@@ -50,7 +50,7 @@ const DATASETS: Dataset[] = [
     ],
     winner: "Dictionary",
     why: {
-      ja: "辞書は 3 エントリだけ。各行は「辞書の何番目か」を指すインデックスになり、それをさらにビットパックすると 1 行 2 ビット。文字列そのものはもう 1 度も現れない。DICT_FSST の見積もりは `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2 という一律 2 倍圧縮の仮定なので 61,440 バイト。なお FSST と DICT_FSST が同じ競争に並ぶことはありません（ストレージ v1.3.0 以降は FSST 側の Analyze が nullptr を返して無効化されます）。",
+      ja: "辞書は 3 エントリーだけ。各行は「辞書の何番目か」を指すインデックスになり、それをさらにビットパックすると 1 行 2 ビット。文字列そのものはもう 1 度も現れない。DICT_FSST の見積もりは `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2 という一律 2 倍圧縮の仮定なので 61,440 バイト。なお FSST と DICT_FSST が同じ競争に並ぶことはありません（ストレージ v1.3.0 以降は FSST 側の Analyze が nullptr を返して無効化されます）。",
       en: "The dictionary holds just three entries; every row becomes an index into it, bit-packed down to 2 bits. The string bytes themselves never repeat. DICT_FSST's estimate is `DictFSSTAnalyzeState::FinalAnalyze()` = total_string_length / 2 — a flat \"assume 2×\" guess — i.e. 61,440 bytes. Note that FSST and DICT_FSST never appear in the same contest: from storage v1.3.0 onward FSST's Analyze returns nullptr and it is disabled.",
     },
   },

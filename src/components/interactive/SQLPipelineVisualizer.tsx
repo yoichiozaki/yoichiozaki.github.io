@@ -32,13 +32,13 @@ const LAYER_META: Record<
     chip: "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/40",
   },
   planner: {
-    ja: "プランナ",
+    ja: "プランナー",
     en: "Planner",
     dot: "bg-sky-500",
     chip: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40",
   },
   executor: {
-    ja: "エグゼキュータ",
+    ja: "エグゼキューター",
     en: "Executor",
     dot: "bg-emerald-500",
     chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40",
@@ -172,7 +172,7 @@ resolved expressions
   · 述語プッシュダウン  : AND を分解し、各連言項を参照テーブル直上へ降ろす
   · 列プルーニング      : 上位で使われない列を読み出し対象から外す
   · 定数畳み込み        : now() のような安定関数をプラン時に1回だけ評価する
-                          （このクエリには対象が無いので何も起きない）`,
+                          （このクエリーには対象が無いので何も起きない）`,
     note: "結合前に行数を減らすほど後段は安くなります。AND を連言項に分解してから降ろすのが定石で、OR は分解できないため降ろせないことがあります。",
     noteEn:
       "The fewer rows that reach the join, the cheaper everything above it becomes. Splitting AND into conjuncts before pushing is the standard trick; OR cannot be split the same way and often stays put.",
@@ -180,7 +180,7 @@ resolved expressions
   {
     id: "stats",
     layer: "planner",
-    title: "統計とカーディナリティ推定",
+    title: "統計とカーディナリティー推定",
     titleEn: "Statistics & cardinality estimation",
     artifactLabel: "推定行数",
     artifactLabelEn: "Estimated row counts",
@@ -198,7 +198,7 @@ pg_statistic
 |σ(orders)| = 1,000,000 × 0.10 = 100,000
 join sel    = 1 / max(NDV(u.id), NDV(o.user_id)) = 1 / 100,000
 |u ⋈ o|     = 55,000 × 100,000 / 100,000 = 55,000`,
-    note: "オプティマイザの品質はここで決まります。推定を誤ると、以降のコスト比較がどれだけ精密でも間違ったプランを選びます。",
+    note: "オプティマイザーの品質はここで決まります。推定を誤ると、以降のコスト比較がどれだけ精密でも間違ったプランを選びます。",
     noteEn:
       "This step determines the optimizer's quality. If the estimate is wrong, no amount of precision in the later cost comparison will save the plan.",
   },
@@ -276,7 +276,7 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
     artifactLabelEn: "From logical tuple to physical location",
     artifact: `SeqScan(orders).next()
   heap_getnext(scan, ForwardScanDirection)
-    現在ブロック内のラインポインタを 1 つ進める
+    現在ブロック内のラインポインターを 1 つ進める
     ブロックを読み切ったら次のブロックへ  block = 0, 1, 2, …, 9,999
 
   可視性判定 : HeapTupleSatisfiesMVCC(tuple, snapshot)
@@ -291,7 +291,7 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
   {
     id: "buffer",
     layer: "storage",
-    title: "バッファプール",
+    title: "バッファープール",
     titleEn: "Buffer pool",
     artifactLabel: "ページのキャッシュ管理",
     artifactLabelEn: "Page cache management",
@@ -307,7 +307,7 @@ Limit が 10 行受け取った時点で next() の呼び出しは止まる。`,
            1. そのページの LSN まで WAL を flush   ← WAL 先行書き込み規則
            2. データページを書き出す
          smgrread() で 8KB を読み込む`,
-    note: "実行エンジンはページを直接ディスクから読みません。必ずバッファプールを経由し、pin されている間はそのページが追い出されないことが保証されます。",
+    note: "実行エンジンはページを直接ディスクから読みません。必ずバッファープールを経由し、pin されている間はそのページが追い出されないことが保証されます。",
     noteEn:
       "The execution engine never reads a page straight from disk. Everything goes through the buffer pool, and while a page is pinned it is guaranteed not to be evicted.",
   },
@@ -355,7 +355,7 @@ export function SQLPipelineVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "同じ1本のクエリが、テキスト → トークン → AST → 論理プラン → 物理プラン → 実行 → ページ読み出しへと姿を変えていく様子を、各段階の中間表現とともに追跡します。"
+          ? "同じ1本のクエリーが、テキスト → トークン → AST → 論理プラン → 物理プラン → 実行 → ページ読み出しへと姿を変えていく様子を、各段階の中間表現とともに追跡します。"
           : "Follow a single query as it changes shape — text → tokens → AST → logical plan → physical plan → execution → page reads — with the intermediate representation shown at every stage."
       }
     >

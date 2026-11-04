@@ -86,7 +86,7 @@ const steps: Layer[] = [
     ],
     highlight: "norm",
     desc: {
-      ja: "RMSNorm は各トークンのベクトルを二乗平均平方根で正規化する。RMS(x) = √(Σxᵢ²/d) で割り、学習可能なスケールパラメータ γ を掛ける。LayerNorm と違い平均を引かないため計算が高速。",
+      ja: "RMSNorm は各トークンのベクトルを二乗平均平方根で正規化する。RMS(x) = √(Σxᵢ²/d) で割り、学習可能なスケールパラメーター γ を掛ける。LayerNorm と違い平均を引かないため計算が高速。",
       en: "RMSNorm normalizes each token's vector by its root mean square: divide by RMS(x) = √(Σxᵢ²/d), then multiply by learnable scale γ. Unlike LayerNorm, it doesn't subtract the mean, making it faster.",
     },
   },

@@ -310,12 +310,12 @@ export function BufferPoolVisualizer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "バッファプールと clock-sweep 置換"
+          ? "バッファープールと clock-sweep 置換"
           : "The Buffer Pool and Clock-Sweep Replacement"
       }
       description={
         isJa
-          ? "4フレームのバッファプールに対する実行エンジンからのページ要求を1イベントずつ追います。pin されたページが追い出されないこと、dirty なページの追い出しが WAL の flush を伴うことに注目してください。"
+          ? "4フレームのバッファープールに対する実行エンジンからのページ要求を1イベントずつ追います。pin されたページが追い出されないこと、dirty なページの追い出しが WAL の flush を伴うことに注目してください。"
           : "Page requests from the execution engine against a four-frame buffer pool, one event at a time. Note that pinned pages are never evicted, and that evicting a dirty page forces a WAL flush first."
       }
     >
@@ -324,7 +324,7 @@ export function BufferPoolVisualizer({ locale = "ja" }: Props) {
         <div>
           <div className="mb-1 flex items-baseline justify-between text-[11px] text-muted-foreground">
             <span className="font-semibold uppercase tracking-wide">
-              {isJa ? "バッファフレーム" : "Buffer frames"}
+              {isJa ? "バッファーフレーム" : "Buffer frames"}
             </span>
             <span className="font-mono">
               {isJa ? "要求中" : "request"}:{" "}

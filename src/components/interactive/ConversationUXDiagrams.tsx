@@ -255,7 +255,7 @@ export function DeterminismSpectrum({ locale = "ja" }: Props) {
             "応答が存在するか / 空でないか",
             "有効なJSON・スキーマ適合",
             "n-gram反復率（ループ検知）",
-            "応答レイテンシ < 閾値",
+            "応答レイテンシー < 閾値",
             "ツール引数の完全一致",
           ]
         : [
@@ -495,7 +495,7 @@ export function TurnTakingLatencyDiagram({ locale = "ja" }: Props) {
 
       <p className="mt-2 text-xs leading-snug" style={{ color: c.textMuted }}>
         {ja
-          ? "人間は相手の発話終わりを予測して応答を先に組み立てるため、産出に600ms以上かかるのに~200msで返せる。古典的パイプラインは「無音を待ってから」直列処理するので、構造軸の応答レイテンシが人間規範を大きく超えやすい（数値は例示）。"
+          ? "人間は相手の発話終わりを予測して応答を先に組み立てるため、産出に600ms以上かかるのに~200msで返せる。古典的パイプラインは「無音を待ってから」直列処理するので、構造軸の応答レイテンシーが人間規範を大きく超えやすい（数値は例示）。"
           : "Humans predict the end of a turn and pre-plan their reply, so they answer in ~200ms even though production takes 600ms+. A classic pipeline waits for silence and then runs serially, so its Structure-axis response latency easily blows past the human norm (numbers illustrative)."}
       </p>
     </div>
@@ -520,7 +520,7 @@ export function EvalMetricMatrix({ locale = "ja" }: Props) {
       color: c.structure,
       cells: ja
         ? [
-            "応答有無・スキーマ適合・ループ検知・レイテンシ・(音声)終話/バージイン/無音",
+            "応答有無・スキーマ適合・ループ検知・レイテンシー・(音声)終話/バージイン/無音",
             "—（参照不要なことが多い）",
             "「流れが自然か」の人手確認（稀）",
           ]
@@ -550,7 +550,7 @@ export function EvalMetricMatrix({ locale = "ja" }: Props) {
       color: c.goodness,
       cells: ja
         ? [
-            "代理指標: 離脱率・再質問率・エスカレーション・(音声)レイテンシ分布",
+            "代理指標: 離脱率・再質問率・エスカレーション・(音声)レイテンシー分布",
             "—（参照しづらい）",
             "CSAT・👍/👎・LLM-judge・(音声)自然さMOS",
           ]

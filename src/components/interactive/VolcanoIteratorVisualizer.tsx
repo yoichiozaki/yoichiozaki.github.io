@@ -317,7 +317,7 @@ class Projection implements Iter {
       this.t.leave(
         this.id,
         null,
-        "子が NULL を返したのでクエリ終了",
+        "子が NULL を返したのでクエリー終了",
         "The child returned NULL, so the query is finished.",
       );
       return null;
@@ -378,7 +378,7 @@ function buildTrace(): Ev[] {
   t.mark(
     "proj",
     "close",
-    "close() が伝播し、バッファの unpin や一時ファイルの削除など資源が解放される",
+    "close() が伝播し、バッファーの unpin や一時ファイルの削除など資源が解放される",
     "close() propagates, releasing resources — unpinning buffers, deleting temp files, and so on.",
   );
 

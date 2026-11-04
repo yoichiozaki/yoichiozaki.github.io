@@ -364,7 +364,7 @@ function buildScenario(): MapReduceState[] {
         { key: "world", value: 2 },
       ],
       description:
-        "完了: 最終結果が分散ファイルシステム (GFS/HDFS) に書き出されます。bar=1, foo=2, hello=4, world=2。プログラマが書いたのは map() と reduce() の 2 つの関数だけ — 分散処理・障害復旧・データ転送はすべてフレームワークが担当しました。",
+        "完了: 最終結果が分散ファイルシステム (GFS/HDFS) に書き出されます。bar=1, foo=2, hello=4, world=2。プログラマーが書いたのは map() と reduce() の 2 つの関数だけ — 分散処理・障害復旧・データ転送はすべてフレームワークが担当しました。",
       descriptionEn:
         "Done: Final results are written to the distributed file system (GFS/HDFS). bar=1, foo=2, hello=4, world=2. The programmer only wrote two functions — map() and reduce() — the framework handled all distribution, fault recovery, and data transfer.",
     },

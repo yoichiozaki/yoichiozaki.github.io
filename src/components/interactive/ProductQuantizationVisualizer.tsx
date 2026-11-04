@@ -110,7 +110,7 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <div className="mb-2 text-sm font-semibold text-foreground">
-            {isJa ? `クエリベクトル (8 次元 = ${rawBytes} byte float32)` : `Query vector (8-dim = ${rawBytes} B float32)`}
+            {isJa ? `クエリーベクトル (8 次元 = ${rawBytes} byte float32)` : `Query vector (8-dim = ${rawBytes} B float32)`}
           </div>
           <div className="space-y-1.5">
             {query.map((v, i) => (
@@ -225,7 +225,7 @@ export function ProductQuantizationVisualizer({ locale = "ja" }: Props) {
 
       <p className="mt-3 text-xs text-muted-foreground">
         {isJa
-          ? "スライダを動かしてみてください。PQ 近似が真の距離をなぞる様子と、部分空間ごとに一番近い代表点が切り替わる瞬間が観察できます。"
+          ? "スライダーを動かしてみてください。PQ 近似が真の距離をなぞる様子と、部分空間ごとに一番近い代表点が切り替わる瞬間が観察できます。"
           : "Move the sliders. Watch the PQ approximation track the true distance, and notice when a sub-space switches to a different centroid."}
       </p>
     </InteractiveDemo>

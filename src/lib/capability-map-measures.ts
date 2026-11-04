@@ -34,7 +34,7 @@ export const MEASURES: GroupDef = {
             "How well the model predicts the next token on text it was not trained on — the most direct gauge of pretraining progress.",
           ),
           note: t(
-            "Kaplan ら（2020 年）は、損失がパラメータ数、データ量、計算量のべき乗則に従って下がることを示した。Chinchilla（2022 年）は、計算量が決まっているなら、パラメータ数と学習データの量を同じ割合で増やすのが最適だとした。",
+            "Kaplan ら（2020 年）は、損失がパラメーター数、データ量、計算量のべき乗則に従って下がることを示した。Chinchilla（2022 年）は、計算量が決まっているなら、パラメーター数と学習データの量を同じ割合で増やすのが最適だとした。",
             "Kaplan et al. (2020) showed loss falling as a power law in parameters, data and compute; Chinchilla (2022) found that for a fixed compute budget, parameters and training tokens should be scaled in equal proportion.",
           ),
           refs: ["5.1", "5.2:loss"],
@@ -72,7 +72,7 @@ export const MEASURES: GroupDef = {
             "The length of tasks, in skilled-human time, that AI completes with 50% probability; since 2023 it has doubled about every four months.",
           ),
           note: t(
-            "道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測り、仕組みはモデルごとに選ぶ。16 時間を超える値は今の課題セットでは信頼できない。METR が測定値を追加したのは 2026 年 5 月が最後で、9 月には公開ページをもう積極的には更新しないと明記した。課題の多くは、ソフトウェア、機械学習、サイバーセキュリティの、自己完結して自動で採点できるように整えた仕事で、METR 自身も、実際の仕事の多くは前提となる文脈を必要とする点が違うと注意している。",
+            "道具を与えて作業のループを回す仕組み（スキャフォールド）にモデルを組み込んで測り、仕組みはモデルごとに選ぶ。16 時間を超える値は今の課題セットでは信頼できない。METR が測定値を追加したのは 2026 年 5 月が最後で、9 月には公開ページをもう積極的には更新しないと明記した。課題の多くは、ソフトウェア、機械学習、サイバーセキュリティーの、自己完結して自動で採点できるように整えた仕事で、METR 自身も、実際の仕事の多くは前提となる文脈を必要とする点が違うと注意している。",
             "Measured with the model inside a scaffold that provides tools and runs the loop, chosen for each model. Values above 16 hours are unreliable on the current task set; METR's last new measurement was in May 2026, and in September it stated that its time-horizons page is no longer actively updated. Most tasks are self-contained, automatically scored software, ML and cybersecurity tasks; METR itself notes that most real work, unlike these, draws on prior context.",
           ),
           refs: ["5.2:metrSystem", "5.2:outrun"],
@@ -317,7 +317,7 @@ export const MATERIALS: GroupDef = {
         "Problems and answers the models produce themselves; for gradable tasks, only the correct ones can be kept.",
       ),
       note: t(
-        "Gunasekar ら（2023 年）の phi-1 は、Web から選んだ教科書のような文章 60 億トークンと、GPT-3.5 でつくった教科書と練習問題 10 億トークンで学習し、13 億パラメータで HumanEval の 50.6% を解いた。",
+        "Gunasekar ら（2023 年）の phi-1 は、Web から選んだ教科書のような文章 60 億トークンと、GPT-3.5 でつくった教科書と練習問題 10 億トークンで学習し、13 億パラメーターで HumanEval の 50.6% を解いた。",
         "Gunasekar et al.'s phi-1 (2023) trained on 6 billion tokens of textbook-quality web text plus 1 billion tokens of textbooks and exercises generated with GPT-3.5, and solved 50.6% of HumanEval with 1.3 billion parameters.",
       ),
       links: [S.phi1, S.deepseekR1],

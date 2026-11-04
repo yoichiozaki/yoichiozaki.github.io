@@ -84,10 +84,10 @@ function buildStreamingScenario(): StreamStep[] {
       ],
       edges: [{ source: 0, target: 1, action: "add" }],
       description:
-        "辺 A-B が到着。両ノードとも未割り当てなので、新しいコミュニティ（青）を作成。",
+        "辺 A-B が到着。両ノードとも未割り当てなので、新しいコミュニティー（青）を作成。",
       descriptionEn:
         "Edge A-B arrives. Both nodes are unassigned, so a new community (blue) is created.",
-      highlight: "新規コミュニティの誕生",
+      highlight: "新規コミュニティーの誕生",
       highlightEn: "Birth of a new community",
       phase: "add",
     },
@@ -108,7 +108,7 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 0, target: 2, action: "add" },
       ],
       description:
-        "辺 A-C が到着。C は未割り当てだが A のコミュニティに合流。ラベル伝搬: A のラベルが C に伝わる。",
+        "辺 A-C が到着。C は未割り当てだが A のコミュニティーに合流。ラベル伝搬: A のラベルが C に伝わる。",
       descriptionEn:
         "Edge A-C arrives. C is unassigned — joins A's community via label propagation.",
       highlight: "ラベル伝搬による拡張",
@@ -133,10 +133,10 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 1, target: 2, action: "add" },
       ],
       description:
-        "辺 B-C が到着し、三角形 △ABC が形成。コミュニティ内の密度が上がり、TILES なら三角形の完成をトリガーにコミュニティを確定する。",
+        "辺 B-C が到着し、三角形 △ABC が形成。コミュニティー内の密度が上がり、TILES なら三角形の完成をトリガーにコミュニティーを確定する。",
       descriptionEn:
         "Edge B-C arrives, forming triangle △ABC. In TILES, triangle completion triggers community confirmation.",
-      highlight: "三角形の完成 → コミュニティ強化",
+      highlight: "三角形の完成 → コミュニティー強化",
       highlightEn: "Triangle completion → community reinforcement",
       phase: "add",
     },
@@ -160,10 +160,10 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 4, target: 5, action: "add" },
       ],
       description:
-        "辺 D-E と E-F が相次いで到着。別の新規コミュニティ（赤）が形成される。",
+        "辺 D-E と E-F が相次いで到着。別の新規コミュニティー（赤）が形成される。",
       descriptionEn:
         "Edges D-E and E-F arrive in succession. A second community (red) forms.",
-      highlight: "2 つ目のコミュニティが並行して成長",
+      highlight: "2 つ目のコミュニティーが並行して成長",
       highlightEn: "Second community grows in parallel",
       phase: "add",
     },
@@ -188,7 +188,7 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 3, target: 5, action: "add" },
       ],
       description:
-        "辺 D-F が到着し、三角形 △DEF が完成。赤コミュニティの結合が強化された。",
+        "辺 D-F が到着し、三角形 △DEF が完成。赤コミュニティーの結合が強化された。",
       descriptionEn:
         "Edge D-F arrives, completing triangle △DEF. Red community is reinforced.",
       highlight: "2 つ目の三角形も完成",
@@ -217,7 +217,7 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 2, target: 3, action: "add" },
       ],
       description:
-        "ブリッジ辺 C-D が到着。2 つのコミュニティが接続された。ナイーブな LPA ならマージの可能性があるが、Modularity を監視する手法は「分離を保つ方が Q が高い」と判定し、コミュニティを維持する。",
+        "ブリッジ辺 C-D が到着。2 つのコミュニティーが接続された。ナイーブな LPA ならマージの可能性があるが、Modularity を監視する手法は「分離を保つ方が Q が高い」と判定し、コミュニティーを維持する。",
       descriptionEn:
         "Bridge edge C-D arrives, connecting two communities. Naive LPA might merge them, but modularity-aware methods keep them separate if Q is higher.",
       highlight: "ブリッジ辺: マージか分離か？",
@@ -249,10 +249,10 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "add" },
       ],
       description:
-        "辺 F-G, F-H, G-H が到着し、3 つ目のコミュニティ（緑）が誕生。G と H は F とも接続されるが、F は赤コミュニティに留まる（F の赤コミュニティ内の辺が多い）。",
+        "辺 F-G, F-H, G-H が到着し、3 つ目のコミュニティー（緑）が誕生。G と H は F とも接続されるが、F は赤コミュニティーに留まる（F の赤コミュニティー内の辺が多い）。",
       descriptionEn:
         "Edges F-G, F-H, G-H arrive. A third community (green) forms. F stays in red community due to stronger internal connections.",
-      highlight: "境界ノード F: 複数コミュニティに接続",
+      highlight: "境界ノード F: 複数コミュニティーに接続",
       highlightEn: "Boundary node F: connected to multiple communities",
       phase: "add",
     },
@@ -281,7 +281,7 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "existing" },
       ],
       description:
-        "辺 C-D が削除（ストリーミングでは辺の削除も発生する）。ブリッジの消失により、青と赤コミュニティは完全に分離。増分的手法ではブリッジ辺の削除時にのみ局所的な再計算を行う。",
+        "辺 C-D が削除（ストリーミングでは辺の削除も発生する）。ブリッジの消失により、青と赤コミュニティーは完全に分離。増分的手法ではブリッジ辺の削除時にのみ局所的な再計算を行う。",
       descriptionEn:
         "Edge C-D is removed (edge deletions also occur in streaming). The bridge disappears; blue and red communities are fully separated. Incremental methods only recompute locally when bridge edges are removed.",
       highlight: "辺削除 → 局所的な再計算のみ",
@@ -313,7 +313,7 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "existing" },
       ],
       description:
-        "辺 B-D が到着し新たなブリッジが形成。コミュニティ構造自体は維持されるが、B と D がコミュニティ間の仲介役になる。delta-screening Louvain は、この辺の追加が Modularity に影響する範囲（B, D の近傍）のみを再評価する。",
+        "辺 B-D が到着し新たなブリッジが形成。コミュニティー構造自体は維持されるが、B と D がコミュニティー間の仲介役になる。delta-screening Louvain は、この辺の追加が Modularity に影響する範囲（B, D の近傍）のみを再評価する。",
       descriptionEn:
         "Edge B-D arrives, creating a new bridge. Community structure is maintained. Delta-screening Louvain only re-evaluates the neighborhood of B and D.",
       highlight: "delta-screening: 影響範囲のみ再計算",
@@ -345,7 +345,7 @@ function buildStreamingScenario(): StreamStep[] {
         { source: 6, target: 7, action: "existing" },
       ],
       description:
-        "最終状態: 3 つの明確なコミュニティが検出された。ストリーミング手法は、辺が 1 本ずつ到着・削除されるたびに局所的に更新を行い、全体の再計算を回避する。",
+        "最終状態: 3 つの明確なコミュニティーが検出された。ストリーミング手法は、辺が 1 本ずつ到着・削除されるたびに局所的に更新を行い、全体の再計算を回避する。",
       descriptionEn:
         "Final state: 3 clear communities detected. Streaming methods update locally as each edge arrives or departs, avoiding full recomputation.",
       highlight: "ストリーミング CD: 局所更新が鍵",
@@ -396,12 +396,12 @@ export function StreamingCommunityVisualizer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "ストリーミング・コミュニティ検出シミュレーター"
+          ? "ストリーミング・コミュニティー検出シミュレーター"
           : "Streaming Community Detection Simulator"
       }
       description={
         isJa
-          ? "辺がストリームとして 1 本ずつ到着・削除される状況で、コミュニティがどう変化するかを観察します。"
+          ? "辺がストリームとして 1 本ずつ到着・削除される状況で、コミュニティーがどう変化するかを観察します。"
           : "Observe how communities evolve as edges arrive and depart one by one in a streaming fashion."
       }
     >

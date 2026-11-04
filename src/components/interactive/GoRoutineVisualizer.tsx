@@ -113,7 +113,7 @@ function buildScenario(): SchedulerState[] {
       ]),
       globalQueue: [],
       description:
-        "G1 内で go func() が 2 回呼ばれ G2, G3 が生成。新しい G は P1 のローカルキュー（256 エントリのリングバッファ）に runqput() で追加されます。",
+        "G1 内で go func() が 2 回呼ばれ G2, G3 が生成。新しい G は P1 のローカルキュー（256 エントリーのリングバッファー）に runqput() で追加されます。",
       descriptionEn:
         "G1 calls go func() twice, spawning G2 and G3. New G's are added to P1's local queue (a 256-entry ring buffer) via runqput().",
       highlight: "G2",
@@ -420,12 +420,12 @@ export function GoRoutineVisualizer({
       title={
         isEn
           ? "Go Scheduler: G, M, P in Action"
-          : "Go スケジューラ: G・M・P の動き"
+          : "Go スケジューラー: G・M・P の動き"
       }
       description={
         isEn
           ? "Step through how Go's runtime scheduler maps goroutines (G) onto OS threads (M) via processors (P)."
-          : "Go ランタイムスケジューラが Goroutine (G) を OS スレッド (M) に Processor (P) 経由でマッピングする様子をステップ実行で見てみましょう。"
+          : "Go ランタイムスケジューラーが Goroutine (G) を OS スレッド (M) に Processor (P) 経由でマッピングする様子をステップ実行で見てみましょう。"
       }
     >
       {/* Visualization */}

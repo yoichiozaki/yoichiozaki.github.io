@@ -33,7 +33,7 @@ export function SearchEnginePipeline({ locale = "ja" }: DiagramProps) {
           { label: "収集", desc: "ドキュメント" },
           { label: "解析", desc: "トークン化" },
           { label: "索引構築", desc: "インデックス" },
-          { label: "検索処理", desc: "クエリ" },
+          { label: "検索処理", desc: "クエリー" },
           { label: "順位付け", desc: "スコア計算" },
           { label: "結果返却", desc: "レスポンス" },
         ];

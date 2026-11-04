@@ -528,7 +528,7 @@ export function FragmentationDiagram({ locale }: { locale?: string }) {
         role="img"
         aria-label={
           ja
-            ? "メモリの断片化とコンパクションの図"
+            ? "メモリーの断片化とコンパクションの図"
             : "Memory Fragmentation & Compaction Diagram"
         }
       >

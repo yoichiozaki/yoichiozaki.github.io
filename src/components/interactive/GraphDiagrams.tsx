@@ -164,7 +164,7 @@ export function TraversalComparisonTable({ locale = "ja" }: DiagramProps) {
             dfs: "❌ 保証しない",
           },
           {
-            aspect: "メモリ使用量",
+            aspect: "メモリー使用量",
             bfs: "O(V) — 幅が広いと大量に",
             dfs: "O(V) — 深さ分のスタック",
           },

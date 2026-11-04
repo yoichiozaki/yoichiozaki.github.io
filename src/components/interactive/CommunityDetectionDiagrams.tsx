@@ -42,7 +42,7 @@ const timelineData = [
     titleJa: "Modularity Q の定式化",
     titleEn: "Modularity Q Formalized",
     descJa:
-      "Newman & Girvan がモジュラリティ Q を定義。「良いコミュニティ分割」の定量的基準が確立。",
+      "Newman & Girvan がモジュラリティー Q を定義。「良いコミュニティー分割」の定量的基準が確立。",
     descEn:
       "Newman & Girvan define Modularity Q — establishing a quantitative criterion for good community structure.",
     color: "#10b981",
@@ -52,7 +52,7 @@ const timelineData = [
     titleJa: "NP困難性の証明",
     titleEn: "NP-Hardness Proved",
     descJa:
-      "Brandes らがモジュラリティ最大化の NP 困難性を証明（IEEE TKDE掲載）。厳密解は大規模グラフでは事実上不可能に。",
+      "Brandes らがモジュラリティー最大化の NP 困難性を証明（IEEE TKDE掲載）。厳密解は大規模グラフでは事実上不可能に。",
     descEn:
       "Brandes et al. prove modularity maximization is NP-hard (published in IEEE TKDE). Exact solutions intractable for large graphs.",
     color: "#ef4444",
@@ -62,7 +62,7 @@ const timelineData = [
     titleJa: "Resolution Limit 発見",
     titleEn: "Resolution Limit Discovered",
     descJa:
-      "Fortunato & Barthélemy がモジュラリティの解像度限界を発見。グラフのサイズに依存して小さなコミュニティが検出不能になる根本的問題。",
+      "Fortunato & Barthélemy がモジュラリティーの解像度限界を発見。グラフのサイズに依存して小さなコミュニティーが検出不能になる根本的問題。",
     descEn:
       "Fortunato & Barthélemy discover the resolution limit. Small communities become undetectable depending on graph size.",
     color: "#f59e0b",
@@ -82,7 +82,7 @@ const timelineData = [
     titleJa: "LFR ベンチマーク",
     titleEn: "LFR Benchmark",
     descJa:
-      "Lancichinetti-Fortunato-Radicchi ベンチマーク。コミュニティ構造を持つ合成グラフの生成器。アルゴリズム評価の標準ツールに。",
+      "Lancichinetti-Fortunato-Radicchi ベンチマーク。コミュニティー構造を持つ合成グラフの生成器。アルゴリズム評価の標準ツールに。",
     descEn:
       "Lancichinetti-Fortunato-Radicchi benchmark. Generates synthetic graphs with planted community structure for algorithm evaluation.",
     color: "#06b6d4",
@@ -92,7 +92,7 @@ const timelineData = [
     titleJa: "Stochastic Block Model の復権",
     titleEn: "SBM Revival",
     descJa:
-      "Karrer & Newman が Degree-Corrected SBM を提案。統計的推論に基づくコミュニティ検出が盛んに。",
+      "Karrer & Newman が Degree-Corrected SBM を提案。統計的推論に基づくコミュニティー検出が盛んに。",
     descEn:
       "Karrer & Newman propose Degree-Corrected SBM. Statistical inference-based detection gains momentum.",
     color: "#ec4899",
@@ -102,7 +102,7 @@ const timelineData = [
     titleJa: "検出限界の導出",
     titleEn: "Detectability Threshold",
     descJa:
-      "Decelle らが cavity 法により検出限界の閾値を導出。コミュニティが原理的に検出不可能になる相転移の存在を示す（厳密証明は 2013–2015 年）。",
+      "Decelle らが cavity 法により検出限界の閾値を導出。コミュニティーが原理的に検出不可能になる相転移の存在を示す（厳密証明は 2013–2015 年）。",
     descEn:
       "Decelle et al. derive the detectability threshold via the cavity method, showing a phase transition below which communities are fundamentally undetectable (rigorous proofs followed in 2013–2015).",
     color: "#f97316",
@@ -184,12 +184,12 @@ const algorithms = [
   {
     name: "Louvain",
     year: 2008,
-    approach: { ja: "貪欲モジュラリティ最適化", en: "Greedy modularity optimization" },
+    approach: { ja: "貪欲モジュラリティー最適化", en: "Greedy modularity optimization" },
     complexity: "O(n log n)",
     scalability: "★★★★★",
     overlapping: false,
     strengths: { ja: "高速、大規模グラフ対応", en: "Fast, scales to large graphs" },
-    weaknesses: { ja: "非連結コミュニティの可能性", en: "May produce disconnected communities" },
+    weaknesses: { ja: "非連結コミュニティーの可能性", en: "May produce disconnected communities" },
   },
   {
     name: "Leiden",
@@ -312,7 +312,7 @@ export function ModularityConceptDiagram({ locale = "ja" }: Props) {
       title={isJa ? "Modularity Q の直感" : "Intuition Behind Modularity Q"}
       description={
         isJa
-          ? "実際のコミュニティ内辺数と、ランダムに辺を張り直した場合の期待値を比較"
+          ? "実際のコミュニティー内辺数と、ランダムに辺を張り直した場合の期待値を比較"
           : "Compare actual intra-community edges with expected values under a random null model"
       }
     >
@@ -385,8 +385,8 @@ export function ModularityConceptDiagram({ locale = "ja" }: Props) {
       <div className="mt-4 p-3 rounded-lg bg-muted/80 text-xs text-muted-foreground leading-relaxed">
         {isJa ? (
           <>
-            <strong>Modularity Q</strong> = (コミュニティ内辺の割合) − (ランダム帰無モデルでの期待値)。
-            Q が高いほど、ランダムに比べて「コミュニティ内のつながりが異常に密」であることを意味します。
+            <strong>Modularity Q</strong> = (コミュニティー内辺の割合) − (ランダム帰無モデルでの期待値)。
+            Q が高いほど、ランダムに比べて「コミュニティー内のつながりが異常に密」であることを意味します。
             範囲は [-0.5, 1] で、0.3〜0.7 が実ネットワークで典型的な値です。
           </>
         ) : (
@@ -411,7 +411,7 @@ export function ResolutionLimitDiagram({ locale = "ja" }: Props) {
       title={isJa ? "Resolution Limit（解像度限界）" : "The Resolution Limit"}
       description={
         isJa
-          ? "Fortunato & Barthélemy (2007): モジュラリティ最大化は小さなコミュニティを見落とす"
+          ? "Fortunato & Barthélemy (2007): モジュラリティー最大化は小さなコミュニティーを見落とす"
           : "Fortunato & Barthélemy (2007): Modularity maximization misses small communities"
       }
     >
@@ -420,7 +420,7 @@ export function ResolutionLimitDiagram({ locale = "ja" }: Props) {
           {/* Large community (left) */}
           <ellipse cx="140" cy="80" rx="120" ry="65" fill="#3b82f6" fillOpacity={0.08} stroke="#3b82f6" strokeWidth={1.5} strokeDasharray="4,2" />
           <text x="140" y="30" textAnchor="middle" fill="#3b82f6" fontSize="10" fontWeight={600}>
-            {isJa ? "大規模コミュニティ" : "Large community"}
+            {isJa ? "大規模コミュニティー" : "Large community"}
           </text>
           {/* nodes in large community */}
           {[[80, 60], [120, 50], [160, 55], [200, 65], [90, 90], [130, 95], [150, 100], [180, 90], [100, 70], [170, 75]].map(([x, y], i) => (
@@ -468,9 +468,9 @@ export function ResolutionLimitDiagram({ locale = "ja" }: Props) {
         <div className="p-3 rounded-lg bg-muted/80 text-xs text-muted-foreground leading-relaxed">
           {isJa ? (
             <>
-              グラフ全体の辺数 <em>m</em> が大きくなると、モジュラリティ Q の最適解は
+              グラフ全体の辺数 <em>m</em> が大きくなると、モジュラリティー Q の最適解は
               辺数 &lt; √(2m) 程度の小さなクリークを統合してしまいます。
-              つまり、<strong>グラフが大きくなるほど小さな真のコミュニティが「見えなく」なる</strong>
+              つまり、<strong>グラフが大きくなるほど小さな真のコミュニティーが「見えなく」なる</strong>
               という根本的な限界があります。これが Resolution Limit です。
             </>
           ) : (
@@ -497,7 +497,7 @@ export function DetectabilityThresholdDiagram({ locale = "ja" }: Props) {
       title={isJa ? "検出限界（Detectability Threshold）" : "Detectability Threshold"}
       description={
         isJa
-          ? "コミュニティ構造が原理的に検出不可能になる情報理論的限界"
+          ? "コミュニティー構造が原理的に検出不可能になる情報理論的限界"
           : "The information-theoretic limit below which community structure is fundamentally undetectable"
       }
     >
@@ -508,7 +508,7 @@ export function DetectabilityThresholdDiagram({ locale = "ja" }: Props) {
 
         {/* X-axis label */}
         <text x="260" y="210" textAnchor="middle" fill="currentColor" fontSize="11">
-          {isJa ? "コミュニティ内外の辺密度の差 (c_in - c_out)" : "Difference in edge density (c_in - c_out)"}
+          {isJa ? "コミュニティー内外の辺密度の差 (c_in - c_out)" : "Difference in edge density (c_in - c_out)"}
         </text>
 
         {/* Y-axis label */}
@@ -551,10 +551,10 @@ export function DetectabilityThresholdDiagram({ locale = "ja" }: Props) {
       <div className="mt-3 p-3 rounded-lg bg-muted/80 text-xs text-muted-foreground leading-relaxed">
         {isJa ? (
           <>
-            SBM において、コミュニティ内の平均次数を <em>c<sub>in</sub></em>、
-            コミュニティ間の平均次数を <em>c<sub>out</sub></em> とすると、
+            SBM において、コミュニティー内の平均次数を <em>c<sub>in</sub></em>、
+            コミュニティー間の平均次数を <em>c<sub>out</sub></em> とすると、
             (c<sub>in</sub> − c<sub>out</sub>)² &lt; 2(c<sub>in</sub> + c<sub>out</sub>) のとき、
-            <strong>いかなるアルゴリズムでもコミュニティをランダムよりうまく検出できない</strong>ことが
+            <strong>いかなるアルゴリズムでもコミュニティーをランダムよりうまく検出できない</strong>ことが
             証明されています（Decelle et al., 2011）。これは物理学の「相転移」と深い関係があります。
           </>
         ) : (

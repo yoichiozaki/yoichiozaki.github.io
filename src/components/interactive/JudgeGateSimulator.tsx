@@ -165,7 +165,7 @@ export function JudgeGateSimulator({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "ゲート + 批評家ループのシミュレータ" : "Gate + critic loop simulator"}
+      title={isJa ? "ゲート + 批評家ループのシミュレーター" : "Gate + critic loop simulator"}
       description={
         isJa
           ? "生成 → 判定 → 修正のループを、人間基準の良否とジャッジの Specificity / Recall で表した小さなマルコフ連鎖です。リトライ予算 K を増やすと提供率は上がりますが、ジャッジの見逃しが試行ごとに独立なほど、不良の提供も増えます。"

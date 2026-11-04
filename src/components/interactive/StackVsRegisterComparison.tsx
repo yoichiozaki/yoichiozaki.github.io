@@ -46,7 +46,7 @@ function buildScenario(): MachineState[] {
       regRegisters: { a: "2", b: "3", c: "4", R0: "-", R1: "-" },
       regHighlight: -1,
       description:
-        "初期状態: a=2, b=3, c=4 として a + b * c を計算します。左がスタックマシン、右がレジスタマシンです。",
+        "初期状態: a=2, b=3, c=4 として a + b * c を計算します。左がスタックマシン、右がレジスターマシンです。",
       descriptionEn:
         "Initial: Computing a + b * c where a=2, b=3, c=4. Left is a stack machine, right is a register machine.",
     },
@@ -59,7 +59,7 @@ function buildScenario(): MachineState[] {
       regRegisters: { a: "2", b: "3", c: "4", R0: "-", R1: "12" },
       regHighlight: 0,
       description:
-        "スタック: LOAD a → a(2)をプッシュ。レジスタ: MUL R1, b, c → R1 = 3 × 4 = 12。レジスタマシンは1命令で乗算完了！",
+        "スタック: LOAD a → a(2)をプッシュ。レジスター: MUL R1, b, c → R1 = 3 × 4 = 12。レジスターマシンは1命令で乗算完了！",
       descriptionEn:
         "Stack: LOAD a → push a(2). Register: MUL R1, b, c → R1 = 3 × 4 = 12. Register machine completes multiply in 1 instruction!",
     },
@@ -72,7 +72,7 @@ function buildScenario(): MachineState[] {
       regRegisters: { a: "2", b: "3", c: "4", R0: "14", R1: "12" },
       regHighlight: 1,
       description:
-        "スタック: LOAD b → b(3)をプッシュ。レジスタ: ADD R0, a, R1 → R0 = 2 + 12 = 14。レジスタマシンはもう計算完了です。",
+        "スタック: LOAD b → b(3)をプッシュ。レジスター: ADD R0, a, R1 → R0 = 2 + 12 = 14。レジスターマシンはもう計算完了です。",
       descriptionEn:
         "Stack: LOAD b → push b(3). Register: ADD R0, a, R1 → R0 = 2 + 12 = 14. Register machine has already finished computation.",
     },
@@ -92,7 +92,7 @@ function buildScenario(): MachineState[] {
       },
       regHighlight: 2,
       description:
-        "スタック: LOAD c → c(4)をプッシュ（まだ計算していない）。レジスタ: MOV result, R0 → 結果を格納。3命令で完了！",
+        "スタック: LOAD c → c(4)をプッシュ（まだ計算していない）。レジスター: MOV result, R0 → 結果を格納。3命令で完了！",
       descriptionEn:
         "Stack: LOAD c → push c(4) (hasn't computed yet). Register: MOV result, R0 → store result. Done in 3 instructions!",
     },
@@ -112,7 +112,7 @@ function buildScenario(): MachineState[] {
       },
       regHighlight: -1,
       description:
-        "スタック: MUL → 3 × 4 = 12 をプッシュ。レジスタマシンは既に完了しています（待機中）。",
+        "スタック: MUL → 3 × 4 = 12 をプッシュ。レジスターマシンは既に完了しています（待機中）。",
       descriptionEn:
         "Stack: MUL → 3 × 4 = 12 pushed. Register machine already done (idle).",
     },
@@ -152,7 +152,7 @@ function buildScenario(): MachineState[] {
       },
       regHighlight: -1,
       description:
-        "スタック: STORE result → 結果を格納。6命令で完了。レジスタマシンは3命令でした。命令ディスパッチ回数が半分に！",
+        "スタック: STORE result → 結果を格納。6命令で完了。レジスターマシンは3命令でした。命令ディスパッチ回数が半分に！",
       descriptionEn:
         "Stack: STORE result → store result. Done in 6 instructions. Register machine took only 3. Dispatch count halved!",
     },
@@ -179,12 +179,12 @@ export function StackVsRegisterComparison({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "スタックマシン vs レジスタマシン"
+          ? "スタックマシン vs レジスターマシン"
           : "Stack Machine vs Register Machine"
       }
       description={
         isJa
-          ? "a + b × c を計算する過程を、スタックマシンとレジスタマシンで同時に実行比較します。"
+          ? "a + b × c を計算する過程を、スタックマシンとレジスターマシンで同時に実行比較します。"
           : "Compare stack and register machine execution side by side, computing a + b × c."
       }
     >
@@ -246,7 +246,7 @@ export function StackVsRegisterComparison({ locale = "ja" }: Props) {
         {/* Register Machine */}
         <div className="border rounded-lg p-3">
           <div className="text-sm font-bold mb-2 text-emerald-600 dark:text-emerald-400">
-            {isJa ? "レジスタマシン" : "Register Machine"}
+            {isJa ? "レジスターマシン" : "Register Machine"}
             <span className="text-xs font-normal text-muted-foreground ml-2">
               ({current.regInstructions.length}{" "}
               {isJa ? "命令" : "instructions"})

@@ -211,7 +211,7 @@ type StepDef = {
 const STEPS: StepDef[] = [
   {
     side: "both",
-    title: (ja) => (ja ? "入力とメモリ予算" : "Input and memory budget"),
+    title: (ja) => (ja ? "入力とメモリー予算" : "Input and memory budget"),
     body: (ja, s, a, mb) =>
       ja
         ? `${num(ROWS)} 行 × ${ROW_BYTES} バイト = 330MB を、work_mem = ${mb}MB で処理します。ソートは全行を並べ替え、集約は同じ入力を ${num(GROUPS)} グループにまとめます（第11章前半のソート例と同じ入力です。表の 1,000,000 行 / 100,000 グループの例ではありません）。予算はソートが work_mem そのもの、ハッシュ集約は hash_mem_multiplier = ${HASH_MEM_MULTIPLIER} 倍の ${mb * HASH_MEM_MULTIPLIER}MB です。ソートは${s.fits ? "収まります" : "収まりません"}。ハッシュ表 ${num(GROUPS)} × ${HASH_ENTRY_BYTES}B = ${num(HASH_TABLE_BYTES / MB)}MB は${a.fits ? "収まります" : "収まりません"}。`
@@ -223,7 +223,7 @@ const STEPS: StepDef[] = [
     body: (ja, s, _a, mb) =>
       s.fits
         ? ja
-          ? `入力全体が work_mem に収まるので run は作られません。メモリ内クイックソート1回で終わりです。`
+          ? `入力全体が work_mem に収まるので run は作られません。メモリー内クイックソート1回で終わりです。`
           : `The whole input fits in work_mem, so no runs are produced — a single in-memory quicksort finishes the job.`
         : ja
           ? `work_mem を使い切るたびに、その分だけをソートして一時ファイルへ書き出します。330MB ÷ ${mb}MB = ${num(s.runs)} 本の run ができます。ここまでは書き込みだけです。`
@@ -238,7 +238,7 @@ const STEPS: StepDef[] = [
           ? "マージ段階そのものが存在しません。"
           : "There is no merge phase at all."
         : ja
-          ? `マージ中は入力テープ 1 本につき 32 ブロック（256KB）の先読みバッファと、入力・出力それぞれ 1 ブロックずつのテープ用バッファが要ります。合わせて 34 ブロック = 272KB。work_mem = ${mb}MB なら同時に扱えるのは ${s.order} 本です。run が ${num(s.runs)} 本なので、${s.runs > s.order ? "1 パスでは足りません" : "1 パスで足ります"}。`
+          ? `マージ中は入力テープ 1 本につき 32 ブロック（256KB）の先読みバッファーと、入力・出力それぞれ 1 ブロックずつのテープ用バッファーが要ります。合わせて 34 ブロック = 272KB。work_mem = ${mb}MB なら同時に扱えるのは ${s.order} 本です。run が ${num(s.runs)} 本なので、${s.runs > s.order ? "1 パスでは足りません" : "1 パスで足ります"}。`
           : `During the merge each input tape needs a 32-block (256 KB) pre-read buffer, plus one block of tape buffer for the input tape and one for the output tape — 34 blocks, 272 KB in all. At work_mem = ${mb} MB that allows ${s.order} tapes at once. With ${num(s.runs)} runs, one pass is ${s.runs > s.order ? "not enough" : "enough"}.`,
   },
   {
@@ -258,7 +258,7 @@ const STEPS: StepDef[] = [
     title: (ja) => (ja ? "ソート: 合計" : "Sort: the total"),
     body: (ja, s) =>
       ja
-        ? `比較コストは ${num(s.cpu)} で、work_mem に関係なく一定です。ディスクは ${num(s.disk)}。合計 ${num(s.total)}、メモリ内実行の ${ratio(s.total, SORT_BASE)} 倍にとどまります。`
+        ? `比較コストは ${num(s.cpu)} で、work_mem に関係なく一定です。ディスクは ${num(s.disk)}。合計 ${num(s.total)}、メモリー内実行の ${ratio(s.total, SORT_BASE)} 倍にとどまります。`
         : `Comparison cost is ${num(s.cpu)} and does not depend on work_mem at all. Disk adds ${num(s.disk)}. Total ${num(s.total)} — only ${ratio(s.total, SORT_BASE)}× the fully in-memory run.`,
   },
   {
@@ -278,7 +278,7 @@ const STEPS: StepDef[] = [
     title: (ja) => (ja ? "判定" : "The verdict"),
     body: (ja, s, a) =>
       ja
-        ? `ソートは ${ratio(s.total, SORT_BASE)} 倍、ハッシュ集約は ${ratio(a.total, AGG_BASE)} 倍。同じ「メモリが足りない」でも、片方はなだらかに劣化し、もう片方は崖から落ちます。`
+        ? `ソートは ${ratio(s.total, SORT_BASE)} 倍、ハッシュ集約は ${ratio(a.total, AGG_BASE)} 倍。同じ「メモリーが足りない」でも、片方はなだらかに劣化し、もう片方は崖から落ちます。`
         : `Sorting lands at ${ratio(s.total, SORT_BASE)}× and hash aggregation at ${ratio(a.total, AGG_BASE)}×. Same "out of memory", but one degrades gently and the other falls off a cliff.`,
   },
 ];
@@ -318,7 +318,7 @@ function Chart({ current, isJa }: { current: number; isJa: boolean }) {
       >
         <title id={titleId}>
           {isJa
-            ? "work_mem を変えたときの、メモリ内実行に対するコスト倍率の折れ線グラフ。正確な数値はこの下の「グラフの数値を表で見る」にあります。"
+            ? "work_mem を変えたときの、メモリー内実行に対するコスト倍率の折れ線グラフ。正確な数値はこの下の「グラフの数値を表で見る」にあります。"
             : "Line chart of cost relative to a fully in-memory run as work_mem varies. Exact values are in the table below the chart."}
         </title>
 
@@ -548,7 +548,7 @@ export function SpillVisualizer({ locale = "ja" }: Props) {
           <div className="mb-1 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
             <span className="font-semibold uppercase tracking-wide">
               {isJa
-                ? "メモリ内実行に対するコスト倍率"
+                ? "メモリー内実行に対するコスト倍率"
                 : "Cost relative to a fully in-memory run"}
             </span>
             <span className="flex items-center gap-1">

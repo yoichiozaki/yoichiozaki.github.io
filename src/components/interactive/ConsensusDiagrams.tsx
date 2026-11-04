@@ -178,7 +178,7 @@ export function ConsensusComparisonTable({ locale = "ja" }: DiagramProps) {
 
   const headers = isEn
     ? ["Algorithm", "Fault Model", "Tolerance", "Msg Complexity", "Latency", "Use Case"]
-    : ["アルゴリズム", "障害モデル", "耐性", "メッセージ計算量", "レイテンシ", "用途"];
+    : ["アルゴリズム", "障害モデル", "耐性", "メッセージ計算量", "レイテンシー", "用途"];
 
   const rows = [
     {

@@ -51,7 +51,7 @@ export function IndexTaxonomy({ locale = "ja" }: DiagramProps) {
         {/* B+Tree children */}
         {[
           { x: 140, label: locale === "en" ? "Clustered" : "クラスタード", desc: locale === "en" ? "Row data in leaf" : "行データ=リーフ順" },
-          { x: 310, label: locale === "en" ? "Non-clustered" : "非クラスタード", desc: locale === "en" ? "Pointer in leaf" : "リーフにポインタ" },
+          { x: 310, label: locale === "en" ? "Non-clustered" : "非クラスタード", desc: locale === "en" ? "Pointer in leaf" : "リーフにポインター" },
         ].map((item, i) => (
           <g key={i}>
             <line x1={310} y1={116} x2={item.x + 70} y2={170} stroke={border} strokeWidth={1.5} />
@@ -67,7 +67,7 @@ export function IndexTaxonomy({ locale = "ja" }: DiagramProps) {
 
         {/* LSM-Tree children */}
         {[
-          { x: 420, label: "Memtable", desc: locale === "en" ? "In-memory write buffer" : "メモリ上の書込バッファ" },
+          { x: 420, label: "Memtable", desc: locale === "en" ? "In-memory write buffer" : "メモリー上の書込バッファー" },
           { x: 420, yOff: 60, label: "SSTable", desc: locale === "en" ? "Sorted on-disk files" : "ディスク上のソート済ファイル" },
         ].map((item, i) => (
           <g key={i}>
@@ -216,7 +216,7 @@ export function LSMWritePath({ locale = "ja" }: DiagramProps) {
         <rect x={132} y={30} width={100} height={36} rx={6} fill={accent} opacity={0.15} stroke={accent} strokeWidth={1.5} />
         <text x={182} y={52} textAnchor="middle" fill={accent} fontSize={12} fontWeight={600}>Memtable</text>
         <text x={182} y={82} textAnchor="middle" fill={muted} fontSize={9}>
-          {locale === "en" ? "In-memory sorted" : "メモリ上ソート済み"}
+          {locale === "en" ? "In-memory sorted" : "メモリー上ソート済み"}
         </text>
 
         {/* Arrow flush */}

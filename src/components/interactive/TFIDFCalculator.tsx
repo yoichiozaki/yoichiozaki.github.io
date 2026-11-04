@@ -50,7 +50,7 @@ const steps: Step[] = [
       { id: 3, terms: ["dog", "sat", "log"] },
     ],
     desc: {
-      ja: '3つのドキュメント（ストップワード除去済み）に対して、クエリ "cat mat" の TF-IDF スコアを計算してみましょう。',
+      ja: '3つのドキュメント（ストップワード除去済み）に対して、クエリー "cat mat" の TF-IDF スコアを計算してみましょう。',
       en: 'Let\'s calculate TF-IDF scores for the query "cat mat" across 3 documents (after stopword removal).',
     },
   },
@@ -147,14 +147,14 @@ export function TFIDFCalculator({ locale = "ja" }: Props) {
       description={
         lang === "en"
           ? 'Step through the TF-IDF scoring process for the query "cat mat".'
-          : 'クエリ "cat mat" に対する TF-IDF スコア計算の過程を見てみましょう。'
+          : 'クエリー "cat mat" に対する TF-IDF スコア計算の過程を見てみましょう。'
       }
     >
       <div className="space-y-4">
         {/* Query badge */}
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground font-medium">
-            {lang === "en" ? "Query:" : "クエリ:"}
+            {lang === "en" ? "Query:" : "クエリー:"}
           </span>
           <span className="px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-mono font-semibold">
             &quot;cat mat&quot;

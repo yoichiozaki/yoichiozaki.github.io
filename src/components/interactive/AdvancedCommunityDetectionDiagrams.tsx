@@ -196,20 +196,20 @@ export function EdgeVsTriangleDiagram({ locale = "ja" }: Props) {
 const timelineData = [
   {
     year: "2005",
-    titleJa: "Palla — CFinder (重複コミュニティ)",
+    titleJa: "Palla — CFinder (重複コミュニティー)",
     titleEn: "Palla — CFinder (Overlapping)",
     descJa:
-      "Palla らが Clique Percolation Method (CPM) を提案。k-クリークの連鎖で重複コミュニティを定義する初の実用的手法。",
+      "Palla らが Clique Percolation Method (CPM) を提案。k-クリークの連鎖で重複コミュニティーを定義する初の実用的手法。",
     descEn:
       "Palla et al. propose the Clique Percolation Method (CPM). First practical method to define overlapping communities via chains of k-cliques.",
     color: "#3b82f6",
   },
   {
     year: "2009",
-    titleJa: "Ahn — リンクコミュニティ",
+    titleJa: "Ahn — リンクコミュニティー",
     titleEn: "Ahn — Link Communities",
     descJa:
-      "Ahn, Bagrow, Lehmann がリンク（辺）をクラスタリングする手法を提案。ノードが複数コミュニティに自然に所属可能。",
+      "Ahn, Bagrow, Lehmann がリンク（辺）をクラスタリングする手法を提案。ノードが複数コミュニティーに自然に所属可能。",
     descEn:
       "Ahn, Bagrow & Lehmann propose clustering links (edges) rather than nodes. Nodes naturally belong to multiple communities.",
     color: "#10b981",
@@ -219,7 +219,7 @@ const timelineData = [
     titleJa: "Mucha — 多重・時間依存ネットワーク",
     titleEn: "Mucha — Multislice Networks",
     descJa:
-      "Mucha らが多重・時間依存ネットワークにおけるコミュニティ検出を Modularity の拡張として統一的に定式化（Science 掲載）。",
+      "Mucha らが多重・時間依存ネットワークにおけるコミュニティー検出を Modularity の拡張として統一的に定式化（Science 掲載）。",
     descEn:
       "Mucha et al. unify community detection in time-dependent, multiscale, multiplex networks via generalized Modularity (published in Science).",
     color: "#8b5cf6",
@@ -239,7 +239,7 @@ const timelineData = [
     titleJa: "Yang & Leskovec — BigCLAM",
     titleEn: "Yang & Leskovec — BigCLAM",
     descJa:
-      "大規模ネットワークにおける重複コミュニティ検出。非負行列分解に基づくスケーラブルな手法。",
+      "大規模ネットワークにおける重複コミュニティー検出。非負行列分解に基づくスケーラブルな手法。",
     descEn:
       "Scalable overlapping community detection for large networks using non-negative matrix factorization.",
     color: "#ef4444",
@@ -259,7 +259,7 @@ const timelineData = [
     titleJa: "Benson — 高次モチーフ",
     titleEn: "Benson — Higher-Order Motifs",
     descJa:
-      "Benson, Gleich, Leskovec がモチーフの密度に基づくコミュニティ検出を提案（Science 掲載）。辺だけでなく三角形などの部分グラフパターンを考慮。",
+      "Benson, Gleich, Leskovec がモチーフの密度に基づくコミュニティー検出を提案（Science 掲載）。辺だけでなく三角形などの部分グラフパターンを考慮。",
     descEn:
       "Benson, Gleich & Leskovec propose motif-based community detection (published in Science). Considers subgraph patterns like triangles, not just edges.",
     color: "#ec4899",
@@ -279,7 +279,7 @@ const timelineData = [
     titleJa: "Interdonato — 多重ネットワークのサーベイ",
     titleEn: "Interdonato — Multiplex CD Survey",
     descJa:
-      "多重ネットワークにおけるコミュニティ検出の包括的サーベイ。手法を体系的に分類。",
+      "多重ネットワークにおけるコミュニティー検出の包括的サーベイ。手法を体系的に分類。",
     descEn:
       "Comprehensive survey of community detection in multiplex networks, systematically categorizing methods.",
     color: "#64748b",
@@ -289,7 +289,7 @@ const timelineData = [
     titleJa: "Rossetti — CDlib",
     titleEn: "Rossetti — CDlib",
     descJa:
-      "Python ライブラリ CDlib の公開。動的・重複・高次コミュニティ検出を含む包括的なツールキット。",
+      "Python ライブラリー CDlib の公開。動的・重複・高次コミュニティー検出を含む包括的なツールキット。",
     descEn:
       "Release of CDlib, a comprehensive Python library covering dynamic, overlapping, and higher-order community detection.",
     color: "#10b981",
@@ -299,7 +299,7 @@ const timelineData = [
     titleJa: "GNN ベース手法の台頭",
     titleEn: "GNN-Based Methods Rise",
     descJa:
-      "Graph Neural Network による教師なし・半教師ありコミュニティ検出がベンチマークで既存手法を凌駕し始める。",
+      "Graph Neural Network による教師なし・半教師ありコミュニティー検出がベンチマークで既存手法を凌駕し始める。",
     descEn:
       "Graph Neural Network-based unsupervised and semi-supervised community detection begins outperforming traditional methods on benchmarks.",
     color: "#f97316",
@@ -312,7 +312,7 @@ export function AdvancedCDTimeline({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "高次・動的コミュニティ検出の年表"
+          ? "高次・動的コミュニティー検出の年表"
           : "Timeline: Higher-Order & Dynamic Community Detection"
       }
       description={
@@ -415,7 +415,7 @@ export function MotifCatalog({ locale = "ja" }: Props) {
       title={isJa ? "ネットワークモチーフのカタログ" : "Catalog of Network Motifs"}
       description={
         isJa
-          ? "高次コミュニティ検出で重要な役割を果たす代表的なモチーフ（部分グラフパターン）。"
+          ? "高次コミュニティー検出で重要な役割を果たす代表的なモチーフ（部分グラフパターン）。"
           : "Representative motifs (subgraph patterns) that play key roles in higher-order community detection."
       }
     >
@@ -528,7 +528,7 @@ export function MultiplexNetworkDiagram({ locale = "ja" }: Props) {
       title={isJa ? "多重 (Multiplex) ネットワークの構造" : "Multiplex Network Structure"}
       description={
         isJa
-          ? "同じノード集合が異なる種類の関係（レイヤー）で結ばれています。各レイヤーのコミュニティ構造は異なり得ます。"
+          ? "同じノード集合が異なる種類の関係（レイヤー）で結ばれています。各レイヤーのコミュニティー構造は異なり得ます。"
           : "The same set of nodes connected by different types of relationships (layers). Each layer may have different community structure."
       }
     >
@@ -584,7 +584,7 @@ export function MultiplexNetworkDiagram({ locale = "ja" }: Props) {
       </div>
       <div className="mt-4 p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 text-xs text-neutral-600 dark:text-neutral-400">
         {isJa
-          ? "💡 ノード A〜D は全レイヤーで共通ですが、辺の構造はレイヤーごとに異なります。多重ネットワークのコミュニティ検出では、これらのレイヤーを統合的に考慮する必要があります。"
+          ? "💡 ノード A〜D は全レイヤーで共通ですが、辺の構造はレイヤーごとに異なります。多重ネットワークのコミュニティー検出では、これらのレイヤーを統合的に考慮する必要があります。"
           : "💡 Nodes A–D are shared across all layers, but edge structures differ per layer. Multiplex community detection must consider all layers jointly."}
       </div>
     </InteractiveDemo>
@@ -621,7 +621,7 @@ const comparisonData = [
     complexityEn: "O(n log n) per slice",
     prosJa: "統一的な定式化",
     prosEn: "Unified formulation",
-    consJa: "結合パラメータ ω の選択",
+    consJa: "結合パラメーター ω の選択",
     consEn: "Coupling parameter ω selection",
   },
   {
@@ -651,7 +651,7 @@ const comparisonData = [
     complexityEn: "Depends on base algorithm",
     prosJa: "既存手法を動的に拡張可能",
     prosEn: "Extends existing methods to dynamic",
-    consJa: "平滑化パラメータの調整",
+    consJa: "平滑化パラメーターの調整",
     consEn: "Smoothing parameter tuning",
   },
   {
@@ -766,7 +766,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "誕生",
       labelEn: "Birth",
       color: "#10b981",
-      descJa: "新しいコミュニティが出現",
+      descJa: "新しいコミュニティーが出現",
       descEn: "A new community emerges",
       icon: "●",
     },
@@ -774,7 +774,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "成長",
       labelEn: "Growth",
       color: "#3b82f6",
-      descJa: "既存コミュニティにメンバーが増加",
+      descJa: "既存コミュニティーにメンバーが増加",
       descEn: "Members join existing community",
       icon: "▲",
     },
@@ -790,7 +790,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "分裂",
       labelEn: "Split",
       color: "#ef4444",
-      descJa: "1つのコミュニティが2つ以上に分かれる",
+      descJa: "1つのコミュニティーが2つ以上に分かれる",
       descEn: "One community splits into two or more",
       icon: "⟨",
     },
@@ -798,7 +798,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "統合",
       labelEn: "Merge",
       color: "#8b5cf6",
-      descJa: "2つ以上のコミュニティが合併する",
+      descJa: "2つ以上のコミュニティーが合併する",
       descEn: "Two or more communities merge",
       icon: "⟩",
     },
@@ -806,7 +806,7 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
       labelJa: "消滅",
       labelEn: "Death",
       color: "#94a3b8",
-      descJa: "コミュニティが消えてなくなる",
+      descJa: "コミュニティーが消えてなくなる",
       descEn: "Community ceases to exist",
       icon: "✕",
     },
@@ -814,10 +814,10 @@ export function CommunityLifecycleDiagram({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "コミュニティのライフサイクルイベント" : "Community Lifecycle Events"}
+      title={isJa ? "コミュニティーのライフサイクルイベント" : "Community Lifecycle Events"}
       description={
         isJa
-          ? "動的ネットワークにおいて、コミュニティは時間とともに様々な変遷を経験します。"
+          ? "動的ネットワークにおいて、コミュニティーは時間とともに様々な変遷を経験します。"
           : "In dynamic networks, communities undergo various transitions over time."
       }
     >

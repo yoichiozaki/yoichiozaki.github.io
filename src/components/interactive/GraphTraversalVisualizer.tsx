@@ -588,7 +588,7 @@ export function GraphTraversalVisualizer({
     <InteractiveDemo
       title={
         locale === "ja"
-          ? "グラフ探索ビジュアライザ — BFS vs DFS"
+          ? "グラフ探索ビジュアライザー — BFS vs DFS"
           : "Graph Traversal Visualizer — BFS vs DFS"
       }
       description={

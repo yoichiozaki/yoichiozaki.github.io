@@ -113,7 +113,7 @@ function buildWriterCriticScenario(): WorkflowStep[] {
         { id: 3, from: "critic", to: "writer", label: "❌ 修正要求", labelEn: "❌ Revise", color: "#ef4444" },
       ],
       description:
-        "Critic が拒否判定。AddSwitch で定義された条件分岐 cd.Approved == false により、CriticDecision が Writer に戻されます。Writer の HandleRevisionRequestAsync（CriticDecision 型のメッセージハンドラ）がフィードバック付きで再実行されます。",
+        "Critic が拒否判定。AddSwitch で定義された条件分岐 cd.Approved == false により、CriticDecision が Writer に戻されます。Writer の HandleRevisionRequestAsync（CriticDecision 型のメッセージハンドラー）がフィードバック付きで再実行されます。",
       descriptionEn:
         "Critic rejects. The conditional branch defined by AddSwitch (cd.Approved == false) routes the CriticDecision back to Writer. Writer's HandleRevisionRequestAsync (a [MessageHandler] for CriticDecision type) re-executes with feedback.",
     },
@@ -438,7 +438,7 @@ function buildConcurrentScenario(): WorkflowStep[] {
       activeNodes: ["fr", "es", "en"],
       activeEdges: [],
       messages: [],
-      description: "3 つの翻訳エージェントが並行して LLM を呼び出し中。Sequential と違い、待ち時間が重なるため全体のレイテンシが大幅に削減されます。",
+      description: "3 つの翻訳エージェントが並行して LLM を呼び出し中。Sequential と違い、待ち時間が重なるため全体のレイテンシーが大幅に削減されます。",
       descriptionEn: "Three translation agents call the LLM concurrently. Unlike Sequential, latencies overlap, significantly reducing total wall-clock time.",
     },
     {

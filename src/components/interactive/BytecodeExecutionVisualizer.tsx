@@ -55,7 +55,7 @@ function buildScenario(): VMState[] {
       stack: [],
       locals: {},
       description:
-        "VM起動: RESUME 命令でフレームを初期化します。IP(命令ポインタ)はバイトコード先頭を指しています。",
+        "VM起動: RESUME 命令でフレームを初期化します。IP(命令ポインター)はバイトコード先頭を指しています。",
       descriptionEn:
         "VM start: RESUME initializes the frame. The IP (instruction pointer) points to the beginning of bytecode.",
       highlight: "ip",
@@ -88,7 +88,7 @@ function buildScenario(): VMState[] {
       stack: ["1"],
       locals: { total: "0" },
       description:
-        "LOAD_CONST 1: 定数「1」をスタックにプッシュします（ループカウンタの初期値）。",
+        "LOAD_CONST 1: 定数「1」をスタックにプッシュします（ループカウンターの初期値）。",
       descriptionEn:
         "LOAD_CONST 1: Pushes constant '1' onto the stack (loop counter initial value).",
       highlight: "stack",
@@ -360,7 +360,7 @@ export function BytecodeExecutionVisualizer({ locale = "ja" }: Props) {
     <InteractiveDemo
       title={
         isJa
-          ? "バイトコード実行シミュレータ"
+          ? "バイトコード実行シミュレーター"
           : "Bytecode Execution Simulator"
       }
       description={

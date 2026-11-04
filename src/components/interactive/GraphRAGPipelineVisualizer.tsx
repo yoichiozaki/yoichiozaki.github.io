@@ -72,7 +72,7 @@ function buildScenario(): PipelineStep[] {
   const rawText2 =
     "Bob は Microsoft Research に所属し、知識グラフの研究をしている。Alice と共同研究をしている。";
   const rawText3 =
-    "GraphRAG は Leiden アルゴリズムを使ってコミュニティ検出を行う。Microsoft Research が開発した。";
+    "GraphRAG は Leiden アルゴリズムを使ってコミュニティー検出を行う。Microsoft Research が開発した。";
 
   // Entities
   const alice: Entity = {
@@ -159,9 +159,9 @@ function buildScenario(): PipelineStep[] {
     },
     // Step 2: Entity extraction
     {
-      phase: "Phase 3a: エンティティ抽出",
+      phase: "Phase 3a: エンティティー抽出",
       description:
-        "LLM が各 TextUnit からエンティティ（人物・組織・場所・概念）を抽出します。タイトル・タイプ・説明のトリプレットが生成されます。",
+        "LLM が各 TextUnit からエンティティー（人物・組織・場所・概念）を抽出します。タイトル・タイプ・説明のトリプレットが生成されます。",
       descriptionEn:
         "The LLM extracts entities (people, orgs, places, concepts) from each TextUnit, producing title-type-description triples.",
       textUnits: [
@@ -179,7 +179,7 @@ function buildScenario(): PipelineStep[] {
     {
       phase: "Phase 3b: 関係性抽出",
       description:
-        "エンティティ間の関係性を抽出し、source→target＋説明のエッジを形成します。同じペアの重複は説明をマージします。",
+        "エンティティー間の関係性を抽出し、source→target＋説明のエッジを形成します。同じペアの重複は説明をマージします。",
       descriptionEn:
         "Relationships between entities are extracted, forming source→target edges with descriptions. Duplicates are merged.",
       textUnits: [
@@ -202,9 +202,9 @@ function buildScenario(): PipelineStep[] {
     },
     // Step 4: Community detection
     {
-      phase: "Phase 4: コミュニティ検出",
+      phase: "Phase 4: コミュニティー検出",
       description:
-        "Leiden アルゴリズムによる階層的コミュニティ検出。グラフを意味的クラスターに分割し、エンティティに色（コミュニティ）を割り当てます。",
+        "Leiden アルゴリズムによる階層的コミュニティー検出。グラフを意味的クラスターに分割し、エンティティーに色（コミュニティー）を割り当てます。",
       descriptionEn:
         "Hierarchical community detection using the Leiden algorithm. The graph is partitioned into semantic clusters, assigning colors (communities) to entities.",
       textUnits: [
@@ -238,9 +238,9 @@ function buildScenario(): PipelineStep[] {
     },
     // Step 5: Community summarization
     {
-      phase: "Phase 5: コミュニティ要約",
+      phase: "Phase 5: コミュニティー要約",
       description:
-        "各コミュニティの内容を LLM で要約し、Community Report を生成。上位レベルのコミュニティほど広範なテーマを捉えます。",
+        "各コミュニティーの内容を LLM で要約し、Community Report を生成。上位レベルのコミュニティーほど広範なテーマを捉えます。",
       descriptionEn:
         "Community contents are summarized by the LLM to generate Community Reports. Higher-level communities capture broader themes.",
       textUnits: [
@@ -280,7 +280,7 @@ function buildScenario(): PipelineStep[] {
         },
         {
           id: 2,
-          summary: "GraphRAG は Leiden アルゴリズムベースのコミュニティ検出を採用",
+          summary: "GraphRAG は Leiden アルゴリズムベースのコミュニティー検出を採用",
         },
       ],
       activePhase: 4,
@@ -289,7 +289,7 @@ function buildScenario(): PipelineStep[] {
     {
       phase: "Query: Global Search",
       description:
-        "「データ全体の主要テーマは？」のような俯瞰的な質問に対し、コミュニティレポートを Map-Reduce 方式で集約して回答を生成します。",
+        "「データ全体の主要テーマは？」のような俯瞰的な質問に対し、コミュニティーレポートを Map-Reduce 方式で集約して回答を生成します。",
       descriptionEn:
         'For holistic questions like "What are the main themes?", community reports are aggregated via Map-Reduce to generate an answer.',
       textUnits: [
@@ -329,7 +329,7 @@ function buildScenario(): PipelineStep[] {
         },
         {
           id: 2,
-          summary: "GraphRAG は Leiden アルゴリズムベースのコミュニティ検出を採用",
+          summary: "GraphRAG は Leiden アルゴリズムベースのコミュニティー検出を採用",
         },
       ],
       activePhase: 5,
@@ -342,7 +342,7 @@ function buildScenario(): PipelineStep[] {
     {
       phase: "Query: Local Search",
       description:
-        "「Alice の研究内容は？」のような特定エンティティに関する質問に対し、知識グラフ上で近傍のエンティティ・関係・TextUnit を集約して回答します。",
+        "「Alice の研究内容は？」のような特定エンティティーに関する質問に対し、知識グラフ上で近傍のエンティティー・関係・TextUnit を集約して回答します。",
       descriptionEn:
         'For entity-specific questions like "What does Alice research?", the system fans out from the entity in the knowledge graph, collecting neighbors, relationships, and TextUnits.',
       textUnits: [
@@ -382,7 +382,7 @@ function buildScenario(): PipelineStep[] {
         },
         {
           id: 2,
-          summary: "GraphRAG は Leiden アルゴリズムベースのコミュニティ検出を採用",
+          summary: "GraphRAG は Leiden アルゴリズムベースのコミュニティー検出を採用",
         },
       ],
       activePhase: 5,
@@ -410,9 +410,9 @@ export function GraphRAGPipelineVisualizer({ locale = "ja" }: Props) {
     isJa ? "入力" : "Input",
     isJa ? "TextUnit分割" : "Chunking",
     isJa ? "グラフ抽出" : "Graph Extraction",
-    isJa ? "コミュニティ検出" : "Community Detection",
-    isJa ? "コミュニティ要約" : "Summarization",
-    isJa ? "クエリ" : "Query",
+    isJa ? "コミュニティー検出" : "Community Detection",
+    isJa ? "コミュニティー要約" : "Summarization",
+    isJa ? "クエリー" : "Query",
   ];
 
   return (
@@ -424,7 +424,7 @@ export function GraphRAGPipelineVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "各ステップを順に再生して、GraphRAG がどのようにテキストから知識グラフを構築し、クエリに回答するかを確認できます。"
+          ? "各ステップを順に再生して、GraphRAG がどのようにテキストから知識グラフを構築し、クエリーに回答するかを確認できます。"
           : "Step through each phase to see how GraphRAG builds a knowledge graph from text and answers queries."
       }
     >
@@ -527,7 +527,7 @@ export function GraphRAGPipelineVisualizer({ locale = "ja" }: Props) {
                 fontSize={12}
               >
                 {isJa
-                  ? "エンティティ未抽出"
+                  ? "エンティティー未抽出"
                   : "No entities extracted yet"}
               </text>
             )}
@@ -566,7 +566,7 @@ export function GraphRAGPipelineVisualizer({ locale = "ja" }: Props) {
           {current.communities.length > 0 && (
             <div className="border border-border rounded-lg p-3 bg-background">
               <div className="text-xs font-medium text-muted-foreground mb-2">
-                {isJa ? "コミュニティ" : "Communities"} (
+                {isJa ? "コミュニティー" : "Communities"} (
                 {current.communities.length})
               </div>
               <div className="space-y-1">
@@ -587,7 +587,7 @@ export function GraphRAGPipelineVisualizer({ locale = "ja" }: Props) {
           {current.communityReports.length > 0 && (
             <div className="border border-border rounded-lg p-3 bg-background">
               <div className="text-xs font-medium text-muted-foreground mb-2">
-                {isJa ? "コミュニティレポート" : "Community Reports"}
+                {isJa ? "コミュニティーレポート" : "Community Reports"}
               </div>
               <div className="space-y-1.5">
                 {current.communityReports.map((r) => (

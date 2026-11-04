@@ -30,7 +30,7 @@ const LAYERS = [
     unitJa: "テナントとモデル",
     unitEn: "tenant and model",
     decisionsJa: [
-      "どのモデル・どのプロバイダへ出すか",
+      "どのモデル・どのプロバイダーへ出すか",
       "テナント間の公平性、優先度、レート制限",
       "サーキットブレーカーとフェイルオーバー",
     ],
@@ -59,7 +59,7 @@ const LAYERS = [
     color: "#8b5cf6",
   },
   {
-    ja: "エンジン内スケジューラ",
+    ja: "エンジン内スケジューラー",
     en: "Engine scheduler",
     unitJa: "1 反復（イテレーション）",
     unitEn: "one iteration",
@@ -76,7 +76,7 @@ const LAYERS = [
     color: "#10b981",
   },
   {
-    ja: "アクセラレータ",
+    ja: "アクセラレーター",
     en: "Accelerator",
     unitJa: "1 カーネル / 1 デバイス",
     unitEn: "one kernel, one device",
@@ -162,7 +162,7 @@ const METRICS = [
     leverEn: "batch cap, chunked prefill, prefill/decode disaggregation",
   },
   {
-    ja: "E2E レイテンシ",
+    ja: "E2E レイテンシー",
     en: "End-to-end latency",
     defJa: "到着から最後のトークンまで",
     defEn: "arrival to last token",
@@ -172,7 +172,7 @@ const METRICS = [
     leverEn: "output length control, model selection",
   },
   {
-    ja: "正規化レイテンシ",
+    ja: "正規化レイテンシー",
     en: "Normalized latency",
     defJa: "E2E ÷ 出力トークン数",
     defEn: "E2E divided by output tokens",
@@ -303,9 +303,9 @@ const POLICIES = [
     failEn: "slightly worse than a full scan, but avoids herding",
   },
   {
-    ja: "レイテンシ加重（EWMA）",
+    ja: "レイテンシー加重（EWMA）",
     en: "Latency weighted (EWMA)",
-    signalJa: "観測レイテンシの指数移動平均",
+    signalJa: "観測レイテンシーの指数移動平均",
     signalEn: "exponentially weighted latency",
     costJa: "O(n)",
     costEn: "O(n)",
@@ -585,7 +585,7 @@ export function RetryAmplificationDiagram({ locale = "ja" }: Props) {
     { depth: 1, retries: 2, ja: "クライアント SDK", en: "Client SDK" },
     { depth: 2, retries: 3, ja: "エージェントのツール実行ループ", en: "Agent tool loop" },
     { depth: 3, retries: 3, ja: "ゲートウェイのルーター", en: "Gateway router" },
-    { depth: 4, retries: 2, ja: "プロバイダ SDK", en: "Provider SDK" },
+    { depth: 4, retries: 2, ja: "プロバイダー SDK", en: "Provider SDK" },
   ];
   let cumulative = 1;
   const computed = rows.map((row) => {

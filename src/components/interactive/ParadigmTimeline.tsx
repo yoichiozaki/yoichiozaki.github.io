@@ -127,7 +127,7 @@ const events: TimelineEvent[] = [
     nameEn: "Rust",
     paradigm: "multi",
     color: "#ec4899",
-    description: "Mozilla Research が開発。所有権システムによりメモリ安全性を保証しつつ、関数型・命令型・並行プログラミングを統合。",
+    description: "Mozilla Research が開発。所有権システムによりメモリー安全性を保証しつつ、関数型・命令型・並行プログラミングを統合。",
     descriptionEn: "Developed by Mozilla Research. Guarantees memory safety via ownership while integrating functional, imperative, and concurrent paradigms.",
   },
   {

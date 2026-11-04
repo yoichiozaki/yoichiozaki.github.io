@@ -90,14 +90,14 @@ const STEPS: Step[] = [
     layer: 2,
     current: "b",
     visited: ["b"],
-    descJa: "最上層 L2 に entry point b から入る。隣人を広く見てクエリに最も近いノードへジャンプする。",
+    descJa: "最上層 L2 に entry point b から入る。隣人を広く見てクエリーに最も近いノードへジャンプする。",
     descEn: "Enter at entry point b on the topmost layer L2. Greedily move to the neighbour closest to the query.",
   },
   {
     layer: 2,
     current: "f",
     visited: ["b", "f"],
-    descJa: "L2 の隣人 f を評価。クエリに b より近いので f に移動。L2 は 2 ノードしかないのでここで終了。",
+    descJa: "L2 の隣人 f を評価。クエリーに b より近いので f に移動。L2 は 2 ノードしかないのでここで終了。",
     descEn: "Evaluate neighbour f in L2. It is closer to the query than b, so move to f. With only 2 nodes in L2, we stop here.",
   },
   {
@@ -111,7 +111,7 @@ const STEPS: Step[] = [
     layer: 1,
     current: "k",
     visited: ["f", "k"],
-    descJa: "L1 で f の隣人 d, k を見る。k のほうがクエリに近いので k へ移動。",
+    descJa: "L1 で f の隣人 d, k を見る。k のほうがクエリーに近いので k へ移動。",
     descEn: "In L1, inspect neighbours d and k of f. k is closer to the query, so move to k.",
   },
   {
@@ -132,7 +132,7 @@ const STEPS: Step[] = [
     layer: 0,
     current: "j",
     visited: ["k", "j", "l"],
-    descJa: "k の隣人 j, l を評価。j がクエリに最接近なので暫定解を j に更新。",
+    descJa: "k の隣人 j, l を評価。j がクエリーに最接近なので暫定解を j に更新。",
     descEn: "Evaluate k's neighbours j and l. j is closest to the query so far; update the candidate to j.",
   },
   {

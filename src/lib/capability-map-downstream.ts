@@ -54,7 +54,7 @@ export const HARNESS: GroupDef = {
     }),
     item("tools", t("道具の利用", "Tool use"), {
       summary: t(
-        "コードの実行、ファイルの編集、検索、ブラウザの操作など。道具の設計しだいで、同じモデルの成績が変わる。",
+        "コードの実行、ファイルの編集、検索、ブラウザーの操作など。道具の設計しだいで、同じモデルの成績が変わる。",
         "Running code, editing files, searching, driving a browser. How the tools are designed changes how well the same model does.",
       ),
       note: t(

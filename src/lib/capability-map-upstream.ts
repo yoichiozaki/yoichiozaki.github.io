@@ -25,7 +25,7 @@ export const RESOURCES: GroupDef = {
       t("チップ", "Chips"),
       {
         summary: t(
-          "計算量の元になるチップ。性能は、プロセス、メモリ、パッケージ、数値精度、相互接続で決まる。",
+          "計算量の元になるチップ。性能は、プロセス、メモリー、パッケージ、数値精度、相互接続で決まる。",
           "The chips compute comes from; their performance depends on process, memory, packaging, precision and interconnect.",
         ),
         refs: ["4.3:gains"],
@@ -33,7 +33,7 @@ export const RESOURCES: GroupDef = {
       },
       [
         item("process", t("プロセス（微細化）", "Process nodes"), {
-          summary: t("同じ面積により多くのトランジスタを載せる。", "Fitting more transistors into the same area."),
+          summary: t("同じ面積により多くのトランジスターを載せる。", "Fitting more transistors into the same area."),
           note: t(
             "H100 から Rubin までの性能の伸びのうち、プロセスの寄与は意外に小さい。TSMC の次の A16 でも、同じ電圧での速度の向上は N2P 比で 8〜10% にとどまる。",
             "Process contributed surprisingly little to the gains from H100 to Rubin; TSMC's next node, A16, is only 8–10% faster than N2P at the same voltage.",
@@ -41,9 +41,9 @@ export const RESOURCES: GroupDef = {
           refs: ["4.3:gains", "4.3:next"],
           links: [S.trendforceTsmc, S.tsmcA16],
         }),
-        item("hbm", t("メモリ（HBM）", "Memory (HBM)"), {
+        item("hbm", t("メモリー（HBM）", "Memory (HBM)"), {
           summary: t(
-            "演算器にデータを送るメモリの帯域と容量。推論の速さを決めることが多い。",
+            "演算器にデータを送るメモリーの帯域と容量。推論の速さを決めることが多い。",
             "Bandwidth and capacity of the memory feeding the compute units; it often sets inference speed.",
           ),
           note: t(
@@ -208,17 +208,17 @@ export const SIZE: GroupDef = {
     links: [S.chinchilla, S.fineGrainedMoe],
   },
   children: [
-    item("params", t("パラメータ数（総数）", "Total parameters"), {
-      summary: t("モデルが持つパラメータの総数。知識を蓄える容量に近い。", "All of a model's parameters — roughly its capacity to store knowledge."),
+    item("params", t("パラメーター数（総数）", "Total parameters"), {
+      summary: t("モデルが持つパラメーターの総数。知識を蓄える容量に近い。", "All of a model's parameters — roughly its capacity to store knowledge."),
       note: t(
-        "Kimi K2 の総パラメータは 1 兆（1 トークンあたりの稼働は 320 億）。OpenAI、Anthropic、xAI の非公開モデルはパラメータ数も構造も公表しておらず、Google も疎の MoE であることしか明かしていない。",
+        "Kimi K2 の総パラメーターは 1 兆（1 トークンあたりの稼働は 320 億）。OpenAI、Anthropic、xAI の非公開モデルはパラメーター数も構造も公表しておらず、Google も疎の MoE であることしか明かしていない。",
         "Kimi K2 has 1 trillion parameters in total (32 billion active per token). OpenAI's, Anthropic's and xAI's closed models disclose neither parameter counts nor architecture; Google says only that its models are sparse MoEs.",
       ),
       refs: ["4.6:moe"],
       links: [S.kimiK2, S.kaplan],
     }),
-    item("active", t("稼働パラメータ（MoE）", "Active params (MoE)"), {
-      summary: t("1 トークンの計算に実際に使うパラメータ。少ないほど推論は安い。", "Parameters actually used per token; fewer means cheaper inference."),
+    item("active", t("稼働パラメーター（MoE）", "Active params (MoE)"), {
+      summary: t("1 トークンの計算に実際に使うパラメーター。少ないほど推論は安い。", "Parameters actually used per token; fewer means cheaper inference."),
       note: t(
         "総数と稼働数の比は、Mixtral の 3.6 倍から Kimi K2 の 31 倍に広がった。",
         "The ratio of total to active parameters grew from 3.6x (Mixtral) to 31x (Kimi K2).",
@@ -298,7 +298,7 @@ export const STAGES: GroupDef = {
             "RL against a reward model trained on people's rankings of answers; usable where correctness is hard to judge, but human judgments are noisy.",
           ),
           note: t(
-            "OpenAI の InstructGPT の研究（2022 年）では、13 億パラメータの InstructGPT の出力が、100 倍以上大きい 1,750 億パラメータの GPT-3 の出力より、人の評価で好まれた。",
+            "OpenAI の InstructGPT の研究（2022 年）では、13 億パラメーターの InstructGPT の出力が、100 倍以上大きい 1,750 億パラメーターの GPT-3 の出力より、人の評価で好まれた。",
             "In OpenAI's InstructGPT work (2022), people preferred the outputs of the 1.3B-parameter InstructGPT to those of the 175B-parameter GPT-3, a model over 100 times larger.",
           ),
           refs: ["5.3:hardToJudge"],
@@ -370,7 +370,7 @@ export const STAGES: GroupDef = {
             "Temporarily updating the weights on the task's own examples during inference; the update is discarded after each task, so what it spends is inference compute.",
           ),
           note: t(
-            "Akyürek らは、ARC の課題ごとに例題で重みを更新すると、微調整しただけのモデルの最大 6 倍の正答率になり、80 億パラメータのモデルで公開検証セットの 53.0% を解いたと報告した。",
+            "Akyürek らは、ARC の課題ごとに例題で重みを更新すると、微調整しただけのモデルの最大 6 倍の正答率になり、80 億パラメーターのモデルで公開検証セットの 53.0% を解いたと報告した。",
             "Akyürek et al. report that updating the weights on each ARC task's examples gives up to 6x the accuracy of fine-tuned baselines, solving 53.0% of the public validation set with an 8B-parameter model.",
           ),
           links: [S.testTimeTraining, S.tttLayers],

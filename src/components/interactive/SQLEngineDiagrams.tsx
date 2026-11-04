@@ -28,15 +28,15 @@ export function ExecutionModelComparison({ locale = "ja" }: DiagramProps) {
           unit: "1024 タプル程度のバッチ",
           calls: "行数 ÷ バッチ幅 × 演算子数",
           pros: "呼び出し回数が3桁減り、SIMD と列指向レイアウトが活きる",
-          cons: "中間バッチのメモリが必要。行指向ストレージとは相性が悪い",
+          cons: "中間バッチのメモリーが必要。行指向ストレージとは相性が悪い",
           used: "DuckDB, ClickHouse, Velox, Photon",
         },
         {
           model: "コード生成（JIT）",
           unit: "パイプライン全体",
           calls: "0（融合されて消える）",
-          pros: "中間表現が消え、値がレジスタに載ったまま処理できる",
-          cons: "コンパイル時間。短いクエリでは元が取れない",
+          pros: "中間表現が消え、値がレジスターに載ったまま処理できる",
+          cons: "コンパイル時間。短いクエリーでは元が取れない",
           used: "HyPer, Umbra, Spark（全段コード生成）",
         },
       ]
@@ -403,7 +403,7 @@ export function HeapTupleAnatomy({ locale = "ja" }: DiagramProps) {
     { name: "t_ctid", size: 6, color: amber, desc: isJa ? "この行の次バージョンの TID" : "TID of the next version" },
     { name: "t_infomask2", size: 2, color: amber, desc: isJa ? "属性数と各種フラグ" : "attribute count + flags" },
     { name: "t_infomask", size: 2, color: amber, desc: isJa ? "NULL の有無・可視性ヒント" : "has-nulls / visibility hints" },
-    { name: "t_hoff", size: 1, color: amber, desc: isJa ? "ヘッダ長（= データ開始位置）" : "header length (= data offset)" },
+    { name: "t_hoff", size: 1, color: amber, desc: isJa ? "ヘッダー長（= データ開始位置）" : "header length (= data offset)" },
   ];
 
   const scale = 13;
@@ -483,7 +483,7 @@ export function HeapTupleAnatomy({ locale = "ja" }: DiagramProps) {
         </text>
         <text x={12} y={95 + (fields.length + 1) * 20 + 4} fill={muted} fontSize={10}>
           {isJa
-            ? "t_hoff は MAXALIGN 済みなので、NULL が無い場合の実効ヘッダ長は 24 バイトになる"
+            ? "t_hoff は MAXALIGN 済みなので、NULL が無い場合の実効ヘッダー長は 24 バイトになる"
             : "t_hoff is MAXALIGN'd, so with no NULLs the effective header length is 24 bytes."}
         </text>
       </svg>

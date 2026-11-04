@@ -114,7 +114,7 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: allEdges,
       description:
-        "元のグラフ: 8 ノード・13 辺。左側クラスタ {0,1,2,3} と右側クラスタ {4,5,6,7} が辺 3-4 で繋がっています。通常の辺密度ではどちらのクラスタも密に見えますが、「三角形」の分布はどうでしょうか？",
+        "元のグラフ: 8 ノード・13 辺。左側クラスター {0,1,2,3} と右側クラスター {4,5,6,7} が辺 3-4 で繋がっています。通常の辺密度ではどちらのクラスターも密に見えますが、「三角形」の分布はどうでしょうか？",
       descriptionEn:
         "Original graph: 8 nodes, 13 edges. Left cluster {0,1,2,3} and right cluster {4,5,6,7} connected by edge 3-4. Both clusters look dense in terms of edges, but what about triangle distribution?",
       phase: "graph",
@@ -124,7 +124,7 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: allEdges,
       description:
-        "ステップ 1: 三角形モチーフの列挙（左クラスタ）。クラスタ A には 4 つの三角形が存在します: {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3}。4 ノードの完全グラフ (K₄) なので三角形が密に詰まっています。",
+        "ステップ 1: 三角形モチーフの列挙（左クラスター）。クラスター A には 4 つの三角形が存在します: {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3}。4 ノードの完全グラフ (K₄) なので三角形が密に詰まっています。",
       descriptionEn:
         "Step 1: Enumerate triangle motifs (left cluster). Cluster A contains 4 triangles: {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3}. As a complete graph K₄, triangles are densely packed.",
       phase: "count",
@@ -135,7 +135,7 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: allEdges,
       description:
-        "ステップ 2: 三角形モチーフの列挙（右クラスタ）。クラスタ B にも同様に 4 つの三角形: {4,5,6}, {4,5,7}, {4,6,7}, {5,6,7}。一方、ブリッジ辺 3-4 を含む三角形は存在しません。",
+        "ステップ 2: 三角形モチーフの列挙（右クラスター）。クラスター B にも同様に 4 つの三角形: {4,5,6}, {4,5,7}, {4,6,7}, {5,6,7}。一方、ブリッジ辺 3-4 を含む三角形は存在しません。",
       descriptionEn:
         "Step 2: Enumerate triangle motifs (right cluster). Cluster B similarly has 4 triangles: {4,5,6}, {4,5,7}, {4,6,7}, {5,6,7}. Note: no triangle contains the bridge edge 3-4.",
       phase: "count",
@@ -147,7 +147,7 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: weightedEdges,
       description:
-        "ステップ 3: モチーフ重み付き隣接行列の構築。各辺の重みを「その辺が属する三角形の数」に設定。クラスタ内の辺は重み 2（各辺が 2 つの三角形に属する）に対し、ブリッジ辺 3-4 の重みは 0。この差が高次構造の情報を捉えています。",
+        "ステップ 3: モチーフ重み付き隣接行列の構築。各辺の重みを「その辺が属する三角形の数」に設定。クラスター内の辺は重み 2（各辺が 2 つの三角形に属する）に対し、ブリッジ辺 3-4 の重みは 0。この差が高次構造の情報を捉えています。",
       descriptionEn:
         "Step 3: Build motif-weighted adjacency. Set each edge weight to the number of triangles it participates in. Intra-cluster edges have weight 2, while bridge edge 3-4 has weight 0. This difference captures higher-order structural information.",
       phase: "weight",
@@ -157,7 +157,7 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes(),
       edges: weightedEdges,
       description:
-        "ステップ 4: モチーフ加重ラプラシアンによるスペクトラルクラスタリング。ラプラシアン L(M) = D(M) - W(M) を構成し、Fiedler ベクトルで 2 分割。ブリッジ辺の重みが 0 なので、クラスタ間のカットコストが極めて低く、明確な分割が得られます。",
+        "ステップ 4: モチーフ加重ラプラシアンによるスペクトラルクラスタリング。ラプラシアン L(M) = D(M) - W(M) を構成し、Fiedler ベクトルで 2 分割。ブリッジ辺の重みが 0 なので、クラスター間のカットコストが極めて低く、明確な分割が得られます。",
       descriptionEn:
         "Step 4: Spectral clustering on motif-weighted Laplacian. Construct L(M) = D(M) - W(M) and bipartition via Fiedler vector. Since the bridge edge has weight 0, the cut cost is minimal, yielding a clear partition.",
       phase: "spectral",
@@ -167,7 +167,7 @@ function buildScenario(): MotifStep[] {
       nodes: mkNodes([1, 1, 1, 1, 2, 2, 2, 2]),
       edges: weightedEdges,
       description:
-        "結果: 三角形モチーフに基づくコミュニティが検出されました。通常の辺ベースの手法では辺 3-4 があるためにクラスタの分離がやや曖昧になり得ますが、モチーフベースの手法では「三角形のない辺」であるブリッジが明確にカットされ、2 つのコミュニティ {0,1,2,3} と {4,5,6,7} が鮮明に分離されます。",
+        "結果: 三角形モチーフに基づくコミュニティーが検出されました。通常の辺ベースの手法では辺 3-4 があるためにクラスターの分離がやや曖昧になり得ますが、モチーフベースの手法では「三角形のない辺」であるブリッジが明確にカットされ、2 つのコミュニティー {0,1,2,3} と {4,5,6,7} が鮮明に分離されます。",
       descriptionEn:
         "Result: Communities detected based on triangle motifs. Edge-based methods might find the bridge 3-4 ambiguous, but motif-based methods cut the 'triangle-free' bridge cleanly, producing two clear communities {0,1,2,3} and {4,5,6,7}.",
       phase: "result",
@@ -222,12 +222,12 @@ export function MotifCommunityVisualizer({
     <InteractiveDemo
       title={
         isJa
-          ? "モチーフベース・コミュニティ検出のステップ"
+          ? "モチーフベース・コミュニティー検出のステップ"
           : "Motif-Based Community Detection Steps"
       }
       description={
         isJa
-          ? "三角形モチーフの密度に基づいてコミュニティを検出するプロセスを可視化します。"
+          ? "三角形モチーフの密度に基づいてコミュニティーを検出するプロセスを可視化します。"
           : "Visualizing the process of detecting communities based on triangle motif density."
       }
     >

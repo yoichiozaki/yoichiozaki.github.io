@@ -37,7 +37,7 @@ const KINDS: NodeKind[] = [
       en: "uint8_t count; uint8_t key[16]; NodePtr children[16];",
     },
     lookup: {
-      ja: "ソート済み key[16] を線形走査。16 バイトが 1 レジスタに収まる形なので SIMD 化の余地はあるが、DuckDB の実装は素直なループ",
+      ja: "ソート済み key[16] を線形走査。16 バイトが 1 レジスターに収まる形なので SIMD 化の余地はあるが、DuckDB の実装は素直なループ",
       en: "linear scan over the sorted key[16]; 16 bytes fit one register, though DuckDB's implementation is a plain loop",
     },
   },
@@ -89,7 +89,7 @@ export function ARTNodeVisualizer({ locale = "ja" }: Props) {
       title={isJa ? "ART の内部ノードが育つところ" : "Watch an ART inner node grow"}
       description={
         isJa
-          ? "ART (Adaptive Radix Tree) は、1 ノードが持つ子の数に応じてノードの物理表現そのものを差し替えます。子バイトを足していって、Node4 → Node16 → Node48 → Node256 の切り替わりと、1 子あたりのメモリコストの推移を見てください。"
+          ? "ART (Adaptive Radix Tree) は、1 ノードが持つ子の数に応じてノードの物理表現そのものを差し替えます。子バイトを足していって、Node4 → Node16 → Node48 → Node256 の切り替わりと、1 子あたりのメモリーコストの推移を見てください。"
           : "An ART (Adaptive Radix Tree) swaps the physical representation of a node according to how many children it holds. Add child bytes and watch it flip Node4 → Node16 → Node48 → Node256, and how the per-child memory cost moves."
       }
     >
@@ -242,7 +242,7 @@ export function ARTNodeVisualizer({ locale = "ja" }: Props) {
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="rounded-md border border-border bg-background px-3 py-2">
             <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-              {isJa ? "子 1 つあたりのメモリ" : "Memory per child"}
+              {isJa ? "子 1 つあたりのメモリー" : "Memory per child"}
             </div>
             <div className="font-mono text-sm text-foreground">
               {bytesPerChild.toFixed(1)} B
@@ -260,7 +260,7 @@ export function ARTNodeVisualizer({ locale = "ja" }: Props) {
 
         <div className="rounded-md border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
           {isJa
-            ? "縮小は膨張と対称ではありません。Node256 は 36 以下（Node256::SHRINK_THRESHOLD）で Node48 へ、Node48 は 12 未満（Node48::SHRINK_THRESHOLD）で Node16 へ落ちます。ヒステリシスを入れて、境界での型振動を防いでいます。DuckDB はさらに、子ポインタを持たず「存在するバイト」だけを保持する Node7Leaf / Node15Leaf / Node256Leaf を追加していて、これは row ID を格納する入れ子 ART（gate の内側）専用です。"
+            ? "縮小は膨張と対称ではありません。Node256 は 36 以下（Node256::SHRINK_THRESHOLD）で Node48 へ、Node48 は 12 未満（Node48::SHRINK_THRESHOLD）で Node16 へ落ちます。ヒステリシスを入れて、境界での型振動を防いでいます。DuckDB はさらに、子ポインターを持たず「存在するバイト」だけを保持する Node7Leaf / Node15Leaf / Node256Leaf を追加していて、これは row ID を格納する入れ子 ART（gate の内側）専用です。"
             : "Shrinking is not the mirror image of growth: a Node256 collapses to Node48 at 36 or fewer children (Node256::SHRINK_THRESHOLD) and a Node48 to Node16 below 12 (Node48::SHRINK_THRESHOLD). The hysteresis prevents type thrashing at the boundary. DuckDB also adds Node7Leaf / Node15Leaf / Node256Leaf, which hold only the present bytes and no child pointers — used exclusively by the nested row-ID ART behind a gate."}
         </div>
       </div>

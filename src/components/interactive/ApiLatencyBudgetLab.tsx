@@ -75,12 +75,12 @@ export function ApiLatencyBudgetLab({ locale = "ja" }: Props) {
   const verdict = (() => {
     if (savedPct < 5) {
       return isJa
-        ? "総レイテンシの支配項は RTT とバックエンド処理です。ここでフォーマットを替えても体感は変わりません — まず DB とネットワーク経路を疑ってください。"
+        ? "総レイテンシーの支配項は RTT とバックエンド処理です。ここでフォーマットを替えても体感は変わりません — まず DB とネットワーク経路を疑ってください。"
         : "RTT and backend work dominate. Swapping the wire format here will not be felt — look at the database and the network path first.";
     }
     if (savedPct < 20) {
       return isJa
-        ? "効果はありますが桁は変わりません。可視化・LB・ブラウザ対応など運用コストと天秤にかけて判断すべき領域です。"
+        ? "効果はありますが桁は変わりません。可視化・LB・ブラウザー対応など運用コストと天秤にかけて判断すべき領域です。"
         : "There is a real gain, but not an order of magnitude. Weigh it against the operational cost: observability, load balancing, browser support.";
     }
     return isJa
@@ -90,10 +90,10 @@ export function ApiLatencyBudgetLab({ locale = "ja" }: Props) {
 
   return (
     <InteractiveDemo
-      title={isJa ? "レイテンシ予算はどこに消えるのか" : "Where does the latency budget actually go?"}
+      title={isJa ? "レイテンシー予算はどこに消えるのか" : "Where does the latency budget actually go?"}
       description={
         isJa
-          ? "「gRPC は REST より N 倍速い」というベンチマークが何を測っているのかを分解します。スライダを動かして、直列化コストが全体に占める割合を確かめてください。"
+          ? "「gRPC は REST より N 倍速い」というベンチマークが何を測っているのかを分解します。スライダーを動かして、直列化コストが全体に占める割合を確かめてください。"
           : "Decompose what \"gRPC is N× faster than REST\" benchmarks actually measure. Move the sliders and watch how small the serialization slice usually is."
       }
     >

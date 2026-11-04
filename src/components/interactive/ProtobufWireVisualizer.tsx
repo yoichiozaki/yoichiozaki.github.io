@@ -73,7 +73,7 @@ const STEPS: StepInfo[] = [
     titleJa: "エンコード開始",
     titleEn: "Start encoding",
     bodyJa:
-      "Protobuf にはフィールド名も型名も入りません。入るのは「フィールド番号 + ワイヤ型 + 値」の三つ組だけです。スキーマ (.proto) を両端が持っている前提でメタ情報を削り落とすのが、JSON との最大の違いです。",
+      "Protobuf にはフィールド名も型名も入りません。入るのは「フィールド番号 + ワイヤー型 + 値」の三つ組だけです。スキーマ (.proto) を両端が持っている前提でメタ情報を削り落とすのが、JSON との最大の違いです。",
     bodyEn:
       "Protobuf carries no field names and no type names on the wire. Each field is just (field number, wire type, value). Stripping metadata is only possible because both ends already share the schema (.proto) — that is the core difference from JSON.",
   },
@@ -81,7 +81,7 @@ const STEPS: StepInfo[] = [
     titleJa: "field 1 のタグバイト",
     titleEn: "Tag byte for field 1",
     bodyJa:
-      "タグは「フィールド番号 << 3 | ワイヤ型」を varint で書いたもの。id はフィールド番号 1、int32 なのでワイヤ型 0 (VARINT)。(1 << 3) | 0 = 8 = 0x08。",
+      "タグは「フィールド番号 << 3 | ワイヤー型」を varint で書いたもの。id はフィールド番号 1、int32 なのでワイヤー型 0 (VARINT)。(1 << 3) | 0 = 8 = 0x08。",
     bodyEn:
       "A tag is (field number << 3 | wire type) written as a varint. `id` is field 1 and an int32, so wire type 0 (VARINT): (1 << 3) | 0 = 8 = 0x08.",
     formula: "(1 << 3) | 0 = 0x08",
@@ -99,7 +99,7 @@ const STEPS: StepInfo[] = [
     titleJa: "field 2 のタグバイト",
     titleEn: "Tag byte for field 2",
     bodyJa:
-      "name はフィールド番号 2、string なのでワイヤ型 2 (LEN = 長さ前置き)。(2 << 3) | 2 = 18 = 0x12。",
+      "name はフィールド番号 2、string なのでワイヤー型 2 (LEN = 長さ前置き)。(2 << 3) | 2 = 18 = 0x12。",
     bodyEn:
       "`name` is field 2 and a string, so wire type 2 (LEN — length-delimited): (2 << 3) | 2 = 18 = 0x12.",
     formula: "(2 << 3) | 2 = 0x12",
@@ -124,7 +124,7 @@ const STEPS: StepInfo[] = [
   {
     titleJa: "'d' = 0x64",
     titleEn: "'d' = 0x64",
-    bodyJa: "2 バイト目。長さが既知なので、パーサは終端を探すスキャンをしません。",
+    bodyJa: "2 バイト目。長さが既知なので、パーサーは終端を探すスキャンをしません。",
     bodyEn:
       "Second byte. Because the length is known up front, the parser never scans for a terminator.",
   },
@@ -138,7 +138,7 @@ const STEPS: StepInfo[] = [
     titleJa: "field 3 のタグバイト",
     titleEn: "Tag byte for field 3",
     bodyJa:
-      "active はフィールド番号 3、bool なのでワイヤ型 0。(3 << 3) | 0 = 24 = 0x18。フィールド番号 1〜15 はタグが 1 バイトに収まるので、頻出フィールドには小さい番号を割り当てるのが定石です。",
+      "active はフィールド番号 3、bool なのでワイヤー型 0。(3 << 3) | 0 = 24 = 0x18。フィールド番号 1〜15 はタグが 1 バイトに収まるので、頻出フィールドには小さい番号を割り当てるのが定石です。",
     bodyEn:
       "`active` is field 3 and a bool, so wire type 0: (3 << 3) | 0 = 24 = 0x18. Field numbers 1–15 fit their tag in a single byte, which is why hot fields should get low numbers.",
     formula: "(3 << 3) | 0 = 0x18",
@@ -288,7 +288,7 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
               {isJa
-                ? "ただし HTTP/2 のフレームヘッダ (9 B/フレーム) と HPACK 圧縮後のヘッダは別途乗ります。"
+                ? "ただし HTTP/2 のフレームヘッダー (9 B/フレーム) と HPACK 圧縮後のヘッダーは別途乗ります。"
                 : "HTTP/2 frame headers (9 B each) and HPACK-compressed headers sit on top of this."}
             </p>
           </div>
@@ -322,7 +322,7 @@ export function ProtobufWireVisualizer({ locale = "ja" }: Props) {
         {!consistent && (
           <p className="rounded border border-red-500/50 bg-[#c64545]/10 p-2 text-xs text-red-600 dark:text-red-400">
             {isJa
-              ? "内部整合性チェックに失敗しました (バイト表とエンコーダの導出結果が一致しません)。"
+              ? "内部整合性チェックに失敗しました (バイト表とエンコーダーの導出結果が一致しません)。"
               : "Internal consistency check failed: the byte table disagrees with the derived encoding."}
           </p>
         )}

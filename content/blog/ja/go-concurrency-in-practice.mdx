@@ -9,7 +9,7 @@ tags: ["Go", "Concurrency", "Backpressure", "Architecture"]
 
 それなのに、いざ業務のコードを書くと <strong>どこにも channel を使う場所が見つからない</strong>。あるいは逆に、無理に使ってみたら以前より読みにくく壊れやすいコードになった。
 
-このギャップは、あなたの理解が浅いから生じているのではありません。<strong>教科書が教えるのは「機構」であって「動機」ではない</strong> からです。「1 から 100 までを 3 つの goroutine で足す」というサンプルは、機構の説明としては正しくても、実務で並行処理を導入する動機とは何の関係もありません。実務で必要なのは「この関数を並行にすべきか」「ここは channel か mutex か」「バッファサイズをいくつにするか」という <strong>判断</strong> です。
+このギャップは、あなたの理解が浅いから生じているのではありません。<strong>教科書が教えるのは「機構」であって「動機」ではない</strong> からです。「1 から 100 までを 3 つの goroutine で足す」というサンプルは、機構の説明としては正しくても、実務で並行処理を導入する動機とは何の関係もありません。実務で必要なのは「この関数を並行にすべきか」「ここは channel か mutex か」「バッファーサイズをいくつにするか」という <strong>判断</strong> です。
 
 この記事では、その判断の側から Go の並行処理を再構成します。
 
@@ -19,11 +19,11 @@ tags: ["Go", "Concurrency", "Backpressure", "Architecture"]
 
 <strong>誤解 1: 並行処理は「速くするため」のもの</strong>
 
-実務のサーバアプリケーションで並行処理を入れる主な理由は、CPU を使い切ることではなく <strong>待ち時間を重ねること</strong> と <strong>ライフサイクルを制御すること</strong> です。Web アプリケーションのプロファイルを取ると、時間の大半は DB・外部 API・ストレージの応答待ちで消えています。CPU 並列化が主役になるのは画像処理や暗号処理のような CPU バウンドな処理に限られます。
+実務のサーバーアプリケーションで並行処理を入れる主な理由は、CPU を使い切ることではなく <strong>待ち時間を重ねること</strong> と <strong>ライフサイクルを制御すること</strong> です。Web アプリケーションのプロファイルを取ると、時間の大半は DB・外部 API・ストレージの応答待ちで消えています。CPU 並列化が主役になるのは画像処理や暗号処理のような CPU バウンドな処理に限られます。
 
 <strong>誤解 2: goroutine を使うのは特別なとき</strong>
 
-`net/http` サーバは受け付けた <strong>接続ごとに</strong> goroutine を起動します（[`net/http/server.go`](https://github.com/golang/go/blob/master/src/net/http/server.go) の `Server.Serve` が `go c.serve(connCtx)` を呼びます。HTTP/1.1 の keep-alive では同一接続上のリクエストはその goroutine 内で逐次処理され、HTTP/2 ではストリームごとに goroutine が起動します）。いずれにせよ、異なるクライアントのハンドラは同時に走ります。つまり Go で Web アプリケーションを書いている時点で、あなたはすでに並行プログラムを書いています。ハンドラの中で触るグローバル変数、共有キャッシュ、コネクションプールはすべて並行アクセスされます。「並行処理を使うかどうか」ではなく「<strong>すでに並行な世界で、どこに構造を入れるか</strong>」が実務の問いです。
+`net/http` サーバーは受け付けた <strong>接続ごとに</strong> goroutine を起動します（[`net/http/server.go`](https://github.com/golang/go/blob/master/src/net/http/server.go) の `Server.Serve` が `go c.serve(connCtx)` を呼びます。HTTP/1.1 の keep-alive では同一接続上のリクエストはその goroutine 内で逐次処理され、HTTP/2 ではストリームごとに goroutine が起動します）。いずれにせよ、異なるクライアントのハンドラーは同時に走ります。つまり Go で Web アプリケーションを書いている時点で、あなたはすでに並行プログラムを書いています。ハンドラーの中で触るグローバル変数、共有キャッシュ、コネクションプールはすべて並行アクセスされます。「並行処理を使うかどうか」ではなく「<strong>すでに並行な世界で、どこに構造を入れるか</strong>」が実務の問いです。
 
 <strong>誤解 3: channel は goroutine 間でデータを渡す道具</strong>
 
@@ -34,11 +34,11 @@ tags: ["Go", "Concurrency", "Backpressure", "Architecture"]
 1. <strong>判断フレーム</strong> — そもそも並行にすべきか、channel と mutex のどちらを選ぶか
 2. <strong>本番パターン 6 種</strong> — fan-out / 有界並行と背圧 / ライフサイクル管理 / 所有権の直列化 / バッチング / 購読
 3. <strong>事故カタログ</strong> — 本番で実際に踏むバグと、Go 1.27 時点での検出手段
-4. <strong>道具箱</strong> — 標準・準標準ライブラリの使い分け
-5. <strong>ケーススタディ</strong> — Webhook 配信ワーカーを段階的に組み立てる
+4. <strong>道具箱</strong> — 標準・準標準ライブラリーの使い分け
+5. <strong>ケーススタディー</strong> — Webhook 配信ワーカーを段階的に組み立てる
 6. <strong>テストと観測</strong>
 
-この記事のコードはすべて <strong>Go 1.27</strong>（`go vet` と `go test -race` を通過）で検証しています。ランタイムの内部実装（G・M・P モデル、work stealing、netpoller）については別記事「[Go スケジューラの仕組み](/ja/blog/go-scheduler-gmp)」を参照してください。ここでは意図的に「使う側」の話に絞ります。
+この記事のコードはすべて <strong>Go 1.27</strong>（`go vet` と `go test -race` を通過）で検証しています。ランタイムの内部実装（G・M・P モデル、work stealing、netpoller）については別記事「[Go スケジューラーの仕組み](/ja/blog/go-scheduler-gmp)」を参照してください。ここでは意図的に「使う側」の話に絞ります。
 
 ## 第1章 判断フレーム — 並行にすべきか、channel を使うべきか
 
@@ -48,14 +48,14 @@ tags: ["Go", "Concurrency", "Backpressure", "Architecture"]
 
 | 動機 | 何を得たいか | 典型的な構造 | 成功の指標 |
 | --- | --- | --- | --- |
-| ① 待ち時間の重ね合わせ | 1 リクエストのレイテンシ短縮 | fan-out / fan-in | p50・p99 レイテンシ |
+| ① 待ち時間の重ね合わせ | 1 リクエストのレイテンシー短縮 | fan-out / fan-in | p50・p99 レイテンシー |
 | ② スループット | 単位時間あたりの処理件数 | 有界ワーカープール / パイプライン | 件/秒、キュー滞留 |
 | ③ ライフサイクル管理 | 止められる・止まるまで待てる | context、graceful shutdown | 停止時のエラー率・取りこぼし |
 | ④ 所有権の直列化 | 壊れない状態管理 | 単一所有者 goroutine（アクター） | 不変条件の維持、race の不在 |
 
 CPU バウンドな計算の並列化は 5 番目の動機ですが、典型的な Web バックエンドでは稀です。もし該当するなら、それは並行処理の設計問題というより「`GOMAXPROCS` 個のワーカーで分割する」という単純な話に落ち着くことが多く、この記事の後半で扱う背圧やライフサイクルの議論はあまり効いてきません。
 
-ここで重要なのは、<strong>① と ② はまったく違う目標だ</strong> ということです。①（レイテンシ）は「1 件の仕事を細かく割って同時に投げる」ことで達成され、②（スループット）は「多数の仕事を詰まらせずに流し続ける」ことで達成されます。①のつもりで無制限に goroutine を撒くと、②が崩壊します（第3章）。
+ここで重要なのは、<strong>① と ② はまったく違う目標だ</strong> ということです。①（レイテンシー）は「1 件の仕事を細かく割って同時に投げる」ことで達成され、②（スループット）は「多数の仕事を詰まらせずに流し続ける」ことで達成されます。①のつもりで無制限に goroutine を撒くと、②が崩壊します（第3章）。
 
 ### 1.2 channel と mutex のどちらを選ぶか
 
@@ -77,7 +77,7 @@ Go には有名な標語があります。
 
 <strong>mutex（あるいは atomic）を選ぶ場合</strong>
 
-- 守りたいのが <strong>データ構造そのもの</strong>（マップ、カウンタ、設定値）
+- 守りたいのが <strong>データ構造そのもの</strong>（マップ、カウンター、設定値）
 - クリティカルセクションが短く、<strong>その中で I/O をしない</strong>
 - 操作が「読む」「書く」に還元でき、<strong>順序に意味がない</strong>
 
@@ -92,7 +92,7 @@ Go には有名な標語があります。
 
 ### 1.3 コストを測る — channel は安くない
 
-判断材料として、実測値を見ておく価値があります。同じ「カウンタを増やす」処理を 3 通りで実装しました。
+判断材料として、実測値を見ておく価値があります。同じ「カウンターを増やす」処理を 3 通りで実装しました。
 
 ```go
 type mutexCounter struct {
@@ -150,13 +150,13 @@ BenchmarkCounterMutex-8       50.2 ns/op
 BenchmarkCounterChannel-8    441.9 ns/op
 ```
 
-絶対値は環境で大きく変わりますし、この測定自体もノイズを含みます（同一環境の 5 回試行でも ±30% 程度は動きます）。読むべきは <strong>桁の関係</strong> です。単純な状態更新において、channel によるアクター方式は mutex のおおよそ 1 桁遅く、atomic とは 30 倍程度の差があります。バッファなし channel の送受信は goroutine の park / unpark（スケジューラへの制御移譲）を伴うため、これは避けられない構造的コストです。
+絶対値は環境で大きく変わりますし、この測定自体もノイズを含みます（同一環境の 5 回試行でも ±30% 程度は動きます）。読むべきは <strong>桁の関係</strong> です。単純な状態更新において、channel によるアクター方式は mutex のおおよそ 1 桁遅く、atomic とは 30 倍程度の差があります。バッファーなし channel の送受信は goroutine の park / unpark（スケジューラーへの制御移譲）を伴うため、これは避けられない構造的コストです。
 
 だからといって「channel は遅いから使うな」という結論にはなりません。正しい結論はこうです。
 
 > <strong>1 回あたり数百ナノ秒を払う価値のある構造</strong> を channel で表現せよ。単なる排他制御に払うな。
 
-1 リクエストで 1 回だけ channel を使うなら 441 ns は完全に無視できます（ネットワーク I/O はミリ秒単位＝ 3〜4 桁上のオーダー）。逆に、ホットループの中で 1 秒あたり数百万回カウンタを更新するなら、mutex どころか atomic を選ぶべきです。
+1 リクエストで 1 回だけ channel を使うなら 441 ns は完全に無視できます（ネットワーク I/O はミリ秒単位＝ 3〜4 桁上のオーダー）。逆に、ホットループの中で 1 秒あたり数百万回カウンターを更新するなら、mutex どころか atomic を選ぶべきです。
 
 ### 1.4 判断のフローチャート
 
@@ -212,7 +212,7 @@ func (c *Clients) BuildPageSerial(ctx context.Context, uid string) (*Page, error
 }
 ```
 
-このコードを見て「並行にできる」と判断する条件は明確です。<strong>4 つの呼び出しの間にデータ依存がない</strong> こと。もし `o` を取るのに `u.TenantID` が必要なら、その 2 つは直列にせざるを得ません（依存グラフの深さがレイテンシの下限になります）。
+このコードを見て「並行にできる」と判断する条件は明確です。<strong>4 つの呼び出しの間にデータ依存がない</strong> こと。もし `o` を取るのに `u.TenantID` が必要なら、その 2 つは直列にせざるを得ません（依存グラフの深さがレイテンシーの下限になります）。
 
 ```mermaid
 graph LR
@@ -279,11 +279,11 @@ func (c *Clients) BuildPageNaive(ctx context.Context, uid string) (*Page, error)
 1. <strong>キャンセルが伝播しない</strong> — User の取得が 500ms で失敗しても、Order は最後まで走り切ります。ユーザーはもう結果を受け取らないのに、下流サービスの負荷だけがかかり続けます。
 2. <strong>エラーの意味が失われる</strong> — `errors.Join` で全部束ねるのは、呼び出し側が「どれが必須でどれが任意か」を判断できない場合に困ります。
 3. <strong>panic がプロセスを殺す</strong> — goroutine 内の panic は `recover` されない限りプロセス全体を落とします。呼び出し元の `defer recover()` では拾えません。
-4. <strong>ロックの用途を取り違えている</strong> — `page.User` と `page.Orders` は<strong>別々のメモリ位置</strong>なので、<strong>ページのフィールドを守るためのロックは要りません</strong>。この `mu` が実際に守っているのは `errs` への `append` の方です（詳細は 2.4）。
+4. <strong>ロックの用途を取り違えている</strong> — `page.User` と `page.Orders` は<strong>別々のメモリー位置</strong>なので、<strong>ページのフィールドを守るためのロックは要りません</strong>。この `mu` が実際に守っているのは `errs` への `append` の方です（詳細は 2.4）。
 
 ### 2.3 errgroup による実装
 
-`golang.org/x/sync/errgroup` はこの用途のための準標準ライブラリです。API は 5 つだけです。
+`golang.org/x/sync/errgroup` はこの用途のための準標準ライブラリーです。API は 5 つだけです。
 
 ```go
 func WithContext(ctx context.Context) (*Group, context.Context)
@@ -358,7 +358,7 @@ func (c *Clients) BuildPage(ctx context.Context, uid string) (*Page, error) {
 
 ### 2.4 なぜ `page` にロックが要らないのか
 
-`page.User` と `page.Orders` に別々の goroutine から書き込んでいますが、これは race ではありません。Go のメモリモデルにおいて、構造体の <strong>異なるフィールドは異なるメモリ位置</strong> であり、異なるメモリ位置への並行書き込みは競合しません。読み出し側は `g.Wait()` の後にのみ `page` を読むため、`Wait` が張る happens-before 関係によって全書き込みが可視になります。
+`page.User` と `page.Orders` に別々の goroutine から書き込んでいますが、これは race ではありません。Go のメモリーモデルにおいて、構造体の <strong>異なるフィールドは異なるメモリー位置</strong> であり、異なるメモリー位置への並行書き込みは競合しません。読み出し側は `g.Wait()` の後にのみ `page` を読むため、`Wait` が張る happens-before 関係によって全書き込みが可視になります。
 
 ただし、この推論が成り立つのは以下の条件下だけです。
 
@@ -386,9 +386,9 @@ for i, in := range inputs {
 
 （このループが安全に書けるのは Go 1.22 でループ変数がイテレーションごとのスコープになったためです。Go 1.21 以前は `i, in := i, in` の再宣言が必須でした。古い記事のコピペには注意してください。）
 
-### 2.5 レイテンシは max ではなく tail に支配される
+### 2.5 レイテンシーは max ではなく tail に支配される
 
-fan-out の効果を「400ms → 100ms」と説明しましたが、本番ではもう少し悲観的に見積もる必要があります。合流点のレイテンシは <strong>4 つのうち最も遅いもの</strong> で決まります。つまり、
+fan-out の効果を「400ms → 100ms」と説明しましたが、本番ではもう少し悲観的に見積もる必要があります。合流点のレイテンシーは <strong>4 つのうち最も遅いもの</strong> で決まります。つまり、
 
 - 各下流の p99 が 500ms なら、4 つ並行に呼んだときの全体の p99 は 500ms より <strong>悪く</strong> なります
 - 1 つでも遅い下流があると、並行化の恩恵はそこで頭打ちになります
@@ -411,9 +411,9 @@ Go 1.25 で `WaitGroup.Go` が入り、両者の見た目は近づきました�
 | エラーの集約 | 自分で書く | 最初の非 nil エラーを返す |
 | 失敗時のキャンセル | なし | `WithContext` ならあり |
 | 並行数の制限 | 自分で書く | `SetLimit(n)` |
-| 依存 | 標準ライブラリ | `golang.org/x/sync` |
+| 依存 | 標準ライブラリー | `golang.org/x/sync` |
 
-<strong>エラーを返すタスクなら `errgroup`、返さないなら `WaitGroup`。</strong> それだけです。「依存を増やしたくない」という理由で `WaitGroup` にエラー集約を手書きするのは、たいてい割に合いません（`golang.org/x/sync` は Go チームが管理する準標準ライブラリです）。
+<strong>エラーを返すタスクなら `errgroup`、返さないなら `WaitGroup`。</strong> それだけです。「依存を増やしたくない」という理由で `WaitGroup` にエラー集約を手書きするのは、たいてい割に合いません（`golang.org/x/sync` は Go チームが管理する準標準ライブラリーです）。
 
 ## 第3章 パターン② 有界並行と背圧 — 「全部 goroutine にする」が事故になる理由
 
@@ -436,8 +436,8 @@ func ProcessAllUnbounded(ctx context.Context, items []Item) {
 
 - <strong>DB コネクションプール枯渇</strong> — `database/sql` の `SetMaxOpenConns(20)` に対して 10 万本が殺到すると、99,980 本がプール待ちでブロックします。待ち時間はやがてアプリ側のタイムアウトを超え、全リクエストがエラーになります
 - <strong>下流サービスへの意図しない DoS</strong> — 自分のサービスは耐えても、呼び出し先が 10 万本の同時接続で死にます。そして障害が連鎖します
-- <strong>メモリ</strong> — 各 goroutine が 1MB のバッファを持てば 100GB です。goroutine が軽くてもペイロードは軽くありません
-- <strong>ファイルディスクリプタ枯渇</strong> — `too many open files` でプロセス全体が機能停止します
+- <strong>メモリー</strong> — 各 goroutine が 1MB のバッファーを持てば 100GB です。goroutine が軽くてもペイロードは軽くありません
+- <strong>ファイルディスクリプター枯渇</strong> — `too many open files` でプロセス全体が機能停止します
 
 重要なのは、<strong>このコードは開発環境とステージングでは絶対に落ちない</strong> ことです。テストデータが 10 件だからです。落ちるのは本番だけです。
 
@@ -532,7 +532,7 @@ func ProcessWeighted(ctx context.Context, items []Item, budgetMB int64) error {
 }
 ```
 
-「同時 10 本」ではなく「同時に使うメモリ 2GB まで」を制限したい場合に使います。動画変換やバッチ集計のように、1 タスクのコストが桁で違うワークロードで効きます。
+「同時 10 本」ではなく「同時に使うメモリー 2GB まで」を制限したい場合に使います。動画変換やバッチ集計のように、1 タスクのコストが桁で違うワークロードで効きます。
 
 <strong>`min` で丸めているのは必須の防御です。</strong> [`semaphore.go`](https://github.com/golang/sync/blob/master/semaphore/semaphore.go) の実装を読むと、`Acquire(ctx, n)` は `n` がセマフォの総容量を超える場合、<strong>エラーを返さずに `<-ctx.Done()` でブロックします</strong>（容量が空でも決して満たせないため）。3GB の項目を 2GB の予算に投げると、キャンセルされるまでループが停止します。「大きすぎる要求はエラー」ではなく「大きすぎる要求は永久に待つ」という挙動なので、呼び出し側で丸めるか事前に弾く必要があります。
 
@@ -542,7 +542,7 @@ func ProcessWeighted(ctx context.Context, items []Item, budgetMB int64) error {
 
 <strong>CPU バウンドなら `GOMAXPROCS`</strong>
 
-`runtime.GOMAXPROCS(0)` を上限にします。それ以上増やしてもコンテキストスイッチが増えるだけです。Go 1.25 以降、`GOMAXPROCS` の既定値は Linux の cgroup CPU 制限を考慮するようになったため、コンテナ環境でもこの値は信頼できます（詳細は「[Go スケジューラの仕組み](/ja/blog/go-scheduler-gmp)」を参照）。
+`runtime.GOMAXPROCS(0)` を上限にします。それ以上増やしてもコンテキストスイッチが増えるだけです。Go 1.25 以降、`GOMAXPROCS` の既定値は Linux の cgroup CPU 制限を考慮するようになったため、コンテナー環境でもこの値は信頼できます（詳細は「[Go スケジューラーの仕組み](/ja/blog/go-scheduler-gmp)」を参照）。
 
 <strong>I/O バウンドなら「下流の制約」から逆算する</strong>
 
@@ -588,7 +588,7 @@ L = λ × W
 ```
 
 - <strong>セマフォ（`SetLimit`、`semaphore.Weighted`）が縛るのは `L`</strong> — 同時に「進行中」の仕事の数
-- <strong>レートリミッタが縛るのは `λ`</strong> — 単位時間あたりに「開始する」仕事の数
+- <strong>レートリミッターが縛るのは `λ`</strong> — 単位時間あたりに「開始する」仕事の数
 
 <strong>下流の契約がどちらの単位で書かれているかで、使う道具が決まります。</strong>
 
@@ -630,48 +630,48 @@ for _, it := range items {
 
 `Reserve()` には注意が必要です。<strong>呼んだ時点でトークンを消費します。</strong> 返ってきた `*Reservation` の `Delay()` を見て「待てないからやめる」と判断したら、必ず `r.Cancel()` でトークンを返してください。返さないと実効レートが静かに下がります（`ReserveN(t, n)` で `n` がバースト値を超える場合は `OK() == false` の予約が返ります）。
 
-第 2 引数のバースト値（上の `20`）は、3.4 のバッファサイズと同じ性質の設計判断です。「瞬間的に何件までなら一気に投げてよいか」を宣言しています。
+第 2 引数のバースト値（上の `20`）は、3.4 のバッファーサイズと同じ性質の設計判断です。「瞬間的に何件までなら一気に投げてよいか」を宣言しています。
 
-<strong>実務では両方必要になることがほとんどです。</strong> レートリミッタだけでは、下流が詰まったときに進行中の仕事が無限に積み上がります（`λ` は守れても `L` が発散する）。セマフォだけでは、下流が速いときに契約速度を超えます。片方しか無い実装を見たら、もう片方の制約が本当に無いのかを確認してください。
+<strong>実務では両方必要になることがほとんどです。</strong> レートリミッターだけでは、下流が詰まったときに進行中の仕事が無限に積み上がります（`λ` は守れても `L` が発散する）。セマフォだけでは、下流が速いときに契約速度を超えます。片方しか無い実装を見たら、もう片方の制約が本当に無いのかを確認してください。
 
 ### 3.4 背圧（backpressure）とは何か
 
 ここが、channel を「非同期キュー」として捉えているうちは見えてこない部分です。
 
-<strong>バッファなし channel は「完全な背圧」を意味します。</strong>
+<strong>バッファーなし channel は「完全な背圧」を意味します。</strong>
 
 ```go
 ch := make(chan Item) // バッファなし
 ch <- item            // 受信側が受け取るまでブロックする
 ```
 
-送信側は受信側が受け取るまで進めません。これは制約ではなく <strong>機能</strong> です。生産者は消費者のペースを強制的に守らされます。生産が消費より速い状況で、キューが無限に伸びてメモリを食い潰すことが構造的に起こりません。
+送信側は受信側が受け取るまで進めません。これは制約ではなく <strong>機能</strong> です。生産者は消費者のペースを強制的に守らされます。生産が消費より速い状況で、キューが無限に伸びてメモリーを食い潰すことが構造的に起こりません。
 
-<strong>バッファ付き channel は「N 個分のバーストを吸収してよい」という宣言です。</strong>
+<strong>バッファー付き channel は「N 個分のバーストを吸収してよい」という宣言です。</strong>
 
 ```go
 ch := make(chan Item, 100) // 100 個までは送信側がブロックしない
 ```
 
-よくある誤解が「バッファを増やせば速くなる」です。正確に言うと、<strong>バッファが上げるのは「到達率」であって「上限」ではありません。</strong> 上限は消費側の処理能力 μ で決まり、バッファはそれを 1 件も引き上げません。
+よくある誤解が「バッファーを増やせば速くなる」です。正確に言うと、<strong>バッファーが上げるのは「到達率」であって「上限」ではありません。</strong> 上限は消費側の処理能力 μ で決まり、バッファーはそれを 1 件も引き上げません。
 
-バッファが買えるのは 2 つです。
+バッファーが買えるのは 2 つです。
 
 1. <strong>一時的なバーストの吸収</strong> — μ を超えた瞬間的な流入を、後で消化する約束で受け取る
 2. <strong>生産者と消費者のスケジューリングの分離</strong> — ランデブーのたびに払う goroutine の park / unpark（1.3 で測った数百 ns）を償却し、両者を重ねて走らせる
 
-(2) はパイプラインのように両側が実仕事をする構成では実測できる差になります。ただし生産が消費を恒常的に上回っているなら、バッファは遅かれ早かれ満杯になり、そこから先の挙動はバッファなしと同じです。
+(2) はパイプラインのように両側が実仕事をする構成では実測できる差になります。ただし生産が消費を恒常的に上回っているなら、バッファーは遅かれ早かれ満杯になり、そこから先の挙動はバッファーなしと同じです。
 
-つまり、バッファサイズは性能のつまみではなく、<strong>「どれだけの滞留を許容するか」という設計判断</strong> です。
+つまり、バッファーサイズは性能のつまみではなく、<strong>「どれだけの滞留を許容するか」という設計判断</strong> です。
 
-| バッファサイズ | 意味 |
+| バッファーサイズ | 意味 |
 | --- | --- |
-| `0`（バッファなし） | 送信と受信をランデブーさせる。完全な背圧。順序と同期が最優先 |
+| `0`（バッファーなし） | 送信と受信をランデブーさせる。完全な背圧。順序と同期が最優先 |
 | `1` | 送信側を 1 回分だけ先に進ませる。シグナル通知の定番 |
-| `N`（小さい） | N 件分のバーストを吸収する。N × 処理時間 ＝ 許容する最大追加レイテンシ |
-| 巨大 / 無制限 | 背圧の放棄。メモリと引き換えに問題を先送りしている |
+| `N`（小さい） | N 件分のバーストを吸収する。N × 処理時間 ＝ 許容する最大追加レイテンシー |
+| 巨大 / 無制限 | 背圧の放棄。メモリーと引き換えに問題を先送りしている |
 
-<strong>実務的な指針:</strong> バッファサイズを決めるときは「何秒分の滞留を許すか」から逆算します。1 件 10ms で処理でき、最大 1 秒の遅延を許容するなら、バッファは 100 です。この数字には意味があります。「100 くらいでいいか」には意味がありません。
+<strong>実務的な指針:</strong> バッファーサイズを決めるときは「何秒分の滞留を許すか」から逆算します。1 件 10ms で処理でき、最大 1 秒の遅延を許容するなら、バッファーは 100 です。この数字には意味があります。「100 くらいでいいか」には意味がありません。
 
 ### 3.5 満杯のときどうするか — 3 つの戦略
 
@@ -714,7 +714,7 @@ case <-ctx.Done():
 | メトリクス、アクセスログ | B（捨てる） | 欠測は許容できる。本処理を止める方が害が大きい |
 | ユーザーからの同期リクエスト | B or C | 待たせ続けるより 503 を早く返す方が親切（fail fast） |
 
-<strong>戦略 B は「諦め」ではなく積極的な設計判断です。</strong> 満杯時に無条件でブロックすると、上流のリクエストハンドラが次々と滞留し、goroutine 数とメモリが増え続け、最終的にサービス全体が応答不能になります。これは典型的なカスケード障害です。早期に 503 を返して負荷を落とす方が、システム全体としては健全です。
+<strong>戦略 B は「諦め」ではなく積極的な設計判断です。</strong> 満杯時に無条件でブロックすると、上流のリクエストハンドラーが次々と滞留し、goroutine 数とメモリーが増え続け、最終的にサービス全体が応答不能になります。これは典型的なカスケード障害です。早期に 503 を返して負荷を落とす方が、システム全体としては健全です。
 
 なお、戦略 B の `default` 節は「即座に諦める」という意味なので、`for` ループの中で使うとビジーループになります。リトライしたいなら必ず戦略 C のように待ち先を持たせてください。
 
@@ -746,13 +746,13 @@ func (d *Dispatcher) observeQueues(ctx context.Context, interval time.Duration) 
 | 観測される滞留量 | 診断 |
 | --- | --- |
 | ほぼ常に 0 | 健全。消費が生産に追いついている |
-| 時々跳ねてすぐ戻る | 健全。バッファが本来の役割（バースト吸収）を果たしている |
-| 常に満杯付近 | <strong>容量不足</strong>。バッファを増やしても解決しない。消費側を増やすか生産を絞る |
+| 時々跳ねてすぐ戻る | 健全。バッファーが本来の役割（バースト吸収）を果たしている |
+| 常に満杯付近 | <strong>容量不足</strong>。バッファーを増やしても解決しない。消費側を増やすか生産を絞る |
 | 単調増加 | <strong>消費側が停止している疑い</strong>。デッドロックかリークを疑う |
 
-3 行目が重要です。滞留が常に高いときにバッファを増やすのは、<strong>問題を隠してレイテンシを悪化させる</strong> だけです。滞留したアイテムは、それだけ古い（＝価値の下がった）データでもあります。
+3 行目が重要です。滞留が常に高いときにバッファーを増やすのは、<strong>問題を隠してレイテンシーを悪化させる</strong> だけです。滞留したアイテムは、それだけ古い（＝価値の下がった）データでもあります。
 
-Go 1.26 では goroutine の状態別内訳が [`runtime/metrics`](https://pkg.go.dev/runtime/metrics) に追加され、ランタイム側の飽和も直接取れるようになりました（こちらの `metrics` は標準ライブラリの `runtime/metrics` です）。
+Go 1.26 では goroutine の状態別内訳が [`runtime/metrics`](https://pkg.go.dev/runtime/metrics) に追加され、ランタイム側の飽和も直接取れるようになりました（こちらの `metrics` は標準ライブラリーの `runtime/metrics` です）。
 
 ```go
 // runtime/metrics
@@ -772,7 +772,7 @@ metrics.Read(samples)
 - `runnable` が慢性的に高い → <strong>CPU が足りていない</strong>。並行数を増やしても悪化するだけ
 - `waiting` が <strong>高いまま安定</strong> していて `runnable` が低く CPU に余裕がある → I/O 待ちが支配的。<strong>ここは並行数を増やす余地がある</strong>
 - `waiting` が <strong>単調増加</strong> している → リーク（8.1）か下流の停止。並行数を増やすと悪化する。goroutine プロファイルでスタックを確認する
-- `/sched/latencies:seconds` の裾が伸びている → goroutine がスケジューラで待たされている
+- `/sched/latencies:seconds` の裾が伸びている → goroutine がスケジューラーで待たされている
 
 「並行数を増やすべきか」という問いに、勘ではなく数字で答えられるようになります。
 
@@ -797,7 +797,7 @@ type Context interface {
 
 これが「1 対多のブロードキャスト」を実現します。`cancel()` が呼ばれると `close(done)` が実行され、<strong>`<-ctx.Done()` で待っていたすべての goroutine が同時に解放されます</strong>。値を送る方式では受信者 1 人にしか届かないので、この用途には `close` を使うのが唯一の正解です。
 
-標準ライブラリの実装（[`context/context.go`](https://github.com/golang/go/blob/master/src/context/context.go)）を見ると、まさにそうなっています。
+標準ライブラリーの実装（[`context/context.go`](https://github.com/golang/go/blob/master/src/context/context.go)）を見ると、まさにそうなっています。
 
 ```go
 // cancelCtx.cancel の抜粋
@@ -867,7 +867,7 @@ ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 defer cancel() // 早く終わっても必ず呼ぶ
 ```
 
-`cancel()` を呼ばないと、親コンテキストの `children` マップから自分が外れず、親が生きている限りメモリが解放されません。タイムアウトが来れば自動で解放されますが、それまでの間リークします。`go vet` が検出してくれます。
+`cancel()` を呼ばないと、親コンテキストの `children` マップから自分が外れず、親が生きている限りメモリーが解放されません。タイムアウトが来れば自動で解放されますが、それまでの間リークします。`go vet` が検出してくれます。
 
 ### 4.3 タイムアウトの階層設計
 
@@ -906,7 +906,7 @@ if err := db.QueryRowContext(dbCtx, q).Scan(&v); err != nil {
 
 #### 4.3.1 `context.Canceled` / `DeadlineExceeded` には 4 通りの意味がある
 
-ここまでは「キャンセルをどう伝えるか」の話でした。実務でより難しいのは、<strong>受け取ったキャンセルをどう解釈するか</strong> です。ハンドラの中で `context.Canceled` を観測したとき、原因は少なくとも 4 通りあり、正しい反応はそれぞれ違います。
+ここまでは「キャンセルをどう伝えるか」の話でした。実務でより難しいのは、<strong>受け取ったキャンセルをどう解釈するか</strong> です。ハンドラーの中で `context.Canceled` を観測したとき、原因は少なくとも 4 通りあり、正しい反応はそれぞれ違います。
 
 | 原因 | 見分け方 | 正しい反応 |
 | --- | --- | --- |
@@ -915,9 +915,9 @@ if err := db.QueryRowContext(dbCtx, q).Scan(&v); err != nil {
 | ② `errgroup` の兄弟タスクが失敗した | `context.Cause(ctx)` が `context.Canceled` 以外 | 兄弟の<strong>本当のエラー</strong>を返す。`Canceled` を報告しない |
 | ③ 自分のタイムアウト予算が尽きた | `DeadlineExceeded` ＋ `Cause` で階層を特定（4.3） | <strong>アラートを出す</strong>。自分の性能問題である |
 
-<strong>判定に順序があることに注意してください。</strong> 4.5 の構成では `BaseContext` に `workerCtx` を渡しているため、`stopWorkers()` は進行中の全ハンドラの `r.Context()` もキャンセルします。つまり `r.Context().Err() != nil` は ① と ④ の両方で真になります。④ を先に判定しないと、停止中のリクエストを「クライアントが切った」と誤分類し、返すべき 503 を返さないことになります。
+<strong>判定に順序があることに注意してください。</strong> 4.5 の構成では `BaseContext` に `workerCtx` を渡しているため、`stopWorkers()` は進行中の全ハンドラーの `r.Context()` もキャンセルします。つまり `r.Context().Err() != nil` は ① と ④ の両方で真になります。④ を先に判定しないと、停止中のリクエストを「クライアントが切った」と誤分類し、返すべき 503 を返さないことになります。
 
-<strong>①を②③と混同するのが、実務で最も多い間違いです。</strong> ユーザーがブラウザを閉じただけの事象が「サーバエラー」として計上され、デプロイのたびにエラー率グラフが跳ねているように見える——「graceful shutdown を入れたのに 5xx が減らない」という相談の一定数はこれです。クライアント都合の切断は、そもそも自分の失敗ではありません。
+<strong>①を②③と混同するのが、実務で最も多い間違いです。</strong> ユーザーがブラウザーを閉じただけの事象が「サーバーエラー」として計上され、デプロイのたびにエラー率グラフが跳ねているように見える——「graceful shutdown を入れたのに 5xx が減らない」という相談の一定数はこれです。クライアント都合の切断は、そもそも自分の失敗ではありません。
 
 ②の見分け方には、実装上の裏付けがあります。[`errgroup.go`](https://github.com/golang/sync/blob/master/errgroup/errgroup.go) の `WithContext` は `context.WithCancelCause` でコンテキストを作り、失敗時に `g.cancel(g.err)` を呼びます。したがって <strong>兄弟の goroutine は `context.Cause(ctx)` で「誰が落としたか」を知れます</strong>。
 
@@ -1002,7 +1002,7 @@ sequenceDiagram
     participant D as DB / 外部リソース
 
     K->>S: SIGTERM
-    Note over S: 1. 新規受付を止める<br/>（リスナを閉じる）
+    Note over S: 1. 新規受付を止める<br/>（リスナーを閉じる）
     S->>H: 2. 処理中の完了を待つ（ドレイン）
     H-->>S: 完了
     S->>W: 3. stopWorkers()<br/>（入口が閉じた後）
@@ -1098,21 +1098,21 @@ terminationGracePeriodSeconds = 30s
 
 <strong>判断 3: `srv.Shutdown` は進行中リクエストの ctx をキャンセルしない</strong>
 
-これは誤解が多い点です。`Shutdown` は「新規受付を止めて、アイドル接続を閉じ、処理中が終わるのを待つ」だけで、<strong>処理中のハンドラの `r.Context()` はキャンセルしません</strong>（[`net/http/server.go`](https://github.com/golang/go/blob/master/src/net/http/server.go) の `Shutdown` はリスナとアイドル接続を閉じたあと、接続が静止するまでポーリングするだけです）。したがって、無限ループするハンドラがあると `Shutdown` 自身は待ち続け、上のコードでは `shutCtx` の 7 秒タイムアウトでしか抜けられません。だからこそ `BaseContext` で `workerCtx` を渡し、最後の手段として `stopWorkers()` で全ハンドラに終了を伝えられるようにしています。
+これは誤解が多い点です。`Shutdown` は「新規受付を止めて、アイドル接続を閉じ、処理中が終わるのを待つ」だけで、<strong>処理中のハンドラーの `r.Context()` はキャンセルしません</strong>（[`net/http/server.go`](https://github.com/golang/go/blob/master/src/net/http/server.go) の `Shutdown` はリスナーとアイドル接続を閉じたあと、接続が静止するまでポーリングするだけです）。したがって、無限ループするハンドラーがあると `Shutdown` 自身は待ち続け、上のコードでは `shutCtx` の 7 秒タイムアウトでしか抜けられません。だからこそ `BaseContext` で `workerCtx` を渡し、最後の手段として `stopWorkers()` で全ハンドラーに終了を伝えられるようにしています。
 
-なお `RunServer` のステップ 3 で `stopWorkers()` を呼んでいるのは、<strong>バックグラウンドワーカーだけでなく、`BaseContext` 経由で進行中のハンドラにも停止を伝えるため</strong> です。`Shutdown` が時間内に返らなかった場合の最終手段として機能します。
+なお `RunServer` のステップ 3 で `stopWorkers()` を呼んでいるのは、<strong>バックグラウンドワーカーだけでなく、`BaseContext` 経由で進行中のハンドラーにも停止を伝えるため</strong> です。`Shutdown` が時間内に返らなかった場合の最終手段として機能します。
 
 <strong>判断 4: ワーカー用 ctx を `rootCtx` から派生させない</strong>
 
-もしワーカーに `rootCtx` を渡すと、SIGTERM の瞬間にワーカーが止まります。しかしその時点ではまだ HTTP リクエストが処理中で、そのハンドラがワーカーにジョブを投入するかもしれません。<strong>入口が閉じきってからワーカーを止める</strong> 必要があるため、別系統の ctx にして手動で `stopWorkers()` を呼びます。
+もしワーカーに `rootCtx` を渡すと、SIGTERM の瞬間にワーカーが止まります。しかしその時点ではまだ HTTP リクエストが処理中で、そのハンドラーがワーカーにジョブを投入するかもしれません。<strong>入口が閉じきってからワーカーを止める</strong> 必要があるため、別系統の ctx にして手動で `stopWorkers()` を呼びます。
 
 <strong>判断 5: `g.Wait()` の `context.Canceled` を無視する</strong>
 
 正常なシグナル停止でも `gctx` はキャンセルされるため、これをエラーとして扱うと終了コードが 1 になり、Kubernetes が異常終了として記録します。
 
-### 4.6 ロードバランサからの離脱を忘れない
+### 4.6 ロードバランサーからの離脱を忘れない
 
-もう一段外側の話です。SIGTERM を受けて即座にリスナを閉じると、<strong>ロードバランサがまだこの Pod にトラフィックを送っている</strong> 可能性があります（Endpoints の更新はプロセス停止と非同期です）。結果として一部のリクエストが接続拒否になります。
+もう一段外側の話です。SIGTERM を受けて即座にリスナーを閉じると、<strong>ロードバランサーがまだこの Pod にトラフィックを送っている</strong> 可能性があります（Endpoints の更新はプロセス停止と非同期です）。結果として一部のリクエストが接続拒否になります。
 
 実務での定番は、SIGTERM 受信後にまず readiness probe を落とし、数秒待ってからドレインを始めることです。4.5 の `RunServer` のシャットダウン担当 goroutine を、次のように差し替えます。
 
@@ -1350,15 +1350,15 @@ func (c *Cache) Get(ctx context.Context, key string) (string, bool, error) {
 
 <strong>ポイント 2: ②の前段のノンブロッキング `select` は飾りではない</strong>
 
-これを省くと、<strong>正しく計算された結果を 50% の確率で捨てて `ErrCacheClosed` を返します</strong>。所有者が `cmd.reply <- ...`（バッファ 1 なので即完了）を実行した直後にループが `<-ctx.Done()` に入って終了し、`defer close(c.done)` が走る、という並びが普通に起こるからです。この瞬間、呼び出し側の `select` からは `reply` と `c.done` の両方が準備できて見え、8.3 のとおり一様ランダムに選ばれます。
+これを省くと、<strong>正しく計算された結果を 50% の確率で捨てて `ErrCacheClosed` を返します</strong>。所有者が `cmd.reply <- ...`（バッファー 1 なので即完了）を実行した直後にループが `<-ctx.Done()` に入って終了し、`defer close(c.done)` が走る、という並びが普通に起こるからです。この瞬間、呼び出し側の `select` からは `reply` と `c.done` の両方が準備できて見え、8.3 のとおり一様ランダムに選ばれます。
 
 手元で 400 回試行したところ、ちょうど 200 回が偽の `ErrCacheClosed` になりました。前段のノンブロッキング `select` を入れると 0 回になります。<strong>`done` の腕が、すでに配送済みの返信を打ち負かしてはいけません。</strong> これは 8.3 の優先度問題を、アクターの返信経路に適用したものです。
 
-<strong>ポイント 3: `reply` にバッファ 1 を持たせる</strong>
+<strong>ポイント 3: `reply` にバッファー 1 を持たせる</strong>
 
-`make(chan getResult, 1)` の `1` には明確な意味があります。仮にバッファなしにすると、呼び出し側が `ctx.Done()` で②を離脱した直後に所有者が `cmd.reply <- ...` を実行したとき、<strong>受信者がいないので所有者ループが永久にブロックします</strong>。1 個のアクターが止まれば全 API が止まる、致命的な障害です。バッファ 1 なら所有者は必ず送信を完了でき、値は誰にも読まれないまま GC されます。
+`make(chan getResult, 1)` の `1` には明確な意味があります。仮にバッファーなしにすると、呼び出し側が `ctx.Done()` で②を離脱した直後に所有者が `cmd.reply <- ...` を実行したとき、<strong>受信者がいないので所有者ループが永久にブロックします</strong>。1 個のアクターが止まれば全 API が止まる、致命的な障害です。バッファー 1 なら所有者は必ず送信を完了でき、値は誰にも読まれないまま GC されます。
 
-これは 3.4 で述べた「バッファサイズには意味を持たせろ」の具体例です。この `1` は性能チューニングではなく、<strong>所有者を絶対にブロックさせないという不変条件</strong> の表明です。
+これは 3.4 で述べた「バッファーサイズには意味を持たせろ」の具体例です。この `1` は性能チューニングではなく、<strong>所有者を絶対にブロックさせないという不変条件</strong> の表明です。
 
 ### 5.4 アクターにすべきか、mutex のままか
 
@@ -1502,9 +1502,9 @@ func (b *Batcher) Add(ctx context.Context, e Event) error {
 }
 ```
 
-`b.in` のバッファサイズが、そのまま「許容する滞留量」になります（3.4 参照）。メトリクスのように落としてよいデータなら、ここを `default:` にして捨てる設計もありえます。
+`b.in` のバッファーサイズが、そのまま「許容する滞留量」になります（3.4 参照）。メトリクスのように落としてよいデータなら、ここを `default:` にして捨てる設計もありえます。
 
-`<-b.done` の腕を忘れると、`Run` が終わった後の `Add` が <strong>誰も読まないバッファに黙って値を捨てる</strong>（`cap(b.in)` 件まで）か、呼び出し側の `ctx` が切れるまでブロックします。5.3 でアクターに課したのと同じ規約が、ここにも同じ理由で必要です。
+`<-b.done` の腕を忘れると、`Run` が終わった後の `Add` が <strong>誰も読まないバッファーに黙って値を捨てる</strong>（`cap(b.in)` 件まで）か、呼び出し側の `ctx` が切れるまでブロックします。5.3 でアクターに課したのと同じ規約が、ここにも同じ理由で必要です。
 
 <strong>判断 5: タイマーは生成直後から走っている</strong>
 
@@ -1517,11 +1517,11 @@ func (b *Batcher) Add(ctx context.Context, e Event) error {
 [Go 1.23 リリースノート](https://go.dev/doc/go1.23#timer-changes) の変更点は 2 つです。
 
 1. <strong>参照されなくなった `Timer` / `Ticker` は、`Stop` を呼ばなくても即座に GC 対象になる</strong> — 以前は、未 `Stop` の `Timer` は発火するまで回収されず、`Ticker` に至っては永久に回収されませんでした
-2. <strong>タイマーの channel がバッファなし（容量 0）になった</strong> — `Reset` / `Stop` の呼び出し後に、それ以前に準備された古い値が送受信されないことが保証されるようになりました
+2. <strong>タイマーの channel がバッファーなし（容量 0）になった</strong> — `Reset` / `Stop` の呼び出し後に、それ以前に準備された古い値が送受信されないことが保証されるようになりました
 
 実務への影響はこうです。
 
-- <strong>`time.After` をループ内で使ってもメモリリークにならなくなった</strong>（Go 1.23 以降）。それ以前は、`for` ループ内の `select` で `time.After(time.Hour)` を使うと、1 時間分のタイマーがすべて生き続けました
+- <strong>`time.After` をループ内で使ってもメモリーリークにならなくなった</strong>（Go 1.23 以降）。それ以前は、`for` ループ内の `select` で `time.After(time.Hour)` を使うと、1 時間分のタイマーがすべて生き続けました
 - ただし <strong>毎回タイマーを確保するコストは残る</strong> ので、ホットループでは `time.Timer` の再利用か `context.WithTimeout` が依然として有利です
 - <strong>`Stop` の後に `<-timer.C` でドレインする処理は、Go 1.23 以降は書いてはいけません</strong>
 
@@ -1547,7 +1547,7 @@ tm.Stop() // → true（発火済みの値を取り除いたため）
 // この後 <-tm.C は永久にブロックする
 ```
 
-なお、`asynctimerchan` GODEBUG（旧挙動に戻すための設定）は Go 1.27 で完全に削除されました。現行の Go では、タイマー channel は常にバッファなしです。
+なお、`asynctimerchan` GODEBUG（旧挙動に戻すための設定）は Go 1.27 で完全に削除されました。現行の Go では、タイマー channel は常にバッファーなしです。
 
 ## 第7章 パターン⑥ 購読とブロードキャスト — 1 対 N の通知
 
@@ -1715,7 +1715,7 @@ default:
 }
 ```
 
-ただし複数の `Publish` が並行すると厳密な「最新 N 件」にはなりません。厳密さが要るなら、購読者ごとにリングバッファを持ち mutex で守る方が素直です。
+ただし複数の `Publish` が並行すると厳密な「最新 N 件」にはなりません。厳密さが要るなら、購読者ごとにリングバッファーを持ち mutex で守る方が素直です。
 
 いずれの戦略でも、<strong>落とした件数を必ずメトリクスに出してください。</strong> 「気づかないうちにデータが消えている」のが、この構造で最も怖い失敗です。
 
@@ -1723,7 +1723,7 @@ default:
 
 ### 8.1 goroutine リークの 4 大原因
 
-goroutine リークは、Go における <strong>メモリリークの主要な形態</strong> です。goroutine が終わらない限り、そのスタックとスタックから参照される全オブジェクトが回収されません。
+goroutine リークは、Go における <strong>メモリーリークの主要な形態</strong> です。goroutine が終わらない限り、そのスタックとスタックから参照される全オブジェクトが回収されません。
 
 <strong>原因 1: 受信者が去った後の送信</strong>
 
@@ -1756,7 +1756,7 @@ func LeakySearch(ctx context.Context, q string) (string, error) {
 results := make(chan string, len(backends)) // 送信側が絶対にブロックしない
 ```
 
-これも 3.4 の「バッファサイズには意味を持たせろ」の例です。この `len(backends)` は「全送信者が受信者不在でも送信を完了できる」という不変条件の表明であり、性能とは無関係です。
+これも 3.4 の「バッファーサイズには意味を持たせろ」の例です。この `len(backends)` は「全送信者が受信者不在でも送信を完了できる」という不変条件の表明であり、性能とは無関係です。
 
 <strong>原因 2: 送信者が去った後の受信</strong>
 
@@ -2053,15 +2053,15 @@ for a != nil || b != nil {
 
 1. <strong>送信側が閉じる。受信側は絶対に閉じない</strong>
 2. <strong>送信者が複数いる channel は閉じない</strong> — どうしても閉じる必要があるなら、`done` channel（または `ctx`）で全送信者に停止を伝え、`wg.Wait()` で <strong>全員が抜けたことを確認してから</strong> 閉じます。`sync.Once` で包んでも解決しません。<strong>`Once` が防ぐのは二重 `close` の panic だけで、「閉じた channel への送信」は防げません。</strong> 複数送信者で実際に問題になるのは後者です（`ch <- v` でパークしている送信者がいる最中に `close` すれば、`Once` の有無に関係なく panic します）
-3. <strong>閉じた channel への送信は panic、二重 close も panic。閉じた channel からの受信は、バッファに残っている値を返し切ってから、ゼロ値と `ok == false` を返す</strong>
+3. <strong>閉じた channel への送信は panic、二重 close も panic。閉じた channel からの受信は、バッファーに残っている値を返し切ってから、ゼロ値と `ok == false` を返す</strong>
 
-3 番目の但し書きは実務で効きます。7.3 で `close(s.ch)` するとき、バッファにまだメッセージが残っていることがあります。それらは失われず、受信側が読み切ってから `ok == false` になります。
+3 番目の但し書きは実務で効きます。7.3 で `close(s.ch)` するとき、バッファーにまだメッセージが残っていることがあります。それらは失われず、受信側が読み切ってから `ok == false` になります。
 
-（6.3 との対比に注意してください。`Add` が `cap(b.in)` 件まで受け付けられるのは、単にバッファに空きがあるからです。`b.in` は誰も閉じないので <strong>この規約 3 は適用されません</strong>——だからこそ、誰も読まないバッファに値を捨てないよう `<-b.done` の腕が要ります。）
+（6.3 との対比に注意してください。`Add` が `cap(b.in)` 件まで受け付けられるのは、単にバッファーに空きがあるからです。`b.in` は誰も閉じないので <strong>この規約 3 は適用されません</strong>——だからこそ、誰も読まないバッファーに値を捨てないよう `<-b.done` の腕が要ります。）
 
 7.3 で `Subscribe` が `<-chan Message` を返していたのは、規約 1 を型で強制するためです。<strong>API の境界では方向つき channel 型（`chan<-` / `<-chan`）を使ってください。</strong> ドキュメントで規約を書くより確実です。
 
-### 8.6 データ競合とメモリモデル
+### 8.6 データ競合とメモリーモデル
 
 <strong>`-race` を CI で必ず回す。</strong> これに勝る対策はありません。競合検出器は「実際に発生した」競合しか報告しませんが、<strong>偽陽性はありません</strong>。報告されたら必ずバグです。
 
@@ -2069,22 +2069,22 @@ for a != nil || b != nil {
 go test -race ./...
 ```
 
-実行速度は 2〜20 倍遅く、メモリは 5〜10 倍使うので、本番バイナリには入れません。CI と、可能ならステージング環境のカナリアで動かします。
+実行速度は 2〜20 倍遅く、メモリーは 5〜10 倍使うので、本番バイナリーには入れません。CI と、可能ならステージング環境のカナリアで動かします。
 
-[Go メモリモデル](https://go.dev/ref/mem)が channel について保証しているのは次の 4 点です（Go 1.19 の改訂で、メモリモデルは *synchronized before* を基礎に整理されました。*happens before* も引き続き、*synchronized before* とプログラム順序から定義されています）。
+[Go メモリーモデル](https://go.dev/ref/mem)が channel について保証しているのは次の 4 点です（Go 1.19 の改訂で、メモリーモデルは *synchronized before* を基礎に整理されました。*happens before* も引き続き、*synchronized before* とプログラム順序から定義されています）。
 
 1. channel への送信は、対応する受信の<strong>完了より前に</strong> synchronized される
 2. channel の `close` は、`close` によりゼロ値を返す受信<strong>より前に</strong> synchronized される
-3. <strong>バッファなし</strong> channel からの受信は、対応する送信の<strong>完了より前に</strong> synchronized される
+3. <strong>バッファーなし</strong> channel からの受信は、対応する送信の<strong>完了より前に</strong> synchronized される
 4. 容量 `C` の channel からの `k` 番目の受信は、`k+C` 番目の送信の<strong>完了より前に</strong> synchronized される
 
-3 番目が「バッファなし channel はランデブーである」ことの形式的な表現です。この保証があるため、channel で値を渡せば、その値を作るまでに行った全ての書き込みが受信側から見えます。
+3 番目が「バッファーなし channel はランデブーである」ことの形式的な表現です。この保証があるため、channel で値を渡せば、その値を作るまでに行った全ての書き込みが受信側から見えます。
 
 4 番目は一見難解ですが、仕様自身が用途を明記しています。
 
 > This rule generalizes the previous rule to buffered channels. It allows a counting semaphore to be modeled by a buffered channel: the number of items in the channel corresponds to the number of active uses, the capacity of the channel corresponds to the maximum number of simultaneous uses, sending an item acquires the semaphore, and receiving an item releases the semaphore.
 
-つまり 3.2 の「buffered channel をセマフォとして使う」パターンは、思いつきのイディオムではなく <strong>メモリモデルが公式に保証している用法</strong> です。
+つまり 3.2 の「buffered channel をセマフォとして使う」パターンは、思いつきのイディオムではなく <strong>メモリーモデルが公式に保証している用法</strong> です。
 
 <strong>ループ変数（Go 1.22 の変更）</strong>
 
@@ -2120,7 +2120,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-`net/http` はハンドラ自体の panic を捕捉して接続だけを閉じますが、<strong>ハンドラが起動した goroutine の panic は捕捉できません</strong>。3.2 で見たとおり `errgroup` も意図的に panic を伝播しません。
+`net/http` はハンドラー自体の panic を捕捉して接続だけを閉じますが、<strong>ハンドラーが起動した goroutine の panic は捕捉できません</strong>。3.2 で見たとおり `errgroup` も意図的に panic を伝播しません。
 
 対策は、ワーカー起動をラップすることです。
 
@@ -2154,17 +2154,17 @@ func Go(ctx context.Context, name string, f func()) {
 | 重み付きの資源制限 | `semaphore.Weighted` | コストが不均一なタスク |
 | 重複呼び出しの抑制 | `singleflight.Group` | キャッシュスタンピード対策 |
 | 1 回だけの初期化 | `sync.OnceValue`（1.21〜） | エラー付きは `OnceValues` |
-| カウンタ・フラグ | `atomic.Int64` / `atomic.Bool`（1.19〜） | 型付き API。`atomic.AddInt64` より安全 |
+| カウンター・フラグ | `atomic.Int64` / `atomic.Bool`（1.19〜） | 型付き API。`atomic.AddInt64` より安全 |
 | 設定のホットリロード | `atomic.Pointer[T]` | コピーオンライト |
 | レート制限 | `x/time/rate.Limiter` | トークンバケット。3.3.1 参照 |
 | 述語待ち（ロック保持中） | `sync.Cond` | ほぼ常に channel で置き換え可能。`Broadcast` だけが `close` より優れる場面がある |
 | 一時オブジェクトの再利用 | `sync.Pool` | GC 圧が実測で問題になってから |
 
-### 9.1 `singleflight` — 実務価値が最も高い準標準ライブラリ
+### 9.1 `singleflight` — 実務価値が最も高い準標準ライブラリー
 
 キャッシュが切れた瞬間に、同じキーへのリクエストが 1000 件同時に来る。全部が原点（DB や外部 API）を叩きにいく。<strong>キャッシュスタンピード</strong>（thundering herd）と呼ばれる、実務で頻発する障害です。
 
-`golang.org/x/sync/singleflight` は「同じキーで同時に走る呼び出しを 1 本にまとめ、結果を全員に配る」だけのライブラリです。1000 件のリクエストに対して原点への呼び出しは 1 回になります。
+`golang.org/x/sync/singleflight` は「同じキーで同時に走る呼び出しを 1 本にまとめ、結果を全員に配る」だけのライブラリーです。1000 件のリクエストに対して原点への呼び出しは 1 回になります。
 
 ```go
 func (l *Loader) Get(ctx context.Context, key string) (string, error) {
@@ -2203,7 +2203,7 @@ func (l *Loader) Get(ctx context.Context, key string) (string, error) {
 
 `Do` はブロックするため、<strong>呼び出し元の `ctx` がキャンセルされても待ち続けます</strong>。`DoChan` は channel を返すので、`select` で「結果」と「自分のキャンセル」を同時に待てます。相乗りしている他の呼び出し元に影響を与えずに、自分だけ離脱できます。
 
-離脱が安全なのは実装上の裏付けがあります。[`singleflight.go`](https://github.com/golang/sync/blob/master/singleflight/singleflight.go) の `DoChan` は待機者ごとに `make(chan Result, 1)`（バッファ 1）を作ります。したがって、あなたが `ctx.Done()` で離脱しても、結果を送る側は <strong>ブロックせずに送信を完了できます</strong>。8.1 の「受信者が去った後の送信」でリークしないのは、このバッファ 1 のおかげです（ドキュメントにも「返された channel は close されない」と明記されています）。
+離脱が安全なのは実装上の裏付けがあります。[`singleflight.go`](https://github.com/golang/sync/blob/master/singleflight/singleflight.go) の `DoChan` は待機者ごとに `make(chan Result, 1)`（バッファー 1）を作ります。したがって、あなたが `ctx.Done()` で離脱しても、結果を送る側は <strong>ブロックせずに送信を完了できます</strong>。8.1 の「受信者が去った後の送信」でリークしないのは、このバッファー 1 のおかげです（ドキュメントにも「返された channel は close されない」と明記されています）。
 
 <strong>判断 2: 実行関数の中で呼び出し元の `ctx` を使わない</strong>
 
@@ -2255,7 +2255,7 @@ func (s *Store) Update(c *Config) { s.cfg.Store(c) }
 
 それでも手順は変わりません。<strong>まず `map` + `RWMutex` で書き、プロファイルでロック競合が見えてから、自分のワークロードで実測して切り替える。</strong> ドキュメントが挙げる 2 つの用途に当てはまらないなら、性能上の理由で `sync.Map` を選ぶ前に必ずベンチマークを取ってください。
 
-## 第10章 ケーススタディ — Webhook 配信ワーカー
+## 第10章 ケーススタディー — Webhook 配信ワーカー
 
 ここまでのパターンを 1 つのシステムに統合します。要件は実際のプロダクトによくあるものです。
 
@@ -2383,7 +2383,7 @@ func (d *Dispatcher) Enqueue(ctx context.Context, del Delivery) error {
 }
 ```
 
-<strong>ここは 8.3 の優先度問題がそのまま現れる場所です。</strong> `default` を持つ `select` は決してブロックしないので、`case <-ctx.Done():` を腕に加えても意味がないどころか有害です。キャンセル済みで空きもある場合、2 つの腕が同時に準備できているため 50% の確率でキャンセルが無視されて投入されてしまいます。さらに、キャンセル済みで満杯の場合は「キュー満杯」ではなく「キャンセル」が返るため、`rejected` カウンタが過少計上になります。ノンブロッキング投入では、`ctx` のチェックを `select` の<strong>前</strong>に置いてください。
+<strong>ここは 8.3 の優先度問題がそのまま現れる場所です。</strong> `default` を持つ `select` は決してブロックしないので、`case <-ctx.Done():` を腕に加えても意味がないどころか有害です。キャンセル済みで空きもある場合、2 つの腕が同時に準備できているため 50% の確率でキャンセルが無視されて投入されてしまいます。さらに、キャンセル済みで満杯の場合は「キュー満杯」ではなく「キャンセル」が返るため、`rejected` カウンターが過少計上になります。ノンブロッキング投入では、`ctx` のチェックを `select` の<strong>前</strong>に置いてください。
 
 <strong>`<-d.done` の事前確認も同じ理由で必須です。</strong> `Run` が返った後（`Shutdown` がタイムアウトして `stopWorkers()` が走った直後など）、レーンにはまだ空きがあります。この確認が無いと `Enqueue` は成功を返し、`enqueued` を増やし、そして <strong>その配信は誰にも処理されず dead letter にも載りません</strong>。10.4 で警告する「たまにイベントが消える」を、自分のコードで作り込むことになります。5.3 のアクターと 6.3 の `Batcher` に課したのと同じ規約が、ここにも必要です。
 
@@ -2556,22 +2556,22 @@ func backoff(base, maxWait time.Duration, attempt int) time.Duration {
 | `deliver` の `cancel()` | `defer` にせずループ内で毎回解放 | — |
 | `d.dead` の `WithoutCancel` ＋ 期限 | 停止中でも書き切るが、無期限にはしない | 4.4 / 6.3 |
 | バックオフ中の `ctx.Done()` | 待機中でも停止に応答する | 4.2 |
-| 完全ジッタ | リトライの同期（thundering herd）を防ぐ | — |
+| 完全ジッター | リトライの同期（thundering herd）を防ぐ | — |
 | `atomic.Int64` ＋ `Stats()` | 観測可能にする | 3.6 |
 
 <strong>`defer cancel()` を使っていない点を補足します。</strong> `deliver` は `for` ループなので、`defer` にすると <strong>関数が返るまで全リトライ分の `cancel` が積み上がります</strong>。リトライ 10 回なら 10 個の未解放コンテキストが残ります。ループ内で `context.WithTimeout` を使うときは、`defer` ではなくその場で `cancel()` を呼んでください。これは `go vet` の `lostcancel` では検出されない、地味に厄介なリークです。
 
 <strong>`d.dead` に期限付きの `context.WithoutCancel` を使う理由。</strong> dead letter への書き込みは「配信を諦めた」という最も失いたくない記録です。停止中（`ctx` がキャンセル済み）に到達する経路があるので、両方の呼び出し箇所でキャンセルを切り離します。ただし `context.WithoutCancel` が返すコンテキストには <strong>デッドラインが一切ありません</strong>（`Deadline()` は `ok == false` を返します）。そのまま渡すと停止時間の上限が消えるので、必ず `WithTimeout` を重ねてください。
 
-<strong>完全ジッタについて。</strong> `rand.Int64N(int64(d)) + 1` は 1 以上 `d` 以下の値を返します。固定のバックオフだと、障害から復旧した瞬間に全リトライが同時に殺到し、下流を再び落とします。ジッタを入れることでリトライが時間軸に散らばります。
+<strong>完全ジッターについて。</strong> `rand.Int64N(int64(d)) + 1` は 1 以上 `d` 以下の値を返します。固定のバックオフだと、障害から復旧した瞬間に全リトライが同時に殺到し、下流を再び落とします。ジッターを入れることでリトライが時間軸に散らばります。
 
 ### 10.4 残る課題 — プロセス内キューの限界
 
-このディスパッチャには、明示しておくべき限界があります。
+このディスパッチャーには、明示しておくべき限界があります。
 
 - <strong>プロセスが SIGKILL されるとキューの中身は消えます。</strong> `drain` は graceful な停止しか救いません
 - <strong>水平スケールすると順序保証が壊れます。</strong> 同じ宛先へのイベントが別インスタンスに振り分けられうるためです。同様に、`Shards` の値を変えると `hash % N` の割り当てが変わるので、<strong>レーン数の変更自体が順序保証を壊します</strong>
-- <strong>1 つの死んだ宛先が、同じレーンに載った健全な宛先を巻き添えにします。</strong> `deliver` はリトライをレーン内でインラインに待つため、`MaxAttempts × MaxBackoff`（例えば 5 回 × 30 秒）のあいだレーン全体が停止します。やがてレーンが満杯になり、<strong>何も悪くない宛先の `Enqueue` が弾かれ始めます</strong>。設計に起因するカスケード障害です。対策は、宛先ごとのサーキットブレーカで即座に dead letter へ落とすか、リトライ対象を遅延キュー（別レーン）へ退避させてレーンを解放することです
+- <strong>1 つの死んだ宛先が、同じレーンに載った健全な宛先を巻き添えにします。</strong> `deliver` はリトライをレーン内でインラインに待つため、`MaxAttempts × MaxBackoff`（例えば 5 回 × 30 秒）のあいだレーン全体が停止します。やがてレーンが満杯になり、<strong>何も悪くない宛先の `Enqueue` が弾かれ始めます</strong>。設計に起因するカスケード障害です。対策は、宛先ごとのサーキットブレーカーで即座に dead letter へ落とすか、リトライ対象を遅延キュー（別レーン）へ退避させてレーンを解放することです
 
 「1 件も失ってはいけない」「厳密な順序保証が要る」場合、プロセス内 channel はキューとして不適格です。永続キュー（PostgreSQL の `SELECT ... FOR UPDATE SKIP LOCKED`、Redis Streams、Kafka など）を使い、<strong>channel はそこから取り出したジョブをプロセス内のワーカーに配る役割に限定</strong> してください。
 
@@ -2676,7 +2676,7 @@ PASS
 
 制約もあります。durably blocked と見なされるのは「バブル内で作られた channel の送受信」「`time.Sleep`」「`sync.WaitGroup.Wait`」「`sync.Cond.Wait`」などで、<strong>実ネットワーク I/O やシステムコール、mutex のロック待ちは含まれません</strong>。実 I/O を伴うコードでは、その部分をフェイクに差し替える必要があります。
 
-<strong>重要な落とし穴: `synctest` はメモリ同期をしてくれません。</strong>
+<strong>重要な落とし穴: `synctest` はメモリー同期をしてくれません。</strong>
 
 この記事を書く過程で実際に踏みました。最初、テスト用の `fakeSink` をロックなしで書いていたところ、`-race` がきっちり競合を報告しました。
 
@@ -2688,7 +2688,7 @@ Previous read at 0x00c000114288 by goroutine 11:
   verify/snip.TestBatcherFlushesOnTimeout.func1()
 ```
 
-`synctest` が決定論的にするのは <strong>時間とスケジューリング</strong> であって、メモリモデル上の同期関係ではありません。テストコードと被テストコードが同じ変数に触るなら、依然としてロックか channel が必要です。
+`synctest` が決定論的にするのは <strong>時間とスケジューリング</strong> であって、メモリーモデル上の同期関係ではありません。テストコードと被テストコードが同じ変数に触るなら、依然としてロックか channel が必要です。
 
 ```go
 type fakeSink struct {
@@ -2719,9 +2719,9 @@ func (f *fakeSink) snapshot() [][]Event {
 | goroutine 数 | `runtime.NumGoroutine()` | 単調増加＝リーク |
 | リーク goroutine 数 | `/debug/pprof/goroutineleak`（1.27〜） | 0 より大きい |
 | キュー滞留 | `len(ch)` | 常に満杯／単調増加 |
-| 投入拒否数 | 自前カウンタ | 増加＝容量不足 |
+| 投入拒否数 | 自前カウンター | 増加＝容量不足 |
 | 実行可能 goroutine | `/sched/goroutines/runnable:goroutines`（1.26〜） | 慢性的に高い＝CPU 不足 |
-| スケジューラ待ち | `/sched/latencies:seconds`（1.17〜） | 裾が伸びている |
+| スケジューラー待ち | `/sched/latencies:seconds`（1.17〜） | 裾が伸びている |
 
 <strong>最も安価で効果が高いのは goroutine 数の監視です。</strong> `runtime.NumGoroutine()` を 30 秒ごとに出すだけで、リークの大半は「グラフが右肩上がりになる」という形で発見できます。閾値アラートを 1 本張っておく価値があります。
 
@@ -2731,7 +2731,7 @@ func (f *fakeSink) snapshot() [][]Event {
 
 | 症状 | 動機 | 打ち手 |
 | --- | --- | --- |
-| 1 リクエストが遅い。中身は待ち時間 | ① レイテンシ | `errgroup.WithContext` で fan-out |
+| 1 リクエストが遅い。中身は待ち時間 | ① レイテンシー | `errgroup.WithContext` で fan-out |
 | 大量データの処理が終わらない | ② スループット | 有界ワーカープール。並行数はリトルの法則で |
 | デプロイのたびにエラーが出る | ③ ライフサイクル | 停止順序の設計、`Shutdown` + LB 離脱待ち |
 | たまに状態が壊れる | ④ 所有権 | mutex か、単一所有者 goroutine |
@@ -2740,7 +2740,7 @@ func (f *fakeSink) snapshot() [][]Event {
 
 | 状況 | 選択 |
 | --- | --- |
-| マップ・カウンタを守るだけ | `sync.Mutex` / `atomic` |
+| マップ・カウンターを守るだけ | `sync.Mutex` / `atomic` |
 | 読み込みが支配的 | `sync.RWMutex` / `atomic.Pointer` |
 | 所有権を渡す、タイミングを伝える | channel |
 | 複数のイベント源を待ち合わせる | channel + `select`（<strong>これしかない</strong>） |
@@ -2750,7 +2750,7 @@ func (f *fakeSink) snapshot() [][]Event {
 
 <strong>channel を作るときの 4 つの質問</strong>
 
-1. <strong>バッファサイズの根拠は何か？</strong> 「許容する滞留量」を説明できないなら、まず 0 にする
+1. <strong>バッファーサイズの根拠は何か？</strong> 「許容する滞留量」を説明できないなら、まず 0 にする
 2. <strong>満杯のときどうするか？</strong> ブロック／捨てる／諦める。決めていないなら暗黙にブロックしている
 3. <strong>誰が閉じるか？</strong> 送信側が閉じる。送信者が複数なら閉じない
 4. <strong>すべての goroutine に終了経路があるか？</strong> `ctx.Done()` を見ているか、送信先／受信元が必ず現れるか
@@ -2764,7 +2764,7 @@ func (f *fakeSink) snapshot() [][]Event {
 - [ ] `context.WithTimeout` / `WithCancel` の `cancel` が必ず呼ばれる（ループ内は `defer` にしない）
 - [ ] graceful shutdown の停止順序が「入口 → 処理中 → ワーカー → リソース」になっている
 - [ ] 停止シーケンス全体（LB 離脱待ち＋`Shutdown`＋ドレイン）の合計が grace period を下回っている
-- [ ] 下流の契約がレート（req/s）なら、並行数ではなくレートリミッタで縛っている
+- [ ] 下流の契約がレート（req/s）なら、並行数ではなくレートリミッターで縛っている
 - [ ] キュー滞留と goroutine 数がメトリクスに出ている
 
 最後にもう一度。<strong>channel は「速くするための道具」ではなく、「タイミングと所有権を型として表現するための道具」です。</strong> 排他制御が欲しいだけなら mutex を使ってください。それは Go らしくない書き方ではなく、Go 公式が推奨する書き方です。
@@ -2778,14 +2778,14 @@ channel を使うべき瞬間は明確です。<strong>複数のイベント源�
 - [The Go Memory Model](https://go.dev/ref/mem) — channel の同期保証の規範的定義
 - [Go Wiki: Use a sync.Mutex or a channel?](https://go.dev/wiki/MutexOrChannel) — 公式の判断指針
 - [Go 1.22 Release Notes](https://go.dev/doc/go1.22) — ループ変数のスコープ変更
-- [Go 1.23 Release Notes: Timer changes](https://go.dev/doc/go1.23#timer-changes) — `Timer` / `Ticker` の GC とバッファなし化
+- [Go 1.23 Release Notes: Timer changes](https://go.dev/doc/go1.23#timer-changes) — `Timer` / `Ticker` の GC とバッファーなし化
 - [Go 1.25 Release Notes](https://go.dev/doc/go1.25) — `WaitGroup.Go`、`testing/synctest` の正式化
 - [Go 1.26 Release Notes](https://go.dev/doc/go1.26) — goroutine 状態別メトリクス、`goroutineleak` 実験版
 - [Go 1.27 Release Notes: Goroutine leak profile](https://go.dev/doc/go1.27) — `goroutineleak` プロファイルの正式化
 - [testing/synctest](https://pkg.go.dev/testing/synctest) — 仮想時計によるテスト
 - [runtime/metrics](https://pkg.go.dev/runtime/metrics) — ランタイム指標の一覧
 
-<strong>ライブラリ</strong>
+<strong>ライブラリー</strong>
 
 - [golang.org/x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync/errgroup)
 - [golang.org/x/sync/semaphore](https://pkg.go.dev/golang.org/x/sync/semaphore)
@@ -2794,7 +2794,7 @@ channel を使うべき瞬間は明確です。<strong>複数のイベント源�
 
 <strong>関連記事</strong>
 
-- [Go スケジューラの仕組み — G・M・P モデルを動く図で理解する](/ja/blog/go-scheduler-gmp) — この記事で触れなかったランタイム内部
+- [Go スケジューラーの仕組み — G・M・P モデルを動く図で理解する](/ja/blog/go-scheduler-gmp) — この記事で触れなかったランタイム内部
 
 <strong>検証環境</strong>
 

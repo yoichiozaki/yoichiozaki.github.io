@@ -386,7 +386,7 @@ export function DijkstraVisualizer({
     <InteractiveDemo
       title={
         locale === "ja"
-          ? "Dijkstra のアルゴリズム ビジュアライザ"
+          ? "Dijkstra のアルゴリズム ビジュアライザー"
           : "Dijkstra's Algorithm Visualizer"
       }
       description={

@@ -86,7 +86,7 @@ function buildScenario(): GCState[] {
       grayStack: ["root1", "root2"],
       phase: "mark",
       description:
-        "GC 開始: マークフェーズに入ります。GC ルート（グローバル変数、スタック上のポインタ）を灰色に塗り、灰色スタックに追加します。灰色 = 「自分は発見されたが、参照先はまだ未探索」を意味します。",
+        "GC 開始: マークフェーズに入ります。GC ルート（グローバル変数、スタック上のポインター）を灰色に塗り、灰色スタックに追加します。灰色 = 「自分は発見されたが、参照先はまだ未探索」を意味します。",
       descriptionEn:
         "GC starts: Entering the mark phase. GC roots (global variables, stack pointers) are colored gray and pushed onto the gray stack. Gray means 'discovered, but references not yet scanned'.",
       highlight: ["root1", "root2"],
@@ -155,7 +155,7 @@ function buildScenario(): GCState[] {
       grayStack: ["B", "E", "C"],
       phase: "mark",
       description:
-        "A をスキャン: A → C を灰色に。A は黒色に。灰色オブジェクトを一つずつ処理し、そのポインタフィールドをすべて走査するのがマークフェーズの基本動作です。",
+        "A をスキャン: A → C を灰色に。A は黒色に。灰色オブジェクトを一つずつ処理し、そのポインターフィールドをすべて走査するのがマークフェーズの基本動作です。",
       descriptionEn:
         "Scan A: C turns gray. A turns black. The mark phase processes gray objects one by one, scanning all their pointer fields.",
       highlight: ["A", "C"],
@@ -293,7 +293,7 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "sweep",
       description:
-        "スイープフェーズ開始: ヒープを走査し白色オブジェクトを解放します。G はどこからも参照されていなかったため解放（free）されます。メモリはフリーリストに戻されます。",
+        "スイープフェーズ開始: ヒープを走査し白色オブジェクトを解放します。G はどこからも参照されていなかったため解放（free）されます。メモリーはフリーリストに戻されます。",
       descriptionEn:
         "Sweep phase begins: Walk the heap and free white objects. G was unreachable, so it is freed. Its memory returns to the free list.",
       highlight: ["G"],
@@ -336,7 +336,7 @@ function buildScenario(): GCState[] {
       grayStack: [],
       phase: "done",
       description:
-        "GC サイクル完了: 生存オブジェクトの色を白にリセットし、次の GC サイクルに備えます。解放された G, H, I のメモリは新しいオブジェクトの割り当てに再利用されます。Go では実際には黒→白のリセットにビットフリップを使い、O(1) で行います。",
+        "GC サイクル完了: 生存オブジェクトの色を白にリセットし、次の GC サイクルに備えます。解放された G, H, I のメモリーは新しいオブジェクトの割り当てに再利用されます。Go では実際には黒→白のリセットにビットフリップを使い、O(1) で行います。",
       descriptionEn:
         "GC cycle complete: Surviving objects are reset to white, preparing for the next cycle. Freed memory from G, H, I can be reused. In Go, the black→white reset uses a bit flip for O(1) operation.",
     },

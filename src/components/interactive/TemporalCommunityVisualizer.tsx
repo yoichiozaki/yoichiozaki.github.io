@@ -68,7 +68,7 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 2, target: 3 },
       ],
       description:
-        "t=1: 初期状態。2 つのコミュニティ（青・赤）が存在。辺 C-D がコミュニティ間のブリッジ。",
+        "t=1: 初期状態。2 つのコミュニティー（青・赤）が存在。辺 C-D がコミュニティー間のブリッジ。",
       descriptionEn:
         "t=1: Initial state. Two communities (blue, red) exist. Edge C-D bridges them.",
       event: "none",
@@ -99,7 +99,7 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 2, target: 3 },
       ],
       description:
-        "t=2: 成長 — ノード G が青コミュニティに参加。A, C と接続。コミュニティが拡大。",
+        "t=2: 成長 — ノード G が青コミュニティーに参加。A, C と接続。コミュニティーが拡大。",
       descriptionEn:
         "t=2: Growth — Node G joins the blue community, connecting to A and C. Community expands.",
       event: "growth",
@@ -137,7 +137,7 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 4, target: 7 },
       ],
       description:
-        "t=3: 誕生 — 新しい緑コミュニティ {H,I,J} が出現。E-H のブリッジで赤コミュニティと接続。",
+        "t=3: 誕生 — 新しい緑コミュニティー {H,I,J} が出現。E-H のブリッジで赤コミュニティーと接続。",
       descriptionEn:
         "t=3: Birth — A new green community {H,I,J} emerges, connected to the red community via E-H bridge.",
       event: "birth",
@@ -173,7 +173,7 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 4, target: 7 },
       ],
       description:
-        "t=4: 分裂 — A-C, B-C の辺が消失し、青コミュニティが分裂。C はノード D との接続から黄コミュニティ（赤寄り）に。{A,B,G} が残存コミュニティとなる。",
+        "t=4: 分裂 — A-C, B-C の辺が消失し、青コミュニティーが分裂。C はノード D との接続から黄コミュニティー（赤寄り）に。{A,B,G} が残存コミュニティーとなる。",
       descriptionEn:
         "t=4: Split — Edges A-C and B-C disappear. Blue community splits. C migrates toward D, forming a yellow-ish community. {A,B,G} remains.",
       event: "split",
@@ -210,7 +210,7 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 4, target: 7 },
       ],
       description:
-        "t=5: 統合 — C と赤コミュニティの間に辺 C-E が出現。C は完全に赤コミュニティに吸収され、{C,D,E,F} の拡大コミュニティに。",
+        "t=5: 統合 — C と赤コミュニティーの間に辺 C-E が出現。C は完全に赤コミュニティーに吸収され、{C,D,E,F} の拡大コミュニティーに。",
       descriptionEn:
         "t=5: Merge — Edge C-E appears. C is fully absorbed into the red community, forming the expanded community {C,D,E,F}.",
       event: "merge",
@@ -243,7 +243,7 @@ function buildTemporalScenario(): TimeStep[] {
         { source: 5, target: 7 },
       ],
       description:
-        "t=6: 消滅 — ノード I, J が離脱し、H は赤コミュニティに吸収。緑コミュニティが消滅。ネットワークは 2 コミュニティ構造に回帰。動的ネットワークではこうしたライフサイクルイベントの追跡が課題となります。",
+        "t=6: 消滅 — ノード I, J が離脱し、H は赤コミュニティーに吸収。緑コミュニティーが消滅。ネットワークは 2 コミュニティー構造に回帰。動的ネットワークではこうしたライフサイクルイベントの追跡が課題となります。",
       descriptionEn:
         "t=6: Death — Nodes I, J leave; H is absorbed into the red community. The green community ceases to exist. The network returns to a 2-community structure. Tracking such lifecycle events is a key challenge in dynamic networks.",
       event: "death",
@@ -285,12 +285,12 @@ export function TemporalCommunityVisualizer({
     <InteractiveDemo
       title={
         isJa
-          ? "動的ネットワークにおけるコミュニティのライフサイクル"
+          ? "動的ネットワークにおけるコミュニティーのライフサイクル"
           : "Community Lifecycle in Dynamic Networks"
       }
       description={
         isJa
-          ? "時間とともにコミュニティが誕生・成長・分裂・統合・消滅する様子を追跡します。"
+          ? "時間とともにコミュニティーが誕生・成長・分裂・統合・消滅する様子を追跡します。"
           : "Track how communities are born, grow, split, merge, and die over time."
       }
     >

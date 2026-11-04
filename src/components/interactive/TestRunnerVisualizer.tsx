@@ -29,7 +29,7 @@ interface SuiteState {
 const steps: Step[] = [
   // Phase 1: Discovery
   {
-    phase: "テストディスカバリ",
+    phase: "テストディスカバリー",
     phaseEn: "Test Discovery",
     description: "glob パターンでテストファイルを探索中...",
     descriptionEn: "Scanning for test files using glob patterns...",
@@ -83,7 +83,7 @@ const steps: Step[] = [
       },
     ],
     output: [
-      "テストレジストリ構築:",
+      "テストレジストリー構築:",
       '  Module "test_math" → 2 tests',
       '  Module "test_string" → 2 tests',
       "  合計: 2 modules, 4 tests",
@@ -577,7 +577,7 @@ export function TestRunnerVisualizer({
           {/* Left: Test Suites */}
           <div className="rounded-lg border border-border bg-background p-4">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-              {isJa ? "テストレジストリ" : "Test Registry"}
+              {isJa ? "テストレジストリー" : "Test Registry"}
             </h4>
             {current.suites.length === 0 ? (
               <div className="text-sm text-muted-foreground italic">

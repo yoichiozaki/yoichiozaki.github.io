@@ -243,7 +243,7 @@ const steps: Step[] = [
     ],
     query: { text: "cat sat", tokens: ["cat", "sat"] },
     desc: {
-      ja: '検索クエリ "cat sat" をトークン化 → [cat, sat]',
+      ja: '検索クエリー "cat sat" をトークン化 → [cat, sat]',
       en: 'Tokenize search query "cat sat" → [cat, sat]',
     },
   },
@@ -349,7 +349,7 @@ export function InvertedIndexVisualizer({ locale = "ja" }: Props) {
       description={
         lang === "en"
           ? "Watch how an inverted index is built from documents, then used to answer a search query."
-          : "ドキュメントから転置インデックスを構築し、検索クエリに応答する過程を見てみましょう。"
+          : "ドキュメントから転置インデックスを構築し、検索クエリーに応答する過程を見てみましょう。"
       }
     >
       <div className="space-y-4">
@@ -458,7 +458,7 @@ export function InvertedIndexVisualizer({ locale = "ja" }: Props) {
             <div className="flex items-center gap-2">
               <span className="text-base">🔍</span>
               <span className="text-sm font-semibold text-purple-700 dark:text-purple-300">
-                {lang === "en" ? "Query" : "クエリ"}: &quot;{current.query.text}&quot;
+                {lang === "en" ? "Query" : "クエリー"}: &quot;{current.query.text}&quot;
               </span>
               {current.query.tokens && (
                 <span className="text-xs text-muted-foreground">

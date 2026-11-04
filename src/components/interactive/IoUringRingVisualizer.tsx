@@ -40,7 +40,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
     setSqTail(sqTail + 1);
     append(
       isJa
-        ? `ユーザ空間が tail++ で ${op}#${id} を slot ${slot} に投入 (syscall なし)`
+        ? `ユーザー空間が tail++ で ${op}#${id} を slot ${slot} に投入 (syscall なし)`
         : `Userspace tail++ placed ${op}#${id} in slot ${slot} (no syscall)`,
     );
   };
@@ -102,7 +102,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
     setCqHead(cqHead + 1);
     append(
       isJa
-        ? `ユーザ空間が CQE#${item.id} を読み取り head++ (syscall なし)`
+        ? `ユーザー空間が CQE#${item.id} を読み取り head++ (syscall なし)`
         : `Userspace read CQE#${item.id} and head++ (no syscall)`,
     );
   };
@@ -123,7 +123,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
       title={isJa ? "SQ/CQ リングを動かしてみる" : "Drive the SQ/CQ ring by hand"}
       description={
         isJa
-          ? "レストランの注文伝票に似ています。ウェイター (ユーザ空間) は伝票を『注文リング (SQ)』に並べるだけ。キッチン (カーネル) は伝票を取って調理し、『料理リング (CQ)』に完成品を並べる。ウェイターはキッチンを呼び鈴 (syscall) で起こす必要が原則ありません。"
+          ? "レストランの注文伝票に似ています。ウェイター (ユーザー空間) は伝票を『注文リング (SQ)』に並べるだけ。キッチン (カーネル) は伝票を取って調理し、『料理リング (CQ)』に完成品を並べる。ウェイターはキッチンを呼び鈴 (syscall) で起こす必要が原則ありません。"
           : "It's like a restaurant's order slips. The waiter (userspace) just pins slips on the 'order ring' (SQ). The kitchen (kernel) pulls slips, cooks, and pushes dishes onto the 'completion ring' (CQ). No bell (syscall) is strictly required."
       }
     >
@@ -200,7 +200,7 @@ export function IoUringRingVisualizer({ locale = "ja" }: Props) {
 
         <p className="text-xs text-muted-foreground">
           {isJa
-            ? "ポイント: ①③はユーザ空間のメモリ書込だけでカーネルに入りません。②は通常 syscall (io_uring_enter) ですが、SQPOLL 時はカーネル側スレッドが勝手に拾うので『呼び鈴』すら要りません。これが syscall ゼロ I/O の正体です。"
+            ? "ポイント: ①③はユーザー空間のメモリー書込だけでカーネルに入りません。②は通常 syscall (io_uring_enter) ですが、SQPOLL 時はカーネル側スレッドが勝手に拾うので『呼び鈴』すら要りません。これが syscall ゼロ I/O の正体です。"
             : "Note: ① and ③ are plain userspace memory writes — no kernel entry. ② is normally a syscall (io_uring_enter), but with SQPOLL the kernel thread picks slips on its own — not even a bell is needed. That's how 'zero-syscall I/O' works."}
         </p>
       </div>

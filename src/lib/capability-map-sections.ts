@@ -210,7 +210,7 @@ export const SECTIONS: Record<string, SectionDef> = {
     title: t("半導体プロセス —— 微細化より「シリコンを増やす」", "Process nodes — more silicon rather than smaller transistors"),
     points: {
       gains: t(
-        "3 年間の性能向上の多くは、微細化ではなく、ダイを増やし、電力を増やし、精度を下げ、メモリを積むことで得られた。",
+        "3 年間の性能向上の多くは、微細化ではなく、ダイを増やし、電力を増やし、精度を下げ、メモリーを積むことで得られた。",
         "Much of the past three years' performance gain came not from shrinking transistors but from adding dies, adding power, lowering precision and adding memory.",
       ),
       next: t(
@@ -220,7 +220,7 @@ export const SECTIONS: Record<string, SectionDef> = {
     },
   },
   "4.4": {
-    title: t("メモリ（HBM）—— 「メモリの壁」と争奪戦", "Memory (HBM) — the memory wall and the scramble for supply"),
+    title: t("メモリー（HBM）—— 「メモリーの壁」と争奪戦", "Memory (HBM) — the memory wall and the scramble for supply"),
     points: {
       soldOut: t(
         "HBM は、2023 年には「1 社しかまともに作れない部品」だったが、2026 年には「どのメーカーでも売り切れの部品」になった。",
@@ -286,7 +286,7 @@ export const SECTIONS: Record<string, SectionDef> = {
     title: t("3 年前の答え", "The answer three years ago"),
     points: {
       powerLaw: t(
-        "事前学習の計算量（とパラメータ数とデータ量）を増やせば、損失はべき乗則に従って下がり、能力も上がる。",
+        "事前学習の計算量（とパラメーター数とデータ量）を増やせば、損失はべき乗則に従って下がり、能力も上がる。",
         "Increase pretraining compute (along with parameters and data), and loss falls along a power law and capability rises.",
       ),
     },

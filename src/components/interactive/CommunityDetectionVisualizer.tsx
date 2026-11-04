@@ -123,7 +123,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity(init),
       description:
-        "Louvain アルゴリズム開始。Phase 1（局所移動）: 各ノードを独自のコミュニティに初期化します。10 ノード・14 辺のグラフで、3 つのクラスタ構造が潜んでいます。",
+        "Louvain アルゴリズム開始。Phase 1（局所移動）: 各ノードを独自のコミュニティーに初期化します。10 ノード・14 辺のグラフで、3 つのクラスター構造が潜んでいます。",
       descriptionEn:
         "Louvain algorithm begins. Phase 1 (local moving): Initialize each node in its own community. A 10-node, 14-edge graph with 3 hidden clusters.",
       phase: "init",
@@ -134,7 +134,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 2, 3, 4, 5, 6, 7, 8, 9]),
       description:
-        "ノード 1 を評価: 隣接ノード 0, 2, 3 のコミュニティへの移動による ΔQ を計算。ノード 0 のコミュニティに移動すると ΔQ が最大になるため移動。",
+        "ノード 1 を評価: 隣接ノード 0, 2, 3 のコミュニティーへの移動による ΔQ を計算。ノード 0 のコミュニティーに移動すると ΔQ が最大になるため移動。",
       descriptionEn:
         "Evaluate node 1: Compute ΔQ for moving to communities of neighbors 0, 2, 3. Moving to node 0's community yields the largest ΔQ gain.",
       phase: "move",
@@ -147,7 +147,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 3, 4, 5, 6, 7, 8, 9]),
       description:
-        "ノード 2 も同様に ΔQ を計算。ノード 0，1 と同じコミュニティに移動すると密結合クラスタの内部辺が増え、ΔQ > 0。",
+        "ノード 2 も同様に ΔQ を計算。ノード 0，1 と同じコミュニティーに移動すると密結合クラスターの内部辺が増え、ΔQ > 0。",
       descriptionEn:
         "Node 2 similarly joins community 0. The dense internal edges among nodes 0, 1, 2 yield ΔQ > 0.",
       phase: "move",
@@ -160,7 +160,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 0, 4, 5, 6, 7, 8, 9]),
       description:
-        "ノード 3 がコミュニティ 0 に合流。左側クラスタ {0,1,2,3} が 1 つのコミュニティを形成。",
+        "ノード 3 がコミュニティー 0 に合流。左側クラスター {0,1,2,3} が 1 つのコミュニティーを形成。",
       descriptionEn:
         "Node 3 joins community 0, forming the left cluster {0,1,2,3} as one community.",
       phase: "move",
@@ -173,7 +173,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 6, 7, 8, 9]),
       description:
-        "中央クラスタへ。ノード 5 はノード 4 のコミュニティに移動（ΔQ > 0）。辺 4-5 が内部辺に変わります。",
+        "中央クラスターへ。ノード 5 はノード 4 のコミュニティーに移動（ΔQ > 0）。辺 4-5 が内部辺に変わります。",
       descriptionEn:
         "Moving to the central cluster. Node 5 joins node 4's community (ΔQ > 0). Edge 4-5 becomes internal.",
       phase: "move",
@@ -186,7 +186,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 8, 9]),
       description:
-        "ノード 6 がコミュニティ 4 に合流。中央クラスタ {4,5,6} が完成。",
+        "ノード 6 がコミュニティー 4 に合流。中央クラスター {4,5,6} が完成。",
       descriptionEn:
         "Node 6 joins community 4. The central cluster {4,5,6} is now formed.",
       phase: "move",
@@ -199,7 +199,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 9]),
       description:
-        "右側クラスタへ。ノード 8 がノード 7 のコミュニティに移動。",
+        "右側クラスターへ。ノード 8 がノード 7 のコミュニティーに移動。",
       descriptionEn:
         "Moving to the right cluster. Node 8 joins node 7's community.",
       phase: "move",
@@ -212,7 +212,7 @@ function buildScenario(): LouvainStep[] {
       edges: baseEdges,
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 7]),
       description:
-        "ノード 9 がコミュニティ 7 に合流。辺 0-9 はコミュニティ間の橋（ブリッジ辺）として残ります。Phase 1 完了 — これ以上 ΔQ > 0 の移動はありません。",
+        "ノード 9 がコミュニティー 7 に合流。辺 0-9 はコミュニティー間の橋（ブリッジ辺）として残ります。Phase 1 完了 — これ以上 ΔQ > 0 の移動はありません。",
       descriptionEn:
         "Node 9 joins community 7. Edge 0–9 remains as an inter-community bridge. Phase 1 complete — no more moves with ΔQ > 0.",
       phase: "move",
@@ -233,7 +233,7 @@ function buildScenario(): LouvainStep[] {
       ],
       modularity: computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 7]),
       description:
-        "Phase 2（集約）: 各コミュニティを超ノードに縮約。内部辺は自己ループ（自己辺重み）となり、コミュニティ間辺は超辺になります。3 ノードの縮約グラフが得られました。",
+        "Phase 2（集約）: 各コミュニティーを超ノードに縮約。内部辺は自己ループ（自己辺重み）となり、コミュニティー間辺は超辺になります。3 ノードの縮約グラフが得られました。",
       descriptionEn:
         "Phase 2 (aggregation): Collapse each community into a super-node. Internal edges become self-loops; inter-community edges become super-edges. A 3-node coarsened graph is obtained.",
       phase: "aggregate",
@@ -254,7 +254,7 @@ function buildScenario(): LouvainStep[] {
       description:
         "再び Phase 1 を適用しても ΔQ > 0 の移動がないため収束。最終 Modularity Q ≈ " +
         computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 7]).toFixed(4) +
-        "。3 つのコミュニティ {0,1,2,3}, {4,5,6}, {7,8,9} が検出されました。",
+        "。3 つのコミュニティー {0,1,2,3}, {4,5,6}, {7,8,9} が検出されました。",
       descriptionEn:
         "Applying Phase 1 again yields no moves with ΔQ > 0 — convergence. Final Modularity Q ≈ " +
         computeModularity([0, 0, 0, 0, 4, 4, 4, 7, 7, 7]).toFixed(4) +

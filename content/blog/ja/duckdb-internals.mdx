@@ -5,7 +5,7 @@ description: "「分析版 SQLite」と呼ばれる DuckDB が、なぜプロセ
 tags: ["DuckDB", "Database", "OLAP", "Vectorized Execution", "Storage Engine", "C++"]
 ---
 
-`pip install duckdb` して 3 秒後には `SELECT` が動く。サーバも起動しない。設定ファイルもない。それでいて 1 億行の Parquet を数秒で集計する。DuckDB を初めて触ったときの「速すぎて逆に不安になる」感覚には、はっきりした技術的な理由があります。
+`pip install duckdb` して 3 秒後には `SELECT` が動く。サーバーも起動しない。設定ファイルもない。それでいて 1 億行の Parquet を数秒で集計する。DuckDB を初めて触ったときの「速すぎて逆に不安になる」感覚には、はっきりした技術的な理由があります。
 
 本記事では DuckDB を <strong>「使い方」ではなく「作り」から</strong> 読み解きます。ベクトル化実行エンジンのデータ表現、push ベースのパイプライン、exchange 演算子を持たない並列化、単一ファイルに閉じた列指向ストレージ、HyPer 系 MVCC、そして ART インデックス — それぞれについて、実際に [`duckdb/duckdb`](https://github.com/duckdb/duckdb) のどのファイルの何という構造体がその役割を担っているかまで踏み込みます。
 
@@ -18,7 +18,7 @@ tags: ["DuckDB", "Database", "OLAP", "Vectorized Execution", "Storage Engine", "
 > - <strong>モーセル駆動</strong>: 仕込みの単位（row group）を小分けにして、手の空いた料理人が次の分を自分で取りに行く。誰かに割り当てられるのを待たない。
 > - <strong>列指向 + 圧縮</strong>: 「食材を料理ごとに箱詰め」ではなく「食材の種類ごとに箱詰め」する。同じものが並ぶので、箱ごと圧縮できる。
 >
-> この 4 つが噛み合ったとき、シングルノードの分析クエリはあきれるほど速くなります。
+> この 4 つが噛み合ったとき、シングルノードの分析クエリーはあきれるほど速くなります。
 
 ## 1. DuckDB とは何か — 位置づけを一言で
 
@@ -26,22 +26,22 @@ DuckDB は Mark Raasveldt と Hannes Mühleisen が CWI (Centrum Wiskunde & Info
 
 | | トランザクション処理 (OLTP) | 分析処理 (OLAP) |
 | --- | --- | --- |
-| <strong>クライアント・サーバ</strong> | PostgreSQL, MySQL | Snowflake, ClickHouse, BigQuery |
+| <strong>クライアント・サーバー</strong> | PostgreSQL, MySQL | Snowflake, ClickHouse, BigQuery |
 | <strong>組み込み（プロセス内）</strong> | SQLite | <strong>DuckDB</strong> |
 
-「SQLite の OLAP 版」という説明はここから来ています。ただしこれは <strong>使われ方</strong> の類似であって、<strong>中身</strong> はまったく別物です。SQLite は行指向・B木・1 行ずつのバイトコード VM。DuckDB は列指向・ベクトル化・push ベース実行。共有しているのは「ライブラリとしてホストプロセスにリンクされる」という配置だけです。
+「SQLite の OLAP 版」という説明はここから来ています。ただしこれは <strong>使われ方</strong> の類似であって、<strong>中身</strong> はまったく別物です。SQLite は行指向・B木・1 行ずつのバイトコード VM。DuckDB は列指向・ベクトル化・push ベース実行。共有しているのは「ライブラリーとしてホストプロセスにリンクされる」という配置だけです。
 
 <DuckDBArchitecture />
 
-この配置がもたらす最大の帰結は <strong>ワイヤプロトコルもシリアライズも介在しない</strong> ことです。Python から 1 億行の結果を受け取るとき、PostgreSQL ならエンコードして TCP を通して再デコードする必要がある。DuckDB は同じプロセスのヒープ上で完結します。
+この配置がもたらす最大の帰結は <strong>ワイヤープロトコルもシリアライズも介在しない</strong> ことです。Python から 1 億行の結果を受け取るとき、PostgreSQL ならエンコードして TCP を通して再デコードする必要がある。DuckDB は同じプロセスのヒープ上で完結します。
 
-ただし「ゼロコピー」は方向によって意味が違います。<strong>入力方向</strong>は、数値列がメモリ上に連続配置されていれば文字どおりゼロコピーです。DuckDB は呼び出し側のバッファをそのまま指すだけで、1 バイトも詰め替えません（pandas と Arrow がそれぞれどの経路を通るかは 10.2 で見ます）。<strong>結果方向</strong>はそうはいきません。`fetchdf()` は列ごとに NumPy 配列を新しく確保して詰め替え、`to_arrow_table()` は自前のバッファに書き出します。エンジン内部の列は圧縮されたままのことがあり、レイアウトも Python 側が期待するものとは違うからです。消えているのは <strong>シリアライズとプロセス間通信</strong> であって、メモリコピーそのものではありません。
+ただし「ゼロコピー」は方向によって意味が違います。<strong>入力方向</strong>は、数値列がメモリー上に連続配置されていれば文字どおりゼロコピーです。DuckDB は呼び出し側のバッファーをそのまま指すだけで、1 バイトも詰め替えません（pandas と Arrow がそれぞれどの経路を通るかは 10.2 で見ます）。<strong>結果方向</strong>はそうはいきません。`fetchdf()` は列ごとに NumPy 配列を新しく確保して詰め替え、`to_arrow_table()` は自前のバッファーに書き出します。エンジン内部の列は圧縮されたままのことがあり、レイアウトも Python 側が期待するものとは違うからです。消えているのは <strong>シリアライズとプロセス間通信</strong> であって、メモリーコピーそのものではありません。
 
 ## 2. ベクトル化実行 — DuckDB のいちばん深い層
 
 ### 2.1 3 つの実行モデル
 
-クエリエンジンが 1 回の演算子呼び出しで何行処理するかには、大きく 3 つの流儀があります。
+クエリーエンジンが 1 回の演算子呼び出しで何行処理するかには、大きく 3 つの流儀があります。
 
 | モデル | 1 呼び出しの粒度 | 代表 | 弱点 |
 | --- | --- | --- | --- |
@@ -70,13 +70,13 @@ DuckDB のベクトルサイズは [`src/include/duckdb/common/vector_size.hpp`]
 #endif
 ```
 
-注目すべきは、これが <strong>実行時の設定ではなくコンパイル時定数</strong> であることです。マクロなので、テンプレート引数にも、固定長配列の宣言にも使える。`SelectionVector sel(STANDARD_VECTOR_SIZE);` のようなスタック上の固定長バッファが、エンジン中に散りばめられています。
+注目すべきは、これが <strong>実行時の設定ではなくコンパイル時定数</strong> であることです。マクロなので、テンプレート引数にも、固定長配列の宣言にも使える。`SelectionVector sel(STANDARD_VECTOR_SIZE);` のようなスタック上の固定長バッファーが、エンジン中に散りばめられています。
 
 2048 という数字の根拠は「中間結果を CPU キャッシュに閉じ込める」ことです。
 
 <VectorSizeTradeoff />
 
-8 バイト型なら 2048 × 8 = 16 KB。典型的な L1 データキャッシュが 32〜48 KB、L2 が数百 KB〜数 MB なので、演算子の入出力と作業用バッファを合わせても L2 に収まります。一方で 2048 行あれば、演算子呼び出し 1 回あたりのオーバーヘッド（仮想関数ディスパッチ、型スイッチ、状態の読み込み）は 1 行あたり 1/2048 に薄まる。
+8 バイト型なら 2048 × 8 = 16 KB。典型的な L1 データキャッシュが 32〜48 KB、L2 が数百 KB〜数 MB なので、演算子の入出力と作業用バッファーを合わせても L2 に収まります。一方で 2048 行あれば、演算子呼び出し 1 回あたりのオーバーヘッド（仮想関数ディスパッチ、型スイッチ、状態の読み込み）は 1 行あたり 1/2048 に薄まる。
 
 DuckDB は `STANDARD_VECTOR_SIZE=512` や `=2` といった値でもビルドできるようになっていて、テストスイートは小さいベクトルサイズでも走ります（コード中に `#if STANDARD_VECTOR_SIZE > 2` のような分岐が現れるのはこのため）。
 
@@ -96,7 +96,7 @@ public:
 
 `DataChunk` は本質的に `vector<Vector>` と行数（cardinality）だけを持つ薄い箱で、重要な仕事はすべて `Vector` の側にあります。
 
-そして `DataChunk::Slice()` を見ると、DuckDB の設計思想がよく分かります。フィルタが行を「削る」とき、値のコピーは起きません。合致した行の添字を並べた `SelectionVector` を作り、各 `Vector` にその選択を <strong>被せる</strong> だけです。
+そして `DataChunk::Slice()` を見ると、DuckDB の設計思想がよく分かります。フィルターが行を「削る」とき、値のコピーは起きません。合致した行の添字を並べた `SelectionVector` を作り、各 `Vector` にその選択を <strong>被せる</strong> だけです。
 
 ### 2.4 Vector は 1 つの姿を持たない
 
@@ -117,7 +117,7 @@ enum class VectorType : uint8_t {
 たとえば `SELECT * FROM t WHERE country = 'JP'` を考えます。
 
 - 定数 `'JP'` は <strong>CONSTANT_VECTOR</strong>。1 個の値しか実体化せず、比較演算子は「1 回計算して 2048 行に配る」最適化ができる。
-- `country` 列が辞書圧縮されていれば、スキャンは <strong>DICTIONARY_VECTOR</strong> をそのまま返す。国名の文字列は辞書エントリぶんしか存在しない。
+- `country` 列が辞書圧縮されていれば、スキャンは <strong>DICTIONARY_VECTOR</strong> をそのまま返す。国名の文字列は辞書エントリーぶんしか存在しない。
 - FSST 圧縮された文字列列は <strong>FSST_VECTOR</strong> のまま演算子に渡され、必要になるまで伸長されない。
 - `range(0, 1000000)` や rowid 列は <strong>SEQUENCE_VECTOR</strong>。start と increment の 2 つの整数だけ。
 
@@ -235,9 +235,9 @@ struct StringComparisonOperators {
 
 最初の 8 バイト（`length` 4 バイト + `prefix` 4 バイト）を <strong>1 つの `uint64_t` として一括比較</strong> する。長さが違うか、先頭 4 文字が違えば、ここで即座に false が返る。実際のワークロードでは不一致の圧倒的多数がこの 1 命令で決着します。
 
-さらに次の 8 バイトも同じように一括比較する。ここが一致すれば「両方ともインライン文字列で中身が同じ」か「同じポインタを指している」かのどちらかなので、<strong>12 バイト以下の文字列の等値判定はロード 4 回・比較 2 回で完結</strong> します。ポインタを追ってキャッシュミスを起こすのは、長さもプレフィックスも一致した長い文字列だけ。
+さらに次の 8 バイトも同じように一括比較する。ここが一致すれば「両方ともインライン文字列で中身が同じ」か「同じポインターを指している」かのどちらかなので、<strong>12 バイト以下の文字列の等値判定はロード 4 回・比較 2 回で完結</strong> します。ポインターを追ってキャッシュミスを起こすのは、長さもプレフィックスも一致した長い文字列だけ。
 
-比較演算 (`GreaterThan`) でも同じ仕掛けが使われますが、こちらは <strong>バイトオーダの入れ替え</strong> が入ります。
+比較演算 (`GreaterThan`) でも同じ仕掛けが使われますが、こちらは <strong>バイトオーダーの入れ替え</strong> が入ります。
 
 ```cpp
 uint32_t a_prefix = Load<uint32_t>(const_data_ptr_cast(left.GetPrefix()));
@@ -253,7 +253,7 @@ if (a_prefix != b_prefix) {
 
 `SelectionVector` は単なる `sel_t*`（`uint32_t*`）のラッパーです。しかし DuckDB の実行モデル全体がこれに乗っています。
 
-- <strong>フィルタ</strong>: 合致した行の添字を書く。
+- <strong>フィルター</strong>: 合致した行の添字を書く。
 - <strong>ハッシュ結合</strong>: マッチした probe 側の行と build 側の行を、2 本の選択ベクトルで表す。
 
 （ソートだけは例外で、選択ベクトルではなくソートキーそのものを並べ替えます — 6.6 で扱います。）
@@ -262,13 +262,13 @@ if (a_prefix != b_prefix) {
 
 ### 2.8 `Value` と `Vector` — 混同すると読めなくなる二つの表現
 
-ソースを読み始めるとすぐ `Value` という型に出会いますが、これは `Vector` の 1 要素版ではありません。<strong>`Vector` は実行エンジンの表現、`Value` はそれ以外全部の表現</strong> だと思ってください。定数畳み込み、統計の min/max、`SET` の設定値、カタログのデフォルト値、そして後述する実行時フィルタの境界値 — これらはすべて `Value` です。型タグと値を 1 個ずつ抱えた、素直だが太いオブジェクトです。
+ソースを読み始めるとすぐ `Value` という型に出会いますが、これは `Vector` の 1 要素版ではありません。<strong>`Vector` は実行エンジンの表現、`Value` はそれ以外全部の表現</strong> だと思ってください。定数畳み込み、統計の min/max、`SET` の設定値、カタログのデフォルト値、そして後述する実行時フィルターの境界値 — これらはすべて `Value` です。型タグと値を 1 個ずつ抱えた、素直だが太いオブジェクトです。
 
 境界を跨ぐ関数は決まっています。`Vector::GetValue(i)` は <strong>1 行を箱詰めして `Value` を作る</strong>。逆向きは `Vector::Reference(const Value &, count_t)` や `ConstantVector` 化。ホットループで `GetValue()` を呼んだら負けで、DuckDB のコードでそれが現れるのは「Finalize で 1 個だけ取り出す」ような場所に限られます。
 
-キャストも 2 系統あります。`Value` に対しては `value.DefaultTryCastAs(type)` が失敗しうる結果を返し、`Vector` に対しては `BoundCastExpression::AddCastToType()` が <strong>式ツリーにキャスト演算子を挿入</strong> して、実行時に `CastFunctionSet` から引いた関数がベクトル単位で走る。キャストが「失敗しうる第一級の演算」であることは、実行時フィルタの設計にも影響します — 結合フィルタの押し下げが整数キャストしか跨げないのも、`RuntimeFilterCastMode { DEFAULT_CAST, TRY_CAST }` で「そのキャストは失敗しうるか」を覚えているのも、このためです。
+キャストも 2 系統あります。`Value` に対しては `value.DefaultTryCastAs(type)` が失敗しうる結果を返し、`Vector` に対しては `BoundCastExpression::AddCastToType()` が <strong>式ツリーにキャスト演算子を挿入</strong> して、実行時に `CastFunctionSet` から引いた関数がベクトル単位で走る。キャストが「失敗しうる第一級の演算」であることは、実行時フィルターの設計にも影響します — 結合フィルターの押し下げが整数キャストしか跨げないのも、`RuntimeFilterCastMode { DEFAULT_CAST, TRY_CAST }` で「そのキャストは失敗しうるか」を覚えているのも、このためです。
 
-そして関数解決は `FunctionBinder` の仕事です。同名関数の候補集合に対して <strong>暗黙キャストのコストで最良の 1 つを選ぶ</strong>。extension が登録したスカラ関数も組み込み関数もこの同じ経路を通るので、後述の「extension がカタログに関数を登録する」は、そのままオーバーロード解決の候補に加わるという意味になります。
+そして関数解決は `FunctionBinder` の仕事です。同名関数の候補集合に対して <strong>暗黙キャストのコストで最良の 1 つを選ぶ</strong>。extension が登録したスカラー関数も組み込み関数もこの同じ経路を通るので、後述の「extension がカタログに関数を登録する」は、そのままオーバーロード解決の候補に加わるという意味になります。
 
 ## 3. push ベース実行モデル
 
@@ -286,13 +286,13 @@ DuckDB は逆向きです。データは <strong>下から上へ押し込まれ 
 | <strong>Operator</strong> | `Execute()` | 中間。chunk を受け取り chunk を返す。状態は持っても有界（下記）。 |
 | <strong>Sink</strong> | `Sink()` / `Combine()` / `Finalize()` | パイプラインの終点。全入力を溜め込む。 |
 
-「有界」というのは「無制限には溜め込まない」の意味です。フィルタや結合のように <strong>出力の行数が入力から変わる</strong> 演算子は `CachingPhysicalOperator` を継承します。該当するのは `PhysicalFilter`、`PhysicalJoin`、`PhysicalCrossProduct`、`PhysicalRecursiveCTEKeyJoin` の 4 つで、射影 `PhysicalProjection` は含まれません。これらは小さい出力 chunk を `cached_chunk` に貯め、2048 行に近づけてから下流へ流します（`CanCacheType()` が LIST / MAP / ARRAY / VARIANT を除外する）。その結果、source を読み切ったあとも演算子の中に行が残り得る。だからパイプラインには Source / Operator / Sink に加えて 4 つ目の呼び出し口 `FinalExecute()` があり、`PipelineExecutor::TryFlushCachingOperators()` が最後にそれを吸い出します。
+「有界」というのは「無制限には溜め込まない」の意味です。フィルターや結合のように <strong>出力の行数が入力から変わる</strong> 演算子は `CachingPhysicalOperator` を継承します。該当するのは `PhysicalFilter`、`PhysicalJoin`、`PhysicalCrossProduct`、`PhysicalRecursiveCTEKeyJoin` の 4 つで、射影 `PhysicalProjection` は含まれません。これらは小さい出力 chunk を `cached_chunk` に貯め、2048 行に近づけてから下流へ流します（`CanCacheType()` が LIST / MAP / ARRAY / VARIANT を除外する）。その結果、source を読み切ったあとも演算子の中に行が残り得る。だからパイプラインには Source / Operator / Sink に加えて 4 つ目の呼び出し口 `FinalExecute()` があり、`PipelineExecutor::TryFlushCachingOperators()` が最後にそれを吸い出します。
 
-同じ物理演算子が、パイプラインによって役割を変えるのが肝です。`PhysicalHashJoin` は build 側パイプラインでは <strong>Sink</strong>、probe 側では <strong>Operator</strong>、そして build 側の行を出力に流す結合型（`PropagatesBuildSide` が真になる RIGHT / FULL OUTER / RIGHT_SEMI / RIGHT_ANTI）のときと、メモリを溢れて外部結合になったときには <strong>Source</strong> です。コード上はこの 3 役が静的に分かれておらず、`IsSource()` は無条件に true を返したうえで、`GetDataInternal()` が `!sink.external && !PropagatesBuildSide(join_type)` なら即 `FINISHED` を返して何もしません。
+同じ物理演算子が、パイプラインによって役割を変えるのが肝です。`PhysicalHashJoin` は build 側パイプラインでは <strong>Sink</strong>、probe 側では <strong>Operator</strong>、そして build 側の行を出力に流す結合型（`PropagatesBuildSide` が真になる RIGHT / FULL OUTER / RIGHT_SEMI / RIGHT_ANTI）のときと、メモリーを溢れて外部結合になったときには <strong>Source</strong> です。コード上はこの 3 役が静的に分かれておらず、`IsSource()` は無条件に true を返したうえで、`GetDataInternal()` が `!sink.external && !PropagatesBuildSide(join_type)` なら即 `FINISHED` を返して何もしません。
 
-### 3.2 パイプラインとパイプラインブレーカ
+### 3.2 パイプラインとパイプラインブレーカー
 
-パイプラインの切れ目は <strong>パイプラインブレーカ</strong>、つまり「全入力を見終わるまで 1 行も出力できない演算子」の位置に入ります。ハッシュ結合の build 側、ハッシュ集約、ソート、ウィンドウ関数などがこれにあたります。
+パイプラインの切れ目は <strong>パイプラインブレーカー</strong>、つまり「全入力を見終わるまで 1 行も出力できない演算子」の位置に入ります。ハッシュ結合の build 側、ハッシュ集約、ソート、ウィンドウ関数などがこれにあたります。
 
 ```mermaid
 flowchart TB
@@ -359,9 +359,9 @@ stack<idx_t> in_process_operators;
 
 ### 3.4 BLOCKED — 実行を止めずに I/O を待つ
 
-`BLOCKED` は比較的新しく入った状態で、S3 上の Parquet を読むような <strong>ネットワーク I/O を伴うクエリ</strong> のために存在します。
+`BLOCKED` は比較的新しく入った状態で、S3 上の Parquet を読むような <strong>ネットワーク I/O を伴うクエリー</strong> のために存在します。
 
-pull モデルなら「ソケットで待つ」で済みますが、それではワーカースレッドが 1 本潰れます。DuckDB では source や sink が `BLOCKED` を返すと、`PipelineExecutor` は `INTERRUPTED` を上に伝え、`PipelineTask` は `TASK_BLOCKED` を返してスケジューラに <strong>スレッドを返上</strong> します。I/O が完了したら、`InterruptState` に握られていたタスクへのコールバックが発火して、タスクが再スケジュールされる。
+pull モデルなら「ソケットで待つ」で済みますが、それではワーカースレッドが 1 本潰れます。DuckDB では source や sink が `BLOCKED` を返すと、`PipelineExecutor` は `INTERRUPTED` を上に伝え、`PipelineTask` は `TASK_BLOCKED` を返してスケジューラーに <strong>スレッドを返上</strong> します。I/O が完了したら、`InterruptState` に握られていたタスクへのコールバックが発火して、タスクが再スケジュールされる。
 
 ```cpp
 // src/parallel/pipeline_executor.cpp — https://github.com/duckdb/duckdb/blob/main/src/parallel/pipeline_executor.cpp
@@ -372,7 +372,7 @@ if (result == OperatorResultType::BLOCKED) {
 }
 ```
 
-`remaining_sink_chunk` のようなフラグが `PipelineExecutor` に大量にあるのは、この <strong>再入可能性 (re-entrancy)</strong> を確保するためです。中断されたパイプラインが正確に同じ位置から再開できるよう、「どこまで進んだか」がすべて明示的なメンバ変数として保持されている。ステートマシンを手で書き下したコードなので読むのは骨が折れますが、コルーチンを使わずに非同期性を実現するための代償です。
+`remaining_sink_chunk` のようなフラグが `PipelineExecutor` に大量にあるのは、この <strong>再入可能性 (re-entrancy)</strong> を確保するためです。中断されたパイプラインが正確に同じ位置から再開できるよう、「どこまで進んだか」がすべて明示的なメンバー変数として保持されている。ステートマシンを手で書き下したコードなので読むのは骨が折れますが、コルーチンを使わずに非同期性を実現するための代償です。
 
 ## 4. モーセル駆動並列化 — exchange 演算子を捨てる
 
@@ -413,7 +413,7 @@ idx_t DataTable::MaxThreads(ClientContext &context) const {
 
 プランに exchange 演算子は 1 つも入りません。並列度は `Pipeline::GetMaxThreads()` が動的に決めます。
 
-モーセルを row group 単位にしているのは、実行エンジンとストレージの都合が一致するからです。row group は列ごとに独立した `ColumnSegment` と min/max 統計を持つ最小の単位なので、モーセルを row group に揃えれば、フィルタによるセグメント丸ごとの枝刈り（後述）がタスクの割り当て単位とそのまま一致します。加えて 122,880 行は 60 ベクトルぶん — 1 回のカーソル前進あたり 60 回ぶんの仕事が取れるので、グローバルカーソルのロックがボトルネックになりません。逆に言えば、行数が row group サイズを下回るテーブルでは `MaxThreads()` が 1 を返し、テーブルスキャンは実質シングルスレッドになります。
+モーセルを row group 単位にしているのは、実行エンジンとストレージの都合が一致するからです。row group は列ごとに独立した `ColumnSegment` と min/max 統計を持つ最小の単位なので、モーセルを row group に揃えれば、フィルターによるセグメント丸ごとの枝刈り（後述）がタスクの割り当て単位とそのまま一致します。加えて 122,880 行は 60 ベクトルぶん — 1 回のカーソル前進あたり 60 回ぶんの仕事が取れるので、グローバルカーソルのロックがボトルネックになりません。逆に言えば、行数が row group サイズを下回るテーブルでは `MaxThreads()` が 1 を返し、テーブルスキャンは実質シングルスレッドになります。
 
 下の可視化ではスレッド数を変えられます。注目してほしいのは、遅いスレッドが 1 本いても他がその分を食べていくところ — これが 4.1 の「データ偏りに弱い」を解いている部分です。
 
@@ -458,15 +458,15 @@ class PipelineTask : public ExecutorTask {
 };
 ```
 
-`TaskExecutionMode::PROCESS_PARTIAL` では、`PipelineExecutor::Execute(50)` が 50 chunk（= 最大 102,400 行）処理した時点で `PipelineExecuteResult::NOT_FINISHED` を返し、`PipelineTask::ExecuteTask()` がそれを `TaskExecutionResult::TASK_NOT_FINISHED` に変換してスケジューラに制御を返します。これにより、キャンセルへの応答性と、他のクエリとの公平性が保たれます。
+`TaskExecutionMode::PROCESS_PARTIAL` では、`PipelineExecutor::Execute(50)` が 50 chunk（= 最大 102,400 行）処理した時点で `PipelineExecuteResult::NOT_FINISHED` を返し、`PipelineTask::ExecuteTask()` がそれを `TaskExecutionResult::TASK_NOT_FINISHED` に変換してスケジューラーに制御を返します。これにより、キャンセルへの応答性と、他のクエリーとの公平性が保たれます。
 
 ## 5. ストレージ — 単一ファイルに閉じた列指向
 
-ここまでは実行時のメモリ上の話でした。ここからは、同じデータがディスク上でどう並んでいるかを見ます。実行エンジンで決めた 2048 という数字が、そのままストレージの粒度を決めていることが分かります。
+ここまでは実行時のメモリー上の話でした。ここからは、同じデータがディスク上でどう並んでいるかを見ます。実行エンジンで決めた 2048 という数字が、そのままストレージの粒度を決めていることが分かります。
 
 ### 5.1 ファイルレイアウト
 
-DuckDB のデータベースは <strong>1 個のファイル</strong>です。先頭には固定サイズのヘッダ群が並びます。
+DuckDB のデータベースは <strong>1 個のファイル</strong>です。先頭には固定サイズのヘッダー群が並びます。
 
 ```text
 +---------------------------+  offset 0
@@ -503,7 +503,7 @@ struct DatabaseHeader {
 };
 ```
 
-チェックポイントは <strong>使っていない方のヘッダに新しい状態を書き、iteration を +1 する</strong> だけ。ヘッダ 1 つは 4096 バイト（`Storage::FILE_HEADER_SIZE`。ページサイズに揃えてある。値が同じ `Storage::SECTOR_SIZE` は Direct I/O 用の別定数）で、ソースのコメントも「ディスクが <strong>ほぼ</strong>アトミックに書ける大きさ」（*written more or less atomically by the hard disk*）と控えめに表現しています。実際に安全性を担保しているのは、それに加えた <strong>書き込み順序</strong> のほうです。
+チェックポイントは <strong>使っていない方のヘッダーに新しい状態を書き、iteration を +1 する</strong> だけ。ヘッダー 1 つは 4096 バイト（`Storage::FILE_HEADER_SIZE`。ページサイズに揃えてある。値が同じ `Storage::SECTOR_SIZE` は Direct I/O 用の別定数）で、ソースのコメントも「ディスクが <strong>ほぼ</strong>アトミックに書ける大きさ」（*written more or less atomically by the hard disk*）と控えめに表現しています。実際に安全性を担保しているのは、それに加えた <strong>書き込み順序</strong> のほうです。
 
 ```cpp
 // src/storage/single_file_block_manager.cpp — https://github.com/duckdb/duckdb/blob/main/src/storage/single_file_block_manager.cpp
@@ -518,9 +518,9 @@ active_header = 1 - active_header;
 handle->Sync();
 ```
 
-「先にデータブロックを fsync → 使っていない方のヘッダスロットに書く → もう一度 fsync → `active_header` を反転」。だから書き込み途中でプロセスが死んでも、古い方の有効なヘッダが無傷で残る — <strong>シャドウページングによるアトミックなチェックポイント</strong>です。さらに各ヘッダには 8 バイトのチェックサムが付いていて、書き込みが途中で切れた場合は起動時の `CheckChecksum()` が `DataCorruptionException` で検知します。
+「先にデータブロックを fsync → 使っていない方のヘッダースロットに書く → もう一度 fsync → `active_header` を反転」。だから書き込み途中でプロセスが死んでも、古い方の有効なヘッダーが無傷で残る — <strong>シャドウページングによるアトミックなチェックポイント</strong>です。さらに各ヘッダーには 8 バイトのチェックサムが付いていて、書き込みが途中で切れた場合は起動時の `CheckChecksum()` が `DataCorruptionException` で検知します。
 
-`vector_size` と `block_alloc_size` がヘッダに書かれているのも面白い点で、異なる `STANDARD_VECTOR_SIZE` でビルドされたバイナリが誤ってファイルを開くのを防いでいます。
+`vector_size` と `block_alloc_size` がヘッダーに書かれているのも面白い点で、異なる `STANDARD_VECTOR_SIZE` でビルドされたバイナリーが誤ってファイルを開くのを防いでいます。
 
 ### 5.2 RowGroup と ColumnSegment
 
@@ -602,20 +602,20 @@ public:
 
 `RG_SAMPLES = 8`、`SAMPLES_PER_VECTOR = 32` という定数から分かるとおり、ALP は row group 全体を舐めるのではなく <strong>等間隔に 8 ベクトルを選び、そこから 32 値ずつサンプリング</strong> します。ただしこの 8 × 32 = 256 値が使われるのは指数・係数の候補を絞り込む `FindTopKCombinations` だけで、最終的なサイズ推定はそのあと <strong>8 本の完全なサンプルベクトル（最大 1024 値ずつ）を実際に圧縮して</strong> 求めます。row group をサンプリングし、次にベクトルをサンプリングする二段構えで、解析コストと代表性を両立させる設計です。
 
-### 5.5 バッファマネージャ
+### 5.5 バッファーマネージャー
 
-DuckDB は <strong>メモリより大きいデータを扱えます</strong>。これを支えているのが `BufferManager` です。
+DuckDB は <strong>メモリーより大きいデータを扱えます</strong>。これを支えているのが `BufferManager` です。
 
-- ブロックは `BlockHandle` として管理され、`Pin()` すると物理メモリに載り、`Unpin()` すると退避候補になる。
-- メモリ上限（既定はシステムの<strong>利用可能</strong>メモリの 80%。cgroup も考慮される）を超えると退避が走る。退避対象の選び方は厳密な LRU ではなく、<strong>Unpin されたブロックを並行キューに追加していく FIFO</strong> です。ブロックが再び Pin → Unpin されると新しいエントリが末尾に積まれ、古いエントリはシーケンス番号の不一致で「死んだノード」として読み飛ばされる — これがロックを取らない LRU 近似の正体です（`EvictionQueue::Purge()` のコメントも *we want to keep the LRU characteristic alive* と言っています）。
+- ブロックは `BlockHandle` として管理され、`Pin()` すると物理メモリーに載り、`Unpin()` すると退避候補になる。
+- メモリー上限（既定はシステムの<strong>利用可能</strong>メモリーの 80%。cgroup も考慮される）を超えると退避が走る。退避対象の選び方は厳密な LRU ではなく、<strong>Unpin されたブロックを並行キューに追加していく FIFO</strong> です。ブロックが再び Pin → Unpin されると新しいエントリーが末尾に積まれ、古いエントリーはシーケンス番号の不一致で「死んだノード」として読み飛ばされる — これがロックを取らない LRU 近似の正体です（`EvictionQueue::Purge()` のコメントも *we want to keep the LRU characteristic alive* と言っています）。
 - キューは 1 本ではなく <strong>退避コストの順に 3 段</strong>あり、`BLOCK` / `EXTERNAL_FILE`（捨てるだけで済むので最初）、`MANAGED_BUFFER`（書き出しが要るので次）、`TINY_BUFFER`（最後の手段）の順に探されます。
-- 永続ブロックは <strong>データベースファイルへ書き戻す（あるいは既に書かれているので捨てる）</strong>。一時ブロック（ハッシュテーブル、ソートバッファ）は <strong>`temp_directory` へ書き出す</strong>。
+- 永続ブロックは <strong>データベースファイルへ書き戻す（あるいは既に書かれているので捨てる）</strong>。一時ブロック（ハッシュテーブル、ソートバッファー）は <strong>`temp_directory` へ書き出す</strong>。
 
-`MemoryTag`（`BASE_TABLE`、`HASH_TABLE`、`ORDER_BY`、`TRANSACTION` など）でメモリ使用が分類されており、`duckdb_memory()` テーブル関数で内訳を覗けます。
+`MemoryTag`（`BASE_TABLE`、`HASH_TABLE`、`ORDER_BY`、`TRANSACTION` など）でメモリー使用が分類されており、`duckdb_memory()` テーブル関数で内訳を覗けます。
 
 ## 6. 重い演算子 — 集約・結合・ソート・ウィンドウ
 
-ここからはパイプラインブレーカ — ハッシュ集約、ハッシュ結合、ソート、ウィンドウ関数 — を見ていきます。いずれも「入力を全部受け取ってからでないと 1 行も出せない」以上、<strong>メモリを超えたときにどうするか</strong> を自分で解かなければなりません。エンジンのなかでとくに込み入った部分です。4 つの演算子の合間に、そのために共有されている部品 — メモリの配分役と、ハッシュテーブルのエントリ表現 — も挟みます。
+ここからはパイプラインブレーカー — ハッシュ集約、ハッシュ結合、ソート、ウィンドウ関数 — を見ていきます。いずれも「入力を全部受け取ってからでないと 1 行も出せない」以上、<strong>メモリーを超えたときにどうするか</strong> を自分で解かなければなりません。エンジンのなかでとくに込み入った部分です。4 つの演算子の合間に、そのために共有されている部品 — メモリーの配分役と、ハッシュテーブルのエントリー表現 — も挟みます。
 
 ### 6.1 基数分割ハッシュ集約
 
@@ -632,7 +632,7 @@ static inline constexpr idx_t Shift(idx_t radix_bits) {
 }
 ```
 
-つまりパーティション番号に使われるのは <strong>上位 16 ビットのすぐ下にある `radix_bits` ビット</strong>。上位 16 ビットを空けてあるのは、そこがハッシュテーブルのソルト（後述 6.2）として使われるからです。もし両者が同じビットを使っていたら、1 パーティション内の全エントリがまったく同じソルトを持つことになり、ソルトによる事前フィルタが完全に無意味になります。
+つまりパーティション番号に使われるのは <strong>上位 16 ビットのすぐ下にある `radix_bits` ビット</strong>。上位 16 ビットを空けてあるのは、そこがハッシュテーブルのソルト（後述 6.2）として使われるからです。もし両者が同じビットを使っていたら、1 パーティション内の全エントリーがまったく同じソルトを持つことになり、ソルトによる事前フィルターが完全に無意味になります。
 
 ただし `MAX_RADIX_BITS = 12`（4096 パーティション）は基数分割の枠組み全体の上限で、ハッシュ集約が実際に使うのはずっと少ない。集約側の上限は `RadixHTConfig::MAXIMUM_FINAL_SINK_RADIX_BITS = 8`（256 パーティション）で、行が太いとさらに削られます（`ROW_WIDTH_THRESHOLD_ONE = 32` バイト<strong>以上</strong>で 1 ビット、`ROW_WIDTH_THRESHOLD_TWO = 64` バイト<strong>以上</strong>で 2 ビット）。コメントにあるとおり「キャッシュミスが手に負えなくなる」からです。
 
@@ -641,9 +641,9 @@ static inline constexpr idx_t Shift(idx_t radix_bits) {
 この分割には 2 つの意味があります。
 
 1. <strong>並列化</strong>: 同じグループキーは必ず同じパーティションに落ちるので、パーティション同士は完全に独立。Finalize でパーティション間の同期が要らない。
-2. <strong>溢れ出しの単位</strong>: メモリが逼迫したら「1 度に 1 パーティションだけメモリに載せ、残りはディスク」で処理できる。
+2. <strong>溢れ出しの単位</strong>: メモリーが逼迫したら「1 度に 1 パーティションだけメモリーに載せ、残りはディスク」で処理できる。
 
-メモリ圧の検知は `MaybeRepartition()` が担っています。
+メモリー圧の検知は `MaybeRepartition()` が担っています。
 
 ```cpp
 // src/execution/radix_partitioned_hashtable.cpp
@@ -655,22 +655,22 @@ if (total_size > gstate.GetThreadLimit()) {
 }
 ```
 
-スレッドあたりのメモリ上限を超えると、`SetRadixBitsToExternal()` が呼ばれて外部モードに入り、パーティション数を増やして（`Repartition()`）1 パーティションあたりのサイズを下げます。パーティションが小さくなれば、それぞれは確実にメモリに収まる。
+スレッドあたりのメモリー上限を超えると、`SetRadixBitsToExternal()` が呼ばれて外部モードに入り、パーティション数を増やして（`Repartition()`）1 パーティションあたりのサイズを下げます。パーティションが小さくなれば、それぞれは確実にメモリーに収まる。
 
-さらに新しい DuckDB は <strong>集約状態そのものの溢れ出し</strong>（`AggregateStateSpilling`）も持ちます。`string_agg` や `list` のように状態が巨大になる集約では、行データを溢れさせてもアリーナアロケータが残ってしまう。そこで状態を `ColumnDataCollection` に「エクスポート」してアリーナを解放し、Finalize 時に「インポート」して戻すという操作が入ります。
+さらに新しい DuckDB は <strong>集約状態そのものの溢れ出し</strong>（`AggregateStateSpilling`）も持ちます。`string_agg` や `list` のように状態が巨大になる集約では、行データを溢れさせてもアリーナアロケーターが残ってしまう。そこで状態を `ColumnDataCollection` に「エクスポート」してアリーナを解放し、Finalize 時に「インポート」して戻すという操作が入ります。
 
 基数分割と溢れ出しに加えて、いまの DuckDB のハッシュ集約はもう一段 <strong>適応的</strong>です。各スレッドは意図的に小さなハッシュテーブルで始め、HyperLogLog で「実際の異なりキー数」を数えながら、1,048,576 行（`RadixHTLocalSinkState::ADAPTIVITY_THRESHOLD`）を処理した時点で `DecideAdaptation()` を呼びます。
 
 - 推定ユニーク率が 95%（`SKIP_LOOKUP_UNIQUE_PERCENTAGE_THRESHOLD`）を超える — つまり「ほとんど集約されない」なら、<strong>ハッシュテーブルの探索をやめて追記だけにし</strong>、重複排除を GetData フェーズに丸ごと先送りする（`ht.SkipLookups()`）。
 - 逆に「HT がもっと大きければ倍以上重複を潰せた」と分かれば、容量を上げて張り直す。
 
-どちらの判断も <strong>データを見てから</strong> 行われる。カーディナリティ推定（後述 8.3）が外れても、実行エンジン側が自力で立て直せるようになっているわけです。なお上の `GetThreadLimit()` も固定値ではなく、`TemporaryMemoryManager`（後述 6.4）が割り当てた予約量に連動して動きます。
+どちらの判断も <strong>データを見てから</strong> 行われる。カーディナリティー推定（後述 8.3）が外れても、実行エンジン側が自力で立て直せるようになっているわけです。なお上の `GetThreadLimit()` も固定値ではなく、`TemporaryMemoryManager`（後述 6.4）が割り当てた予約量に連動して動きます。
 
 （ただしこの適応が働くのは 3 スレッド以上のときだけです。`GROW_STRATEGY_THREAD_THRESHOLD = 2` 以下なら DuckDB は「育てる」戦略を採り、`SinkCapacity()` は適応モードの 32,768 ではなく 262,144 で始めて、`DecideAdaptation()` は一度も呼ばれません。）
 
-### 6.2 ht_entry_t — ポインタの空きビットを使い切る
+### 6.2 ht_entry_t — ポインターの空きビットを使い切る
 
-ハッシュテーブルのエントリは 64 ビット 1 つです。
+ハッシュテーブルのエントリーは 64 ビット 1 つです。
 
 ```cpp
 // duckdb/execution/ht_entry.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/ht_entry.hpp
@@ -685,9 +685,9 @@ private:
 };
 ```
 
-x86-64 のユーザ空間ポインタは実質 48 ビットしか使わないので、<strong>上位 16 ビットが空いている</strong>。DuckDB はそこにハッシュの一部（<strong>ソルト</strong>）を詰め込みます。
+x86-64 のユーザー空間ポインターは実質 48 ビットしか使わないので、<strong>上位 16 ビットが空いている</strong>。DuckDB はそこにハッシュの一部（<strong>ソルト</strong>）を詰め込みます。
 
-線形探索でスロットを見るとき、まずソルトを比較する。違えば <strong>ポインタを辿らずに次のスロットへ</strong> 進める。ハッシュテーブルの探索でいちばん高くつくのは「ポインタを追った先でキャッシュミス」なので、16 ビットの事前フィルタで偽陽性を 1/65536 に落とせるのは大きい。
+線形探索でスロットを見るとき、まずソルトを比較する。違えば <strong>ポインターを辿らずに次のスロットへ</strong> 進める。ハッシュテーブルの探索でいちばん高くつくのは「ポインターを追った先でキャッシュミス」なので、16 ビットの事前フィルターで偽陽性を 1/65536 に落とせるのは大きい。
 
 （Android では仮想アドレス空間の都合でこの最適化が無効化されており、`DUCKDB_DISABLE_POINTER_SALT` でソルトなしに切り替わります。ソースのコメントに残っている愚痴が実に人間くさい。）
 
@@ -700,9 +700,9 @@ x86-64 のユーザ空間ポインタは実質 48 ビットしか使わないの
 static constexpr const idx_t USE_SALT_THRESHOLD = 8192;
 ```
 
-テーブルが L2 に収まる程度なら、そもそもポインタを追ってもキャッシュミスしない。事前フィルタのコストのほうが高くつくので、`JoinHashTable::UseSalt()` が偽を返してソルト比較を丸ごと省きます。<strong>最適化そのものにも損益分岐点がある</strong> ことを、コードが素直に認めている例です。
+テーブルが L2 に収まる程度なら、そもそもポインターを追ってもキャッシュミスしない。事前フィルターのコストのほうが高くつくので、`JoinHashTable::UseSalt()` が偽を返してソルト比較を丸ごと省きます。<strong>最適化そのものにも損益分岐点がある</strong> ことを、コードが素直に認めている例です。
 
-同じヘッダには、モジュロ演算を分岐なしで書くヘルパもあります。
+同じヘッダーには、モジュロ演算を分岐なしで書くヘルパーもあります。
 
 ```cpp
 // uses an AND operation to apply the modulo operation instead of an if condition that could be branch mispredicted
@@ -715,7 +715,7 @@ inline void IncrementAndWrap(idx_t &offset, const uint64_t &capacity_mask) {
 
 ### 6.3 外部ハッシュ結合と ProbeSpill
 
-ハッシュ結合の build 側がメモリに収まらない場合、DuckDB は build 側を基数分割し、<strong>「今メモリに載っているパーティション」に当たらない probe 行を退避します</strong>。
+ハッシュ結合の build 側がメモリーに収まらない場合、DuckDB は build 側を基数分割し、<strong>「今メモリーに載っているパーティション」に当たらない probe 行を退避します</strong>。
 
 ```cpp
 // duckdb/execution/join_hashtable.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/join_hashtable.hpp
@@ -738,7 +738,7 @@ const auto true_count =
 
 コメントにあるとおり、「あと 1 ラウンドで片付く」なら退避データを分割せずそのまま持ちます。無駄な分割コストを避けるための場合分けです。
 
-なお、ロードファクタの定義がやや独特です。
+なお、ロードファクターの定義がやや独特です。
 
 ```cpp
 //! For a LOAD_FACTOR of 2.0, the HT is between 25% and 50% full
@@ -749,9 +749,9 @@ static constexpr double DEFAULT_LOAD_FACTOR = 2.0;
 
 ### 6.4 TemporaryMemoryManager
 
-複数の演算子が同時にメモリを取り合うと、単純な「演算子ごとの上限」では非効率になります。ハッシュ結合とソートが同時に走っているとき、片方が暇なら他方が全部使いたい。
+複数の演算子が同時にメモリーを取り合うと、単純な「演算子ごとの上限」では非効率になります。ハッシュ結合とソートが同時に走っているとき、片方が暇なら他方が全部使いたい。
 
-`TemporaryMemoryManager` はこれを調停するグローバルな仲介役で、各演算子は `TemporaryMemoryState` を登録して「最低これだけ要る (`SetMinimumReservation`)」「あとこれくらい欲しい (`SetRemainingSizeAndUpdateReservation`)」を申告します。マネージャは全体の要求を見て予約量を割り振り、演算子は割り当てられた予約に応じて外部モードに落ちるかどうかを決めます。
+`TemporaryMemoryManager` はこれを調停するグローバルな仲介役で、各演算子は `TemporaryMemoryState` を登録して「最低これだけ要る (`SetMinimumReservation`)」「あとこれくらい欲しい (`SetRemainingSizeAndUpdateReservation`)」を申告します。マネージャーは全体の要求を見て予約量を割り振り、演算子は割り当てられた予約に応じて外部モードに落ちるかどうかを決めます。
 
 ### 6.5 外部ハッシュ結合のステートマシン
 
@@ -762,14 +762,14 @@ static constexpr double DEFAULT_LOAD_FACTOR = 2.0;
 enum class HashJoinSourceStage : uint8_t { INIT, BUILD, PROBE, SCAN_HT, DONE };
 ```
 
-外部結合では、このステージを <strong>メモリに載るパーティション群を入れ替えながら何周も回します</strong>。
+外部結合では、このステージを <strong>メモリーに載るパーティション群を入れ替えながら何周も回します</strong>。
 
-1. <strong>BUILD</strong> — 今回メモリに載せるパーティション群についてポインタテーブルを構築する（`ExternalBuild`）。
+1. <strong>BUILD</strong> — 今回メモリーに載せるパーティション群についてポインターテーブルを構築する（`ExternalBuild`）。
 2. <strong>PROBE</strong> — 退避しておいた probe 行を `probe_spill` から chunk 単位で取り出して探索する（`ExternalProbe`）。
 3. <strong>SCAN_HT</strong> — `PropagatesBuildSide` が真なら（RIGHT / FULL OUTER / RIGHT_SEMI / RIGHT_ANTI）build 側の残りを吐く（`ExternalScanHT` → `ScanFullOuter`）。
 4. `PrepareBuild()` に戻り、次のパーティションが載るなら BUILD へ、載らなければ DONE。
 
-一点だけ補足すると、Source が最初に入るのは BUILD ではなく PROBE です。1 周目のポインタテーブルは Sink 側の `Finalize()` が `PrepareExternalFinalize()` → `ScheduleFinalize()` で既に作っているので、`Initialize()` は `global_stage` をいきなり `PROBE` にします。BUILD が回るのは 2 周目以降です。
+一点だけ補足すると、Source が最初に入るのは BUILD ではなく PROBE です。1 周目のポインターテーブルは Sink 側の `Finalize()` が `PrepareExternalFinalize()` → `ScheduleFinalize()` で既に作っているので、`Initialize()` は `global_stage` をいきなり `PROBE` にします。BUILD が回るのは 2 周目以降です。
 
 面白いのは <strong>ステージの切り替わり待ちに、前に見た `BLOCKED` がそのまま使われている</strong> ことです。
 
@@ -782,13 +782,13 @@ if (gstate.TryPrepareNextStage(sink) || gstate.global_stage == HashJoinSourceSta
 }
 ```
 
-つまり「他のスレッドが今のステージを終えるのを待つ」という同期が、S3 の I/O 待ちとまったく同じ仕組み（タスクを手放してスケジューラに返す）で書かれている。`BLOCKED` は非同期 I/O 専用の機構ではなく、<strong>パイプライン内の任意の待ちを表現する汎用の手段</strong> なのだ、という点がここでよく分かります。
+つまり「他のスレッドが今のステージを終えるのを待つ」という同期が、S3 の I/O 待ちとまったく同じ仕組み（タスクを手放してスケジューラーに返す）で書かれている。`BLOCKED` は非同期 I/O 専用の機構ではなく、<strong>パイプライン内の任意の待ちを表現する汎用の手段</strong> なのだ、という点がここでよく分かります。
 
 ### 6.6 ソート — キーを二値化してから基数ソートする
 
-`ORDER BY` は DuckDB のなかでも近年まるごと書き直された部分で、実装は [`src/common/sort/`](https://github.com/duckdb/duckdb/tree/main/src/common/sort)（ヘッダは `src/include/duckdb/common/sorting/` — ディレクトリ名が揃っていないので注意）にあります。
+`ORDER BY` は DuckDB のなかでも近年まるごと書き直された部分で、実装は [`src/common/sort/`](https://github.com/duckdb/duckdb/tree/main/src/common/sort)（ヘッダーは `src/include/duckdb/common/sorting/` — ディレクトリー名が揃っていないので注意）にあります。
 
-出発点は <strong>比較関数を捨てる</strong> ことです。`Sort` は `create_sort_key` というスカラ関数の式を持っていて、sink のたびにこれを実行し、ORDER BY の全列を <strong>1 本の二値比較可能なバイト列</strong> に畳みます。以降、比較そのものは列の型も ASC/DESC も NULLS FIRST/LAST も一切見ません。`memcmp` 相当の比較だけで正しい順序になるからです。（型とソート指定が再び要るのはキーを値に戻すときだけで、`Sort::Sort` は `create_sort_key` と対になる `decode_sort_key` 式を同時に束縛しています。）
+出発点は <strong>比較関数を捨てる</strong> ことです。`Sort` は `create_sort_key` というスカラー関数の式を持っていて、sink のたびにこれを実行し、ORDER BY の全列を <strong>1 本の二値比較可能なバイト列</strong> に畳みます。以降、比較そのものは列の型も ASC/DESC も NULLS FIRST/LAST も一切見ません。`memcmp` 相当の比較だけで正しい順序になるからです。（型とソート指定が再び要るのはキーを値に戻すときだけで、`Sort::Sort` は `create_sort_key` と対になる `decode_sort_key` 式を同時に束縛しています。）
 
 そのバイト列の物理表現が `SortKeyType` です。
 
@@ -810,7 +810,7 @@ enum class SortKeyType : uint8_t {
 };
 ```
 
-`sizeof(SortKey<NO_PAYLOAD_FIXED_8>) == 8` のように、どれも `static_assert` で幅が固定されています。<strong>PAYLOAD 系はキー構造体の中に払い出し行へのポインタを持つ</strong>（`SetPayload` / `GetPayload`）ので、ソート中に動くのは 8〜32 バイトの構造体だけ。行データは 1 バイトも動きません（外部ソートに落ちたときだけ `SortedRun::Finalize(external)` が物理的に並べ替えます — *"Sorts the data (physically reorder data if external)"*）。
+`sizeof(SortKey<NO_PAYLOAD_FIXED_8>) == 8` のように、どれも `static_assert` で幅が固定されています。<strong>PAYLOAD 系はキー構造体の中に払い出し行へのポインターを持つ</strong>（`SetPayload` / `GetPayload`）ので、ソート中に動くのは 8〜32 バイトの構造体だけ。行データは 1 バイトも動きません（外部ソートに落ちたときだけ `SortedRun::Finalize(external)` が物理的に並べ替えます — *"Sorts the data (physically reorder data if external)"*）。
 
 面白いのは、キーが <strong>実際にはバイト比較可能な順に並んでいない</strong> ことです。
 
@@ -848,9 +848,9 @@ static const auto fallback = [](SORT_KEY *begin, SORT_KEY *end) {
 
 ここでも実際に呼ばれるのは `duckdb_vergesort::vergesort(..., std::less<SORT_KEY>(), fallback)` で、`pdqsort_branchless` はフォールバック側です — run ソートとまったく同じ形。コメントのとおり「現代のソートは既にソート済みの部分列を検出してマージする」ので、自前の K-way マージを書くより速いという判断です。
 
-メモリを超えたときは `BlockIteratorStateType` が `IN_MEMORY` から `EXTERNAL` に切り替わり、同じテンプレートコードがバッファマネージャ経由でキーを読むようになります。
+メモリーを超えたときは `BlockIteratorStateType` が `IN_MEMORY` から `EXTERNAL` に切り替わり、同じテンプレートコードがバッファーマネージャー経由でキーを読むようになります。
 
-なお `Sort` はウィンドウ関数からも使われます。`SortStrategy::Factory()` が返す派生が 3 つあって、`FullSort`（`OVER (ORDER BY ...)`）、`HashedSort`（`OVER (PARTITION BY ...)` — パーティションキーをハッシュして基数分割し、ハッシュグループごとに独立したソート状態（`sort_global` / `sort_source`）を持つ。`Sort` オブジェクト自体はヘッダが *"Common sort description"* と呼ぶ 1 つを共有する）、`NaturalSort`（`OVER ()`、そもそも並べ替えない）。6.1 のハッシュ集約とまったく同じ「ハッシュで分割してから各パーティションを独立に処理する」型が、ここでも再利用されているわけです。
+なお `Sort` はウィンドウ関数からも使われます。`SortStrategy::Factory()` が返す派生が 3 つあって、`FullSort`（`OVER (ORDER BY ...)`）、`HashedSort`（`OVER (PARTITION BY ...)` — パーティションキーをハッシュして基数分割し、ハッシュグループごとに独立したソート状態（`sort_global` / `sort_source`）を持つ。`Sort` オブジェクト自体はヘッダーが *"Common sort description"* と呼ぶ 1 つを共有する）、`NaturalSort`（`OVER ()`、そもそも並べ替えない）。6.1 のハッシュ集約とまったく同じ「ハッシュで分割してから各パーティションを独立に処理する」型が、ここでも再利用されているわけです。
 
 ### 6.7 ウィンドウ関数 — ハッシュグループとセグメント木
 
@@ -968,7 +968,7 @@ UndoBufferReference UndoBuffer::CreateEntry(UndoFlags type, idx_t len) {
 }
 ```
 
-`(型タグ, 長さ, ペイロード)` を詰めた自前のバイト列です。同じバッファが、用途ごとに違う走査で読み直されます。
+`(型タグ, 長さ, ペイロード)` を詰めた自前のバイト列です。同じバッファーが、用途ごとに違う走査で読み直されます。
 
 | 操作 | 走査方向 | 実装 |
 | --- | --- | --- |
@@ -977,9 +977,9 @@ UndoBufferReference UndoBuffer::CreateEntry(UndoFlags type, idx_t len) {
 | ロールバック | <strong>逆順</strong> | `RollbackState::RollbackEntry` — 変更を巻き戻す |
 | ガベージコレクション | 挿入順 | `CleanupState::CleanupEntry` — 誰からも見えなくなった旧バージョンを解放 |
 
-逆順が要るのはロールバックだけで、ソースのコメントも `// rollback needs to be performed in reverse` としか言っていません。コミット側の各エントリはほぼ独立です（`UPDATE_TUPLE` なら `info->version_number = commit_id;` の 1 行、`INSERT_TUPLE` なら `CommitAppend`）。順序が本当に効くのは 2 か所だけ。1 つはカタログ変更で、同じオブジェクトへの CREATE → ALTER のように、積まれた順にコミットタイムスタンプを打っていく必要がある。もう 1 つは WAL 書き出しで、ログは操作が起きた順でなければ再生できません。
+逆順が要るのはロールバックだけで、ソースのコメントも `// rollback needs to be performed in reverse` としか言っていません。コミット側の各エントリーはほぼ独立です（`UPDATE_TUPLE` なら `info->version_number = commit_id;` の 1 行、`INSERT_TUPLE` なら `CommitAppend`）。順序が本当に効くのは 2 か所だけ。1 つはカタログ変更で、同じオブジェクトへの CREATE → ALTER のように、積まれた順にコミットタイムスタンプを打っていく必要がある。もう 1 つは WAL 書き出しで、ログは操作が起きた順でなければ再生できません。
 
-注目すべきは `UndoBufferAllocator` が `BufferManager` から確保している点で、<strong>巨大なトランザクションの undo 情報もディスクへ退避できる</strong>。「10 億行を 1 トランザクションで UPDATE したらメモリが溢れた」を防いでいます。
+注目すべきは `UndoBufferAllocator` が `BufferManager` から確保している点で、<strong>巨大なトランザクションの undo 情報もディスクへ退避できる</strong>。「10 億行を 1 トランザクションで UPDATE したらメモリーが溢れた」を防いでいます。
 
 ### 7.4 WAL・楽観的書き込み・チェックポイント
 
@@ -1005,7 +1005,7 @@ sequenceDiagram
 
 <strong>楽観的書き込み (optimistic writing)</strong> が独特です。大量 INSERT のとき、DuckDB はコミットを待たずに、完成した row group をデータベースファイルへ直接書き出します。
 
-- コミットしたら → WAL にはブロックへのポインタだけ書けばよい。データ本体を WAL に二重に書かない。
+- コミットしたら → WAL にはブロックへのポインターだけ書けばよい。データ本体を WAL に二重に書かない。
 - ロールバックしたら → 書いたブロックをフリーリストに戻すだけ。
 
 これにより「1 億行の COPY」がデータを 2 回書かずに済みます。`DuckTransaction::PreFlushOptimisticBlocks()` がコミットロックを取る <strong>前</strong> に呼ばれているのも重要で、fsync のような遅い操作をクリティカルセクションの外に追い出しています。
@@ -1022,15 +1022,15 @@ sequenceDiagram
 
 こうすると、同じ列のデータがファイル上で連続配置される。1 列だけを読むスキャンで、シーク距離が最小になります。
 
-## 8. オプティマイザ
+## 8. オプティマイザー
 
-ここまで見てきた実行エンジンは、与えられた物理プランを速く回す装置でした。そのプランを決めているのがオプティマイザです。
+ここまで見てきた実行エンジンは、与えられた物理プランを速く回す装置でした。そのプランを決めているのがオプティマイザーです。
 
 ### 8.1 最適化パスの列
 
-DuckDB のオプティマイザは、論理プランに対する変換パスの列です（[`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)）。式の書き換え、フィルタ押し下げ、不要列の削除、統計伝播、結合順序決定、共通部分式の除去、そして正規表現からの範囲フィルタ生成 (`regex_range`) など。
+DuckDB のオプティマイザーは、論理プランに対する変換パスの列です（[`src/optimizer/`](https://github.com/duckdb/duckdb/tree/main/src/optimizer)）。式の書き換え、フィルター押し下げ、不要列の削除、統計伝播、結合順序決定、共通部分式の除去、そして正規表現からの範囲フィルター生成 (`regex_range`) など。
 
-最後のものは分かりやすい例です。`regex_range` は 2 引数の定数パターン `regexp_full_match` を見つけると、RE2 の `PossibleMatchRange` に下限・上限を出させ、成功したら `col >= min AND col <= max` を<strong>元のフィルタの下に追加</strong>します。正規表現の評価自体は残りますが、その手前で 5.3 のゾーンマップが効くようになる。
+最後のものは分かりやすい例です。`regex_range` は 2 引数の定数パターン `regexp_full_match` を見つけると、RE2 の `PossibleMatchRange` に下限・上限を出させ、成功したら `col >= min AND col <= max` を<strong>元のフィルターの下に追加</strong>します。正規表現の評価自体は残りますが、その手前で 5.3 のゾーンマップが効くようになる。
 
 個別のパスは `SET disabled_optimizers='join_order'` のようにカンマ区切りで無効化でき、名前の一覧は `SELECT * FROM duckdb_optimizers();` で引けます。どのパスがどれだけ効いているかを実測で切り分けられます。
 
@@ -1047,7 +1047,7 @@ bool PlanEnumerator::SolveJoinOrder() {
 }
 ```
 
-DuckDB のコードに「DPccp」「DPhyp」という語は出てきませんが、`EmitCSG` / `EnumerateCSGRecursive` / `EnumerateCmpRecursive` という関数名がそのまま出自を示しています — DPccp（VLDB 2006）が導入し、"Dynamic Programming Strikes Back" が DPhyp としてハイパーグラフへ拡張した CSG-CMP ペア列挙です。いずれも、素朴な「全部分集合を試す DP」を大幅に効率化したアルゴリズムです。要点は <strong>クエリグラフ上で連結な部分グラフ (connected subgraph) だけを列挙する</strong> こと。関係が線形に繋がっているクエリなら、$2^n$ の部分集合のうちごく一部しか調べずに済みます。
+DuckDB のコードに「DPccp」「DPhyp」という語は出てきませんが、`EmitCSG` / `EnumerateCSGRecursive` / `EnumerateCmpRecursive` という関数名がそのまま出自を示しています — DPccp（VLDB 2006）が導入し、"Dynamic Programming Strikes Back" が DPhyp としてハイパーグラフへ拡張した CSG-CMP ペア列挙です。いずれも、素朴な「全部分集合を試す DP」を大幅に効率化したアルゴリズムです。要点は <strong>クエリーグラフ上で連結な部分グラフ (connected subgraph) だけを列挙する</strong> こと。関係が線形に繋がっているクエリーなら、$2^n$ の部分集合のうちごく一部しか調べずに済みます。
 
 実装は論文どおりの関数名で書かれているので、論文を横に置きながら読める作りです。
 
@@ -1067,7 +1067,7 @@ if (query_graph_manager.relation_manager.NumRelations() >= swap_to_approximate_t
 
 関係数が閾値を超えるか、探索したペア数が予算 (`pairs`) を使い切ったら、貪欲法 (`SolveJoinOrderApproximately`) に切り替える。<strong>最適解を諦めてでも最適化時間を有限に保つ</strong> という判断です。
 
-### 8.3 カーディナリティ推定
+### 8.3 カーディナリティー推定
 
 コストモデルの入力となる中間結果サイズの推定は `CardinalityEstimator` が行います。DuckDB の実装は「分子 / 分母」モデルです。
 
@@ -1082,9 +1082,9 @@ $$
 
 DuckDB は結合列に対して HyperLogLog による異なり数推定を持っており、それが `DistinctCountSource` として total domain の元になります。`DistinctCountSource` が `HLL` でも `EXACT` でもないとき（`IsReliableDistinctCount` が偽）は、あらかじめ用意された `fallback_distinct_count` を使う保守的な作りです。
 
-### 8.4 実行時のフィルタ伝播
+### 8.4 実行時のフィルター伝播
 
-静的な最適化だけでなく、DuckDB は <strong>実行中に</strong> フィルタを作ります。プラン時に決まるのは「どの `LogicalGet` のどの列に、あとでフィルタを差し込むか」だけで、中身は build が終わるまで空のままです。この予約席が `DynamicTableFilterSet`、予約の内容が `JoinFilterPushdownInfo` です。
+静的な最適化だけでなく、DuckDB は <strong>実行中に</strong> フィルターを作ります。プラン時に決まるのは「どの `LogicalGet` のどの列に、あとでフィルターを差し込むか」だけで、中身は build が終わるまで空のままです。この予約席が `DynamicTableFilterSet`、予約の内容が `JoinFilterPushdownInfo` です。
 
 ```cpp
 // duckdb/execution/operator/join/join_filter_pushdown.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/operator/join/join_filter_pushdown.hpp
@@ -1102,30 +1102,30 @@ struct JoinFilterPushdownInfo {
 
 注目すべきは `min_max_aggregates` が <strong>本物の集約式</strong> であることです。min/max は build が終わってから計算されるのではなく、build の `Sink()` の中でスレッドローカルな `LocalUngroupedAggregateState` に流し込まれ、`Combine()` でグローバルへマージされます — 並列化の章で見た三段階の粒度が、ここでもそのまま使われている。
 
-そして Finalize の時点で、DuckDB は min/max だけを押し込むわけではありません。`FinalizeFilters()` は build 側の性質を見ながら、<strong>4 種類のフィルタを選択的に</strong> 差し込みます。
+そして Finalize の時点で、DuckDB は min/max だけを押し込むわけではありません。`FinalizeFilters()` は build 側の性質を見ながら、<strong>4 種類のフィルターを選択的に</strong> 差し込みます。
 
-| フィルタ | 発動条件 | 効き方 |
+| フィルター | 発動条件 | 効き方 |
 | --- | --- | --- |
-| <strong>min/max 比較</strong> | min/max が NULL でなく、IN フィルタも prefix range も採用されなかったとき（min = max なら等値比較 1 本に畳まる） | ゾーンマップで row group ごと棄却 |
+| <strong>min/max 比較</strong> | min/max が NULL でなく、IN フィルターも prefix range も採用されなかったとき（min = max なら等値比較 1 本に畳まる） | ゾーンマップで row group ごと棄却 |
 | <strong>IN リスト</strong> | 等値結合で `1 < ht.Count() <= dynamic_or_filter_threshold`。値が密（連番）だったり NULL を含む場合は不採用 | build 側の実値そのもので絞る |
 | <strong>prefix range</strong> | Bloom と同じ門（等値条件がちょうど 1 本、`build 行数 / probe 推定行数 <= 1.0`）に加えて、値域が `1 << 26` 未満か Bloom のビット予算以内 | min/max より細かい範囲棄却 |
-| <strong>Bloom フィルタ</strong> | 等値条件がちょうど 1 本、かつ `build 行数 / probe 推定行数 <= 1.0`。build 側にフィルタが無い場合はさらに厳しく、比が 0.1 を超えていて build が 4,194,304 行超なら見送る | 行単位の事前棄却 |
+| <strong>Bloom フィルター</strong> | 等値条件がちょうど 1 本、かつ `build 行数 / probe 推定行数 <= 1.0`。build 側にフィルターが無い場合はさらに厳しく、比が 0.1 を超えていて build が 4,194,304 行超なら見送る | 行単位の事前棄却 |
 
 Bloom / prefix range は「作るのに build 側のコストがかかる」ので条件が厳しい。`CanUseBloomFilter()` のコメントが理由をそのまま書いています — *building the bloom filter is costly on the build to make probing faster, so only use it if there are less build tuples than probing tuples*。
 
-さらにもう一段の保険があります。Bloom と prefix range は常に、min/max は非等値比較のときに限って、<strong>selectivity-optional</strong> なフィルタとして包まれます。スキャン開始後の最初の数ベクトルで「実際にはほとんど何も落とせていない」と分かると、<strong>自分自身を無効化して以降は評価さえされなくなる</strong>。プラン時の推定が外れても、コストが線形に積み上がらないようになっているわけです（IN リストだけは包まれません — 実値を持っている以上、選択率は既に分かっているからです）。
+さらにもう一段の保険があります。Bloom と prefix range は常に、min/max は非等値比較のときに限って、<strong>selectivity-optional</strong> なフィルターとして包まれます。スキャン開始後の最初の数ベクトルで「実際にはほとんど何も落とせていない」と分かると、<strong>自分自身を無効化して以降は評価さえされなくなる</strong>。プラン時の推定が外れても、コストが線形に積み上がらないようになっているわけです（IN リストだけは包まれません — 実値を持っている以上、選択率は既に分かっているからです）。
 
-TPC-H の Q3 のように「小さい次元表 × 巨大なファクト表」の形をしたクエリでは、build 側の値域が狭いので、ファクト表の row group の大半が min/max だけで棄却されることがあります。
+TPC-H の Q3 のように「小さい次元表 × 巨大なファクト表」の形をしたクエリーでは、build 側の値域が狭いので、ファクト表の row group の大半が min/max だけで棄却されることがあります。
 
 ## 9. インデックス — なぜ ART なのか
 
 ### 9.1 分析 DB にインデックスは要るのか
 
-列指向ストレージとゾーンマップがあれば、分析クエリの大半はインデックスを必要としません。それでも DuckDB がインデックスを持っているのは、主に <strong>制約の強制</strong>（PRIMARY KEY / UNIQUE / FOREIGN KEY）と、<strong>選択率の非常に高い点検索</strong> のためです。
+列指向ストレージとゾーンマップがあれば、分析クエリーの大半はインデックスを必要としません。それでも DuckDB がインデックスを持っているのは、主に <strong>制約の強制</strong>（PRIMARY KEY / UNIQUE / FOREIGN KEY）と、<strong>選択率の非常に高い点検索</strong> のためです。
 
 選ばれたのは B+ 木ではなく <strong>ART (Adaptive Radix Tree)</strong>。Leis・Kemper・Neumann の "The Adaptive Radix Tree: ARTful Indexing for Main-Memory Databases" (ICDE 2013) です。
 
-理由は主記憶向けだからです。B+ 木の探索は各ノードで二分探索を行うため、比較のたびにキャッシュラインをまたぐ可能性がある。基数木（トライ）はキーのバイトを直接添字に使うので比較がゼロで、木の高さがキー長だけで決まる。しかし素朴な基数木は 1 ノードあたり 256 個のポインタ配列を持つため、疎な木では絶望的にメモリを食う。
+理由は主記憶向けだからです。B+ 木の探索は各ノードで二分探索を行うため、比較のたびにキャッシュラインをまたぐ可能性がある。基数木（トライ）はキーのバイトを直接添字に使うので比較がゼロで、木の高さがキー長だけで決まる。しかし素朴な基数木は 1 ノードあたり 256 個のポインター配列を持つため、疎な木では絶望的にメモリーを食う。
 
 ART の答えは <strong>ノードの物理表現を子の数に応じて切り替える</strong> ことでした。
 
@@ -1152,14 +1152,14 @@ enum class NType : uint8_t {
 論文にある `Node4` / `Node16` / `Node48` / `Node256` に加えて、DuckDB 固有のものが並んでいるのが分かります。
 
 - <strong>`PREFIX`</strong> — 経路圧縮。分岐しない連続バイト列を 1 ノードにまとめる。プレフィックス長は ART インスタンスごとに設定可能 (`ART::PrefixCount()`)。
-- <strong>`LEAF_INLINED`</strong> — 行 ID が 1 つだけなら、リーフノードを確保せず <strong>ポインタの中に行 ID を直接埋め込む</strong>。ユニークインデックスではこれが大半を占める。
-- <strong>`NODE_7_LEAF` / `NODE_15_LEAF` / `NODE_256_LEAF`</strong> — 子ポインタを持たず、<strong>存在するバイトだけ</strong>を保持する特殊ノード。
+- <strong>`LEAF_INLINED`</strong> — 行 ID が 1 つだけなら、リーフノードを確保せず <strong>ポインターの中に行 ID を直接埋め込む</strong>。ユニークインデックスではこれが大半を占める。
+- <strong>`NODE_7_LEAF` / `NODE_15_LEAF` / `NODE_256_LEAF`</strong> — 子ポインターを持たず、<strong>存在するバイトだけ</strong>を保持する特殊ノード。
 
 下の可視化で子を 1 つずつ足していくと、Node4 → Node16 → Node48 → Node256 の切り替わりがそのまま見えます。
 
 <ARTNodeVisualizer />
 
-`Node48` の間接参照は、素朴な実装とのメモリ効率の差がいちばん分かりやすい例です。
+`Node48` の間接参照は、素朴な実装とのメモリー効率の差がいちばん分かりやすい例です。
 
 ```cpp
 // duckdb/execution/index/art/node48.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/index/art/node48.hpp
@@ -1177,7 +1177,7 @@ private:
 };
 ```
 
-256 バイトの索引配列を持っても、`NodePtr` の 8 バイトアライメントを含めて `sizeof(Node48)` は 648 バイト。`Node256` は 2056 バイトなので、子が 48 個までなら 3 分の 1 弱で済みます。<strong>1 バイトの間接参照テーブルで 8 バイトのポインタ配列を圧縮している</strong> わけです。
+256 バイトの索引配列を持っても、`NodePtr` の 8 バイトアライメントを含めて `sizeof(Node48)` は 648 バイト。`Node256` は 2056 バイトなので、子が 48 個までなら 3 分の 1 弱で済みます。<strong>1 バイトの間接参照テーブルで 8 バイトのポインター配列を圧縮している</strong> わけです。
 
 縮小は膨張と対称ではありません。`Node256::SHRINK_THRESHOLD = 36`、`Node48::SHRINK_THRESHOLD = 12` で、膨張の閾値（48、16）よりかなり低い。境界付近で挿入と削除が繰り返されたときに型変換が振動しないよう、<strong>ヒステリシス</strong>を入れてあります。
 
@@ -1192,9 +1192,9 @@ static constexpr uint8_t AND_GATE = 0x80;
 static constexpr idx_t AND_ROW_ID = 0x00FFFFFFFFFFFFFF;
 ```
 
-`NodePtr` のメタデータバイトの最上位ビットを立てるだけで、「この先は入れ子 ART である」を表現している。ポインタの空きビットを使い切る発想は `ht_entry_t` と同じです。
+`NodePtr` のメタデータバイトの最上位ビットを立てるだけで、「この先は入れ子 ART である」を表現している。ポインターの空きビットを使い切る発想は `ht_entry_t` と同じです。
 
-`NODE_7_LEAF` などのリーフ特化ノードは、この入れ子 ART の内側で使われます。行 ID は 8 バイト固定長なので、木の最下層では「最後の 1 バイトの集合」だけを持てばよい — 子ポインタは不要になる。だから `Node256Leaf` は 256 ビットのビットマスクだけで済みます。
+`NODE_7_LEAF` などのリーフ特化ノードは、この入れ子 ART の内側で使われます。行 ID は 8 バイト固定長なので、木の最下層では「最後の 1 バイトの集合」だけを持てばよい — 子ポインターは不要になる。だから `Node256Leaf` は 256 ビットのビットマスクだけで済みます。
 
 ```cpp
 // duckdb/execution/index/art/node256_leaf.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/execution/index/art/node256_leaf.hpp
@@ -1206,7 +1206,7 @@ class Node256Leaf {
 };
 ```
 
-2048 バイト分の子ポインタ配列が、256 ビットのビットマスクに置き換わる。（論理的に必要なのは 256 ビット = 32 バイトですが、`validity_t mask[CAPACITY / sizeof(validity_t)]` という宣言は 32 エントリ × 8 バイト = 256 バイトを確保するので、`sizeof(Node256Leaf)` は 264 バイトになります。）同じ ART という枠組みの中で、内側と外側でまったく違う最適化が効いているのが面白いところです。
+2048 バイト分の子ポインター配列が、256 ビットのビットマスクに置き換わる。（論理的に必要なのは 256 ビット = 32 バイトですが、`validity_t mask[CAPACITY / sizeof(validity_t)]` という宣言は 32 エントリー × 8 バイト = 256 バイトを確保するので、`sizeof(Node256Leaf)` は 264 バイトになります。）同じ ART という枠組みの中で、内側と外側でまったく違う最適化が効いているのが面白いところです。
 
 ### 9.4 ART のノードはどこに確保されるか
 
@@ -1218,11 +1218,11 @@ ART のノードは `new` で確保されるのではなく、<strong>ノード�
 shared_ptr<array<unsafe_unique_ptr<FixedSizeAllocator>, ALLOCATOR_COUNT>> allocators;
 ```
 
-そして `NodePtr` は生ポインタではなく `IndexPointer` — <strong>「どのバッファの何番目か」を表す 64 ビット値</strong> です。これによって、
+そして `NodePtr` は生ポインターではなく `IndexPointer` — <strong>「どのバッファーの何番目か」を表す 64 ビット値</strong> です。これによって、
 
 - 同じ型のノードが連続配置され、キャッシュ効率が上がる
-- インデックス全体をバッファマネージャ管理下に置ける（＝メモリより大きなインデックスを扱える）
-- ディスクへのシリアライズがポインタ書き換えなしで済む
+- インデックス全体をバッファーマネージャー管理下に置ける（＝メモリーより大きなインデックスを扱える）
+- ディスクへのシリアライズがポインター書き換えなしで済む
 
 という 3 つの利点が同時に得られます。ART をディスクに永続化できるのは、この間接参照のおかげです。
 
@@ -1230,9 +1230,9 @@ shared_ptr<array<unsafe_unique_ptr<FixedSizeAllocator>, ALLOCATOR_COUNT>> alloca
 
 ### 10.1 extension
 
-DuckDB のコアは意図的に小さく保たれ、Parquet、JSON、httpfs（S3/HTTP アクセス）、spatial、iceberg、delta、fts（全文検索）、vss（ベクトル検索）などは <strong>core extension</strong>（DuckDB チームが保守し、公式リポジトリから配布される extension。第三者が公開する community extension と対になる呼び名）として分離されています。
+DuckDB のコアは意図的に小さく保たれ、Parquet、JSON、httpfs（S3/HTTP アクセス）、spatial、iceberg、delta、fts（全文検索）、vss（ベクトル検索）などは <strong>core extension</strong>（DuckDB チームが保守し、公式リポジトリーから配布される extension。第三者が公開する community extension と対になる呼び名）として分離されています。
 
-ただし「分離されている＝必ず別ファイル」ではありません。標準の Python / CLI 配布では parquet や json などは <strong>バイナリに静的リンクされて出荷</strong>されており、`DBConfig::linked_extensions` を通してロードされます。
+ただし「分離されている＝必ず別ファイル」ではありません。標準の Python / CLI 配布では parquet や json などは <strong>バイナリーに静的リンクされて出荷</strong>されており、`DBConfig::linked_extensions` を通してロードされます。
 
 ```cpp
 // duckdb/main/config.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/main/config.hpp
@@ -1251,7 +1251,7 @@ LOAD httpfs;
 SELECT count(*) FROM 's3://bucket/data/*.parquet';
 ```
 
-extension は動的リンクされる共有ライブラリ（`.duckdb_extension`）で、ロード時にスカラ関数・テーブル関数・型・最適化パス・ストレージバックエンドなどをカタログに登録します。バージョン間の ABI 互換性を守るため、拡張バイナリはコアのバージョンとプラットフォームごとにビルドされ、署名が検証されます。
+extension は動的リンクされる共有ライブラリー（`.duckdb_extension`）で、ロード時にスカラー関数・テーブル関数・型・最適化パス・ストレージバックエンドなどをカタログに登録します。バージョン間の ABI 互換性を守るため、拡張バイナリーはコアのバージョンとプラットフォームごとにビルドされ、署名が検証されます。
 
 `DBConfig` にはこれを受け止めるフックが並んでいます。
 
@@ -1263,11 +1263,11 @@ vector<ReplacementScan> replacement_scans;
 
 ### 10.2 replacement scan — 「なぜ `SELECT * FROM 'file.parquet'` が動くのか」
 
-上のコメントがそのまま答えです。バインダがテーブル名を解決できなかったとき、DuckDB は諦めずに <strong>登録された replacement scan を順に試します</strong>。
+上のコメントがそのまま答えです。バインダーがテーブル名を解決できなかったとき、DuckDB は諦めずに <strong>登録された replacement scan を順に試します</strong>。
 
 - 名前が `.parquet` で終わる → `parquet_scan('...')` に置き換える（`read_parquet` と同じ関数セットの別名）。このフックは parquet extension の `LoadInternal()` が `config.replacement_scans` に登録するので、<strong>extension がロードされて初めて動きます</strong>。
 - 名前が `.csv` / `.tsv` で終わる → `read_csv_auto('...')` に置き換える。`.gz` / `.zst` は先に剥がすので `data.csv.gz` も通ります。
-- Python クライアントなら、呼び出し元のローカル変数を探して pandas DataFrame や Arrow テーブルを見つけ、それをスキャンする関数に置き換える。（PyArrow / Polars は arrow スキャンに、`DuckDBPyRelation` はテーブル関数ではなくサブクエリに展開されます。探索範囲は既定で呼び出し元フレーム 1 段だけで、`python_scan_all_frames` を立てると祖先フレームまで遡ります。）
+- Python クライアントなら、呼び出し元のローカル変数を探して pandas DataFrame や Arrow テーブルを見つけ、それをスキャンする関数に置き換える。（PyArrow / Polars は arrow スキャンに、`DuckDBPyRelation` はテーブル関数ではなくサブクエリーに展開されます。探索範囲は既定で呼び出し元フレーム 1 段だけで、`python_scan_all_frames` を立てると祖先フレームまで遡ります。）
 
 ```python
 import duckdb, pandas as pd
@@ -1275,15 +1275,15 @@ df = pd.DataFrame({"a": [1, 2, 3]})
 duckdb.sql("SELECT sum(a) FROM df")   # df はテーブルではないが動く
 ```
 
-「魔法」に見える機能の正体は、<strong>名前解決の失敗をフック可能にした</strong> という 1 点だけです。しかもこの置き換えは論理プランの段階で起きるので、置き換わったテーブル関数はその後の最適化（フィルタ押し下げ、列刈り込み）を普通に受けられます。だから `SELECT a FROM 'huge.parquet' WHERE b = 1` は、Parquet のフッタを見て不要な row group と列を読み飛ばせるのです。
+「魔法」に見える機能の正体は、<strong>名前解決の失敗をフック可能にした</strong> という 1 点だけです。しかもこの置き換えは論理プランの段階で起きるので、置き換わったテーブル関数はその後の最適化（フィルター押し下げ、列刈り込み）を普通に受けられます。だから `SELECT a FROM 'huge.parquet' WHERE b = 1` は、Parquet のフッターを見て不要な row group と列を読み飛ばせるのです。
 
-1 節で触れた「入力方向のゼロコピー」の実体もここにあります。pandas 経路では `ScanNumpyColumn` / `ScanNumpyFpColumn` が `stride == sizeof(T)` のときだけ NumPy バッファを `FlatVector::SetData` にそのまま渡し、strided な配列は gather ループ、object 列は常に詰め替えになります（このコードは本体ではなく別リポジトリ [`duckdb/duckdb-python`](https://github.com/duckdb/duckdb-python) の `src/numpy/numpy_scan.cpp`）。Arrow 経路では [`src/function/table/arrow_conversion.cpp`](https://github.com/duckdb/duckdb/blob/main/src/function/table/arrow_conversion.cpp) の `DirectConversion` が stride を見ずに `FlatVector::SetData` を呼びます — 固定幅プリミティブの Arrow レイアウトは値バッファが 1 本に連続しているので、必要なのはオフセットだけだからです。ただしこれが効くのは固定幅の数値と一部の時刻型に限った話で、BOOLEAN はビットを開き、`TIME` や ns 精度のタイムスタンプは 1 行ずつ換算されます。
+1 節で触れた「入力方向のゼロコピー」の実体もここにあります。pandas 経路では `ScanNumpyColumn` / `ScanNumpyFpColumn` が `stride == sizeof(T)` のときだけ NumPy バッファーを `FlatVector::SetData` にそのまま渡し、strided な配列は gather ループ、object 列は常に詰め替えになります（このコードは本体ではなく別リポジトリー [`duckdb/duckdb-python`](https://github.com/duckdb/duckdb-python) の `src/numpy/numpy_scan.cpp`）。Arrow 経路では [`src/function/table/arrow_conversion.cpp`](https://github.com/duckdb/duckdb/blob/main/src/function/table/arrow_conversion.cpp) の `DirectConversion` が stride を見ずに `FlatVector::SetData` を呼びます — 固定幅プリミティブの Arrow レイアウトは値バッファーが 1 本に連続しているので、必要なのはオフセットだけだからです。ただしこれが効くのは固定幅の数値と一部の時刻型に限った話で、BOOLEAN はビットを開き、`TIME` や ns 精度のタイムスタンプは 1 行ずつ換算されます。
 
 ### 10.3 table function
 
 外部データソースを DuckDB に繋ぐ標準的な口が `TableFunction` です。実装者は `bind`（列名と型を決める）、`init_global` / `init_local`（並列スキャン状態を作る）、そして `function`（chunk を 1 つ埋める）を書きます。
 
-ここで混同しやすいのですが、最適化を受け取る口には <strong>bool のケイパビリティフラグ</strong>と <strong>コールバック</strong>の 2 種類があります。
+ここで混同しやすいのですが、最適化を受け取る口には <strong>bool のケイパビリティーフラグ</strong>と <strong>コールバック</strong>の 2 種類があります。
 
 ```cpp
 // duckdb/function/table_function.hpp — https://github.com/duckdb/duckdb/blob/main/src/include/duckdb/function/table_function.hpp
@@ -1295,13 +1295,13 @@ bool projection_pushdown;
 bool filter_pushdown;
 ```
 
-`projection_pushdown` / `filter_pushdown` を true にしておくと、`init_global` / `init_local` に渡される `TableFunctionInitInput` の `column_indexes` と `filters` に、必要な列と押し下げられたフィルタがそのまま届きます（フラグを立てなければ、DuckDB がスキャンの上に Projection / Filter 演算子を足して同じ結果を得ます）。さらに `cardinality`、`table_scan_progress`、`pushdown_complex_filter`（定数比較に収まらない任意の式を受け取る）といったオプショナルなコールバックを実装すれば、<strong>組み込みテーブルと同等の最適化を受けられます</strong>。Parquet リーダも CSV リーダも、内部的にはただのテーブル関数です。
+`projection_pushdown` / `filter_pushdown` を true にしておくと、`init_global` / `init_local` に渡される `TableFunctionInitInput` の `column_indexes` と `filters` に、必要な列と押し下げられたフィルターがそのまま届きます（フラグを立てなければ、DuckDB がスキャンの上に Projection / Filter 演算子を足して同じ結果を得ます）。さらに `cardinality`、`table_scan_progress`、`pushdown_complex_filter`（定数比較に収まらない任意の式を受け取る）といったオプショナルなコールバックを実装すれば、<strong>組み込みテーブルと同等の最適化を受けられます</strong>。Parquet リーダーも CSV リーダーも、内部的にはただのテーブル関数です。
 
-### 10.4 CSV リーダ — 「ただのテーブル関数」の中身
+### 10.4 CSV リーダー — 「ただのテーブル関数」の中身
 
-とはいえ CSV リーダを「ただのテーブル関数」で片づけるのは不当です。[`src/execution/operator/csv_scanner/`](https://github.com/duckdb/duckdb/tree/main/src/execution/operator/csv_scanner) は DuckDB でいちばん特徴的な部品のひとつで、<strong>方言の推測</strong>と<strong>並列読み</strong>という 2 つの厄介な問題を正面から解いています。
+とはいえ CSV リーダーを「ただのテーブル関数」で片づけるのは不当です。[`src/execution/operator/csv_scanner/`](https://github.com/duckdb/duckdb/tree/main/src/execution/operator/csv_scanner) は DuckDB でいちばん特徴的な部品のひとつで、<strong>方言の推測</strong>と<strong>並列読み</strong>という 2 つの厄介な問題を正面から解いています。
 
-まず sniffer。`read_csv` が区切り文字も型もヘッダも当ててくれるのは、段階的な推測が走っているからです。
+まず sniffer。`read_csv` が区切り文字も型もヘッダーも当ててくれるのは、段階的な推測が走っているからです。
 
 ```cpp
 // duckdb/execution/operator/csv_scanner/sniffer/csv_sniffer.hpp
@@ -1340,7 +1340,7 @@ bool filter_pushdown;
 scan.validator.Verify();
 ```
 
-各スキャナが「自分が最初に読んだ行」を登録しておき、隣のスキャナの「最後に読んだ行」と噛み合っているかを突き合わせる。ずれていればそこで落とす。<strong>速い推測 + 事後検証</strong> という、実行時フィルタ（8.4）の selectivity-optional とよく似た構えです。
+各スキャナーが「自分が最初に読んだ行」を登録しておき、隣のスキャナーの「最後に読んだ行」と噛み合っているかを突き合わせる。ずれていればそこで落とす。<strong>速い推測 + 事後検証</strong> という、実行時フィルター（8.4）の selectivity-optional とよく似た構えです。
 
 例外もあります。`null_padding` を有効にしたうえで引用符内改行が見つかると、並列読みでは <strong>行頭の推測が原理的に確定できない</strong> ため `CSVError::NullPaddingFail` でエラーになります。
 
@@ -1350,19 +1350,19 @@ DuckDB の速さは 1 つの魔法ではなく、層ごとの意思決定の積�
 
 | 層 | 決定 | 効いてくる場面 |
 | --- | --- | --- |
-| 配置 | プロセス内ライブラリ | シリアライズも IPC もなし。連続配置の数値列は真にゼロコピー（10.2） |
+| 配置 | プロセス内ライブラリー | シリアライズも IPC もなし。連続配置の数値列は真にゼロコピー（10.2） |
 | データ表現 | 2048 行のベクトル、多態的な `Vector` | 中間結果が L1/L2 に収まる。ホットな演算子は圧縮表現のまま処理できる |
 | 実行モデル | push ベース、パイプライン分解 | 中間の materialize を最小化 |
 | 並列化 | モーセル駆動、exchange なし | データ偏りに強く、動的に並列度を変えられる |
 | 順序付け | ソートキーの二値化 + Merge Path 並列マージ | 比較関数の呼び出しが消え、マージまで並列化できる |
 | ストレージ | 単一ファイル・row group・per-segment 圧縮 | I/O 量そのものが減る。ゾーンマップで読まずに済む |
-| メモリ | 基数分割 + 溢れ出し | メモリを超えるクエリが「落ちない」 |
-| 並行制御 | HyPer 系 MVCC | 読み手がライタに一切ブロックされない |
+| メモリー | 基数分割 + 溢れ出し | メモリーを超えるクエリーが「落ちない」 |
+| 並行制御 | HyPer 系 MVCC | 読み手がライターに一切ブロックされない |
 | 拡張 | 小さいコア + extension + replacement scan | コアを膨らませずにエコシステムを広げられる |
 
 特に強調したいのは、これらが <strong>互いに前提を共有している</strong> ことです。`STANDARD_VECTOR_SIZE` は実行エンジンの都合で決まった値ですが、`DEFAULT_ROW_GROUP_SIZE` はその倍数でなければならず、MVCC の `ChunkVectorInfo` もその粒度で切られ、圧縮の解析もその単位で走る。1 つの定数がエンジン全体を貫いている。
 
-そして DuckDB の設計判断の多くには <strong>「どちらかを捨てる」勇気</strong> が見えます。`ToUnifiedFormat()` が FSST を平坦化してしまうのは抽象化のための妥協ですし、結合順序探索を予算で打ち切るのは最適性の放棄です。全部を最適化しようとせず、「ほとんどの場合に速い」を選ぶ。組み込み DB として起動時間とバイナリサイズを守るためには、この線引きが不可欠でした。
+そして DuckDB の設計判断の多くには <strong>「どちらかを捨てる」勇気</strong> が見えます。`ToUnifiedFormat()` が FSST を平坦化してしまうのは抽象化のための妥協ですし、結合順序探索を予算で打ち切るのは最適性の放棄です。全部を最適化しようとせず、「ほとんどの場合に速い」を選ぶ。組み込み DB として起動時間とバイナリーサイズを守るためには、この線引きが不可欠でした。
 
 ## 12. コードを読み始めるための地図
 
@@ -1404,19 +1404,19 @@ SELECT * FROM duckdb_extensions();
 | ハッシュ集約 | `src/execution/radix_partitioned_hashtable.cpp`, `src/execution/aggregate_hashtable.cpp` |
 | 基数分割のビット割り当て | `src/include/duckdb/common/radix_partitioning.hpp` |
 | ハッシュ結合 | `src/execution/join_hashtable.cpp`, `src/execution/operator/join/physical_hash_join.cpp` |
-| 実行時フィルタ伝播 | `src/include/duckdb/execution/operator/join/join_filter_pushdown.hpp` |
-| バッファ退避 | `src/storage/buffer/buffer_pool.cpp` |
+| 実行時フィルター伝播 | `src/include/duckdb/execution/operator/join/join_filter_pushdown.hpp` |
+| バッファー退避 | `src/storage/buffer/buffer_pool.cpp` |
 | ソート（キー表現） | `src/include/duckdb/common/sorting/sort_key.hpp` |
 | ソート（実装） | `src/common/sort/sort.cpp`, `sorted_run.cpp`, `sorted_run_merger.cpp`, `hashed_sort.cpp` |
 | ウィンドウ関数 | `src/execution/operator/aggregate/physical_window.cpp`, `src/function/window/` |
-| CSV リーダ | `src/execution/operator/csv_scanner/`（`sniffer/`, `scanner/`, `table_function/`） |
+| CSV リーダー | `src/execution/operator/csv_scanner/`（`sniffer/`, `scanner/`, `table_function/`） |
 | ストレージ | `src/storage/table/row_group.cpp`, `src/storage/table/row_group_collection.cpp` |
 | 圧縮 | `src/storage/compression/` |
 | MVCC | `src/storage/table/row_version_manager.cpp`, `src/transaction/undo_buffer.cpp` |
 | 結合順序 | `src/optimizer/join_order/plan_enumerator.cpp` |
 | ART | `src/execution/index/art/` |
 
-（一つ罠なのはソートで、実装は `src/common/sort/`、ヘッダは `src/include/duckdb/common/sorting/` とディレクトリ名が違います。）
+（一つ罠なのはソートで、実装は `src/common/sort/`、ヘッダーは `src/include/duckdb/common/sorting/` とディレクトリー名が違います。）
 
 ## 参考文献
 

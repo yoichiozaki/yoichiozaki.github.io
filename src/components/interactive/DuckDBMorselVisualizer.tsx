@@ -195,7 +195,7 @@ export function DuckDBMorselVisualizer({ locale = "ja" }: Props) {
 
         <div className="rounded-md border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
           {isJa
-            ? "静的分割ではスレッド 2・3 が早々に手を空け、遅いスレッドを待つ。モーセル駆動では GlobalSourceState の共有カーソルを短いロック（RowGroupCollection::NextParallelScan の lock_guard）の下で 1 つ進めるだけで、負荷が自然に均される。1 回のロックで 1 row group ぶんの仕事を取るので、ロックが競合点になることはない。DuckDB はさらに TaskExecutionMode::PROCESS_PARTIAL で 50 chunk（PipelineTask::PARTIAL_CHUNK_COUNT）ごとにスケジューラへ制御を返し、タスク粒度も動的に保つ。"
+            ? "静的分割ではスレッド 2・3 が早々に手を空け、遅いスレッドを待つ。モーセル駆動では GlobalSourceState の共有カーソルを短いロック（RowGroupCollection::NextParallelScan の lock_guard）の下で 1 つ進めるだけで、負荷が自然に均される。1 回のロックで 1 row group ぶんの仕事を取るので、ロックが競合点になることはない。DuckDB はさらに TaskExecutionMode::PROCESS_PARTIAL で 50 chunk（PipelineTask::PARTIAL_CHUNK_COUNT）ごとにスケジューラーへ制御を返し、タスク粒度も動的に保つ。"
             : "With a static split, threads 2 and 3 go idle early and everyone waits for the slowest. Morsel-driven scheduling only needs one short critical section around the shared cursor in GlobalSourceState (the lock_guard in RowGroupCollection::NextParallelScan), and the load balances itself. Each lock hands out a whole row group of work, so the lock never becomes the bottleneck. DuckDB additionally yields back to the scheduler every 50 chunks (PipelineTask::PARTIAL_CHUNK_COUNT) via TaskExecutionMode::PROCESS_PARTIAL, keeping task granularity adaptive."}
         </div>
 

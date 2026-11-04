@@ -202,7 +202,7 @@ const STEPS: Step[] = [
   {
     title: { ja: "経路を束縛に展開する", en: "Expand the path into bindings" },
     body: {
-      ja: "各エンティティ型を、それを所有するシステムの表へ展開する。Fabric では 1 つのエンティティ型が持てる静的な束縛は 1 つまでなので、CRM の取引先と ERP の得意先を 1 つの型に合流させず、別の型として関係で結んでいる。Container は TMS の静的データに加えて、IoT の時系列を device_id で束縛している。",
+      ja: "各エンティティー型を、それを所有するシステムの表へ展開する。Fabric では 1 つのエンティティー型が持てる静的な束縛は 1 つまでなので、CRM の取引先と ERP の得意先を 1 つの型に合流させず、別の型として関係で結んでいる。Container は TMS の静的データに加えて、IoT の時系列を device_id で束縛している。",
       en: "Each entity type expands to a table in the system that owns it. In Fabric an entity type can have only one static binding, so the CRM account and the ERP sold-to party are not merged into one type; they are separate types joined by a relationship. Container combines static TMS data with an IoT time series bound through device_id.",
     },
   },
@@ -216,7 +216,7 @@ const STEPS: Step[] = [
   {
     title: { ja: "エンジンごとに実行する", en: "Execute per engine" },
     body: {
-      ja: "オントロジー自体は問い合わせエンジンではない。消費側のエージェントが束縛先に応じて KQL・SQL・DAX を選び、結果を組み合わせる。温度逸脱の規則をクエリに翻訳するのもエージェントの仕事で、どう解釈したかは生成されたクエリで確かめたい（執筆時点では、組み込みのオントロジーエージェントが回答時に規則を考慮しないという既知の問題があり、規則を効かせるには、MCP の list_ontology_rules などで規則を取り出して使う消費者が要る）。",
+      ja: "オントロジー自体は問い合わせエンジンではない。消費側のエージェントが束縛先に応じて KQL・SQL・DAX を選び、結果を組み合わせる。温度逸脱の規則をクエリーに翻訳するのもエージェントの仕事で、どう解釈したかは生成されたクエリーで確かめたい（執筆時点では、組み込みのオントロジーエージェントが回答時に規則を考慮しないという既知の問題があり、規則を効かせるには、MCP の list_ontology_rules などで規則を取り出して使う消費者が要る）。",
       en: "The ontology is not a query engine. The consuming agent picks KQL, SQL or DAX according to each binding and combines the results. Translating the excursion rule into a query is also the agent’s job, so check the generated queries to see how it interpreted the rule (at the time of writing, a known issue means the built-in ontology agent does not consider rules when answering; to apply them, you need a consumer that fetches rules itself, e.g. through the MCP list_ontology_rules tool).",
     },
   },
@@ -538,7 +538,7 @@ export function SemanticViewWalkthrough({ locale = "ja" }: Props) {
             </ul>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
               {isJa
-                ? "経路そのものが主役の問いなら、グラフを実体化して GQL でたどる選択肢もある（エンティティ型キーが必須で、対象はレイクハウスかミラーリングされたデータベースの Delta テーブルに束縛された型だけ。複数の表に束縛された型も外れるので、このデモでは時系列を併せ持つ Container が対象にならない）。分解と結合の具体的なやり方は消費側の実装に依存する。"
+                ? "経路そのものが主役の問いなら、グラフを実体化して GQL でたどる選択肢もある（エンティティー型キーが必須で、対象はレイクハウスかミラーリングされたデータベースの Delta テーブルに束縛された型だけ。複数の表に束縛された型も外れるので、このデモでは時系列を併せ持つ Container が対象にならない）。分解と結合の具体的なやり方は消費側の実装に依存する。"
                 : "When the path itself is the point, you can materialise a graph and traverse it with GQL (entity type keys are required, only types bound to Delta tables in lakehouses or mirrored databases are eligible, and types bound to multiple tables are excluded — so in this demo Container, with its time series, drops out). Exactly how the work is decomposed and recombined depends on the consumer."}
             </p>
           </div>

@@ -61,7 +61,7 @@ const STEPS: Step[] = [
   {
     pipeline: -1,
     slot: -1,
-    ja: "オプティマイザが出した物理プランを、Executor が MetaPipeline に分解する。パイプラインの切れ目は「パイプラインブレーカ」— 入力を全部受け取るまで 1 行も返せない演算子（ハッシュ結合の build、集約、ソート）の位置に入る。",
+    ja: "オプティマイザーが出した物理プランを、Executor が MetaPipeline に分解する。パイプラインの切れ目は「パイプラインブレーカー」— 入力を全部受け取るまで 1 行も返せない演算子（ハッシュ結合の build、集約、ソート）の位置に入る。",
     en: "The Executor decomposes the physical plan into MetaPipelines. The cut points are pipeline breakers — operators that cannot emit a single row until they have consumed all input (hash-join build, aggregation, sort).",
   },
   {
@@ -94,7 +94,7 @@ const STEPS: Step[] = [
   {
     pipeline: 0,
     slot: -1,
-    ja: "source が枯れると各スレッドが Combine() でローカル状態を global sink state にマージし、全員が終わったところで Executor の finish event が Finalize() を呼ぶ。ここでポインタテーブルが確保され、ハッシュテーブルが完成する。",
+    ja: "source が枯れると各スレッドが Combine() でローカル状態を global sink state にマージし、全員が終わったところで Executor の finish event が Finalize() を呼ぶ。ここでポインターテーブルが確保され、ハッシュテーブルが完成する。",
     en: "Once the source is exhausted each thread merges its local state via Combine(), and when every thread is done the executor's finish event calls Finalize(), which allocates the pointer table and completes the hash table.",
   },
   {
@@ -146,7 +146,7 @@ const STEPS: Step[] = [
   {
     pipeline: 3,
     slot: 1,
-    ja: "P4 でソート結果を読み出し、RESULT_COLLECTOR に渡してクエリ完了。パイプラインごとに source と sink の役割が入れ替わっていくのが push ベースモデルの骨格。",
+    ja: "P4 でソート結果を読み出し、RESULT_COLLECTOR に渡してクエリー完了。パイプラインごとに source と sink の役割が入れ替わっていくのが push ベースモデルの骨格。",
     en: "P4 reads the sorted output and hands it to the RESULT_COLLECTOR — query complete. Roles flipping between source and sink from pipeline to pipeline is the skeleton of the push-based model.",
   },
 ];
@@ -163,7 +163,7 @@ export function DuckDBPipelineVisualizer({ locale = "ja" }: Props) {
       title={isJa ? "push ベース実行を 1 ステップずつ追う" : "Walk through push-based execution"}
       description={
         isJa
-          ? "SELECT o_orderpriority, count(*) FROM orders JOIN lineitem ON o_orderkey = l_orderkey WHERE o_orderdate >= DATE '1995-01-01' GROUP BY 1 ORDER BY 1 — このクエリが 4 本のパイプラインに分解され、DataChunk が押し込まれていく様子。"
+          ? "SELECT o_orderpriority, count(*) FROM orders JOIN lineitem ON o_orderkey = l_orderkey WHERE o_orderdate >= DATE '1995-01-01' GROUP BY 1 ORDER BY 1 — このクエリーが 4 本のパイプラインに分解され、DataChunk が押し込まれていく様子。"
           : "SELECT o_orderpriority, count(*) FROM orders JOIN lineitem ON o_orderkey = l_orderkey WHERE o_orderdate >= DATE '1995-01-01' GROUP BY 1 ORDER BY 1 — how this query splits into four pipelines and how DataChunks get pushed through them."
       }
     >

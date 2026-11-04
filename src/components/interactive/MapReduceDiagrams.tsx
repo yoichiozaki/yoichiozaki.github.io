@@ -46,7 +46,7 @@ export function MapReduceArchitecture({
         ? [
             "64–128 MB ブロック単位の分割",
             "3重レプリケーション",
-            "データローカリティの活用",
+            "データローカリティーの活用",
           ]
         : [
             "64–128 MB block-level splitting",
@@ -55,8 +55,8 @@ export function MapReduceArchitecture({
           ],
     },
     {
-      label: isJa ? "コモディティハードウェア" : "Commodity Hardware",
-      sublabel: isJa ? "数千台のマシンクラスタ" : "Clusters of thousands of machines",
+      label: isJa ? "コモディティーハードウェア" : "Commodity Hardware",
+      sublabel: isJa ? "数千台のマシンクラスター" : "Clusters of thousands of machines",
       color: "#64748b",
       items: isJa
         ? ["安価なサーバー群", "故障は日常 (年間数%のディスク障害)"]
@@ -69,7 +69,7 @@ export function MapReduceArchitecture({
       title={isJa ? "MapReduce アーキテクチャ" : "MapReduce Architecture"}
       description={
         isJa
-          ? "MapReduce のレイヤー構造 — プログラマが書くのは最上位の2関数だけ"
+          ? "MapReduce のレイヤー構造 — プログラマーが書くのは最上位の2関数だけ"
           : "MapReduce layer architecture — programmers only write the top two functions"
       }
     >
@@ -180,7 +180,7 @@ export function FaultToleranceDiagram({
       title={isJa ? "耐障害性メカニズム" : "Fault Tolerance Mechanisms"}
       description={
         isJa
-          ? "MapReduce が数千台規模のクラスタで信頼性を確保する仕組み"
+          ? "MapReduce が数千台規模のクラスターで信頼性を確保する仕組み"
           : "How MapReduce ensures reliability in clusters of thousands of machines"
       }
     >
@@ -231,10 +231,10 @@ export function MapReduceComparison({
 
   const rows = isJa
     ? [
-        { aspect: "並列化", before: "プログラマが手動で管理", after: "フレームワークが自動処理" },
+        { aspect: "並列化", before: "プログラマーが手動で管理", after: "フレームワークが自動処理" },
         { aspect: "障害復旧", before: "アプリケーション固有のロジック", after: "フレームワークが透過的に再実行" },
         { aspect: "データ分散", before: "明示的なパーティショニング", after: "分散FS + 自動スプリット" },
-        { aspect: "スケーラビリティ", before: "アーキテクチャの再設計が必要", after: "マシン追加で線形にスケール" },
+        { aspect: "スケーラビリティー", before: "アーキテクチャの再設計が必要", after: "マシン追加で線形にスケール" },
         { aspect: "プログラミングモデル", before: "ソケット/RPC/スレッド管理", after: "map() と reduce() の2関数" },
         { aspect: "デバッグ", before: "分散デバッグは極めて困難", after: "個々の map/reduce を単体テスト可能" },
       ]
@@ -325,7 +325,7 @@ export function MapReduceTimeline({ locale = "ja" }: MapReduceTimelineProps) {
       year: "2008",
       title: "Hadoop @ Scale",
       description: isJa
-        ? "Yahoo! が 10,000 ノードの Hadoop クラスタを運用"
+        ? "Yahoo! が 10,000 ノードの Hadoop クラスターを運用"
         : "Yahoo! operates a 10,000-node Hadoop cluster",
       color: "#f59e0b",
     },
@@ -333,7 +333,7 @@ export function MapReduceTimeline({ locale = "ja" }: MapReduceTimelineProps) {
       year: "2010",
       title: "Spark",
       description: isJa
-        ? "Apache Spark 登場。インメモリ処理で MapReduce の 10–100 倍高速化"
+        ? "Apache Spark 登場。インメモリー処理で MapReduce の 10–100 倍高速化"
         : "Apache Spark emerges. In-memory processing, 10–100x faster than MapReduce",
       color: "#ef4444",
     },

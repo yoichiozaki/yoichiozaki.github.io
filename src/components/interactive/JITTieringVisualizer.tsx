@@ -36,7 +36,7 @@ const TIER_COLORS: Record<Tier, string> = {
 };
 
 const TIER_LABELS: Record<Tier, { ja: string; en: string }> = {
-  interpreter: { ja: "インタプリタ", en: "Interpreter" },
+  interpreter: { ja: "インタプリター", en: "Interpreter" },
   baseline: { ja: "ベースライン JIT", en: "Baseline JIT" },
   optimized: { ja: "最適化 JIT", en: "Optimizing JIT" },
   deopt: { ja: "脱最適化!", en: "Deoptimized!" },
@@ -56,7 +56,7 @@ function buildScenario(): JITState[] {
       events: [],
       eventsEn: [],
       description:
-        "プログラム開始: すべての関数はインタプリタで実行されます。プロファイリングデータの収集が始まります。",
+        "プログラム開始: すべての関数はインタプリターで実行されます。プロファイリングデータの収集が始まります。",
       descriptionEn:
         "Program start: All functions execute in the interpreter. Profiling data collection begins.",
     },
@@ -67,7 +67,7 @@ function buildScenario(): JITState[] {
         { name: "helper()", callCount: 200, tier: "interpreter", color: TIER_COLORS.interpreter },
         { name: "format()", callCount: 5, tier: "interpreter", color: TIER_COLORS.interpreter },
       ],
-      events: ["呼び出しカウンタを蓄積中..."],
+      events: ["呼び出しカウンターを蓄積中..."],
       eventsEn: ["Accumulating call counters..."],
       description:
         "実行開始直後: 各関数の呼び出し回数がカウントされています。helper() が最も頻繁に呼ばれています。",
@@ -152,7 +152,7 @@ function buildScenario(): JITState[] {
       ],
       events: [
         "calculate() も最適化 JIT へ昇格",
-        "format() はコールドなままインタプリタで実行",
+        "format() はコールドなままインタプリターで実行",
         "★ ホットコードはネイティブ速度で動作中!",
       ],
       eventsEn: [
@@ -161,7 +161,7 @@ function buildScenario(): JITState[] {
         "★ Hot code running at native speed!",
       ],
       description:
-        "定常状態: ホットな関数（calculate, helper）は最適化済みネイティブコードで高速実行。コールドな format() はインタプリタのまま（コンパイルコスト不要）。",
+        "定常状態: ホットな関数（calculate, helper）は最適化済みネイティブコードで高速実行。コールドな format() はインタプリターのまま（コンパイルコスト不要）。",
       descriptionEn:
         "Steady state: Hot functions (calculate, helper) run as optimized native code at full speed. Cold format() stays in interpreter (no compilation cost).",
     },
@@ -176,7 +176,7 @@ function buildScenario(): JITState[] {
         "helper(\"string\") ← string が渡された!",
         "→ ガード命令が失敗 (型チェック: int ではない!)",
         "→ 脱最適化 (deoptimization) 発生!",
-        "→ インタプリタに戻ってフレームを再構築",
+        "→ インタプリターに戻ってフレームを再構築",
       ],
       eventsEn: [
         "helper(\"string\") ← string was passed!",
@@ -185,7 +185,7 @@ function buildScenario(): JITState[] {
         "→ Fall back to interpreter, reconstruct frame",
       ],
       description:
-        "予期しない型（string）で helper() が呼ばれました！ガード命令が失敗し、脱最適化が発生。ネイティブコードを破棄してインタプリタに戻ります。",
+        "予期しない型（string）で helper() が呼ばれました！ガード命令が失敗し、脱最適化が発生。ネイティブコードを破棄してインタプリターに戻ります。",
       descriptionEn:
         "helper() called with unexpected type (string)! Guard instruction fails, deoptimization occurs. Native code discarded, falls back to interpreter.",
       highlight: "helper()",
@@ -243,7 +243,7 @@ export function JITTieringVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "3つの関数が実行されるにつれて、インタプリタ → ベースライン JIT → 最適化 JIT へ昇格していく過程を追いかけます。脱最適化と再コンパイルも体験できます。"
+          ? "3つの関数が実行されるにつれて、インタプリター → ベースライン JIT → 最適化 JIT へ昇格していく過程を追いかけます。脱最適化と再コンパイルも体験できます。"
           : "Watch 3 functions progress from interpreter → baseline JIT → optimizing JIT as they execute. Experience deoptimization and recompilation."
       }
     >

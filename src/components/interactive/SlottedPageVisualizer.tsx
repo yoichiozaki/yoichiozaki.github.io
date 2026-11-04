@@ -140,9 +140,9 @@ function buildFrames(): Frame[] {
     title: "空のページ",
     titleEn: "An empty page",
     code: `PageInit(page, 256, 0)
-  pd_lower = 24    // ヘッダ直後
+  pd_lower = 24    // ヘッダー直後
   pd_upper = 256   // ページ末尾`,
-    note: "ページはヘッダから始まり、ラインポインタ配列が前から、タプル本体が後ろから伸びていきます。pd_lower と pd_upper に挟まれた領域が空き領域です。",
+    note: "ページはヘッダーから始まり、ラインポインター配列が前から、タプル本体が後ろから伸びていきます。pd_lower と pd_upper に挟まれた領域が空き領域です。",
     noteEn:
       "A page starts with its header. The line-pointer array grows forward and tuple bodies grow backward; the region between pd_lower and pd_upper is free space.",
     touched: ["free"],
@@ -155,7 +155,7 @@ function buildFrames(): Frame[] {
     code: `pd_upper -= MAXALIGN(30) = 32   → 224
 ItemIdData[0] = (off=224, len=32, LP_NORMAL)
 pd_lower += 4                   → 28`,
-    note: "タプルはページ末尾から下向きに置かれ、その位置を指すラインポインタが前から追加されます。長さは MAXALIGN（8バイト境界）に切り上げられます。",
+    note: "タプルはページ末尾から下向きに置かれ、その位置を指すラインポインターが前から追加されます。長さは MAXALIGN（8バイト境界）に切り上げられます。",
     noteEn:
       "The tuple is placed downward from the end of the page, and a line pointer pointing at it is appended at the front. Lengths are rounded up to MAXALIGN (an 8-byte boundary).",
     touched: ["lp0", "t1"],
@@ -168,7 +168,7 @@ pd_lower += 4                   → 28`,
     code: `pd_upper -= 40                  → 184
 ItemIdData[1] = (off=184, len=40, LP_NORMAL)
 pd_lower += 4                   → 32`,
-    note: "行の物理位置は TID = (ブロック番号, ラインポインタ番号) で表されます。インデックスが指すのはこの TID であって、タプルのバイトオフセットではありません。",
+    note: "行の物理位置は TID = (ブロック番号, ラインポインター番号) で表されます。インデックスが指すのはこの TID であって、タプルのバイトオフセットではありません。",
     noteEn:
       "A row's physical location is a TID = (block number, line-pointer number). Indexes point at this TID — not at the tuple's byte offset.",
     touched: ["lp1", "t2"],
@@ -182,7 +182,7 @@ pd_lower += 4                   → 32`,
 ItemIdData[2] = (off=160, len=24, LP_NORMAL)
 pd_lower += 4                   → 36
 free space = 160 - 36 = 124`,
-    note: "空き領域は pd_upper − pd_lower で求まります。次の挿入では「タプル長 + ラインポインタ4バイト」がこの空き領域に収まるかを確認します。",
+    note: "空き領域は pd_upper − pd_lower で求まります。次の挿入では「タプル長 + ラインポインター4バイト」がこの空き領域に収まるかを確認します。",
     noteEn:
       "Free space is pd_upper − pd_lower. Before the next insert, the page checks whether the tuple length plus a 4-byte line pointer still fits.",
     touched: ["lp2", "t3", "free"],
@@ -194,7 +194,7 @@ free space = 160 - 36 = 124`,
     titleEn: "Delete row 2 (DELETE)",
     code: `ItemIdData[1].lp_flags = LP_DEAD
 // タプルのバイトはまだページ上に残っている`,
-    note: "DELETE はバイトを消しません。MVCC のもとでは、まだそのバージョンを見ているトランザクションがいるかもしれないからです。まず t_xmax が書かれ、誰からも見えなくなって初めてラインポインタが LP_DEAD になります。",
+    note: "DELETE はバイトを消しません。MVCC のもとでは、まだそのバージョンを見ているトランザクションがいるかもしれないからです。まず t_xmax が書かれ、誰からも見えなくなって初めてラインポインターが LP_DEAD になります。",
     noteEn:
       "DELETE does not erase bytes: under MVCC another transaction may still be looking at that version. First t_xmax is stamped, and only once the version is invisible to everyone does the line pointer become LP_DEAD.",
     touched: ["lp1", "t2"],
@@ -211,7 +211,7 @@ free space = 160 - 36 = 124`,
   ItemIdData[2].lp_off = 200
   ItemIdData[1].lp_flags = LP_UNUSED
   pd_upper = 200`,
-    note: "詰め直しでタプルは移動しますが、ラインポインタ番号は変わりません。だからインデックスに記録された TID を書き換えずに済みます。これが間接参照を1段挟む最大の理由です。",
+    note: "詰め直しでタプルは移動しますが、ラインポインター番号は変わりません。だからインデックスに記録された TID を書き換えずに済みます。これが間接参照を1段挟む最大の理由です。",
     noteEn:
       "Compaction moves tuples, but line-pointer numbers stay the same — which is why TIDs recorded in indexes never have to be rewritten. That is the whole reason for the extra level of indirection.",
     touched: ["t3", "lp1", "lp2", "free"],
@@ -226,7 +226,7 @@ pd_upper -= 32                  → 168
 ItemIdData[1] = (off=168, len=32, LP_NORMAL)
 pd_lower は 36 のまま（配列は伸びない）
 free space = 168 - 36 = 132`,
-    note: "空いているラインポインタがあれば配列は伸びません。だから pd_lower は据え置きです。逆に言えば、削除と挿入を繰り返してもラインポインタ番号は再利用されるため、TID は世界で一意な識別子ではありません。",
+    note: "空いているラインポインターがあれば配列は伸びません。だから pd_lower は据え置きです。逆に言えば、削除と挿入を繰り返してもラインポインター番号は再利用されるため、TID は世界で一意な識別子ではありません。",
     noteEn:
       "When a free line pointer exists the array does not grow, so pd_lower stays put. Conversely, because slot numbers are recycled across delete/insert cycles, a TID is not a globally unique row identifier.",
     touched: ["lp1", "t4"],
@@ -308,7 +308,7 @@ export function SlottedPageVisualizer({ locale = "ja" }: Props) {
       }
       description={
         isJa
-          ? "挿入・削除・VACUUM・スロット再利用を通して、pd_lower / pd_upper とラインポインタ配列がどう動くかを追います（実際は 8192 バイトですが、ここでは 256 バイトに縮めています）。"
+          ? "挿入・削除・VACUUM・スロット再利用を通して、pd_lower / pd_upper とラインポインター配列がどう動くかを追います（実際は 8192 バイトですが、ここでは 256 バイトに縮めています）。"
           : "Watch pd_lower / pd_upper and the line-pointer array move through insert, delete, VACUUM and slot reuse. (A real page is 8192 bytes; here it is shrunk to 256.)"
       }
     >
@@ -358,7 +358,7 @@ export function SlottedPageVisualizer({ locale = "ja" }: Props) {
           {/* Line pointer array */}
           <div>
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {isJa ? "ラインポインタ配列（ItemIdData）" : "Line-pointer array (ItemIdData)"}
+              {isJa ? "ラインポインター配列（ItemIdData）" : "Line-pointer array (ItemIdData)"}
             </div>
             <div className="overflow-hidden rounded-lg border border-border bg-background">
               <table className="w-full border-collapse text-[11px]">

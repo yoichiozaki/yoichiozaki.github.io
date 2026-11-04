@@ -107,7 +107,7 @@ export const interpretations: Interpretation[] = [
     anchor: "concept",
     spectrum: { ja: "シソーラス・非形式的な is-a", en: "Thesaurus / informal is-a" },
     misses: {
-      ja: "broader / narrower は厳密な部分集合関係を約束しない。性質（プロパティ）も、データへの束縛もない。",
+      ja: "broader / narrower は厳密な部分集合関係を約束しない。性質（プロパティー）も、データへの束縛もない。",
       en: "broader/narrower does not promise strict subsumption. There are no properties and no binding to data.",
     },
   },
@@ -160,7 +160,7 @@ export const interpretations: Interpretation[] = [
     id: "fabric-ontology",
     name: { ja: "Fabric IQ の Ontology", en: "Fabric IQ ontology" },
     example: {
-      ja: "エンティティ型 Customer を ERP のテーブルに束縛して Order との関係・同義語・規則を付け、売上の指標はセマンティックモデルから取り込む",
+      ja: "エンティティー型 Customer を ERP のテーブルに束縛して Order との関係・同義語・規則を付け、売上の指標はセマンティックモデルから取り込む",
       en: "Binding entity type Customer to an ERP table, attaching its relationship to Order, synonyms and rules, and bringing in revenue metrics from a semantic model",
     },
     coverage: { vocabulary: "full", structure: "partial", binding: "full", operation: "partial" },
@@ -175,7 +175,7 @@ export const interpretations: Interpretation[] = [
     id: "owl",
     name: { ja: "OWL オントロジー（形式オントロジー）", en: "OWL ontology (formal ontology)" },
     example: {
-      ja: "「冷凍コンテナで運ばれる出荷は冷凍品の出荷である」を公理として書き、推論器に出荷を自動分類させる",
+      ja: "「冷凍コンテナーで運ばれる出荷は冷凍品の出荷である」を公理として書き、推論器に出荷を自動分類させる",
       en: "Stating “every shipment carried in a reefer container is a frozen shipment” as an axiom and letting a reasoner classify shipments",
     },
     coverage: { vocabulary: "full", structure: "full", binding: "none", operation: "none" },
@@ -263,7 +263,7 @@ export const sources: SourceSystem[] = [
   },
   {
     id: "iot",
-    name: { ja: "冷凍コンテナの IoT", en: "Reefer IoT" },
+    name: { ja: "冷凍コンテナーの IoT", en: "Reefer IoT" },
     owner: { ja: "設備運用", en: "Equipment operations" },
     fabricItem: { ja: "イベントハウス", en: "Eventhouse" },
     engine: "KQL",
@@ -352,7 +352,7 @@ export const entityTypes: EntityType[] = [
   {
     id: "Container",
     namespace: "logistics",
-    label: { ja: "冷凍コンテナ", en: "Reefer container" },
+    label: { ja: "冷凍コンテナー", en: "Reefer container" },
     description: {
       ja: "温度管理された輸送容器。庫内温度を時系列で持つ。",
       en: "A temperature-controlled transport container with an in-box temperature time series.",
@@ -425,7 +425,7 @@ export const relationships: Relationship[] = [
 export const rule = {
   name: { ja: "温度逸脱（TemperatureExcursion）", en: "TemperatureExcursion" },
   definition: {
-    ja: "冷凍コンテナの庫内温度が −15℃ を上回る状態が 30 分以上続いた場合、温度逸脱とみなす。",
+    ja: "冷凍コンテナーの庫内温度が −15℃ を上回る状態が 30 分以上続いた場合、温度逸脱とみなす。",
     en: "A reefer container has a temperature excursion when its in-box temperature stays above −15 °C for 30 minutes or more.",
   },
   linkedTo: ["Container"] as EntityTypeId[],
@@ -438,7 +438,7 @@ export const metric = {
 };
 
 export const question: Bilingual = {
-  ja: "先週、温度逸脱を起こした冷凍コンテナで運ばれた出荷があった顧客を、影響を受けた受注の金額が大きい順に挙げて。営業 CRM 上の取引先名も添えて。",
+  ja: "先週、温度逸脱を起こした冷凍コンテナーで運ばれた出荷があった顧客を、影響を受けた受注の金額が大きい順に挙げて。営業 CRM 上の取引先名も添えて。",
   en: "Which customers had shipments carried in reefer containers that had a temperature excursion last week? Rank them by the amount of the affected orders and include their account names from the sales CRM.",
 };
 
@@ -453,7 +453,7 @@ export type TermResolution = {
 
 export const termResolutions: TermResolution[] = [
   { term: { ja: "温度逸脱", en: "temperature excursion" }, target: { kind: "rule" } },
-  { term: { ja: "冷凍コンテナ", en: "reefer containers" }, target: { kind: "entity", id: "Container" } },
+  { term: { ja: "冷凍コンテナー", en: "reefer containers" }, target: { kind: "entity", id: "Container" } },
   { term: { ja: "出荷", en: "shipments" }, target: { kind: "entity", id: "Shipment" } },
   { term: { ja: "顧客", en: "customers" }, target: { kind: "entity", id: "Customer" } },
   { term: { ja: "受注の金額", en: "amount of the affected orders" }, target: { kind: "metric" } },

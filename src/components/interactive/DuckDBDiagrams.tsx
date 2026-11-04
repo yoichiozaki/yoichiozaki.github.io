@@ -33,19 +33,19 @@ export function DuckDBArchitecture({ locale = "ja" }: DiagramProps) {
       color: p.muted,
     },
     {
-      title: en ? "Parser (vendored libpg_query — PostgreSQL's grammar)" : "パーサ（libpg_query を同梱 — PostgreSQL の文法）",
+      title: en ? "Parser (vendored libpg_query — PostgreSQL's grammar)" : "パーサー（libpg_query を同梱 — PostgreSQL の文法）",
       items: [en ? "SQL text → parse tree" : "SQL テキスト → 構文木"],
       color: p.accent,
     },
     {
-      title: en ? "Binder → Logical planner" : "バインダ → 論理プランナ",
+      title: en ? "Binder → Logical planner" : "バインダー → 論理プランナー",
       items: [en ? "name resolution, types" : "名前解決・型付け", "LogicalOperator"],
       color: p.accent,
     },
     {
-      title: en ? "Optimizer" : "オプティマイザ",
+      title: en ? "Optimizer" : "オプティマイザー",
       items: [
-        en ? "filter pushdown" : "フィルタ押し下げ",
+        en ? "filter pushdown" : "フィルター押し下げ",
         en ? "join order (DP)" : "結合順序（DP）",
         en ? "statistics propagation" : "統計伝播",
         en ? "expression rewriting" : "式書き換え",
@@ -53,7 +53,7 @@ export function DuckDBArchitecture({ locale = "ja" }: DiagramProps) {
       color: p.purple,
     },
     {
-      title: en ? "Physical planner → Executor" : "物理プランナ → Executor",
+      title: en ? "Physical planner → Executor" : "物理プランナー → Executor",
       items: [
         "PhysicalOperator",
         "Pipeline / MetaPipeline",
@@ -130,7 +130,7 @@ export function DuckDBArchitecture({ locale = "ja" }: DiagramProps) {
         <text x={330} y={394} textAnchor="middle" fill={p.muted} fontSize={10}>
           {en
             ? "All layers live in the host process — no server, no socket, no serialization boundary"
-            : "全レイヤがホストプロセス内に同居 — サーバもソケットもシリアライズ境界もない"}
+            : "全レイヤーがホストプロセス内に同居 — サーバーもソケットもシリアライズ境界もない"}
         </text>
       </svg>
     </div>
@@ -177,7 +177,7 @@ export function StringTLayout({ locale = "ja" }: DiagramProps) {
         </text>
 
         <text x={20} y={124} fill={p.text} fontSize={12} fontWeight={700}>
-          {en ? "Long string (> 12 bytes) — prefix + pointer" : "長い文字列（13 バイト以上）— プレフィックス + ポインタ"}
+          {en ? "Long string (> 12 bytes) — prefix + pointer" : "長い文字列（13 バイト以上）— プレフィックス + ポインター"}
         </text>
         {cell(20, 134, 130, "uint32_t length", "4 B", p.accent)}
         {cell(154, 134, 130, 'char prefix[4] = "furi"', "4 B", p.amber)}
@@ -538,7 +538,7 @@ export function RadixPartitionDiagram({ locale = "ja" }: DiagramProps) {
         <text x={20} y={320} fill={p.muted} fontSize={9}>
           {en
             ? "If memory runs short, the same partitioning becomes the spilling unit: one partition at a time is pinned, the rest go to disk."
-            : "メモリが足りなくなったら、この分割がそのまま溢れ出しの単位になる。1 度に 1 パーティションだけをメモリに載せ、残りはディスクへ。"}
+            : "メモリーが足りなくなったら、この分割がそのまま溢れ出しの単位になる。1 度に 1 パーティションだけをメモリーに載せ、残りはディスクへ。"}
         </text>
       </svg>
     </div>
