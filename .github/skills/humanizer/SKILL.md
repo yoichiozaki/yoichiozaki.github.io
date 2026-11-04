@@ -12,22 +12,28 @@ following the two guides by imoz.jp:
 - Japanese: <https://imoz.jp/humanizer.ja.txt>
 - English: <https://imoz.jp/humanizer.en.txt>
 
-The guides are the source of truth. This repository does **not** redistribute
-them; fetch the current version before every run (step 0). The files in
-`references/` are short, paraphrased checklists for locating problems — they
-do not replace a full reading of the guide.
+The guides are the source of truth. Full copies are bundled in `references/`
+(`humanizer.ja.txt`, `humanizer.en.txt`) so the skill works offline; the
+canonical versions are published by the author at the URLs above.
+The short checklists in `references/` are paraphrased indexes for locating
+problems — they do not replace a full reading of the guide.
 
 ## Step 0: Load the guides
 
+Read the bundled guide for each language you edit:
+
+- [references/humanizer.ja.txt](references/humanizer.ja.txt)
+- [references/humanizer.en.txt](references/humanizer.en.txt)
+
+**Read the whole guide** before diagnosing anything; the guides say so
+explicitly. To pick up upstream changes, refresh the copies and commit the diff:
+
 ```powershell
-node .github/skills/humanizer/scripts/fetch-guides.mjs          # cached for 24h
-node .github/skills/humanizer/scripts/fetch-guides.mjs --force  # refetch
+node .github/skills/humanizer/scripts/fetch-guides.mjs
 ```
 
-The script writes `.github/skills/humanizer/.cache/humanizer.{ja,en}.txt`
-(git-ignored). If Node or network access is unavailable, fetch the URLs above
-with a web-fetch tool instead. **Read the whole guide for each language you
-edit** before diagnosing anything; the guides say so explicitly.
+If Node or network access is unavailable, fetch the URLs above with a
+web-fetch tool instead.
 
 ## Step 1–5: The guide's workflow
 
@@ -104,10 +110,12 @@ npm run build                                  # full static export
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/fetch-guides.mjs` | Download the canonical guides into `.cache/` |
+| `scripts/fetch-guides.mjs` | Refresh the bundled guide copies in `references/` from imoz.jp |
 | `scripts/scan-patterns.mjs` | Read-only locator for common patterns (ja/en) and missing long vowels. Usage: `node .github/skills/humanizer/scripts/scan-patterns.mjs [--lang ja\|en] [--summary] [files...]` |
 
 ## References
 
 - [references/checklist-ja.md](references/checklist-ja.md) — condensed Japanese checklist
 - [references/checklist-en.md](references/checklist-en.md) — condensed English checklist
+- [references/humanizer.ja.txt](references/humanizer.ja.txt) — full Japanese guide (copy of <https://imoz.jp/humanizer.ja.txt>)
+- [references/humanizer.en.txt](references/humanizer.en.txt) — full English guide (copy of <https://imoz.jp/humanizer.en.txt>)

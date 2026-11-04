@@ -120,7 +120,7 @@ tags: ["Tag1", "Tag2"]
 ### Humanizer (writing style)
 
 - **Skill**: `.github/skills/humanizer/SKILL.md` — Revision workflow that applies the imoz.jp writing guides ([ja](https://imoz.jp/humanizer.ja.txt) / [en](https://imoz.jp/humanizer.en.txt)) to articles
-- **Guides**: fetched at run time by `node .github/skills/humanizer/scripts/fetch-guides.mjs` into the git-ignored `.cache/`; not stored in the repo
+- **Guides**: full copies bundled at `.github/skills/humanizer/references/humanizer.{ja,en}.txt`; refresh from imoz.jp with `node .github/skills/humanizer/scripts/fetch-guides.mjs`
 - **Locator**: `node .github/skills/humanizer/scripts/scan-patterns.mjs --summary` lists candidate patterns and missing long vowels; judge every hit in context
 - Japanese posts use the guide's long-vowel notation (サーバー, ユーザー, メモリー, パラメーター; but データ, キー, アーキテクチャ)
 
