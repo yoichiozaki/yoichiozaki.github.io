@@ -117,6 +117,13 @@ tags: ["Tag1", "Tag2"]
 - **Skill**: `.github/skills/content-reviewer/SKILL.md` — Systematic technical accuracy review workflow for blog articles
 - **Agent**: `.github/agents/content-reviewer.agent.md` — Automated reviewer that checks algorithms, pseudocode, language-specific claims, diagrams, and bilingual consistency
 
+### Humanizer (writing style)
+
+- **Skill**: `.github/skills/humanizer/SKILL.md` — Revision workflow that applies the imoz.jp writing guides ([ja](https://imoz.jp/humanizer.ja.txt) / [en](https://imoz.jp/humanizer.en.txt)) to articles
+- **Guides**: fetched at run time by `node .github/skills/humanizer/scripts/fetch-guides.mjs` into the git-ignored `.cache/`; not stored in the repo
+- **Locator**: `node .github/skills/humanizer/scripts/scan-patterns.mjs --summary` lists candidate patterns and missing long vowels; judge every hit in context
+- Japanese posts use the guide's long-vowel notation (サーバー, ユーザー, メモリー, パラメーター; but データ, キー, アーキテクチャ)
+
 ### Mermaid Diagrams
 
 - **CodeBlock**: `src/components/CodeBlock.tsx` — `pre` override that detects `data-language="mermaid"` and delegates to Mermaid component; otherwise renders CopyCodeBlock
