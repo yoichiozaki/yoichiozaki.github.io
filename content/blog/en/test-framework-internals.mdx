@@ -1,17 +1,17 @@
 ---
 title: "Inside Test Frameworks — Designing and Building a Test Runner from Scratch"
 date: "2026-04-04"
-description: "What really happens under the hood when you run pytest or unittest? We build a test runner from scratch in Python, exploring discovery, collection, lifecycle hooks, assertions, mocking, and reporting in exhaustive detail."
+description: "What do test frameworks like pytest and unittest do between finding your tests and reporting the results? We build a small test runner in Python and explain how discovery, collection, lifecycle hooks, assertions, mocking, and reporting work."
 tags: ["Testing", "Python", "Software Engineering", "Architecture", "Interactive"]
 ---
 
-Have you ever wondered what happens behind the scenes when you run `pytest`?
+When you type `pytest`, the test files are found, the test functions run in order, and a failed comparison is reported along with the values it compared.
 
-Test frameworks (pytest, unittest, Jest, Go's testing package, etc.) take hundreds of lines of test code and **automatically discover, organize, execute, and report results** — a remarkably complex job. In this article, we'll build a test framework from scratch in Python, thoroughly dissecting its design philosophy and internal architecture.
+Test frameworks (pytest, unittest, Jest, Go's testing package, etc.) automatically discover, organize, execute, and report on tests. In this article, we build a small test runner in Python that performs each of these steps and look at how each one is designed.
 
 ## The Big Picture of a Test Framework
 
-Let's start with the overall pipeline that a test framework processes.
+A test framework's work can be divided into the following pipeline.
 
 ```mermaid
 graph LR
@@ -24,21 +24,19 @@ graph LR
     G --> H[Reporter]
 ```
 
-Use the interactive demo below to step through what the test runner does at each phase.
+The interactive demo below lets you step through what the test runner does at each phase.
 
 <TestRunnerVisualizer />
-
-Now let's dive into each phase, implementing real code along the way.
 
 ---
 
 ## Phase 1: Test Discovery — Finding the Files
 
-The first thing a test framework does is **find which files are tests**.
+A test framework first has to find which files contain tests.
 
 ### Convention-Based Discovery
 
-Most frameworks identify test files by **filename conventions**.
+Most frameworks identify test files by filename conventions.
 
 ```text
 pytest:
@@ -56,7 +54,7 @@ Go:
   *_test.go
 ```
 
-Let's implement this. `pathlib.Path.rglob()` lets us recursively traverse directories and collect all files matching a pattern in one shot.
+Our implementation follows pytest's conventions. `pathlib.Path.rglob()` traverses directories recursively and returns every file that matches a pattern.
 
 ```python
 # mini_test/discovery.py
@@ -89,14 +87,14 @@ def discover_test_files(
     return sorted(files)
 ```
 
-We apply `sorted()` to the result to make test execution order **deterministic**. The order returned by the filesystem varies by OS and filesystem type, so sorting guarantees a stable, environment-independent execution order. The ignore list (`__pycache__`, `.venv`, etc.) prevents the framework from accidentally picking up `.py` files inside those directories as "tests."
+We apply `sorted()` to the result to make the test execution order deterministic. The order in which the filesystem returns files varies by OS and filesystem type; sorting gives the same order in every environment. The ignore list (`__pycache__`, `.venv`, etc.) keeps the runner from picking up `.py` files inside those directories as tests.
 
 ### Why Glob Patterns?
 
-The advantage of glob patterns is that they're **declarative**. Users can define file placement rules in configuration, and the framework simply scans the filesystem following those patterns.
+Glob patterns are declarative. Users write the rules for where test files live in a configuration file, and the framework only has to scan the filesystem with those patterns. In pytest, the following settings play this role.
 
 ```ini
-# pyproject.toml — this is exactly what testpaths config does
+# pyproject.toml — testpaths sets where to search; python_* set the name patterns
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
@@ -108,13 +106,13 @@ python_functions = ["test_*"]
 
 ## Phase 2: Test Collection — Gathering Functions and Classes
 
-Once test files are found, the next step is to **collect** test cases from them. This is where pytest's design gets really interesting.
+Once test files are found, the next step is to collect the test cases inside them.
 
 ### pytest's Collection Strategy: Function Name Conventions
 
-pytest doesn't use DSLs like `describe`/`it`. Standard function tests are identified by <strong>function name conventions</strong> (`test_` prefix). Real pytest also supports `Test*` classes, `unittest.TestCase`, and configuration overrides such as `python_files`, `python_classes`, and `python_functions`. Combined with Python's `inspect` module, this enables remarkably powerful discovery.
+pytest doesn't use DSLs like `describe`/`it`. Standard function tests are identified by <strong>function name conventions</strong> (`test_` prefix). Real pytest also supports `Test*` classes, `unittest.TestCase`, and configuration overrides such as `python_files`, `python_classes`, and `python_functions`. Because names alone identify tests, a runner can load a module, list its functions with Python's `inspect` module, and keep the ones whose names match.
 
-The implementation below uses `importlib.util` to **dynamically import test files as modules**. The three-step process — `spec_from_file_location()` to create a module spec from a file path, `module_from_spec()` to build the module object, and `exec_module()` to actually execute the code — allows importing any `.py` file without polluting `sys.path`.
+The implementation below uses `importlib.util` to import each test file dynamically as a module. It takes three steps: `spec_from_file_location()` creates a module spec from a file path, `module_from_spec()` builds the module object, and `exec_module()` executes the code. This lets us import any `.py` file without modifying `sys.path`.
 
 ```python
 # mini_test/collector.py
@@ -172,7 +170,7 @@ def collect_from_file(path: Path) -> TestSuite:
 
 ### The Key to Collection: Module Import
 
-The crucial point here is that **`exec_module()` executes the module's top-level code**. The test functions themselves are NOT executed at this point — they're merely collected by name via `inspect.getmembers()`.
+Calling `exec_module()` executes the module's top-level code. The test functions themselves do not run at this point; `inspect.getmembers()` only collects them by name.
 
 ```python
 # test_math.py — this file gets exec_module()'d
@@ -194,16 +192,15 @@ def helper_function():
     pass
 ```
 
-This pattern of **"import to collect, defer test execution"** is the foundational design of pytest-style frameworks. It enables:
+Importing the module collects the tests, and running the test functions is deferred. This separation is the foundation of pytest-style frameworks. It allows a runner to:
 
-1. **Separation** of test registration and execution
-2. Knowing the total test count before execution (for progress bars)
-3. **Filtering** (`-k` option) and **reordering** tests before running
-4. Injecting lifecycle hooks (setup/teardown) at the right moments
+1. Know the total number of tests before running them (for progress bars)
+2. Filter (`-k` option) and reorder tests before running them
+3. Insert lifecycle hooks (setup/teardown) at the right moments
 
 ### Lifecycle Hook Registration
 
-In pytest / unittest conventions, functions with specific names are recognized as lifecycle hooks. The split into `setup_module`/`teardown_module` (module-level) and `setup_function`/`teardown_function` (per-test) exists for an important reason. **Expensive resources** like database connections can be created and destroyed once per module, while operations that ensure **test isolation** (e.g., clearing tables) run before every individual test.
+pytest recognizes module-level functions with fixed names, such as `setup_module`, as xunit-style lifecycle hooks (unittest uses names such as `setUpModule` and `TestCase.setUp`). Because the hooks are split into module-level `setup_module`/`teardown_module` and per-test `setup_function`/`teardown_function`, each operation can run at the frequency it needs. Expensive resources such as database connections are created and destroyed once per module, while operations that keep tests independent, such as clearing tables, run before every test.
 
 ```python
 # test_database.py — lifecycle hook example
@@ -241,11 +238,11 @@ def test_delete():
 
 ## Phase 3: The Execution Engine — Running in the Right Order
 
-After collection, it's time to run the tests. The test runner's job is to **execute each test safely while interleaving lifecycle hooks in the correct order**.
+After collection, the runner executes the tests. It runs each test in isolation from the others and calls the lifecycle hooks around it in the correct order.
 
 ### Execution Order
 
-Visualizing the test runner's execution order for a suite reveals a nested structure: `setup_module` → (`setup_function` → test body → `teardown_function`) × n → `teardown_module`.
+A suite runs in a nested order: `setup_module` → (`setup_function` → test body → `teardown_function`) × n → `teardown_module`.
 
 ```text
 Execution flow for Suite "test_math":
@@ -264,7 +261,7 @@ Execution flow for Suite "test_math":
 
 ### Runner Implementation
 
-A key detail in the implementation is the use of **`time.perf_counter()`**. While `time.time()` is based on the system clock and can be affected by NTP synchronization or manual clock changes, `perf_counter()` uses a monotonic clock, making it **ideal for measuring elapsed time**.
+The runner measures durations with `time.perf_counter()`. `time.time()` follows the system clock, so NTP synchronization or manual clock changes can affect it. `perf_counter()` uses a monotonic clock, which makes it suitable for measuring elapsed time.
 
 ```python
 # mini_test/runner.py
@@ -325,7 +322,7 @@ def run_suite(suite: TestSuite) -> list[TestResult]:
 
 ### Test Isolation via try-except
 
-One of the most important design principles in a test runner is that **one test's failure must not affect other tests**.
+A basic design principle of a test runner is that one test's failure must not spread to other tests.
 
 ```python
 # Each test is wrapped in its own try-except
@@ -336,19 +333,19 @@ except Exception as exc:
     # → if an exception is thrown, FAIL (other tests unaffected)
 ```
 
-This works hand-in-hand with the design that "assertions simply raise exceptions." `assert 1 == 2` internally executes `raise AssertionError`. A test PASSes when "nothing was thrown," and FAILs when "something was thrown."
+This works because assertions do nothing more than raise exceptions. `assert 1 == 2` internally executes `raise AssertionError`. A test passes if it finishes without raising and fails if an exception is raised.
 
-Another benefit of this `try-except` model is that it <strong>catches unexpected ordinary exceptions (`TypeError`, `KeyError`, etc.) too</strong>. Not just assertion failures, but many exceptions thrown during a test are safely captured, allowing the remaining tests to continue. `BaseException` subclasses such as `KeyboardInterrupt` and `SystemExit` are usually handled separately as interruption or termination signals. This robustness is a fundamental quality expected of test runners.
+`except Exception` catches assertion failures and also unexpected ordinary exceptions such as `TypeError` and `KeyError`. When a test raises one of these, the runner records the test as failed and continues with the remaining tests. `BaseException` subclasses such as `KeyboardInterrupt` and `SystemExit` are usually handled separately as interruption or termination signals.
 
 ---
 
 ## Phase 4: The Assertion Engine — Inside assert
 
-The assertion engine is the part of the test framework closest to the user.
+The assertion engine is the part of a test framework that test authors use directly.
 
 ### Python's assert Statement
 
-In Python tests, the built-in `assert` statement works out of the box. It's simply syntactic sugar for raising `AssertionError`.
+In Python tests, the built-in `assert` statement works out of the box. It is syntactic sugar for raising `AssertionError` when its condition is false.
 
 ```python
 # The essence of assert
@@ -358,11 +355,11 @@ if not (1 + 1 == 2):
     raise AssertionError
 ```
 
-However, a plain `assert` produces poor error messages. For example, when `assert result == "Hello, world!"` fails, plain Python only shows `AssertionError` with no indication of what `result` actually contained. This makes debugging painfully slow. pytest solves this through **assert rewriting**.
+However, a plain `assert` reports almost nothing when it fails. For example, when `assert result == "Hello, world!"` fails, plain Python shows only `AssertionError`, with no indication of what `result` contained. pytest solves this through **assert rewriting**.
 
 ### pytest's Assert Rewriting
 
-pytest **rewrites the AST (Abstract Syntax Tree) of `assert` statements at import time** to display detailed information on failure. This is one of pytest's most innovative features.
+pytest rewrites the AST (Abstract Syntax Tree) of `assert` statements at import time so that a failure reports details such as the compared values.
 
 ```python
 # What the user writes
@@ -382,7 +379,7 @@ def test_greeting():
         )
 ```
 
-Let's implement a simplified version of this mechanism:
+Here is a simplified implementation. It handles only `assert` statements with a single comparison operator: it stores the left and right operands in temporary variables and, if the comparison is false, raises an `AssertionError` whose message includes both values.
 
 ```python
 # mini_test/assertion_rewrite.py
@@ -470,9 +467,9 @@ class AssertRewriter(ast.NodeTransformer):
 
 ### Custom Assert Functions
 
-While pytest's assert rewriting uses the advanced technique of AST transformation, a simpler approach is to implement **custom assert functions**.
+Detailed messages are also possible without rewriting the AST, by using custom assert functions.
 
-The tradeoff is clear: AST rewriting lets users write plain `assert` and still get detailed messages, but the implementation is complex and harder to debug. Custom assert functions require calls like `assert_equal(a, b)`, but the implementation is transparent and easy to understand:
+With AST rewriting, users write a plain `assert` and still get detailed messages, but the implementation is complex and harder to debug. Custom assert functions require calls like `assert_equal(a, b)`, but their implementation is simple and easy to follow.
 
 ```python
 # mini_test/assertions.py
@@ -544,7 +541,7 @@ def assert_length(obj: Any, length: int) -> None:
 
 ### == vs is — What's the Difference?
 
-The difference between these two comparisons is a common source of confusion for test writers. As a practical guideline, **use `==` when verifying value equality, and `is` when verifying identity with singleton objects (like `None`) or same-object references**.
+The difference between `==` and `is` often confuses test writers. <strong>Use `==` to check that values are equal, and `is` to check identity with a singleton such as `None` or a reference to the same object</strong>.
 
 ```python
 # == → value equality (__eq__ method)
@@ -574,13 +571,13 @@ assert not 1 == 1   → not (1 == 1) is False → AssertionError
 
 ## Phase 5: Mocking & Patching — Replacing Function Behavior
 
-Another crucial feature of test frameworks is the ability to **replace function behavior and record calls**.
+Test frameworks also provide ways to replace a function's behavior and record its calls.
 
-Why is mocking necessary? Tests often face **external dependencies** like API calls, database connections, and filesystem operations. Including these dependencies directly in tests makes them slow, flaky, and environment-dependent. Mocking lets you replace these dependencies with "fakes," allowing you to focus solely on the logic under test.
+Tests often run into external dependencies such as API calls, database connections, and filesystem operations. Including these dependencies directly makes tests slow, flaky, and environment-dependent. Mocks replace the dependencies with fakes so that a test checks only the logic under test.
 
 ### Implementing a Spy
 
-A **spy** wraps the original function and records call information.
+A <strong>spy</strong> wraps the original function and records the arguments and return value of each call.
 
 ```python
 # mini_test/spy.py
@@ -671,7 +668,7 @@ def test_spy_mock_return():
 
 ### Patching Object Methods
 
-In Python, `unittest.mock.patch` is well-known, and its mechanism is essentially **attribute replacement**. The `Patch` class below uses Python's context manager (`with` statement). `__enter__` replaces the attribute and `__exit__` restores it, **structurally preventing restoration from being forgotten**. This is critical for maintaining test isolation.
+In Python, `unittest.mock.patch` is widely used, and its mechanism is attribute replacement. The `Patch` class below is implemented as a context manager (`with` statement). `__enter__` replaces the attribute and `__exit__` restores it, so the original is always restored when the `with` block exits. If restoration were forgotten, the replaced attribute would remain for later tests and break test isolation.
 
 ```python
 # mini_test/patch.py
@@ -716,11 +713,11 @@ def test_patch_environ():
 
 ## Phase 6: The Reporter — Communicating Results to Humans
 
-The reporter **formats test execution results into human-readable output**.
+The reporter formats test results as human-readable output.
 
 ### Reporter Interface
 
-Defining the reporter as an abstract class (interface) is a classic application of the **Strategy pattern**. The same test results can be output in various formats — console, JSON file, JUnit XML, HTML — and the runner depends only on the interface, not any specific implementation.
+Defining the reporter as an abstract class (interface) is a typical application of the Strategy pattern. The same results can be written to the console, a JSON file, JUnit XML, HTML, and other formats. The runner knows nothing about specific reporter implementations and depends only on the interface.
 
 ```python
 # mini_test/reporter.py
@@ -743,7 +740,7 @@ class Reporter(ABC):
 
 ### Console Reporter Implementation
 
-The console reporter uses ANSI escape codes (`\033[32m` for green, `\033[31m` for red, `\033[0m` for reset) to color-code test results. The visual feedback of green `✓` for passes and red `✗` for failures lets you scan hundreds of results at a glance.
+The console reporter uses ANSI escape codes (`\033[32m` for green, `\033[31m` for red, `\033[0m` for reset) to color-code test results. Passes appear as a green `✓` and failures as a red `✗`, so failures are easy to spot even among many results.
 
 ```python
 # mini_test/console_reporter.py
@@ -812,7 +809,7 @@ def run(suites: list[TestSuite], reporter: Reporter) -> list[TestResult]:
 
 ## Phase 7: Putting It All Together — The CLI Entry Point
 
-Finally, let's build a CLI entry point that ties all the phases together. A particularly important detail here is the **exit code** design. `sys.exit(1 if failed else 0)` allows CI servers (GitHub Actions, Jenkins, CircleCI, etc.) to determine test success purely from the exit code. This follows the Unix convention of "exit code 0 = success, non-zero = failure," honored by every test framework.
+Finally, we build a CLI entry point that ties all the phases together. It reports success or failure through its exit code. Exiting with `sys.exit(1 if failed else 0)` lets CI servers (GitHub Actions, Jenkins, CircleCI, etc.) determine test success from the exit code alone. This is the Unix convention of "exit code 0 = success, non-zero = failure", and pytest, Jest, and `go test` also exit with a non-zero code when tests fail.
 
 ```python
 # mini_test/cli.py
@@ -869,11 +866,11 @@ Found 2 test file(s)
 
 ## Comparison with Real Frameworks
 
-We've now implemented the core features of a test framework. Real frameworks build many more advanced features on top of this core. Test parallelization shortens execution time, snapshot testing enables regression detection, code coverage reveals untested paths, and watch mode improves the development experience — each bringing its own unique design challenges.
+We have now implemented the core features of a test framework. On top of this core, real frameworks add parallelization to shorten run time, snapshot testing to detect output regressions, coverage measurement to find untested code, and watch mode to rerun tests when files change.
 
 ### Test Parallelization
 
-pytest-xdist uses `execnet` to spawn and manage worker processes, running test files in parallel.
+pytest-xdist uses `execnet` to spawn and manage worker processes and distributes tests across the workers to run them in parallel. For simplicity, the diagram and implementation below distribute work per test file.
 
 ```text
 Parallel execution architecture:
@@ -906,7 +903,7 @@ def run_in_parallel(files: list[Path], num_workers: int = 4) -> list[TestResult]
 
 ### Snapshot Testing
 
-Snapshot testing **saves output to a file and compares it on the next run** (in pytest, plugins like syrupy provide this). It's especially effective for cases where the output is complex and writing the "correct value" by hand would be tedious, such as UI components or API responses. On the first run, it saves a "baseline snapshot," and subsequent runs detect only the diff — efficiently catching unintended regressions.
+Snapshot testing saves output to a file and compares later runs against the saved content (in pytest, plugins such as syrupy provide this). It suits cases where the output is complex and writing the expected value by hand would be tedious, such as UI components or API responses. The first run saves a baseline snapshot, and later runs detect differences from it, which catches unintended regressions.
 
 ```python
 # Conceptual implementation
@@ -933,14 +930,14 @@ def assert_matches_snapshot(actual: Any, snapshot_path: Path) -> None:
 
 ### Code Coverage
 
-Code coverage in Python is achieved through **trace hooks via `sys.settrace`** or **`sys.monitoring` (Python 3.12+)**.
+Code coverage in Python is measured through trace hooks set with `sys.settrace`, or through `sys.monitoring` (Python 3.12+).
 
 ```text
 How coverage.py works:
   1. Sets a trace hook via sys.settrace()
   2. Python interpreter calls the hook on each line execution
   3. The hook records executed line numbers in a set
-  4. After tests complete, compares against total lines to calculate coverage
+  4. After tests complete, compares executed lines against the executable statements to calculate coverage
 
 Python 3.12+ sys.monitoring:
   1. sys.monitoring is a newer API with less overhead
@@ -950,7 +947,7 @@ Python 3.12+ sys.monitoring:
 
 ### Watch Mode
 
-Watch mode detects file changes and automatically reruns tests, implemented through filesystem monitoring with libraries like `watchdog` (e.g., pytest-watch).
+Watch mode detects file changes and reruns tests automatically. pytest-watch implements this with filesystem monitoring via the `watchdog` library.
 
 ```python
 # Conceptual implementation
@@ -1001,7 +998,7 @@ The key difference:
 
 ### Go's testing Package
 
-Go is a rare language that bakes testing into its standard library.
+Go provides testing through the standard library's `testing` package and the `go test` command.
 
 ```go
 // Go: tests are identified by function signature conventions
@@ -1040,11 +1037,11 @@ Go testing characteristics:
   - Testing concurrent code: virtual time via testing/synctest (Go 1.25+)
 ```
 
-That last entry, [`testing/synctest`](https://go.dev/pkg/testing/synctest), is Go's answer to the perennial problem with concurrency tests: you end up sleeping with `time.Sleep`, which makes tests both slow and flaky. `synctest.Test` runs the test function inside an isolated "bubble" where the `time` package operates on a fake clock. The moment every goroutine in the bubble is blocked, the clock jumps forward instantly — so a "one hour later" timeout can be tested deterministically in zero wall-clock time. It first appeared behind `GOEXPERIMENT=synctest` in Go 1.24 and graduated to general availability in Go 1.25.
+That last entry, [`testing/synctest`](https://go.dev/pkg/testing/synctest), addresses a common problem with concurrency tests: waiting with `time.Sleep` makes them slow and flaky. `synctest.Test` runs the test function inside an isolated "bubble" where the `time` package uses a fake clock. When every goroutine in the bubble is blocked, the clock advances immediately, so a "one hour later" timeout can be tested deterministically in zero wall-clock time. It first appeared behind `GOEXPERIMENT=synctest` in Go 1.24 and graduated to general availability in Go 1.25.
 
 ### Jest / Vitest
 
-The major test frameworks in the JavaScript / TypeScript ecosystem.
+Jest and Vitest are the major test frameworks in the JavaScript / TypeScript ecosystem.
 
 ```text
 Jest:
@@ -1060,9 +1057,9 @@ Vitest:
   - parallelization through worker threads / child processes depending on pool configuration
 ```
 
-### pytest Fixtures — A Masterpiece of Dependency Injection
+### pytest Fixtures — Dependency Injection by Argument Name
 
-pytest's fixture system is one of the most elegant designs in test framework engineering. Test functions' **argument names** are matched against fixture names, and dependencies are automatically injected. This is similar to DI containers in web frameworks, but specialized for testing. With `yield`-based fixtures, everything before `yield` is setup and everything after is teardown, keeping resource creation and cleanup co-located.
+In pytest, the <strong>argument names</strong> of a test function are matched against fixture names, and the matching fixtures are injected automatically. The idea is similar to DI containers in web frameworks, implemented for testing. In a fixture that uses `yield`, the code before `yield` is setup and the code after it is teardown, so resource creation and cleanup are written in one place.
 
 ```python
 # pytest: fixtures are dependency injection
@@ -1112,7 +1109,7 @@ pytest fixture resolution:
 
 ## Summary
 
-Test frameworks appear simple on the surface yet are composed of sophisticated design choices under the hood.
+The mechanisms of each phase and their corresponding design patterns are as follows.
 
 | Phase | Mechanism | Design Pattern |
 |-------|-----------|---------------|
@@ -1125,4 +1122,4 @@ Test frameworks appear simple on the surface yet are composed of sophisticated d
 | Reporting | Reporter abstract class | Strategy Pattern |
 | Parallelization | execnet (process parallelism) | Message Passing |
 
-Understanding "what happens behind the scenes" makes you a better test designer. Next time a test goes red, picture the `assert` statement triggering `raise AssertionError`, caught by the runner's `try-except` — and you'll know exactly what's happening.
+Knowing how these mechanisms work makes it easier to decide at what scope to use hooks and fixtures, and to tell at which stage a failure happened. Next time a test goes red, picture the `assert` statement running `raise AssertionError` and the runner's `try-except` catching it.

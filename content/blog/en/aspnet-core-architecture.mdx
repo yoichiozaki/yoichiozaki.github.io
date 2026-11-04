@@ -1,19 +1,19 @@
 ---
-title: "ASP.NET Core Architecture Deep Dive — From Request Arrival to Response"
+title: "Inside ASP.NET Core — From Request Arrival to Response"
 date: "2026-04-05"
-description: "A thorough exploration of ASP.NET Core internals: hosting model, middleware pipeline, DI container, routing, filter pipeline, and performance optimizations."
+description: "How ASP.NET Core handles a request from arrival to response: the hosting model, middleware pipeline, DI container, routing, filter pipeline, and other internals, explained with simplified code and diagrams."
 tags: ["ASP.NET Core", ".NET", "Architecture", "Middleware", "Dependency Injection"]
 ---
 
 ## Introduction
 
-ASP.NET Core is a cross-platform, high-performance web framework developed by Microsoft. But behind a simple line like `app.MapGet("/hello", () => "Hello World")`, the framework performs a surprisingly complex series of operations.
+ASP.NET Core is a cross-platform web framework developed by Microsoft. Even a handler written in one line, like `app.MapGet("/hello", () => "Hello World")`, receives its request only after Kestrel has parsed it, a DI scope has been created, and the request has passed through the middleware pipeline and routing.
 
-In this article, we trace the entire journey of an HTTP request from arrival to response, examining the source code along the way.
+The chapters below take the stages in the order a request passes through them and explain the internals of the component behind each one with simplified code and diagrams.
 
 ## Architecture Overview
 
-Let's start with a bird's-eye view of the major components and request flow.
+A request goes from Kestrel through `HostingApplication` into the middleware pipeline, passes through the middleware in registration order, and reaches the endpoint's handler. The response travels back through the same middleware in reverse order.
 
 ```mermaid
 graph TD
@@ -42,7 +42,7 @@ graph TD
 
 ### Generic Host Structure
 
-ASP.NET Core applications are built on top of the **Generic Host** (`Microsoft.Extensions.Hosting`). When you call `WebApplication.CreateBuilder()`, the following happens internally:
+ASP.NET Core applications are built on top of the Generic Host (`Microsoft.Extensions.Hosting`). When you call `WebApplication.CreateBuilder()`, the following happens internally.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -54,7 +54,7 @@ var builder = WebApplication.CreateBuilder(args);
 // 5. Initialize the DI container (ServiceCollection)
 ```
 
-Let's look at the internal implementation of [`WebApplication.CreateBuilder()`](https://github.com/dotnet/aspnetcore/blob/main/src/DefaultBuilder/src/WebApplication.cs):
+[`WebApplication.CreateBuilder()`](https://github.com/dotnet/aspnetcore/blob/main/src/DefaultBuilder/src/WebApplication.cs) itself only wraps the arguments in `WebApplicationOptions` and creates a `WebApplicationBuilder`.
 
 ```csharp
 // Simplified implementation from dotnet/aspnetcore
@@ -66,7 +66,7 @@ public static WebApplicationBuilder CreateBuilder(string[] args)
 }
 ```
 
-The `WebApplicationBuilder` constructor initializes in the following order:
+The `WebApplicationBuilder` constructor registers the configuration sources and creates the `ServiceCollection`, and `Build()` creates the DI container and the `WebApplication`. Middleware registered with `app.UseXxx()` is assembled into the pipeline when `app.Run()` starts the host.
 
 ```mermaid
 sequenceDiagram
@@ -85,14 +85,14 @@ sequenceDiagram
     WAB-->>App: WebApplicationBuilder
     App->>WAB: Build()
     WAB->>WAB: BuildServiceProvider()
-    WAB->>WAB: Build middleware pipeline
+    WAB->>WAB: Create WebApplication
     WAB-->>App: WebApplication
-    App->>App: app.Run()
+    App->>App: app.Run() (pipeline built at host start)
 ```
 
-### Kestrel — High-Performance Web Server
+### Kestrel — The Default HTTP Server
 
-Kestrel is ASP.NET Core's default in-process HTTP server. Having migrated from [libuv](https://libuv.org/) to its own I/O implementation, it now uses an **asynchronous I/O** architecture based on `System.IO.Pipelines` and `System.Net.Sockets`.
+Kestrel is ASP.NET Core's default in-process HTTP server. It started out on [libuv](https://libuv.org/), moved to its own I/O implementation, and now does asynchronous I/O with `System.IO.Pipelines` and `System.Net.Sockets`.
 
 #### Kestrel Internals
 
@@ -115,7 +115,7 @@ graph TD
     Pipeline --> Http3
 ```
 
-The key design choice in Kestrel is the adoption of **`System.IO.Pipelines`**. Traditional `Stream`-based APIs required frequent buffer copies when reading data. With `Pipelines`, data can be processed in a **near-zero-copy** manner through `ReadOnlySequence<byte>`.
+Kestrel reads incoming data through `System.IO.Pipelines`. With traditional `Stream`-based APIs, reading data often meant copying buffers. `Pipelines` exposes the receive buffers as a `ReadOnlySequence<byte>`, so Kestrel can parse the data with almost no copying.
 
 ```csharp
 // Simplified image of Kestrel's HTTP/1.1 parser
@@ -139,7 +139,9 @@ while (true)
 
 #### Connection Management and Concurrency
 
-Kestrel manages each connection as an individual `Task`. With .NET's thread pool and `async/await`, a small number of OS threads can efficiently handle a large number of concurrent connections.
+Kestrel manages each connection as an individual `Task`. With .NET's thread pool and `async/await`, threads are released while a connection waits on I/O, so a small number of OS threads can handle many concurrent connections.
+
+Limits on connections, request size, and timeouts are set through `KestrelServerLimits`. The defaults are:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -151,7 +153,7 @@ Kestrel manages each connection as an individual `Task`. With .NET's thread pool
 
 ### Reverse Proxy Configuration
 
-In production, Kestrel is typically placed behind a **reverse proxy** (Nginx, IIS, YARP, etc.) rather than being directly exposed.
+In production, Kestrel is typically placed behind a reverse proxy (Nginx, IIS, YARP, etc.) rather than being directly exposed.
 
 ```mermaid
 graph LR
@@ -161,19 +163,19 @@ graph LR
     RP --> K3["Kestrel<br/>Instance 3"]
 ```
 
-Responsibilities of the reverse proxy:
+The reverse proxy can take over these jobs:
 
-- **TLS Termination** — SSL/TLS encryption and decryption
-- **Load Balancing** — Distributing load across multiple instances
-- **Request Buffering** — Absorbing slow client transmissions
-- **Static File Serving** — Responding without reaching Kestrel
-- **Rate Limiting** — Mitigating DDoS attacks and abuse
+- TLS termination: SSL/TLS encryption and decryption
+- Load balancing: spreading load across multiple Kestrel instances
+- Request buffering: receiving uploads from slow clients at the proxy
+- Static file serving: responding without the request reaching Kestrel
+- Rate limiting: mitigating DDoS attacks and excessive requests
 
 ## Chapter 2: Middleware Pipeline — The Request's Journey
 
 ### How Middleware Works
 
-The core of ASP.NET Core's request processing is the **middleware pipeline**. Each middleware receives a `RequestDelegate` and returns a `RequestDelegate`, forming a **nested structure**.
+In ASP.NET Core, requests are processed by the middleware pipeline. Each stage receives a `RequestDelegate` for the next stage and returns a new `RequestDelegate` that adds its own work, so the middleware ends up nested. Each middleware can handle the request before calling `_next` and the response after it returns.
 
 ```csharp
 // RequestDelegate definition
@@ -204,7 +206,7 @@ public class MyMiddleware
 
 ### Pipeline Construction Process
 
-When `builder.Build()` constructs the `WebApplication`, registered middleware are chained in <strong>reverse order</strong>. This is known as the <strong>Russian Doll (Matryoshka)</strong> model.
+When `app.Run()` starts the host, the middleware registered with `app.UseXxx()` is chained in **reverse order**. Wrapping starts from the last registration, so the first-registered middleware ends up outermost and receives the request first. This nesting is called the Russian Doll (Matryoshka) model.
 
 ```mermaid
 graph TD
@@ -230,7 +232,7 @@ graph TD
     end
 ```
 
-Internally, `ApplicationBuilder.Build()` performs the following:
+`ApplicationBuilder.Build()` starts from a terminal delegate that returns 404 and wraps the registered middleware around it, last to first.
 
 ```csharp
 // Simplified implementation of ApplicationBuilder.Build()
@@ -255,7 +257,7 @@ public RequestDelegate Build()
 
 ### Short-Circuiting
 
-A middleware can **short-circuit** the pipeline by not calling `next()`. For example, the `StaticFiles` middleware returns a response directly when a matching file is found, without executing downstream middleware.
+A middleware can **short-circuit** the pipeline by not calling `next()`. For example, when the `StaticFiles` middleware finds a matching file, it returns the response without running the downstream middleware.
 
 ```mermaid
 sequenceDiagram
@@ -269,7 +271,7 @@ sequenceDiagram
     Client->>Ex: GET /style.css
     Ex->>Https: next()
     Https->>Static: next()
-    Note over Static: File found! Short-circuit
+    Note over Static: File found, so short-circuit
     Static-->>Https: Return response
     Https-->>Ex: Return response
     Ex-->>Client: 200 OK (style.css)
@@ -278,7 +280,7 @@ sequenceDiagram
 
 ### Built-in Middleware Order
 
-In ASP.NET Core, middleware **registration order** directly determines behavior. The recommended order is:
+Middleware runs in registration order, so the order changes behavior. For example, if `Authorization` comes before `Authentication`, the user hasn't been established yet when authorization runs. The recommended order is:
 
 | Order | Middleware | Responsibility |
 |-------|-----------|----------------|
@@ -298,11 +300,11 @@ In ASP.NET Core, middleware **registration order** directly determines behavior.
 
 ### ASP.NET Core's DI Container
 
-ASP.NET Core includes a **built-in DI container** provided as the `Microsoft.Extensions.DependencyInjection` package. The framework itself is also built using this DI container.
+ASP.NET Core uses a built-in DI container shipped as the `Microsoft.Extensions.DependencyInjection` package. The framework registers its own services in this container alongside the application's.
 
 #### Service Lifetimes
 
-The DI container supports three lifetime types:
+The DI container supports three lifetimes.
 
 ```mermaid
 graph TD
@@ -331,13 +333,13 @@ graph TD
 
 | Lifetime | Creation | Disposal |
 |----------|----------|----------|
-| **Transient** | New instance per injection | When scope ends |
-| **Scoped** | On first request within scope | When scope ends (request ends) |
-| **Singleton** | On first request | When application shuts down |
+| Transient | New instance per injection | When scope ends |
+| Scoped | On first request within scope | When scope ends (request ends) |
+| Singleton | On first request | When application shuts down |
 
 #### Captive Dependency Problem
 
-**Critical pitfall**: When a Singleton service depends on a Scoped service, the Scoped service effectively becomes a Singleton. This is called a **captive dependency**.
+When a Singleton service depends on a Scoped service, the Singleton keeps its reference, so the same Scoped instance is reused across requests. The Scoped service effectively behaves as a Singleton, a problem known as a **captive dependency**.
 
 ```csharp
 // Dangerous: Singleton depending on Scoped
@@ -355,7 +357,7 @@ public class MySingleton
 }
 ```
 
-ASP.NET Core can detect this problem and throw an exception. When using `WebApplication.CreateBuilder()`, **`ValidateScopes` and `ValidateOnBuild` are enabled by default in the development environment** (since .NET 6). To enable them explicitly in production or when using a different host builder:
+ASP.NET Core has validation that detects this dependency and throws an exception. With `WebApplication.CreateBuilder()`, `ValidateScopes` and `ValidateOnBuild` are enabled by default in the development environment (since .NET 6). To enable them in production, or when you build the host some other way, set them like this:
 
 ```csharp
 builder.Host.UseDefaultServiceProvider(options =>
@@ -367,7 +369,7 @@ builder.Host.UseDefaultServiceProvider(options =>
 
 ### ServiceProvider Internals
 
-How does the `ServiceProvider` resolve registered services internally?
+`ServiceProvider` gathers the dependencies needed to build the requested type into a graph of CallSites and returns instances using a cache for each lifetime.
 
 ```mermaid
 graph TD
@@ -381,7 +383,7 @@ graph TD
     CompiledResolver --> Instance["Return instance"]
 ```
 
-On first resolution, the `CallSiteFactory` builds a dependency graph (a **CallSite chain**). On subsequent resolutions, a compiled factory delegate is used for fast resolution.
+The first time a service is resolved, the `CallSiteFactory` builds its dependency graph (a CallSite chain). At first, instances are created by walking this graph. Once the same service has been resolved repeatedly, the provider switches to a factory delegate compiled from the graph, which resolves faster.
 
 ```csharp
 // Overview of ServiceProvider resolution process:
@@ -397,7 +399,7 @@ On first resolution, the `CallSiteFactory` builds a dependency graph (a **CallSi
 
 ### How Scopes Work
 
-A new scope is created for each HTTP request, managed internally by `IServiceScopeFactory`.
+For each HTTP request, `IServiceScopeFactory` creates a new scope, which is disposed after the response completes. Disposing the scope also disposes the `IDisposable` Scoped and Transient services created in it.
 
 ```mermaid
 sequenceDiagram
@@ -422,7 +424,7 @@ sequenceDiagram
 
 ### Endpoint Routing
 
-Since **.NET Core 3.0**, ASP.NET Core uses **endpoint routing**. In this architecture, routing is split into two middleware:
+Since .NET Core 3.0, ASP.NET Core uses endpoint routing, which splits routing across two middleware:
 
 ```mermaid
 graph LR
@@ -446,11 +448,11 @@ graph LR
     Cors --> Execute
 ```
 
-This separation allows authentication and authorization middleware to operate **knowing which endpoint was selected**.
+Authentication and authorization middleware run after `UseRouting()` has selected an endpoint and before `UseEndpoints()` / `MapXxx()` executes it. That lets them read the selected endpoint's metadata, such as an `[Authorize]` attribute.
 
 ### Route Matching Internals
 
-The routing engine uses a **DFA (Deterministic Finite Automaton)** based matcher — a state machine that processes URL segments one by one.
+The routing engine uses a matcher based on a DFA (Deterministic Finite Automaton). The DFA matcher reads URL segments one at a time and moves between states.
 
 ```mermaid
 graph TD
@@ -465,11 +467,11 @@ graph TD
     Blog -->|"{slug}"| BlogPost["Endpoint:<br/>GetBlogPost(string slug)"]
 ```
 
-Key characteristics of the DFA matcher:
+The DFA matcher has these properties:
 
-- **O(path segments)** time complexity for matching (no linear scan of all routes)
-- Automaton is built from the route table at startup time
-- Route parameter constraints (`{id:int}`) are evaluated during the matching phase
+- Matching takes O(number of path segments) time, with no linear scan of all routes
+- The automaton is built from the route table ahead of matching, not per request
+- Route parameter constraints (`{id:int}`) are evaluated during matching
 
 ```csharp
 // Route pattern examples and internal matching
@@ -481,12 +483,13 @@ app.MapGet("/api/users/{id:guid}", (Guid id) => ...);
 
 // Same path with different constraints matches different endpoints:
 // /api/users/42       → int version
-// /api/users/abc-def  → guid version (if GUID-formatted)
+// /api/users/3f2504e0-4f89-11d3-9a0c-0305e82c3301  → guid version
+// /api/users/abc-def  → no match (404)
 ```
 
 ### Minimal API vs Controllers
 
-ASP.NET Core offers two programming models:
+ASP.NET Core has two programming models: Minimal API and Controllers (MVC). For Minimal API, `RequestDelegateFactory` generates a delegate for each handler. For Controllers, the framework analyzes the controllers at startup and runs actions through the filter pipeline.
 
 ```mermaid
 graph TD
@@ -506,17 +509,17 @@ graph TD
 
 | Feature | Minimal API | Controller (MVC) |
 |---------|------------|------------------|
-| **Routing** | `app.MapGet/Post/Put/Delete()` | Attribute routing `[Route]` / Convention-based |
-| **Model Binding** | `RequestDelegateFactory` auto-infers | `ModelBinder` + `ValueProvider` chain |
-| **Filters** | Endpoint Filters (ASP.NET Core 7+) | Action / Result / Exception / Resource |
-| **Best for** | Simple APIs, microservices | Complex apps, MVC with Views |
-| **Startup speed** | Fast (minimal reflection) | Slightly slower (controller scan, descriptor building) |
+| Routing | `app.MapGet/Post/Put/Delete()` | Attribute routing `[Route]` / Convention-based |
+| Model Binding | `RequestDelegateFactory` auto-infers | `ModelBinder` + `ValueProvider` chain |
+| Filters | Endpoint Filters (ASP.NET Core 7+) | Action / Result / Exception / Resource |
+| Best for | Simple APIs, microservices | Complex apps, MVC with Views |
+| Startup speed | Fast (minimal reflection) | Slightly slower (controller scan, descriptor building) |
 
 ## Chapter 5: Model Binding and Validation
 
 ### Model Binding Flow
 
-**Model binding** is the process of converting raw HTTP request data (query strings, route parameters, forms, JSON body, etc.) into C# objects.
+Model binding converts raw HTTP request data (query strings, route parameters, forms, JSON body, etc.) into C# objects. In MVC, validating the bound values is part of the same flow.
 
 ```mermaid
 sequenceDiagram
@@ -539,14 +542,14 @@ sequenceDiagram
 
 ### Binding Source Types
 
-By specifying attributes explicitly, data can be retrieved from the following sources. Note that the default search order without explicit attributes is: form fields → request body (for controllers with `[ApiController]`) → route data → query string → uploaded files. Route data and query string values are mainly used for simple types, and uploaded files bind only to `IFormFile` / `IEnumerable<IFormFile>`.
+Without attributes, values are looked up in this order: form fields → request body (for controllers with `[ApiController]`) → route data → query string → uploaded files. Route data and query string values are mainly used for simple types, and uploaded files bind only to `IFormFile` / `IEnumerable<IFormFile>`. With explicit attributes, you can pick any of these sources:
 
-1. **Form data** (`[FromForm]`)
-2. **Request body** (`[FromBody]`) — processed via input formatters
-3. **Route parameters** (`[FromRoute]`)
-4. **Query string** (`[FromQuery]`)
-5. **Headers** (`[FromHeader]`)
-6. **Services (DI container)** (`[FromServices]`)
+1. Form data (`[FromForm]`)
+2. Request body (`[FromBody]`): processed via input formatters
+3. Route parameters (`[FromRoute]`)
+4. Query string (`[FromQuery]`)
+5. Headers (`[FromHeader]`)
+6. Services (DI container) (`[FromServices]`)
 
 ```csharp
 // Explicitly specifying binding sources
@@ -564,15 +567,15 @@ public IActionResult UpdateOrder(
 
 ### JSON Serialization: System.Text.Json
 
-ASP.NET Core uses **System.Text.Json** by default. Here's a comparison with Newtonsoft.Json:
+ASP.NET Core uses System.Text.Json by default. The main differences to know when migrating from Newtonsoft.Json are below. The stricter default parsing and the different way of declaring polymorphism affect how existing code behaves.
 
 | Feature | System.Text.Json | Newtonsoft.Json |
 |---------|-----------------|-----------------|
-| **Performance** | Fast via `Utf8JsonReader/Writer` | Reflection-heavy |
-| **Memory efficiency** | `Span<byte>`-based, minimal allocations | `string`-based |
-| **Source Generator** | `JsonSerializerContext` for AOT | None |
-| **Default behavior** | Strict (no comments, no trailing commas) | Lenient |
-| **Polymorphism** | `[JsonDerivedType]` (.NET 7+) | `TypeNameHandling` (security risk) |
+| Performance | Fast via `Utf8JsonReader/Writer` | Reflection-heavy |
+| Memory efficiency | `Span<byte>`-based, minimal allocations | `string`-based |
+| Source Generator | `JsonSerializerContext` for AOT | None |
+| Default behavior | Strict (no comments, no trailing commas) | Lenient |
+| Polymorphism | `[JsonDerivedType]` (.NET 7+) | `TypeNameHandling` (security risk) |
 
 ```csharp
 // High-performance JSON serialization with Source Generator
@@ -592,7 +595,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 ### Filter Execution Order
 
-MVC filters allow inserting logic before and after action execution. Five filter types execute in a defined order:
+MVC filters run code before and after an action executes. There are five kinds (authorization, resource, action, exception, and result), and they run in this order:
 
 ```mermaid
 graph TD
@@ -613,7 +616,7 @@ graph TD
 
 ### Endpoint Filters (for Minimal API)
 
-Instead of MVC filters, Minimal APIs have **Endpoint Filters** (ASP.NET Core 7+):
+Minimal APIs use Endpoint Filters instead of MVC filters (ASP.NET Core 7+). In this example, the filter checks the `id` argument before the handler runs and returns 400 Bad Request unless it's a positive integer.
 
 ```csharp
 app.MapGet("/api/users/{id}", (int id) => ...)
@@ -634,7 +637,7 @@ app.MapGet("/api/users/{id}", (int id) => ...)
 
 ### Configuration Provider Chain
 
-ASP.NET Core's configuration system retrieves settings from multiple sources, where **later sources override earlier ones**.
+ASP.NET Core's configuration system reads settings from multiple sources. When the same key appears in more than one, the value from the source added later overrides the earlier one.
 
 ```mermaid
 graph LR
@@ -674,6 +677,8 @@ builder.Services.AddOptions<SmtpSettings>()
 
 ### Three Options Interfaces
 
+The Options pattern has three interfaces. Which one to use depends on whether you need configuration reloads and on the lifetime of the service you inject it into.
+
 | Interface | Use Case | Reload Support |
 |-----------|----------|---------------|
 | `IOptions<T>` | Singleton. Value is created on first access and cached | No |
@@ -703,7 +708,7 @@ public class MyService
 
 ### Authentication Schemes and Handlers
 
-ASP.NET Core's authentication system uses a **scheme-based** architecture.
+In ASP.NET Core, authentication is done by handlers registered per scheme (JWT Bearer, Cookie, and so on). A successful handler produces a `ClaimsPrincipal`, and the authorization middleware evaluates policies against it.
 
 ```mermaid
 graph TD
@@ -747,7 +752,7 @@ public async Task InvokeAsync(HttpContext context)
 
 ### Policy-Based Authorization
 
-Authorization is flexibly composed with policies and requirements:
+Authorization rules are registered as named policies. Besides built-in checks such as roles, you can express your own rule by implementing a requirement and a handler that evaluates it. In the example below, `MinimumAgeHandler` computes the age from the `birth_date` claim and marks the requirement as met at 18 or older.
 
 ```csharp
 // Define custom authorization policies
@@ -822,7 +827,7 @@ graph TD
 
 ### Feature Collection
 
-`HttpContext.Features` is an **extension point** where servers and middleware can inject additional capabilities.
+`HttpContext.Features` is a collection of features keyed by interface type. Servers and middleware add features to it, and application code retrieves them by type. The server (Kestrel) sets the connection information, and the RequestTimeouts middleware adds the request timeout feature.
 
 ```csharp
 // Examples of features provided by Kestrel
@@ -844,7 +849,7 @@ timeoutFeature?.DisableTimeout();
 
 ### Object Pool
 
-ASP.NET Core **pools** frequently used objects to reduce GC pressure.
+ASP.NET Core pools and reuses frequently used objects to reduce GC load. Application code can do the same with `ObjectPool<T>`.
 
 ```csharp
 // StringBuilder pooling example
@@ -866,10 +871,10 @@ finally
 
 ### ArrayPool and MemoryPool
 
-`System.Buffers.ArrayPool<T>` manages array rental and return, reducing heap allocations from large numbers of short-lived arrays.
+`System.Buffers.ArrayPool<T>` manages array rental and return, reducing heap allocations from large numbers of short-lived arrays. Kestrel itself does not rent from `ArrayPool`: it takes its socket I/O buffers from a `MemoryPool<byte>` of pinned blocks and hands them to System.IO.Pipelines. Application code can use the same rent-and-return pattern through `ArrayPool`:
 
 ```csharp
-// Buffer management pattern used inside Kestrel
+// Rent-and-return pattern in application code
 byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
 try
 {
@@ -905,35 +910,37 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
 
 | Feature | Description |
 |---------|-------------|
-| **Native AOT** | No JIT needed. Dramatically reduces startup time and memory |
-| **Request Delegate Generator** | Compile-time generation of Minimal API delegates |
-| **Frozen Collections** | Optimized read-only collections via `FrozenDictionary` / `FrozenSet` |
-| **SearchValues** | SIMD-optimized string searching |
-| **Interceptors** | Compile-time method call interception |
-| **CompositeFormat** | Pre-parsed `string.Format` format strings |
+| Native AOT | No JIT needed. Reduces startup time and memory |
+| Request Delegate Generator | Compile-time generation of Minimal API delegates |
+| Frozen Collections | Optimized read-only collections via `FrozenDictionary` / `FrozenSet` |
+| SearchValues | SIMD-optimized string searching |
+| Interceptors | Compile-time method call interception |
+| CompositeFormat | Pre-parsed `string.Format` format strings |
 
 #### .NET 9
 
 | Feature | Description |
 |---------|-------------|
-| **MapStaticAssets** | Build-time compressed static file serving with fingerprinting (recommended replacement for `UseStaticFiles`) |
-| **HybridCache** | Unified caching library combining `IDistributedCache` and `IMemoryCache` with stampede protection |
-| **Keyed DI in Middleware** | Support for `[FromKeyedServices]` in middleware constructors and `Invoke` methods |
-| **SignalR Native AOT** | SignalR client and server support for trimming and Native AOT |
+| MapStaticAssets | Build-time compressed static file serving with fingerprinting (recommended replacement for `UseStaticFiles`) |
+| HybridCache | Unified caching library combining `IDistributedCache` and `IMemoryCache` with stampede protection |
+| Keyed DI in Middleware | Support for `[FromKeyedServices]` in middleware constructors and `Invoke` methods |
+| SignalR Native AOT | SignalR client and server support for trimming and Native AOT |
 
 #### .NET 10
 
 | Feature | Description |
 |---------|-------------|
-| **Minimal API Validation** | Built-in DataAnnotations validation via `AddValidation()` |
-| **Server-Sent Events** | Return SSE streams with `TypedResults.ServerSentEvents` |
-| **OpenAPI 3.1** | OpenAPI document generation with JSON Schema draft 2020-12 |
-| **Memory Pool Eviction** | Automatic memory release in Kestrel / IIS / HTTP.sys pools when idle |
-| **JSON Patch (System.Text.Json)** | High-performance JSON Patch without Newtonsoft.Json |
+| Minimal API Validation | Built-in DataAnnotations validation via `AddValidation()` |
+| Server-Sent Events | Return SSE streams with `TypedResults.ServerSentEvents` |
+| OpenAPI 3.1 | OpenAPI document generation with JSON Schema draft 2020-12 |
+| Memory Pool Eviction | Automatic memory release in Kestrel / IIS / HTTP.sys pools when idle |
+| JSON Patch (System.Text.Json) | JSON Patch implementation without Newtonsoft.Json |
 
 ## Chapter 11: Error Handling Architecture
 
 ### Exception Handling Hierarchy
+
+An exception thrown inside an MVC action goes to exception filters first. If no filter handles it, it reaches the ExceptionHandler middleware (DeveloperExceptionPage in development) early in the pipeline. If that doesn't handle it either, the result is a 500.
 
 ```mermaid
 graph TD
@@ -948,7 +955,7 @@ graph TD
 
 ### Problem Details (RFC 9457)
 
-Since ASP.NET Core 7, returning [RFC 9457 (Problem Details)](https://www.rfc-editor.org/rfc/rfc9457)-compliant error responses is straightforward:
+Since ASP.NET Core 7, you can return Problem Details error responses with little setup. The format was defined in RFC 7807, which [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) replaced in 2023.
 
 ```csharp
 // Enable Problem Details globally
@@ -978,7 +985,7 @@ app.UseStatusCodePages();
 
 ### WebApplicationFactory
 
-ASP.NET Core provides `WebApplicationFactory`, which can start the entire application in-memory, enabling integration testing without actual network communication.
+`WebApplicationFactory` starts the whole application on an in-memory `TestServer`. Requests from the test's `HttpClient` don't go over the network, and they run through the same middleware pipeline as in production. Services registered in DI can be swapped for test implementations.
 
 ```csharp
 public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
@@ -1024,7 +1031,7 @@ graph TD
 
 ## Summary: The Lifetime of a Request
 
-Finally, let's trace the complete journey of a single HTTP request:
+A single HTTP request is parsed by Kestrel, gets a scope, passes through middleware, routing, authentication and authorization, model binding, and filters to reach the action, and then returns along the same path as the response.
 
 ```mermaid
 sequenceDiagram

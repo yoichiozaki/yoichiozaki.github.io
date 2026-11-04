@@ -1,25 +1,25 @@
 ---
 title: "Running the GitHub Copilot SDK Server-Side — Can It Be Designed Stateless?"
 date: "2026-08-25"
-description: "When embedding the GitHub Copilot SDK into a backend, can you design it stateless enough to scale horizontally? A deep, operational look at the runtime's state model, session persistence, the single-writer constraint, resume cost, streaming, and capacity planning."
+description: "Can a backend built on the GitHub Copilot SDK be stateless enough to scale horizontally? The API tier can; the runtime cannot. This article covers where the runtime keeps state, session persistence, the single-writer constraint, resume cost, streaming, and capacity planning."
 tags: ["GitHub Copilot", "Copilot SDK", "Architecture", "Scalability", "Agent", "Distributed Systems"]
 ---
 
 ## Introduction
 
-The GitHub Copilot SDK is a library for programmatically driving the agent runtime that sits behind Copilot CLI. It ships for Node.js/TypeScript, Python, Go, .NET, Java, and Rust, letting you embed a Copilot-grade agent into your own product.
+The GitHub Copilot SDK is a library for programmatically driving the agent runtime that sits behind Copilot CLI. It ships for Node.js/TypeScript, Python, Go, .NET, Java, and Rust, so you can embed that agent in your own product.
 
-The moment you consider running it server-side, the same question always comes up.
+Running it server-side raises a question:
 
 > Can a backend built on this SDK be designed stateless and scaled horizontally?
 
-The short answer: <strong>your app tier can be stateless; the runtime tier cannot.</strong> But the useful discussion is not yes/no. It is these three questions:
+The short answer: <strong>your app tier can be stateless; the runtime tier cannot.</strong> A design decision needs more than that answer, though. It depends on three questions:
 
 - Where does state live, and at what granularity?
 - What does it cost to cross that state boundary?
 - When you put the boundary in the wrong place, how exactly does it break?
 
-This article is grounded in the public documentation and the `@github/copilot-sdk` v1.0.13 README as of 2026-08. The SDK moves fast, so always re-verify against the type definitions of the version you actually have.
+This article is based on the public documentation and the `@github/copilot-sdk` v1.0.13 README as of August 2026. The SDK changes quickly, so re-verify everything against the type definitions of the version you install.
 
 ## The short version
 
@@ -36,7 +36,7 @@ This article is grounded in the public documentation and the `@github/copilot-sd
 
 ### The SDK is a client, not the engine
 
-You need an accurate mental model first. The SDK does not call an LLM itself. It is a <strong>JSON-RPC client connected to the Copilot CLI runtime</strong>.
+The SDK does not call an LLM itself. It is a JSON-RPC client connected to the Copilot CLI runtime.
 
 ```mermaid
 flowchart LR
@@ -46,9 +46,9 @@ flowchart LR
     RT --> Disk[(COPILOT_HOME)]
 ```
 
-In other words, there is a second stateful process outside your own. That fact governs everything about stateless design here.
+So a second stateful process runs outside your own, and every stateless design decision has to account for it.
 
-The transport is chosen through `RuntimeConnection` factories.
+You choose the transport with the `RuntimeConnection` factories.
 
 | Transport | Factory | Runtime lifetime |
 |---|---|---|
@@ -57,23 +57,23 @@ The transport is chosen through `RuntimeConnection` factories.
 | External URI | `RuntimeConnection.forUri(url, { connectionToken })` | Connects to an already-running runtime; lifetime managed separately |
 | In-process | `RuntimeConnection.forInProcess()` | Same process via the native C ABI (FFI), experimental |
 
-For server-side work, `forUri` is the one that matters. Run the runtime as a resident server with `copilot --headless --port 4321` and connect from your API processes. This decouples the runtime's lifecycle from your request handlers, so restarts and deployments can be scheduled independently.
+For server-side work, use `forUri`: run the runtime as a resident server with `copilot --headless --port 4321` and connect to it from your API processes. The runtime then has its own lifecycle, separate from your request handlers, so you can restart and deploy each independently.
 
-Note that the headless server accepts loopback (`127.0.0.1`) connections only by default. Binding with `--host 0.0.0.0` is required to reach it from another container — and at that moment the constraint "there is no built-in auth between the SDK and the CLI" becomes load-bearing. `forUri` and `forTcp` do accept a `connectionToken`, but the docs still list the missing auth as a limitation: one shared secret is not a substitute for authentication. You have to protect it at the network boundary (same pod, sidecar, mTLS inside a VPC).
+By default, the headless server accepts connections only from loopback (`127.0.0.1`). To reach it from another container you must bind with `--host 0.0.0.0`, and then the documented limitation "there is no built-in auth between the SDK and the CLI" becomes a real exposure. `forUri` and `forTcp` accept a `connectionToken`, but the docs still list missing auth as a limitation, because one shared secret is not a substitute for authentication. Protect the connection at the network boundary (same pod, sidecar, mTLS inside a VPC).
 
 ### Taking inventory of state
 
-Before arguing about statelessness, classify the state. A system built on the Copilot SDK holds at least five kinds.
+Before deciding what can be stateless, classify the state. A system built on the Copilot SDK holds at least five kinds.
 
 | Kind of state | What it is | Persisted? | Externalizable? |
 |---|---|---|---|
 | Conversation | Message thread, tool call results | Yes (checkpoints) | Yes (shared FS / `sessionFs`) |
 | Plan and artifacts | `plan.md`, contents of `files/` | Yes | Yes |
 | Runtime memory | Live session objects, subscribed event handlers | No | No |
-| Credentials | BYOK API keys, per-session GitHub tokens | <strong>No</strong> (deliberately) | Keep in your own secret manager |
+| Credentials | BYOK API keys, per-session GitHub tokens | No (deliberately) | Keep in your own secret manager |
 | Tool implementation state | In-memory state held by `defineTool` handlers | No | Your design problem |
 
-Reorganizing what the docs state, `COPILOT_HOME/session-state/{sessionId}/` looks like this.
+Based on the docs, a session directory under `COPILOT_HOME/session-state/{sessionId}/` looks like this.
 
 ```text
 ~/.copilot/session-state/
@@ -86,14 +86,14 @@ Reorganizing what the docs state, `COPILOT_HOME/session-state/{sessionId}/` look
     └── files/
 ```
 
-Two asymmetries here are critical.
+Two asymmetries in this state shape the design.
 
 1. <strong>Conversations persist; connections do not.</strong> The on-disk session survives, but the live object holding it and its event subscriptions vanish when the process dies.
-2. <strong>Keys do not persist.</strong> With BYOK, you must re-supply the `provider` config on every `resumeSession`. That is a sound security decision, and it is also a landmine you will step on the first time you write a stateless resume path.
+2. <strong>Keys do not persist.</strong> With BYOK, you must re-supply the `provider` config on every `resumeSession`. That is a sound security decision, and it is also easy to miss the first time you write a stateless resume path.
 
 ## Redefining "stateless" per tier
 
-Statelessness is not a property of a system; it is a property of a <strong>tier</strong>. Splitting a Copilot SDK system into three tiers makes the design tractable.
+Statelessness is a property of a tier, not of the whole system. Splitting a Copilot SDK system into three tiers shows which parts can be stateless.
 
 ```mermaid
 flowchart TB
@@ -129,14 +129,14 @@ flowchart TB
 ```
 
 - <strong>L1 (API tier)</strong> can be fully stateless in the twelve-factor sense. A request carries nothing but a session ID.
-- <strong>L2 (runtime tier)</strong> is inherently stateful. The process holds live sessions. Trying to make it stateless is the same category error as trying to make PostgreSQL stateless.
-- <strong>L3 (durable tier)</strong> consists of shared storage — or object storage via `sessionFs` — plus <strong>a session registry you own</strong>.
+- <strong>L2 (runtime tier)</strong> is inherently stateful because the process holds live sessions. Trying to make it stateless is the same category error as trying to make PostgreSQL stateless.
+- <strong>L3 (durable tier)</strong> consists of shared storage (or object storage via `sessionFs`) plus a session registry you own.
 
-That third piece is the one most designs forget. The SDK offers `listSessions()`, but it only enumerates sessions visible on the runtime's storage. It will not tell you who owns a session, which runtime currently holds it, or whether it is still valid. <strong>Ownership and routing are your database's responsibility.</strong>
+The registry is the piece designs most easily overlook. The SDK offers `listSessions()`, but it only enumerates sessions visible on the runtime's storage. It will not tell you who owns a session, which runtime currently holds it, or whether it is still valid. <strong>Ownership and routing are your database's responsibility.</strong>
 
 ## Four levels of statelessness
 
-Treat this as a spectrum, not a binary.
+Statelessness comes in degrees. The flowchart picks a level from your requirements.
 
 ```mermaid
 flowchart TD
@@ -153,7 +153,7 @@ flowchart TD
 
 ### Level 0: ephemeral sessions
 
-When each request is independent — classification, summarization, one-shot code generation — do not keep a session at all. This is genuinely stateless.
+When each request is independent (classification, summarization, one-shot code generation), do not keep a session at all. This level is fully stateless.
 
 ```typescript
 import { CopilotClient, RuntimeConnection } from "@github/copilot-sdk";
@@ -182,17 +182,17 @@ app.post("/api/analyze", async (req, res) => {
 });
 ```
 
-Three things to get right.
+Three details matter in this handler.
 
-- Do not construct `client` per request. `createSession` is cheap; `new CopilotClient()` + `start()` establishes a runtime connection.
-- Always pass a timeout to `sendAndWait`. Agents have no guaranteed termination, so the caller owns the bound.
-- `disconnect()` in `finally`. That releases in-memory resources while preserving on-disk data. If the session is disposable, follow up with `deleteSession()`.
+- Do not construct `client` per request. `createSession` is cheap, but `new CopilotClient()` + `start()` establishes a runtime connection.
+- Always pass a timeout to `sendAndWait`. An agent turn is not guaranteed to finish, so the caller has to bound it.
+- Call `disconnect()` in `finally`. It releases in-memory resources and keeps the on-disk data. If the session is disposable, follow up with `deleteSession()`.
 
-Level 0's cost is obvious: <strong>no context carries over</strong>. Making it multi-turn means stuffing the history back into the prompt yourself, which hits token billing and latency directly.
+The cost of Level 0 is that no context carries over. To make it multi-turn you must put the history back into the prompt yourself, which increases token billing and latency.
 
 ### Level 1: shared storage plus resume per turn
 
-The straightforward way to keep the API tier fully stateless while supporting multi-turn. Put session state on shared storage (NFS, a CSI PVC, or object storage via `sessionFs`) so any runtime can resume any session.
+This is the standard way to support multi-turn conversations while keeping the API tier fully stateless. Put session state on shared storage (NFS, a CSI PVC, or object storage via `sessionFs`) so any runtime can resume any session.
 
 ```typescript
 app.post("/api/chat", async (req, res) => {
@@ -222,17 +222,17 @@ app.post("/api/chat", async (req, res) => {
 });
 ```
 
-Clean, but not free. Wall-clock time per turn becomes
+The handler stays simple, but each turn now takes longer in wall-clock time:
 
 $$
 W_{\text{L1}} = W_{\text{lease}} + W_{\text{resume}} + W_{\text{turn}} + W_{\text{disconnect}}
 $$
 
-and that difference shows up in capacity, as shown below.
+The extra terms raise the capacity you need, as the section on resume cost quantifies.
 
 ### Level 2: lease-routed warm sessions
 
-To avoid resume cost, keep sessions alive inside a runtime for a while, and have the API tier <strong>ask a registry</strong> which runtime holds the session before forwarding. The API tier stays stateless while you get effective affinity.
+To avoid the resume cost, keep sessions alive inside a runtime for a while. Before forwarding a request, the API tier asks a registry which runtime holds the session. The API tier stays stateless, yet each session's requests consistently reach the same runtime.
 
 ```mermaid
 sequenceDiagram
@@ -250,11 +250,11 @@ sequenceDiagram
     API-->>U: 200 OK
 ```
 
-The important part is <strong>not relying on load balancer sticky sessions</strong>. LB affinity is a property of the client connection, not the truth about session ownership. When a pod dies the LB silently routes elsewhere, and you get two writers. Express ownership as a lease in a registry, and let the API tier simply look it up.
+Do <strong>not rely on load balancer sticky sessions</strong> for this. LB affinity follows the client connection, not the actual owner of the session. When a pod dies, the LB silently routes to another pod, and you get two writers. Record ownership as a lease in a registry, and have the API tier look it up.
 
 ### Level 3: runtime per tenant
 
-If compliance requirements are strict, or each tenant's runtime needs distinct credentials, split runtimes per tenant. Isolation is strongest and density is worst — you pay for processes and memory belonging to idle tenants.
+If compliance requirements are strict, or each tenant's runtime needs distinct credentials, run a separate runtime per tenant. This gives the strongest isolation and the worst density, because you pay for the processes and memory of idle tenants.
 
 | | Level 0 | Level 1 | Level 2 | Level 3 |
 |---|---|---|---|---|
@@ -268,23 +268,23 @@ If compliance requirements are strict, or each tenant's runtime needs distinct c
 
 ## What externalizing storage does and does not solve
 
-Let me kill a common misconception here. "Move session data to external storage and it becomes stateless" — that is <strong>only half true</strong>.
+A common assumption is that moving session data to external storage makes the system stateless. That is only half true.
 
 ### What you get is not "stateless" but "relocatable"
 
-Externalizing buys exactly one property: the session <strong>can be opened from any node</strong>. The two remaining kinds of state cannot be externalized even in principle.
+Externalizing gives you exactly one property: the session can be opened from any node. The other two kinds of state in the table below cannot be externalized even in principle.
 
 | State | Externalizable | Why |
 |---|---|---|
 | Conversation, checkpoints, `plan.md`, `files/` | Yes | Plain data. This is what `sessionFs` is for |
-| The in-flight turn's outstanding call | <strong>No</strong> | It is not data — it is an <strong>RPC into your process</strong> |
-| Events during streaming | <strong>No</strong> | They are never written to disk at all (see below) |
+| The in-flight turn's outstanding call | No | It is not data — it is an RPC into your process |
+| Events during streaming | No | They are never written to disk at all (see below) |
 
-The second row is the essential one. Tool execution, `onPermissionRequest`, and hooks all work by the runtime issuing a JSON-RPC request into your process and <strong>blocking on your reply</strong>. If an API pod dies mid-turn, the runtime is left holding a pending request with nobody to answer it. Sharing a disk does not let you transfer that open call to another pod.
+The in-flight turn's outstanding call matters most. Tool execution, `onPermissionRequest`, and hooks all work by the runtime sending a JSON-RPC request into your process and blocking until you reply. If an API pod dies mid-turn, the runtime is left with a pending request that nobody will answer. A shared disk cannot move that open call to another pod.
 
-So externalizing protects <strong>between turns</strong>, not <strong>within a turn</strong>. When a Level 1 handler retries, the only safe assumption is "we are back at the last checkpoint" — which means tool side effects must be <strong>designed idempotent</strong>.
+So externalizing protects state <strong>between turns</strong>, not <strong>within a turn</strong>. When a Level 1 handler retries, the only safe assumption is that the session is back at the last checkpoint, so tool side effects must be idempotent.
 
-That is not my inference. The SDK says so itself, in the implementation of Agent Factories' durable steps.
+The SDK states this requirement itself, in a comment in the implementation of durable steps for Agent Factories.
 
 ```typescript
 // nodejs/src/session.ts
@@ -292,13 +292,11 @@ That is not my inference. The SDK says so itself, in the implementation of Agent
 // concurrent callers, so authors must make side effects idempotent.
 ```
 
-Even the most durability-conscious mechanism in the SDK guarantees only at-least-once.
+Even the SDK mechanism most concerned with durability guarantees only at-least-once execution.
 
-### Externalizing costs you an accidental single-writer property
+### Externalizing removes an accidental single-writer guarantee
 
-There is a second, easily missed consequence.
-
-With local disk, session state lived only on one pod's filesystem, so <strong>only that pod could touch it</strong>. Mutual exclusion held by accident. The moment you move to shared storage, that protection disappears — and the SDK has no locking.
+With local disk, session state lived only on one pod's filesystem, so only that pod could touch it. Mutual exclusion held by accident. Shared storage removes that protection, and the SDK has no locking to replace it.
 
 Searching all of `nodejs/src` turns up exactly two things called a lock, and neither has anything to do with sessions.
 
@@ -309,7 +307,7 @@ Searching all of `nodejs/src` turns up exactly two things called a lock, and nei
 
 Neither `createSession` nor `resumeSession` checks whether another client already holds the session. Two pods resuming the same `sessionId` both succeed.
 
-What makes this interesting is that the SDK does model "already active" — just not for sessions. It does it for factory runs.
+The SDK does model "already active", but only for factory runs, not for sessions.
 
 ```typescript
 // nodejs/src/factory.ts
@@ -324,14 +322,14 @@ export type FactoryResumeErrorCode =
     | "factory_storage_corrupt";
 ```
 
-So this reads as a deliberate decision — <strong>session exclusion is the application's job</strong> — rather than an oversight. A library cannot know the shape of the layer above it (how many pods exist, how the LB routes), so it cannot provide exclusion. Attempting to would force the SDK itself to require Redis or etcd, which is a bad dependency for a library to impose.
+So leaving <strong>session exclusion to the application</strong> looks like a deliberate decision rather than an oversight. A library cannot know the layer above it (how many pods exist, how the LB routes), so it cannot provide exclusion itself. Doing so would require the SDK to depend on Redis or etcd, which is a bad dependency for a library to impose.
 
-That said, layers that decline to provide exclusion normally still provide <strong>conflict detection</strong>. HTTP's `If-Match`, conditional writes on object storage, and `git push`'s non-fast-forward rejection are all examples. The Copilot SDK gives you `modifiedTime` from `listSessions()`, but <strong>no compare-and-swap that validates a version at write time</strong>. Therefore:
+Layers that leave exclusion to their callers usually still provide conflict detection: HTTP's `If-Match`, conditional writes on object storage, and `git push` rejecting non-fast-forward updates. The Copilot SDK gives you `modifiedTime` from `listSessions()`, but <strong>no compare-and-swap that validates a version at write time</strong>. As a result:
 
-- You cannot <strong>prevent</strong> double writes (reasonable for this layer)
-- You have little means to <strong>know</strong> a double write happened (this part is thin)
+- You cannot prevent double writes (reasonable for this layer)
+- You have little means to detect that a double write happened (this part is weak)
 
-The division of responsibility comes out like this:
+The responsibilities divide like this:
 
 | What the SDK provides | What you must provide |
 |---|---|
@@ -339,21 +337,21 @@ The division of responsibility comes out like this:
 | Durability — checkpoint persistence and restore | Ownership — whose session this is |
 | Placement freedom — `sessionFs` lets you choose where state lives | Routing — which runtime currently holds it |
 
-Externalizing storage buys you the third item in the left column. The right column is your job from beginning to end, externalized or not.
+Externalizing storage gives you the third item in the left column. The right column is your job whether or not you externalize.
 
 ## The session ID is a primary key, not an ACL
 
-`createSession({ sessionId })` lets you choose the ID. Omit it and a random one is generated — in which case you cannot resume it later unless you recorded it.
+`createSession({ sessionId })` lets you choose the ID. If you omit it, a random ID is generated, and you cannot resume the session later unless you recorded that ID.
 
 The official docs recommend structured IDs like `user-{userId}-{taskId}` and show a sample that verifies ownership by `sessionId.split("-")`. <strong>Do not ship that sample.</strong>
 
-The reason is simple: it turns a string representation into a trust boundary.
+The problem is that it turns a string representation into a trust boundary:
 
 - A hyphen inside a user ID shifts the boundary. How would you split `user-alice-smith-42`?
 - An attacker controls the `sessionId` they send. Passing a client-supplied ID straight into `createSession` lets them claim someone else's namespace.
 - It cannot follow tenant deletion or user ID reuse.
 
-The correct approach is to <strong>treat the session ID as an opaque identifier and keep ownership in your own database</strong>.
+Instead, <strong>treat the session ID as an opaque identifier and keep ownership in your own database</strong>.
 
 ```typescript
 // Generation: an opaque, collision-free ID with only a tenant prefix
@@ -371,17 +369,17 @@ async function authorize(sessionId: string, user: User) {
 }
 ```
 
-Keeping a tenant prefix is still useful — for routing storage paths in `sessionFs`, and for reading an ID during an incident. Just <strong>never make it the basis of authorization</strong>. Return 404 rather than 403 for other tenants' sessions so you do not leak existence.
+A tenant prefix is still useful for routing storage paths in `sessionFs` and for reading an ID during an incident. Just never base authorization on it. Return 404 rather than 403 for other tenants' sessions so you do not reveal that they exist.
 
 ## The single-writer constraint — solve it with partitioning, not locks
 
 The SDK docs are explicit: there is no built-in session locking. If two clients `resumeSession` the same ID and write concurrently, the behavior is undefined. Checkpoints are written as numbered JSON files, so lost updates are possible.
 
-The official sample shows a Redis `SET NX EX` lock. The direction is right, but there are two problems if you copy it as-is.
+The official sample shows a Redis `SET NX EX` lock. That is the right direction, but copying it as-is leaves two problems.
 
 ### Problem 1: lock release races
 
-Some doc samples do a `GET` followed by a `DEL`. If the TTL expires between those two steps and another client acquires the lock, you <strong>delete someone else's lock</strong>. Release must be atomic via Lua.
+Some doc samples do a `GET` followed by a `DEL`. If the TTL expires between those two steps and another client acquires the lock, you delete someone else's lock. Release must be atomic via Lua.
 
 ```typescript
 const RELEASE = `
@@ -423,25 +421,25 @@ async function withSessionLease<T>(
 }
 ```
 
-The easy thing to miss is that <strong>renewal has exactly the same race</strong>. A bare `EXPIRE` never checks whether the key is still yours. If the TTL lapses, another client acquires the lock, and then your renewal timer fires, you have just extended someone else's lease. Renew through a token-checked Lua script, just like release.
+Renewal has the same race. A bare `EXPIRE` never checks whether the key is still yours. If the TTL lapses, another client acquires the lock, and then your renewal timer fires, you extend someone else's lease. That is why the code above renews through a token-checked Lua script, just like release.
 
 ### Problem 2: a lock does not actually guarantee mutual exclusion
 
-A Redis lock is <strong>advisory</strong>; it is not a proof of mutual exclusion. A long GC pause, a network partition, or a frozen container can leave a process writing while believing it still holds an expired lock. The standard remedy for distributed locks is a fencing token validated at the resource — but <strong>the Copilot runtime does not accept fencing tokens</strong>. Locks alone cannot close the hole.
+A Redis lock is advisory, so it does not prove mutual exclusion. A long GC pause, a network partition, or a frozen container can leave a process writing while it still believes it holds an expired lock. The standard remedy for distributed locks is a fencing token that the resource validates, but <strong>the Copilot runtime does not accept fencing tokens</strong>, so locks alone cannot close this gap.
 
-Two practical answers exist.
+There are two practical answers.
 
-<strong>(a) Make single-writer structural.</strong> Use a partitioned queue keyed by session ID (a Kafka partition, an SQS FIFO `MessageGroupId`, a Redis Streams consumer group) so the same session's turns are always processed in order by the same worker. Mutual exclusion then comes from a delivery property rather than a lock outcome, which is far more robust.
+<strong>(a) Make single-writer structural.</strong> Use a queue partitioned by session ID (a Kafka partition, an SQS FIFO `MessageGroupId`, a Redis Streams consumer group) so the same worker always processes a session's turns in order. Mutual exclusion then follows from how messages are delivered rather than from whether a lock was acquired, which is far more robust.
 
-<strong>(b) Make corruption detectable.</strong> Assume double writes can still happen. Use the `modifiedTime` returned by `listSessions()` or your own turn counter, and treat any unexpected advance as an anomaly. Agent sessions are not financial transactions, so "detect, quarantine that session, and ask the user to restart" is usually enough.
+<strong>(b) Make corruption detectable.</strong> Assume double writes can still happen. Track the `modifiedTime` returned by `listSessions()` or your own turn counter, and treat any unexpected advance as an anomaly. Agent sessions are not financial transactions, so detecting the problem, quarantining the session, and asking the user to start over is usually enough.
 
-And the cheapest mitigation of all: <strong>reject concurrent requests to the same session with 409 Conflict immediately</strong>. A UI that says "still generating the previous response" resolves most of these cases.
+The cheapest mitigation is to reject concurrent requests to the same session immediately with 409 Conflict. With a UI message such as "still generating the previous response", this resolves most cases.
 
 ## Resume cost and capacity planning
 
-Level 1 accepts resume on every turn. Let us make that cost quantitative.
+Level 1 pays for a resume on every turn. Little's law shows what that costs in capacity.
 
-The number of concurrently active turns follows Little's law.
+The number of concurrently active turns is
 
 $$
 L = \lambda \cdot W
@@ -455,13 +453,13 @@ $$
 N = \left\lceil \frac{L}{C} \right\rceil \times (1 + \text{headroom})
 $$
 
-This is where Level 1 and Level 2 diverge. Inserting a resume stretches $W$, and $L$ grows linearly.
+Level 1 and Level 2 differ here. A resume lengthens $W$, and $L$ grows in proportion.
 
 $$
 \frac{L_{\text{L1}}}{L_{\text{L2}}} = \frac{W_{\text{resume}} + W_{\text{turn}}}{W_{\text{turn}}}
 $$
 
-$W_{\text{lease}}$ applies to both Level 1 and Level 2, so it cancels; $W_{\text{disconnect}}$ is dropped as small next to $W_{\text{resume}}$.
+$W_{\text{lease}}$ applies to both Level 1 and Level 2, but it does not cancel out of the ratio; it is omitted because it is small next to $W_{\text{turn}}$. $W_{\text{disconnect}}$ is likewise dropped as small next to $W_{\text{resume}}$.
 
 | $W_{\text{turn}}$ | $W_{\text{resume}} = 1\text{s}$ | $W_{\text{resume}} = 5\text{s}$ |
 |---|---|---|
@@ -470,24 +468,22 @@ $W_{\text{lease}}$ applies to both Level 1 and Level 2, so it cancels; $W_{\text
 | 5 s (short lookup) | +20% | +100% |
 | 1 s (completion-like) | +100% | +500% |
 
-So <strong>the cost of statelessness is inversely proportional to turn length</strong>. For long agentic workflows, Level 1 is nearly free. For an API handling short turns at high frequency, resume translates directly into infrastructure spend. That is exactly the Level 1 / Level 2 decision boundary.
+For a fixed $W_{\text{resume}}$, <strong>the overhead of statelessness is inversely proportional to turn length</strong>. For long agentic workflows, Level 1 costs almost nothing extra. For an API handling short turns at high frequency, every resume adds directly to infrastructure spend. Turn length is therefore what decides between Level 1 and Level 2.
 
-Do not reason about $W$ using the mean, though. Agent turn duration is heavy-tailed — tool execution dominates, and retries and compaction mix in. Size capacity on p95/p99, and <strong>cap concurrency so excess work waits</strong>. Without a cap, slow turns pile up, exhaust memory, and collapse the whole tier.
+Do not reason about $W$ from the mean. Agent turn duration is heavy-tailed: tool execution dominates, and retries and compaction add to it. Size capacity on p95/p99, and cap concurrency so excess work waits. Without a cap, slow turns pile up, exhaust memory, and take down the whole tier.
 
-As for $C$, the public docs give no number. They only state that the runtime is single-process and that you scale by adding instances rather than threads. <strong>Measure it on your own workload.</strong> As you increase concurrent sessions against one runtime, record:
+The public docs give no number for $C$. They only state that the runtime is single-process and that you scale by adding instances rather than threads. Measure it on your own workload. As you increase concurrent sessions against one runtime, record:
 
 - Turn latency p50 / p95 / p99
 - RSS (slope against live session count)
 - `session-state` disk I/O and growth rate
 - Error and timeout rates
 
-You are not looking for "how many sessions fit" — you are looking for where latency falls off a cliff.
+Look for the concurrency at which latency rises sharply, rather than for the maximum number of sessions that fit.
 
 ## Streaming breaks statelessness
 
-This is where implementations most often get stuck.
-
-With `createSession({ streaming: true })` the runtime emits `assistant.message_delta` events carrying `deltaContent`. Those events are delivered to <strong>the process holding that SDK client</strong>. The browser's SSE or WebSocket connection may be terminated on a different API pod.
+Implementations most often get stuck on streaming. With `createSession({ streaming: true })` the runtime emits `assistant.message_delta` events carrying `deltaContent`. Those events are delivered to the process holding that SDK client, but the browser's SSE or WebSocket connection may terminate on a different API pod.
 
 ```mermaid
 flowchart LR
@@ -497,13 +493,13 @@ flowchart LR
     RT -->|assistant.message_delta| A1
 ```
 
-The naive design produces exactly this: pod 1 receives the deltas while the browser is attached to pod 2 and sees nothing.
+A naive design ends up like this: pod 1 receives the deltas, while the browser is attached to pod 2 and sees nothing.
 
 ### Ephemeral events — some things cannot be replayed
 
-There is a problem here beyond delivery. <strong>Streaming events are never written to disk.</strong>
+Delivery is not the only problem. <strong>Streaming events are never written to disk.</strong>
 
-Look at the generated type definitions and every session event carries an `ephemeral` flag.
+In the generated type definitions, every session event carries an `ephemeral` flag.
 
 ```typescript
 // nodejs/src/generated/session-events.ts
@@ -513,26 +509,26 @@ Look at the generated type definitions and every session event carries an `ephem
 ephemeral?: boolean;
 ```
 
-And for some events that field is pinned to the literal type `true` — meaning <strong>non-persistence is guaranteed at the type level</strong>. There are 63 such events, including:
+For some events, that field has the literal type `true`, so the types guarantee they are never persisted. There are 63 such events, including:
 
 | Event | What is lost |
 |---|---|
 | `assistant.message_delta` / `assistant.message_start` | A partially generated response |
 | `assistant.reasoning_delta` / `assistant.tool_call_delta` | Reasoning and tool-call streams |
-| `assistant.usage` | <strong>Per-model-call token counts and cost</strong> |
+| `assistant.usage` | Per-model-call token counts and cost |
 | `tool.execution_progress` / `tool.execution_partial_result` | Tool execution progress |
 | `session.usage_info` | Context window utilization |
 | `session_limits_exhausted.requested` / `.completed` | Budget exhaustion notifications |
 | `user_input.requested` / `elicitation.requested` | User input and form requests |
 | `session.idle` / `model.call_failure` | Idle transitions and model call failures |
 
-This is what bites in stateless design. Calling `getEvents()` <strong>cannot reconstruct a partially streamed turn</strong>. What survives on disk is only what landed in a checkpoint.
+For a stateless design, this means `getEvents()` cannot reconstruct a partially streamed turn. Only what reached a checkpoint survives on disk.
 
-So the streaming problem is not "how do I deliver events" but "<strong>how do I make events durable</strong>". Publishing to a broker is not merely transport — it becomes the only record. An append-only buffer is not a nice-to-have; it is <strong>the vault for things that are gone forever if dropped</strong>.
+So streaming also requires designing for durability, not only delivery. Once you publish events through a broker, your pipeline holds the only record of them, and the append-only buffer described below becomes the store for events that cannot be recovered if lost.
 
-Note also that events carry a `parentId` forming "a linked chain to the chronologically preceding event". Order and causality are expressed through that chain, so carrying `parentId` through your own buffer makes reconstruction much easier.
+Events also carry a `parentId` that forms "a linked chain to the chronologically preceding event". This chain records order and causality, so keeping `parentId` in your own buffer makes reconstruction much easier.
 
-There are three ways out.
+There are three ways to deliver events across pods.
 
 | Approach | Mechanism | Fits | Cost |
 |---|---|---|---|
@@ -540,21 +536,21 @@ There are three ways out.
 | Route to the owning pod | Look up the registry and proxy or redirect the SSE connection to the owning pod | Fewer hops, lower latency | Requires inter-pod routing; drain handling gets awkward |
 | Drop streaming | Skip `streaming` and return only the final `assistant.message` | Batch work, non-interactive UIs | Poor perceived latency; long turns look frozen |
 
-If you take the broker route, add an <strong>append-only turn buffer</strong>. Publish each delta and simultaneously append it to a Redis List or Stream; a new SSE connection replays the existing buffer before switching to the subscription. That kills the "reconnected and lost the middle" class of bug. Combined with SSE `Last-Event-ID`, the resume point is well-defined too.
+If you use a broker, add an append-only turn buffer. Publish each delta and append it to a Redis List or Stream at the same time. A new SSE connection replays the buffer before switching to the subscription, which prevents the bug where a client reconnects and loses the middle of a response. With SSE `Last-Event-ID`, the client's resume point is also well defined.
 
-Note that the final `assistant.message` is always sent regardless of the `streaming` setting, so you can reconcile the buffer against the complete content that arrives at the end.
+The final `assistant.message` is always sent regardless of the `streaming` setting, so you can reconcile the buffer against the complete content that arrives at the end.
 
-Cloud sessions (`cloud: { repository: ... }`) add another trap. `createSession` resolves as soon as Mission Control reserves a task, but the remote worker connects a second or two later. If you `send` before that, the runtime throws `"Remote session is still starting"` — yet <strong>the schema wrapper swallows that error and returns a fresh messageId</strong>. The prompt is dropped server-side. You must wait for a `session.start` event whose `producer === "copilot-agent"` before sending. In a stateless handler, either split "create session" and "send first prompt" into two requests, or await readiness before responding to the create call.
+Cloud sessions (`cloud: { repository: ... }`) add another trap. `createSession` resolves as soon as Mission Control reserves a task, but the remote worker connects a second or two later. If you `send` before that, the runtime throws `"Remote session is still starting"`. <strong>The schema wrapper swallows that error and returns a fresh messageId</strong>, so the call appears to succeed while the prompt is dropped on the server. Wait for a `session.start` event whose `producer === "copilot-agent"` before sending. In a stateless handler, either split "create session" and "send first prompt" into two requests, or wait for readiness before responding to the create call.
 
 ## `sessionFs` — peeling state off the local disk
 
-`baseDirectory` sets `COPILOT_HOME`, defaulting to `~/.copilot`. When you connect to an external runtime with `RuntimeConnection.forUri`, the SDK client's `baseDirectory` is <strong>ignored</strong> — you must set it as an environment variable on the runtime process instead. This one trips people up.
+`baseDirectory` sets `COPILOT_HOME`, which defaults to `~/.copilot`. When you connect to an external runtime with `RuntimeConnection.forUri`, the SDK client's `baseDirectory` is <strong>ignored</strong>; set `COPILOT_HOME` as an environment variable on the runtime process instead.
 
-The same is true of `sessionIdleTimeoutSeconds` and `enableRemoteSessions`. Under an external-runtime connection those client options are silently ignored — no exception, no warning — and the runtime process's own configuration wins. The resident headless topology this article recommends is exactly the case that lands on the "ignored" side.
+The same applies to `sessionIdleTimeoutSeconds` and `enableRemoteSessions`. With an external runtime, the client ignores these options without an exception or warning, and the runtime process's own configuration applies. The resident headless topology recommended in this article is exactly the case where they are ignored.
 
-The classic way to get shared storage is to mount `COPILOT_HOME/session-state` on a PVC or Azure File; the docs show Kubernetes and ACI examples. But mounting a network filesystem into several runtimes concurrently drags in locking, consistency, and latency problems all at once.
+The usual way to get shared storage is to mount `COPILOT_HOME/session-state` on a PVC or Azure File; the docs show Kubernetes and ACI examples. But mounting a network filesystem into several runtimes at once brings locking, consistency, and latency problems.
 
-That is what `sessionFs` is for. It routes session-scoped file I/O through your application's storage instead of the runtime's local disk.
+With `sessionFs`, session-scoped file I/O goes through your application's storage instead of the runtime's local disk.
 
 ```typescript
 const client = new CopilotClient({
@@ -567,7 +563,7 @@ const client = new CopilotClient({
 });
 ```
 
-The shape is two-stage: configure `sessionFs` at the client level, and supply a per-session filesystem handler when creating or resuming. The public surfaces per language:
+Configuration has two parts: set `sessionFs` at the client level, and supply a per-session filesystem handler when creating or resuming a session. The public APIs for each language are:
 
 | Language | Client-level config | Per-session provider |
 |---|---|---|
@@ -580,21 +576,21 @@ The shape is two-stage: configure `sessionFs` at the client level, and supply a 
 
 Java currently has no verified public `sessionFs` option. If you are on a JVM stack, plan for a shared-filesystem design up front.
 
-Three practical benefits.
+`sessionFs` has three practical benefits.
 
-1. <strong>Local disk can be ephemeral.</strong> State survives pod deletion. This is mandatory on Cloud Run or Container Apps where disks are volatile.
-2. <strong>Tenant boundaries can be enforced by path.</strong> Force a tenant prefix inside the provider implementation, and a session ID mix-up is stopped at the storage layer. That is real defense in depth.
-3. <strong>Lifecycle management moves to your tooling.</strong> Object storage lifecycle policies give you TTL deletion, versioning, and audit logs for free.
+1. <strong>Local disk can be ephemeral.</strong> State survives pod deletion. This is mandatory on Cloud Run or Container Apps, where disks are volatile.
+2. <strong>Tenant boundaries can be enforced by path.</strong> If the provider implementation forces a tenant prefix, the storage layer stops a mixed-up session ID from reaching another tenant's data. This adds a second layer of defense behind authorization.
+3. <strong>Lifecycle management moves to your tooling.</strong> Object storage lifecycle policies give you TTL deletion, versioning, and audit logs without extra code.
 
-The cost is latency: checkpoint reads and writes go over the network. Combined with Level 1's per-turn resume, that lands squarely on $W_{\text{resume}}$. It pairs much better with Level 2 warm sessions.
+The cost is latency, because checkpoint reads and writes go over the network. With Level 1's per-turn resume, that latency adds directly to $W_{\text{resume}}$. Level 2 warm sessions, which resume less often, feel it less.
 
 ## `mode: "empty"` — the precondition for multi-tenancy
 
-It is one line of config, and <strong>the single most important branch in a multi-tenant design</strong>.
+Whether a shared runtime can serve multiple tenants safely depends on this one setting.
 
-`CopilotClient`'s `mode` is either `"copilot-cli"` (default) or `"empty"`, and the docs are unambiguous: do not use the default `"copilot-cli"` on a shared server. That mode targets CLI-style coding agents and <strong>can expose ambient tools with host filesystem access</strong>.
+`CopilotClient`'s `mode` is either `"copilot-cli"` (default) or `"empty"`, and the docs are explicit: do not use the default `"copilot-cli"` on a shared server. That mode targets CLI-style coding agents and <strong>can expose ambient tools with host filesystem access</strong>.
 
-The runtime runs as a process on your server. Anything that process can read is, in principle, shared across all tenants: `.env` files, service account tokens, other tenants' session directories, `/proc`, cloud instance metadata endpoints. Leaving tools that let an agent "read a file on the server" implicitly enabled walks you straight into OWASP A01 (broken access control) and A05 (security misconfiguration).
+The runtime runs as a process on your server, so anything that process can read is potentially exposed to every tenant: `.env` files, service account tokens, other tenants' session directories, `/proc`, cloud instance metadata endpoints. Leaving tools that let an agent read files on the server implicitly enabled leads straight to OWASP A01 (broken access control) and A05 (security misconfiguration).
 
 ```typescript
 const client = new CopilotClient({
@@ -621,7 +617,7 @@ const session = await client.createSession({
 });
 ```
 
-The docs summarize session-level isolation like this.
+The docs summarize session-level isolation as follows.
 
 | Surface | Isolation behavior |
 |---|---|
@@ -629,13 +625,13 @@ The docs summarize session-level isolation like this.
 | Session state | Per `COPILOT_HOME/session-state/{sessionId}` |
 | GitHub identity | Per session when `gitHubToken` is set on the session |
 | Tools | Explicit under `mode: "empty"`, ambient under `"copilot-cli"` |
-| Host filesystem | <strong>Shared by the runtime process</strong> if host tools are available |
+| Host filesystem | Shared by the runtime process if host tools are available |
 
-That last row says it all. `mode: "empty"` is precisely what makes the shared-runtime pattern viable.
+The last row explains why the shared-runtime pattern depends on `mode: "empty"`: with host tools available, every session shares the runtime process's filesystem.
 
 ### `mode: "empty"` is validation, not just a defaults switch
 
-Read only the guides and `mode: "empty"` looks like a defaults toggle. Read the type definitions and it is more than that.
+The guides present `mode: "empty"` as a switch for defaults. The type definitions show that it also validates your configuration.
 
 ```typescript
 // nodejs/src/types.ts
@@ -648,22 +644,22 @@ Read only the guides and `mode: "empty"` looks like a defaults toggle. Read the 
  */
 ```
 
-`mode: "empty"` <strong>enforces</strong> two things. Miss either and you get a runtime error.
+`mode: "empty"` enforces two requirements, and missing either causes a runtime error.
 
-1. Either `baseDirectory` <strong>or</strong> `sessionFs` must be set (validated when `CopilotClient` is constructed)
+1. Either `baseDirectory` or `sessionFs` must be set (validated when `CopilotClient` is constructed)
 2. Every session must specify `availableTools` (validated on `createSession`)
 
-The first has a catch. As noted earlier, `baseDirectory` is ignored under `RuntimeConnection.forUri`. So in the external-runtime plus `mode: "empty"` topology this article recommends, <strong>`sessionFs` is effectively what you should supply</strong>. Passing `baseDirectory` satisfies the validation, but it configures nothing.
+The first requirement has a catch. As noted earlier, `baseDirectory` is ignored under `RuntimeConnection.forUri`. So in the topology this article recommends (an external runtime with `mode: "empty"`), <strong>you should supply `sessionFs`</strong>. Passing `baseDirectory` satisfies the validation but configures nothing.
 
-The second is a pleasant surprise: not "you should write an allowlist" but "it will not run without one". That errs on the safe side.
+The second requirement errs on the safe side: instead of recommending an allowlist, the SDK refuses to create a session without one.
 
 ### A deny-by-default configuration reference
 
-`mode: "empty"` flips many defaults to the safe side, but it <strong>does not close everything</strong>. Pulling from the type definitions, here are the fields whose defaults change with mode, plus the ones you should pin explicitly in a multi-tenant deployment.
+`mode: "empty"` switches many defaults to the safe side, but it does not close everything. The table below, compiled from the type definitions, lists the fields whose defaults change with mode and the ones you should set explicitly in a multi-tenant deployment.
 
 | Field | How the default changes with mode | Multi-tenant recommendation |
 |---|---|---|
-| `availableTools` | <strong>Required</strong> under `empty` (omitting it errors) | Explicit allowlist |
+| `availableTools` | Required under `empty` (omitting it errors) | Explicit allowlist |
 | `skipCustomInstructions` | `false` → `true` under `empty` | `true` (keep the default) |
 | `customAgentsLocalOnly` | `false` → `true` under `empty` | `true` (keep the default) |
 | `coauthorEnabled` | `true` → `false` under `empty` | `false` (keep the default) |
@@ -671,18 +667,18 @@ The second is a pleasant surprise: not "you should write an allowlist" but "it w
 | `enableExperimentalMode` | Runtime-dependent → `false` under `empty` | `false` (keep the default) |
 | `enableSessionStore` | Enabled under `copilot-cli` → disabled under `empty` | Explicitly `false` |
 | `memory` | Runtime default under `copilot-cli` → disabled under `empty` | Explicitly `{ enabled: false }` |
-| `skipEmbeddingRetrieval` | No mode-specific default documented | <strong>`true`</strong> |
-| `embeddingCacheStorage` | No mode-specific default documented | <strong>`"in-memory"`</strong> |
+| `skipEmbeddingRetrieval` | No mode-specific default documented | `true` |
+| `embeddingCacheStorage` | No mode-specific default documented | `"in-memory"` |
 | `enableFileHooks` | No mode-specific default documented | `false` |
 | `enableOnDemandInstructionDiscovery` | Same | `false` |
 | `enableHostGitOperations` | Same | `false` |
 | `enableSkills` | Same | `false` unless needed |
 
-`skipCustomInstructions` matters more than it looks. Under the default `copilot-cli` mode the runtime reads `.github/copilot-instructions.md`, `AGENTS.md`, and `CLAUDE.md` from the working directory and folds them into the system prompt. If tenants can upload files or otherwise influence the working directory, that is a <strong>direct prompt injection path</strong>. `enableOnDemandInstructionDiscovery` is the same family — it discovers additional instruction files after file views.
+Under the default `copilot-cli` mode (`skipCustomInstructions: false`), the runtime reads `.github/copilot-instructions.md`, `AGENTS.md`, and `CLAUDE.md` from the working directory and adds them to the system prompt. If tenants can upload files or otherwise influence the working directory, that is a <strong>direct prompt injection path</strong>. `enableOnDemandInstructionDiscovery` carries the same risk: it discovers additional instruction files after the agent views files.
 
 ### The embedding cache is an easily missed leakage path
 
-Buried in the type definitions is a warning the public guides never surface.
+The type definitions contain a warning that the public guides barely mention.
 
 ```typescript
 // nodejs/src/types.ts
@@ -694,34 +690,34 @@ Buried in the type definitions is a warning the public guides never surface.
 skipEmbeddingRetrieval?: boolean;
 ```
 
-<strong>Cross-session information leakage through the shared embedding cache.</strong> This is a field the SDK itself recommends by name for multi-tenant deployments. The related `embeddingCacheStorage` chooses between `"persistent"` (cached on disk, shared across sessions and restarts) and `"in-memory"` (discarded when the session ends).
+The SDK itself names multi-tenant deployments as the use case for this field: it prevents cross-session information leakage through the shared embedding cache. The related `embeddingCacheStorage` chooses between `"persistent"` (cached on disk, shared across sessions and restarts) and `"in-memory"` (discarded when the session ends).
 
-`mode: "empty"` closes the tool exposure surface, but <strong>the type definitions document no mode-specific default for either of these two</strong>. For a multi-tenant SaaS, set `skipEmbeddingRetrieval: true`, or at minimum `embeddingCacheStorage: "in-memory"`, explicitly.
+`mode: "empty"` closes the tool exposure surface, but <strong>the type definitions document no mode-specific default for either field</strong>. For a multi-tenant SaaS, set `skipEmbeddingRetrieval: true` explicitly, or at minimum `embeddingCacheStorage: "in-memory"`.
 
-`onPermissionRequest` has a subtle trap too. Omit the handler and permission requests are emitted as events and <strong>left pending</strong>. The session will not advance until something resolves them. Forget the handler in a backend service and sessions hang silently until the idle timeout. Always set it explicitly.
+`onPermissionRequest` has a subtle trap too. If you omit the handler, permission requests are emitted as events and left pending, and the session does not advance until something resolves them. In a backend service without the handler, sessions hang silently until the idle timeout, so always set it explicitly.
 
-Also, the scopes `approve-for-session`, `approve-for-location`, and `approve-permanently` persist approvals beyond a single request. In a multi-tenant deployment, an `approve-for-location` `locationKey` or an `approve-permanently` domain approval can be shared unintentionally. On a shared runtime, restricting yourself to `approve-once` and `reject` is the safe side.
+The scopes `approve-for-session`, `approve-for-location`, and `approve-permanently` keep an approval beyond a single request. In a multi-tenant deployment, an `approve-for-location` `locationKey` or an `approve-permanently` domain approval can be shared unintentionally. On a shared runtime, use only `approve-once` and `reject`.
 
 ## Authentication and token lifecycles
 
-Server-side, auth is two-layered.
+Server-side, authentication has two layers.
 
 - <strong>Client/runtime level</strong>: environment variables such as `COPILOT_GITHUB_TOKEN`, or the `gitHubToken` client option. This is the runtime process's own identity.
 - <strong>Session level</strong>: `createSession({ gitHubToken })`. This is the requesting user's identity.
 
-The docs state plainly that multi-user servers should <strong>pass a per-session token</strong>, because content exclusion, model routing, quota checks, and per-user Copilot entitlement all depend on it. Reusing one service token for every user bypasses all of those organizational policies.
+The docs state that multi-user servers should pass a per-session token, because content exclusion, model routing, quota checks, and per-user Copilot entitlement all depend on it. Reusing one service token for every user bypasses all of those organizational policies.
 
-Authentication priority runs: explicit SDK token → direct Copilot API environment auth → environment variable GitHub tokens → stored Copilot CLI credentials → GitHub CLI credentials. The dangerous entries are the last two: <strong>code that forgot to pass an explicit token happily picks up whatever credentials are sitting on disk</strong>. Ship an image where a developer's `copilot` login is still lying around in `COPILOT_HOME` (default `~/.copilot`) and you get the classic "works locally, fails in production" — or worse, "runs in production under an unintended identity".
+Credentials are resolved in this order: explicit SDK token → direct Copilot API environment auth → environment variable GitHub tokens → stored Copilot CLI credentials → GitHub CLI credentials. The last two are dangerous: <strong>code that forgets to pass an explicit token silently picks up whatever credentials are on disk</strong>. If you ship an image that still contains a developer's `copilot` login in `COPILOT_HOME` (default `~/.copilot`), you get the classic "works locally, fails in production", or worse, a production service running under an unintended identity.
 
-Note that the client option `useLoggedInUser` cannot be combined with `RuntimeConnection.forUri` (nor can a client-level `gitHubToken`). So in an external-runtime deployment this accident does not happen on the SDK client — it happens on <strong>the runtime process</strong>, and that is where the fix belongs. Keep `~/.copilot` out of your container image and pin the runtime process's `COPILOT_HOME` to a dedicated directory. (The SDK client's `baseDirectory` has no effect under `forUri`.)
+The client option `useLoggedInUser` cannot be combined with `RuntimeConnection.forUri`, and neither can a client-level `gitHubToken`. So in an external-runtime deployment this accident happens on the runtime process, not on the SDK client, and the fix belongs there. Keep `~/.copilot` out of your container image and pin the runtime process's `COPILOT_HOME` to a dedicated directory. (The SDK client's `baseDirectory` has no effect under `forUri`.)
 
-The nastiest issue for stateless handlers is that <strong>token lifetime and session lifetime do not match</strong>. A user's OAuth token may expire in hours; a session can live for days. So:
+The hardest issue for stateless handlers is that <strong>token lifetime and session lifetime do not match</strong>. A user's OAuth token may expire in hours, while a session can live for days. So:
 
 - Do not store the token itself in the session record.
 - On every resume, fetch a fresh token from your auth system and pass it as `gitHubToken`.
-- If no token can be obtained — the user left, or revoked access — treat the session as non-resumable.
+- If no token can be obtained (the user left or revoked access), treat the session as non-resumable.
 
-BYOK has the same shape. API keys are deliberately not persisted to disk, so <strong>you must re-supply `provider` on every `resumeSession`</strong>. Forget it and you get a low-reproducibility bug: works right after creation, auth error after resume.
+BYOK has the same shape. API keys are deliberately not persisted to disk, so you must re-supply `provider` on every `resumeSession`. If you forget, you get a bug that is hard to reproduce: the session works right after creation and fails with an auth error after resume.
 
 ```typescript
 async function resumeWithFreshCredentials(sessionId: string, rec: SessionRecord) {
@@ -734,11 +730,11 @@ async function resumeWithFreshCredentials(sessionId: string, rec: SessionRecord)
 }
 ```
 
-Note that BYOK is not limited to static API keys. Besides `apiKey`, `provider` accepts `bearerToken` (a static string) and `bearerTokenProvider` (a callback that returns a token on demand), and the docs ship a dedicated Azure Managed Identity guide: acquire a token for the `https://ai.azure.com/.default` scope with `DefaultAzureCredential` and hand it to `bearerTokenProvider`.
+BYOK is not limited to static API keys. Besides `apiKey`, `provider` accepts `bearerToken` (a static string) and `bearerTokenProvider` (a callback that returns a token on demand). The docs include a dedicated Azure Managed Identity guide: acquire a token for the `https://ai.azure.com/.default` scope with `DefaultAzureCredential` and pass it through `bearerTokenProvider`.
 
-That distinction matters for stateless design. `apiKey` and `bearerToken` are values you must re-fetch from a secret manager and re-supply on every resume, whereas `bearerTokenProvider` hands over <strong>the callback itself</strong>, delegating token acquisition and refresh to the Identity SDK. No long-lived key ends up in your session record or your environment. The `provider` object still has to be passed again on every resume (a callback reference is not persisted to disk either). Conversely, a static `bearerToken` is documented as never being auto-refreshed, so always use `bearerTokenProvider` for long-running sessions.
+The difference matters for stateless design. You must re-fetch `apiKey` and `bearerToken` values from a secret manager and re-supply them on every resume. With `bearerTokenProvider`, you pass the callback itself, and the Identity SDK handles token acquisition and refresh, so no long-lived key ends up in your session record or your environment. You still have to pass the `provider` object again on every resume, because a callback reference is not persisted to disk either. A static `bearerToken` is documented as never being refreshed automatically, so always use `bearerTokenProvider` for long-running sessions.
 
-And credentials are not the only thing you must re-supply on resume. The type definitions carry one more — a more dangerous one.
+Credentials are not the only thing you must re-supply on resume. The type definitions describe one more, and forgetting it is more dangerous.
 
 ```typescript
 // nodejs/src/types.ts — SessionConfigBase.managedSettings
@@ -747,15 +743,15 @@ And credentials are not the only thing you must re-supply on resume. The type de
 // the layer, so warm and cold resume behave identically).
 ```
 
-`managedSettings` is host-injected enterprise managed policy. `deny`/`ask` rules are unioned and `disableBypassPermissionsMode: "disable"` is deny-wins. In other words it is <strong>the setting that tightens permissions</strong> — and forgetting it on resume clears the layer, which <strong>loosens your policy</strong>.
+`managedSettings` is enterprise managed policy injected by the host. Its `deny`/`ask` rules are unioned, and `disableBypassPermissionsMode: "disable"` is deny-wins, so this setting tightens permissions. Forgetting it on resume clears the layer and <strong>loosens your policy</strong>.
 
-Forget a BYOK key and you find out immediately via an auth error. Forget `managedSettings` and <strong>the session works fine</strong>. The failure is silent, so the only place to catch it is review. Collect everything that must be re-supplied on resume into a single function and write a test against it.
+A forgotten BYOK key shows up immediately as an auth error. A forgotten `managedSettings` leaves a session that works normally. Because the failure is silent, only review and tests can catch it: collect everything that must be re-supplied on resume into a single function and write a test for it.
 
-One thing here does err safe: `enableManagedSettings` (the mode where the runtime self-fetches org policy) requires the session's `gitHubToken`, and the type definitions state the runtime is expected to reject session creation if it is omitted (fail-closed).
+One related setting does fail safe: `enableManagedSettings` (where the runtime fetches org policy itself) requires the session's `gitHubToken`, and the type definitions state that the runtime is expected to reject session creation if the token is missing (fail-closed).
 
 ## A catalog of failure modes
 
-Organized so you can look them up by symptom during a design review.
+Look up a symptom in the first column during a design review.
 
 | Symptom | Root cause | Fix |
 |---|---|---|
@@ -775,22 +771,22 @@ Organized so you can look them up by symptom during a design review.
 | Sessions hang silently | Permission requests pending with no `onPermissionRequest` | Always set a handler; monitor for pending requests |
 | Turns lost on every deploy | No drain design | On SIGTERM: stop accepting, await in-flight turns, `disconnect()`, release leases |
 
-On that last one: in Kubernetes, `terminationGracePeriodSeconds` must exceed <strong>p99 turn duration</strong>. Agent turns can run for minutes, so the 30-second default will almost always cut them off. Making it unbounded, however, means rolling updates never finish. In practice, do a staged shutdown:
+On deploy, drain in-flight turns before stopping a pod. In Kubernetes, `terminationGracePeriodSeconds` must exceed p99 turn duration. Agent turns can run for minutes, so the 30-second default will almost always cut them off. An unbounded grace period, however, means rolling updates never finish. In practice, shut down in stages:
 
 1. Stop accepting new turns in a preStop hook
 2. Wait for in-flight turns, with a cap
 3. For anything past the cap, `session.abort()` then `disconnect()`
 4. Release leases and tell clients to retry
 
-This is exactly where `disconnect()` preserving on-disk state pays off.
+Because `disconnect()` preserves on-disk state, sessions cut off this way can be resumed later.
 
-At process exit, call `client.stop()`. It closes all sessions and <strong>returns an array of `Error[]` collected during cleanup</strong> rather than throwing, so log the return value instead of discarding it. `forceStop()` exists as an escape hatch when shutdown drags, but it skips graceful cleanup — treat it as the last resort in your drain sequence.
+At process exit, call `client.stop()`. It closes all sessions and returns the errors collected during cleanup as an `Error[]` instead of throwing, so log the return value instead of discarding it. `forceStop()` is an escape hatch when shutdown drags on, but it skips graceful cleanup, so use it only as the last step of your drain sequence.
 
 ## Observability and budget control
 
 Agent backends are harder to observe than ordinary web services, because a single request contains many model calls and tool executions.
 
-The SDK supports OpenTelemetry out of the box. Just pass `telemetry` and the runtime emits spans for sessions, messages, and tool calls to your collector.
+The SDK supports OpenTelemetry out of the box. Pass `telemetry`, and the runtime emits spans for sessions, messages, and tool calls to your collector.
 
 ```typescript
 const client = new CopilotClient({
@@ -803,50 +799,50 @@ const client = new CopilotClient({
 });
 ```
 
-`captureContent` controls whether message bodies land in spans. In a multi-tenant SaaS, turning it on pushes tenant data into your tracing backend, which drags data residency, retention, and access control requirements onto that system too. Off by default, on only with consent, is the safe operating posture.
+`captureContent` controls whether message bodies are recorded in spans. In a multi-tenant SaaS, turning it on sends tenant data to your tracing backend, which then has to meet your data residency, retention, and access control requirements too. Keep it off by default and turn it on only with consent.
 
-Use `onGetTraceContext` if you want your own application spans in the same trace as the runtime's. Tool handlers receive context as `traceparent` / `tracestate` on `ToolInvocation`, so even database access inside a tool implementation joins one trace.
+Use `onGetTraceContext` to put your own application spans in the same trace as the runtime's. Tool handlers receive the context as `traceparent` / `tracestate` on `ToolInvocation`, so database access inside a tool implementation joins the same trace.
 
-For metrics, you want at minimum:
+At minimum, collect these metrics:
 
 - Live session count (per runtime)
 - Turn latency (p50 / p95 / p99)
 - Resume latency (the single most important number at Level 1)
-- Lease acquisition failure rate (409 frequency equals concurrent-operation pressure)
+- Lease acquisition failure rate (the frequency of 409 responses measures concurrent-operation pressure)
 - Rate of `session.compaction_start` / `session.compaction_complete`
 - Cumulative usage from `session.usage_checkpoint`
 - Tool call success rate and duration, broken down by tool
 
 ### There are two usage events, and one of them disappears
 
-If you are building tenant chargeback, this is mandatory reading. Usage arrives on two separate channels.
+Tenant chargeback depends on the difference between two usage events.
 
 | Event | Granularity | Persisted | Key fields |
 |---|---|---|---|
-| `assistant.usage` | Per model call | <strong>No</strong> (`ephemeral: true` in the type) | `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, `cost`, `duration`, `timeToFirstTokenMs`, `interTokenLatencyMs`, `finishReason`, `isByok`, `serviceRequestId`, `providerCallId` |
+| `assistant.usage` | Per model call | No (`ephemeral: true` in the type) | `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, `cost`, `duration`, `timeToFirstTokenMs`, `interTokenLatencyMs`, `finishReason`, `isByok`, `serviceRequestId`, `providerCallId` |
 | `session.usage_checkpoint` | Session cumulative | Yes | `totalNanoAiu`, `totalPremiumRequests?` |
 
-In other words, <strong>the detailed one disappears</strong>. If you are not subscribed to `assistant.usage`, or the pod that was subscribed dies, those token counts and that cost are gone for good. GitHub still bills you; your ledger just has a hole in it.
+The detailed per-call event is the one that is not persisted. If you are not subscribed to `assistant.usage`, or the subscribed pod dies, those token counts and that cost are gone for good. GitHub still bills you, but your ledger has a gap.
 
-So the chargeback design falls out as:
+The chargeback design follows from this:
 
-1. Push `assistant.usage` to an external append target (a queue, a time-series DB, an event store) <strong>the moment you receive it</strong>. Do not make this an async best-effort path.
+1. Push `assistant.usage` to an external append target (a queue, a time-series DB, an event store) as soon as you receive it. Do not make this an async best-effort path.
 2. Use the cumulative `session.usage_checkpoint` as the book of record. It is persisted, so it stays consistent across resume.
-3. Reconcile the two to detect loss. Any gap is precisely the volume of events you dropped to pod failures.
+3. Reconcile the two to detect loss. Any gap is exactly the usage whose events you lost to pod failures.
 
-`serviceRequestId` (`x-copilot-service-request-id`) and `providerCallId` (`x-github-request-id`) are your correlation handles into GitHub's own logs. They are the only lever you have when escalating "this specific request was slow or failed", so store them alongside cost.
+`serviceRequestId` (`x-copilot-service-request-id`) and `providerCallId` (`x-github-request-id`) let you correlate a call with GitHub's own logs. You need them when you ask support about a specific slow or failed request, so store them alongside cost.
 
-Note that `quotaSnapshots` and `toolCounts` are marked `@internal` in the type definitions. You can reach them, but treat them as outside the backward-compatibility contract.
+`quotaSnapshots` and `toolCounts` are marked `@internal` in the type definitions. You can access them, but they are outside the backward-compatibility contract.
 
-On cost, `sessionLimits.maxAiCredits` gives you a <strong>soft cap</strong> for the session's current accounting window. Usage is checked after model calls return, so <strong>one response can exceed the configured value</strong>. Treat it as a brake against runaway spend, not a hard ceiling.
+On cost, `sessionLimits.maxAiCredits` sets a soft cap for the session's current accounting window. Usage is checked after model calls return, so <strong>one response can exceed the configured value</strong>. Treat it as a brake against runaway spend, not a hard ceiling.
 
-Budget exhaustion arrives as a `session_limits_exhausted.requested` event and needs a user decision to continue. How you handle that inside a stateless HTTP handler is a design choice. The clean option is to `disconnect()` the session, return "budget limit reached", and take the top-up decision in a separate request. Waiting for human input inside a handler just parks the request.
+Budget exhaustion arrives as a `session_limits_exhausted.requested` event, and continuing requires a user decision. In a stateless HTTP handler, the clean option is to `disconnect()` the session, return "budget limit reached", and handle the top-up decision in a separate request. Waiting for human input inside a handler leaves the request hanging.
 
-Set `maxAiCredits` on both `createSession` and `resumeSession`. The official samples always set it in both places, and the behavior when it is omitted on resume is not documented — assume the cap disappears and pass it every time.
+Set `maxAiCredits` on both `createSession` and `resumeSession`. The official samples always set it in both places, and the behavior when it is omitted on resume is not documented, so assume the cap disappears and pass it every time.
 
 ## Context compaction as hidden state
 
-Long sessions rely on infinite sessions. Enabled by default, it manages the context window limit automatically through background compaction.
+Long sessions rely on infinite sessions, a feature enabled by default that manages the context window limit through background compaction.
 
 ```typescript
 const session = await client.createSession({
@@ -859,19 +855,19 @@ const session = await client.createSession({
 });
 ```
 
-The thresholds are <strong>context utilization ratios (0.0–1.0)</strong>, not absolute token counts. Misreading that and passing something like `8000` is an easy mistake.
+The thresholds are <strong>context utilization ratios (0.0–1.0)</strong>, not absolute token counts, so passing something like `8000` is an easy mistake.
 
-For stateless design, what matters is that compaction is an <strong>asynchronous background process</strong>. Which means:
+Compaction affects stateless design because it runs asynchronously in the background. As a result:
 
-- Wall-clock $W$ spikes on turns where compaction interleaves. It is a primary source of a heavy latency tail.
-- Hitting `bufferExhaustionThreshold` <strong>blocks</strong> until compaction completes. Your concurrency cap needs to account for that.
-- If the process dies mid-compaction, which checkpoint the next resume starts from is not under your control.
+- Wall-clock $W$ spikes on turns that overlap with compaction, which makes compaction a primary source of the heavy latency tail.
+- Hitting `bufferExhaustionThreshold` blocks the session until compaction completes. Your concurrency cap needs to account for that.
+- If the process dies mid-compaction, you cannot control which checkpoint the next resume starts from.
 
-As a mitigation, subscribe to `session.compaction_start` / `session.compaction_complete` and turn them into metrics. When compaction becomes frequent, have the application close the long-running session and start a fresh one. An infinite session is also an infinitely growing resume cost.
+To mitigate this, subscribe to `session.compaction_start` / `session.compaction_complete` and turn them into metrics. When compaction becomes frequent, have the application close the long-running session and start a fresh one. An infinite session also has an ever-growing resume cost.
 
 ## Watch for documentation drift
 
-The SDK moves quickly, and the official docs contradict themselves in places. Verify against the type definitions of your installed version before basing a design decision on any of it. The main inconsistencies observable as of 2026-08:
+The SDK changes quickly, and the official docs contradict themselves in places. These were the main inconsistencies as of August 2026:
 
 | Item | Statement A | Statement B | How to treat it |
 |---|---|---|---|
@@ -883,11 +879,11 @@ The SDK moves quickly, and the official docs contradict themselves in places. Ve
 | What you can pass on resume | Session Persistence's "Resume options" table omits `gitHubToken` and `sessionLimits` | Type definitions: `ResumeSessionConfig` extends `SessionConfigBase`, which carries `gitHubToken`; the Session limits guide sets `sessionLimits` on resume too | The table is not exhaustive. Trust the type definitions |
 | Event persistence | The guides describe some events as ephemeral | Generated types: 63 events pin `ephemeral` to the literal `true` | Check `session-events.ts` for the exact set before depending on any of them |
 
-Drift like this is unremarkable for an SDK that recently reached GA and is still evolving. What matters is <strong>not letting your production design depend on sample code from a blog post or a guide</strong>. Reading `node_modules/@github/copilot-sdk`'s `.d.ts` is always the right answer.
+Drift like this is normal for an SDK that recently reached GA and is still evolving. <strong>Base your production design on the `.d.ts` files in `node_modules/@github/copilot-sdk`, not on sample code from a blog post or a guide.</strong>
 
 ## Design decision checklist
 
-Finally, in the form you would actually use during review.
+Use these questions during a design review.
 
 <strong>Architecture</strong>
 
@@ -898,8 +894,9 @@ Finally, in the form you would actually use during review.
 
 <strong>Isolation and security</strong>
 
-- Is `mode: "empty"` set?
+- Is `mode: "empty"` set (and does it pass the `sessionFs` or `baseDirectory` validation)?
 - Is `availableTools` an explicit allowlist (no `builtin:*`)?
+- Are `skipEmbeddingRetrieval` / `embeddingCacheStorage` / `enableSessionStore` / `memory` pinned explicitly?
 - Is `onPermissionRequest` always supplied, rejecting `shell` / `read` / `write`?
 - Are approval scopes limited to `approve-once` / `reject`?
 - Is session ID string parsing kept out of authorization?
@@ -910,8 +907,11 @@ Finally, in the form you would actually use during review.
 
 - Are concurrent writes to one session prevented by partitioning or a lease?
 - Is lease release atomic (Lua)?
-- Are BYOK `provider` and `gitHubToken` re-supplied on every resume?
+- Are tool side effects idempotent (safe if re-sent after a mid-turn crash)?
+- Is `assistant.usage` pushed to external storage the moment it is received?
+- Are BYOK `provider`, `gitHubToken`, and `managedSettings` re-supplied on every resume?
 - Is there a SIGTERM drain procedure, with `terminationGracePeriodSeconds` above p99?
+- Is the return value of `client.stop()` (`Error[]`) logged?
 - Is `session-state` independent of pod lifecycle?
 
 <strong>Cost and capacity</strong>
@@ -926,11 +926,11 @@ Finally, in the form you would actually use during review.
 
 The answer to "can you write a stateless backend on the Copilot SDK" is: yes, but what is stateless is your code, not your system.
 
-Agents are inherently stateful. Conversation history, plans, tool side effects, compacted context — none of that can be wished away, and none of it should be. The architect's job is not to eliminate state but to <strong>choose deliberately where state lives, measure the cost of crossing that boundary, and design how it fails when the boundary is violated</strong>.
+Agents are inherently stateful. Conversation history, plans, tool side effects, and compacted context cannot be designed away, and they should not be. The architect's job is to <strong>choose deliberately where state lives, measure the cost of crossing that boundary, and design how the system fails when the boundary is violated</strong>.
 
-The Copilot SDK offers those choices carefully. `sessionFs` lets you choose where state physically lives. `mode: "empty"` lets you choose the tool exposure surface. Per-session tokens let you choose the identity boundary. `sessionLimits` lets you choose the cost ceiling. In exchange, <strong>session locking, ownership, routing, and event delivery are explicitly left to you</strong>. Design with that division of responsibility in mind and the Copilot SDK holds up fine as a production multi-tenant backend.
+The Copilot SDK exposes each of these choices as configuration. `sessionFs` lets you choose where state physically lives. `mode: "empty"` lets you choose the tool exposure surface. Per-session tokens let you choose the identity boundary. `sessionLimits` lets you choose the cost ceiling. In exchange, session locking, ownership, routing, and event delivery are explicitly left to you. If you design with that division of responsibility in mind, the Copilot SDK works as a production multi-tenant backend.
 
-Ship without understanding it, and double writers corrupt conversations, `mode: "copilot-cli"` leaks tenant boundaries, and resume-time auth errors linger as bugs you cannot reproduce. Hopefully this article is enough to make you stop just short of that.
+If you ship without understanding it, double writers corrupt conversations, `mode: "copilot-cli"` breaks tenant boundaries, and resume-time auth errors linger as bugs you cannot reproduce.
 
 ## References
 

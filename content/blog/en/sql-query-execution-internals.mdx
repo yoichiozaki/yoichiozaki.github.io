@@ -1,15 +1,15 @@
 ---
 title: "How SQL Reaches Bytes on Disk — Building a Query Engine From Scratch"
 date: "2026-08-25"
-description: "Tracing a single SELECT statement all the way down — lexing, parsing, binding, logical planning, cardinality estimation, cost-based optimization, physical planning, Volcano execution, access methods, the buffer pool, slotted pages, and finally pread(2) — by writing the code that does it. Plus what happens past work_mem, and how parallel plans get costed."
+description: "Tracing a single SELECT statement all the way down — lexing, parsing, binding, logical planning, cardinality estimation, cost-based optimization, physical planning, Volcano execution, access methods, the buffer pool, slotted pages, and finally pread(2) — by writing the code that does it. It also covers what happens past work_mem and how parallel plans are costed."
 tags: ["Database", "PostgreSQL", "Query Optimization", "Parser", "Execution Engine", "Storage"]
 ---
 
-## What This Article Follows
+## What This Article Traces
 
-Type `SELECT name FROM users WHERE age > 30` and results come back. The goal here is to trace everything that happens in between without ever saying "and from here it's a black box."
+Type `SELECT name FROM users WHERE age > 30` and results come back. This article traces everything that happens in between, without ever stopping at "and from here it's a black box."
 
-The starting point is a plain string. The end point is a very concrete instruction: read 8192 bytes at offset 34,988,032 of file descriptor 42, and interpret 48 of those bytes as a struct. Between them sit more than a dozen transformations, each with its own intermediate representation.
+The starting point is a plain string. The end point is a concrete instruction: read 8192 bytes at offset 34,988,032 of file descriptor 42, and interpret 48 of those bytes as a struct. Between them sit more than a dozen transformations, each with its own intermediate representation.
 
 <SQLPipelineVisualizer />
 
@@ -35,11 +35,11 @@ flowchart TD
   CACHE -.-> PHYS
 ```
 
-The dotted edges are references rather than data flow. The catalog and the statistics are consulted from outside the main top-to-bottom path; the plan cache goes further and <strong>skips that path entirely</strong> — the second time the same SQL arrives, binding can short-circuit straight to a physical plan (chapter 9).
+The dotted edges are references rather than data flow. The catalog and the statistics are consulted from outside the main top-to-bottom path. The plan cache skips part of that path: when the same SQL arrives a second time, a cached physical plan can be used right after binding, and the stages from the logical plan through optimization do not run again (chapter 9).
 
 We will implement each stage in Python, leaning on PostgreSQL's vocabulary. Concrete names (`pd_lower`, `t_hoff`, `clock-sweep`) make it much easier to pick up the real source code afterwards.
 
-The spine is one query traced top to bottom, but we detour into `GROUP BY` aggregation, `NULL` and three-valued logic, what actually happens past `work_mem`, plan caching, and how parallel plans get costed. Each of those is a direct answer to "why did this query suddenly get slow in production?"
+The spine is one query traced top to bottom, but we detour into `GROUP BY` aggregation, `NULL` and three-valued logic, what actually happens past `work_mem`, plan caching, and how parallel plans get costed. Each bears directly on why a query suddenly gets slow in production.
 
 Index data structures themselves (B+ trees and LSM-trees) are covered in [How Database Indexes Work](/en/blog/database-indexing), so this article concentrates on how indexes are *used*.
 
@@ -49,7 +49,7 @@ Index data structures themselves (B+ trees and LSM-trees) are covered in [How Da
 
 ## Chapter 1: Lexing — Cutting a String Into Lexemes
 
-The first job is turning a sequence of characters into meaningful minimal units — tokens.
+The first job is turning a sequence of characters into tokens, the smallest meaningful units.
 
 It looks trivial, but decisions have to be made. Is `>=` one token or two? Is `age30` an identifier, or `age` followed by `30`? The answer is <strong>maximal munch</strong>: from the current position, consume as much as possible. That makes `>=` one token and `age30` one identifier.
 
@@ -127,7 +127,7 @@ def tokenize(sql: str) -> list[Token]:
     return out
 ```
 
-The order of the branches carries meaning. If the `sql[i:i+2] in TWO_CHAR_OPS` test does not come <strong>before</strong> the single-character operator test, `>=` splits into `>` and `=`.
+The order of the branches carries meaning. If the `sql[i:i+2] in TWO_CHAR_OPS` test does not come before the single-character operator test, `>=` splits into `>` and `=`.
 
 The demo below runs this scanner one token at a time.
 
@@ -135,15 +135,15 @@ The demo below runs this scanner one token at a time.
 
 ### Where Keywords Are Recognized
 
-The implementation above reads the whole word first and then consults the keyword table. Do it the other way around — scan for the literal string `SELECT` — and a column named `selected_at` splits into `SELECT` + `ed_at`. <strong>Munch first, classify second</strong> is the rule.
+The implementation above reads the whole word first and then consults the keyword table. Do it the other way around (scan for the literal string `SELECT`) and a column named `selected_at` splits into `SELECT` + `ed_at`. <strong>Munch first, classify second</strong> is the rule.
 
-The SQL standard reserves more than 200 words, and implementations differ. PostgreSQL grades them into four categories — reserved; reserved but still usable as a function or type name; non-reserved but not usable as a function or type name; and fully non-reserved — listed in `kwlist.h`. That gradation is why words like `value` and `name` (both non-reserved) still work as column names.
+The SQL standard reserves more than 200 words, and implementations differ. PostgreSQL grades them into four categories, listed in `kwlist.h`: reserved; reserved but still usable as a function or type name; non-reserved but not usable as a function or type name; and fully non-reserved. That gradation is why words like `value` and `name` (both non-reserved) still work as column names.
 
 ---
 
 ## Chapter 2: Parsing — Assembling Tokens Into a Tree
 
-Next, the grammar builds a tree. The skeleton of a statement (`SELECT … FROM … WHERE …`) falls out of <strong>recursive descent</strong> naturally, but expressions (`a + b * c > d AND e`) need operator precedence. We use <strong>precedence climbing</strong>, also known as Pratt parsing.
+Next, the parser assembles the tokens into a tree. Plain recursive descent handles the skeleton of a statement (`SELECT … FROM … WHERE …`), but expressions (`a + b * c > d AND e`) need operator precedence. We use precedence climbing, also known as Pratt parsing.
 
 ### AST Definitions
 
@@ -325,17 +325,17 @@ class Parser:
         raise SyntaxError(f"unexpected token {tok.text!r}")
 ```
 
-The `+ 1` in `parse_expr(prec + 1)` is what creates left associativity. Parsing `a - b - c`, the right operand is parsed with `min_prec = 5`, so the second `-` (precedence 4) is not absorbed and we get `(a - b) - c`. Write `parse_expr(prec)` instead and you get right associativity, `a - (b - c)`, which changes the result. Right-associative operators such as exponentiation use exactly that form.
+The `+ 1` in `parse_expr(prec + 1)` is what creates left associativity. When the parser reaches `a - b - c`, it parses the right operand of the first `-` with `min_prec = 5`, so the second `-` (precedence 4) is not absorbed and we get `(a - b) - c`. Write `parse_expr(prec)` instead and you get right associativity, `a - (b - c)`, which changes the result. Right-associative operators such as exponentiation use exactly that form.
 
 ### An AST Is Only What Was Written
 
-What we have now is a <strong>syntax</strong> tree. Whether a table named `users` exists, whether it has a column `age`, whether the comparison `age > 30` is well typed — none of that has been checked. `SELECT nonexistent FROM nowhere` parses without complaint.
+What we have now is a syntax tree. Whether a table named `users` exists, whether it has a column `age`, whether the comparison `age > 30` is well typed — none of that has been checked. `SELECT nonexistent FROM nowhere` parses without complaint.
 
 ---
 
 ## Chapter 3: Binding — Attaching Names to Entities
 
-Meaning is attached during <strong>binding</strong> (also called semantic analysis). This is where the catalog — the system tables — is consulted.
+Meaning is attached during <strong>binding</strong> (also called semantic analysis), the first stage that consults the catalog, i.e. the system tables.
 
 ### The Catalog
 
@@ -370,7 +370,7 @@ CATALOG = {
 
 ### Range Tables and Vars
 
-After binding, a column reference is a <strong>position</strong>, not a name — PostgreSQL's `Var(varno, varattno)`. `varno` indexes the range table (the list of relations that appeared in `FROM`), and `varattno` is the column number.
+After binding, a column reference is a position, not a name: PostgreSQL's `Var(varno, varattno)`. `varno` indexes the range table (the list of relations that appeared in `FROM`), and `varattno` is the column number.
 
 ```python
 @dataclass(frozen=True)
@@ -468,17 +468,17 @@ Only now can these errors be produced:
 - `column reference "id" is ambiguous` — both relations have an `id`
 - `operator does not exist: text > integer` — type mismatch
 
-The line `lt != rt and not {lt, rt} <= NUMERIC_TYPES` compresses <strong>implicit casting</strong> into a single condition. Real PostgreSQL is far more elaborate: it collects every candidate operator from `pg_operator` and ranks them using the conversion rules in `pg_cast`. That machinery is what promotes the `100` in `o.total > 100` to `numeric`.
+The line `lt != rt and not {lt, rt} <= NUMERIC_TYPES` compresses implicit casting into a single condition. Real PostgreSQL is far more elaborate: it collects every candidate operator from `pg_operator` and ranks them using the conversion rules in `pg_cast`. That machinery is what promotes the `100` in `o.total > 100` to `numeric`.
 
 ### Binding Normalizes Away Surface Differences
 
-After binding, `u.age`, `users.age`, and (when unambiguous) plain `age` all become the same `Var(0, 2, "int")`. Every later optimization works on that normalized form and never has to care how the query was written. That is deliberate.
+After binding, `u.age` and (when unambiguous) plain `age` both become the same `Var(0, 2, "int")`. Once the table is aliased as `u`, the name `users` is hidden, so `users.age` is an error in PostgreSQL and in the binder above. That is by design: every later optimization works on the normalized form and never has to care how the query was written.
 
 ---
 
 ## Chapter 4: The Logical Plan — Dropping Into Relational Algebra
 
-The bound AST becomes a tree of <strong>relational algebra</strong> operators. From here on SQL syntax is irrelevant; all that remains is which set operations to apply, in what order.
+The bound AST becomes a tree of relational algebra operators. From here on SQL syntax is irrelevant; all that remains is which set operations to apply, in what order.
 
 ```python
 @dataclass
@@ -534,7 +534,7 @@ The translation rules are direct.
 | `ORDER BY k` | `Sort(child, [k])` |
 | `LIMIT n` | `Limit(child, n)` |
 
-<strong>This table is where SQL's folk rules come from.</strong> `WHERE` expands <strong>below</strong> `Aggregate` and `HAVING` <strong>above</strong> it. That is the entire reason `HAVING` may reference aggregates and `WHERE` may not: one of them simply sits at a position where aggregated values do not exist yet.
+Several familiar SQL rules follow from this table. `WHERE` becomes a node below `Aggregate`, and `HAVING` one above it. That is the entire reason `HAVING` may reference aggregates and `WHERE` may not: `WHERE` sits at a position where aggregated values do not exist yet.
 
 Applied naively, the result is this tree:
 
@@ -548,15 +548,15 @@ Limit(10)
             └─ Scan(orders AS o)
 ```
 
-The nesting order mirrors SQL's evaluation order (`FROM` → `WHERE` → `SELECT` → `ORDER BY` → `LIMIT`). Because `SELECT` sits <strong>above</strong> `WHERE`, an alias defined in the select list cannot be referenced in `WHERE` — a familiar SQL restriction that falls straight out of this shape.
+The nesting order mirrors SQL's evaluation order (`FROM` → `WHERE` → `SELECT` → `ORDER BY` → `LIMIT`). Because `SELECT` sits above `WHERE`, an alias defined in the select list cannot be referenced in `WHERE`, a familiar SQL restriction that follows directly from this shape.
 
-The tree is <strong>correct</strong> and <strong>slow</strong>: it joins all 1,000,000 `orders` with all 100,000 `users` before filtering anything.
+The tree returns the correct result, but slowly: it joins all 1,000,000 `orders` with all 100,000 `users` before filtering anything.
 
 ---
 
 ## Chapter 5: Rewriting — Changing Shape Without Changing Meaning
 
-The first stage of optimization consists of transformations that are obviously profitable without computing any cost. They come from the equivalence laws of relational algebra.
+Optimization starts with transformations that are clearly profitable without computing any cost. They come from the equivalence laws of relational algebra.
 
 ### Predicate Pushdown
 
@@ -564,7 +564,7 @@ $$\sigma_{p}(R \bowtie S) \equiv \sigma_{p}(R) \bowtie S \quad (\text{when } p \
 
 Push selection below the join. Fewer rows reach the join, which is almost always a win.
 
-The key implementation trick is to <strong>split AND into conjuncts and push each one separately</strong>. As one lump, `u.age > 30 AND o.total > 100` can only be pushed to one side; split apart, both halves can be pushed.
+The key implementation trick is to <strong>split AND into conjuncts and push each one separately</strong>. As one lump, `u.age > 30 AND o.total > 100` references both tables, so it cannot go below the join at all; split apart, each half can be pushed to its own table.
 
 ```python
 def conjuncts(expr) -> list:
@@ -641,10 +641,10 @@ The join now sees 55,000 × 100,000 rows instead of 100,000 × 1,000,000.
 
 ### Other Rewrites
 
-- <strong>Column pruning</strong> — drop columns that nothing above the node references. The effect is dramatic in columnar stores, which is one reason to avoid `SELECT *`.
-- <strong>Constant folding</strong> — evaluate `now() - interval '7 days'` once at plan time. This is only valid because `now()` is <strong>stable</strong> — constant within a statement. Volatile functions such as `random()` cannot be folded.
+- <strong>Column pruning</strong> — drop columns that nothing above the node references. The savings are largest in columnar stores, which is one reason to avoid `SELECT *`.
+- <strong>Constant folding</strong> — evaluate `now() - interval '7 days'` once at plan time. This is only valid because `now()` is stable (constant within a statement). Volatile functions such as `random()` cannot be folded.
 - <strong>Transitive predicate closure</strong> — derive `b.x = 10` from `a.x = b.x AND a.x = 10` so the constant can also be pushed onto `b`.
-- <strong>Subquery decorrelation</strong> — turn a correlated subquery into a join. This is often the single highest-impact rewrite.
+- <strong>Subquery decorrelation</strong> — turn a correlated subquery into a join. This is often one of the highest-impact rewrites.
 
 Transitive closure is short enough to show. In practice, "why does only one of my two tables use its index?" is very often a question about whether this rewrite fired.
 
@@ -671,7 +671,7 @@ def transitive_closure(preds: list) -> list:
     return preds + derived
 ```
 
-Applied to `a.x = b.x AND a.x = 10`, this produces `b.x = 10`, which `push_down()` can then sink all the way to the scan of `b`. PostgreSQL calls this machinery <strong>equivalence classes</strong>, implemented in `equivclass.c`.
+Applied to `a.x = b.x AND a.x = 10`, this produces `b.x = 10`, which `push_down()` can then sink all the way to the scan of `b`. PostgreSQL calls this machinery equivalence classes, implemented in `equivclass.c`.
 
 An example of decorrelation:
 
@@ -689,9 +689,9 @@ SEMI JOIN orders o ON o.user_id = u.id AND o.total > 100;
 
 ### What Breaks Rewriting: Three-Valued Logic and Outer Joins
 
-Everything above quietly assumed two things: that <strong>a predicate is either true or false</strong>, and that <strong>joins commute</strong>. Neither holds in SQL.
+Everything above quietly assumed two things: that a predicate is either true or false, and that joins commute. SQL guarantees neither in general.
 
-<strong>First: NULL and three-valued logic.</strong> SQL has three truth values — TRUE, FALSE and UNKNOWN. `NULL > 30` is not FALSE; it is UNKNOWN.
+The first problem is NULL and three-valued logic. SQL has three truth values: TRUE, FALSE and UNKNOWN. `NULL > 30` is not FALSE; it is UNKNOWN.
 
 ```text
 AND    | T | F | U          OR     | T | F | U
@@ -703,12 +703,12 @@ AND    | T | F | U          OR     | T | F | U
 
 Two consequences matter in practice.
 
-1. <strong>`WHERE` keeps a row only when the predicate is TRUE</strong>; UNKNOWN is discarded. So a predicate test should really read `if pred(row) is True` — which is exactly how it is spelled once chapter 15 rewires the scan to real storage.
-2. <strong>`CHECK` constraints do the opposite</strong> and treat UNKNOWN as passing. The same expression flips its NULL behaviour depending on where it is written.
+1. `WHERE` keeps a row only when the predicate is TRUE; UNKNOWN is discarded. So a predicate test should really read `if pred(row) is True`, and that is how it is spelled once chapter 15 rewires the scan to real storage.
+2. `CHECK` constraints do the opposite and treat UNKNOWN as passing. The same expression flips its NULL behavior depending on where it is written.
 
 This is also why `NOT IN (… a list containing NULL)` always returns nothing. `x NOT IN (1, NULL)` means `x <> 1 AND x <> NULL`, and the right conjunct is permanently UNKNOWN, so the whole thing can never be TRUE. Consequently the planner cannot safely convert `NOT IN` into an anti join, which is why it tends to be slower than `NOT EXISTS`.
 
-<strong>Second: outer joins.</strong> Predicate pushdown is only unconditionally valid for inner joins.
+The second problem is outer joins. Predicate pushdown is only unconditionally valid for inner joins.
 
 ```sql
 -- Original: users with no orders survive the join
@@ -716,20 +716,20 @@ SELECT u.name, o.total
 FROM users u LEFT JOIN orders o ON u.id = o.user_id
 WHERE o.total > 100;          -- ← discards the NULL-extended side anyway
 
--- This one cannot be pushed down
+-- This predicate cannot be moved out of the join into WHERE
 SELECT u.name, o.total
 FROM users u LEFT JOIN orders o ON u.id = o.user_id AND o.total > 100;
 ```
 
-In the first query `o.total > 100` rejects NULLs, so the planner performs <strong>join strength reduction</strong>, turning the outer join into an inner join and regaining full freedom to reorder. In the second the predicate lives in the `ON` clause; pushing it down would change the answer by dropping users entirely instead of NULL-extending them.
+In the first query `o.total > 100` rejects NULLs, so the planner performs <strong>join strength reduction</strong>, turning the outer join into an inner join and regaining full freedom to reorder. In the second the predicate lives in the `ON` clause, so it does not reject NULL-extended rows: the join must stay an outer join, and the predicate cannot be moved out of the join into a filter on its result, because that would drop users entirely instead of NULL-extending them. Since it references only `orders`, it can still be applied to the `orders` scan before the join.
 
-Outer joins also <strong>destroy join-order freedom</strong>: $(A \bowtie B) \mathbin{⟕} C$ and $A \bowtie (B \mathbin{⟕} C)$ generally differ. Chapter 8's dynamic program relies on the inner-join property that every split of a subset yields the same result, so it cannot be applied unchanged once outer joins appear. Representing joins as <strong>hyperedges</strong> instead of graph edges — "these relations must all be present before this join may run" — is exactly the idea behind DPhyp, which we meet shortly.
+Outer joins also restrict join-order freedom: $(A \mathbin{⟕} B) \bowtie C$ and $A \mathbin{⟕} (B \bowtie C)$ generally differ. Chapter 8's dynamic program relies on the inner-join property that every split of a subset yields the same result, so it cannot be applied unchanged once outer joins appear. Representing joins as hyperedges instead of graph edges ("these relations must all be present before this join may run") is the idea behind DPhyp, which we meet shortly.
 
 ---
 
 ## Chapter 6: Statistics and Cardinality Estimation
 
-Now the optimizer proper begins — and this is the <strong>most fragile part of query optimization</strong>.
+The optimizer proper begins here, with the most fragile part of query optimization.
 
 Comparing costs requires knowing how many rows each operator produces. That number is unknowable before execution, so it is estimated from statistics.
 
@@ -781,7 +781,7 @@ Following the arithmetic: `30` lands in bucket 4, `[29, 31)`. Buckets 5 through 
 
 ### Join Cardinality
 
-The textbook estimate for an equi-join is the following, where $\mathrm{NDV}$ is the number of distinct values — the `n_distinct` seen above.
+The textbook estimate for an equi-join is the following, where $\mathrm{NDV}$ is the number of distinct values (the `n_distinct` seen above).
 
 $$|R \bowtie_{R.a = S.b} S| \approx \frac{|R| \cdot |S|}{\max(\mathrm{NDV}(R.a), \mathrm{NDV}(S.b))}$$
 
@@ -804,13 +804,13 @@ Three strong assumptions underpin all of this:
 2. <strong>Independence</strong> — selectivities of separate predicates are independent and can be multiplied
 3. <strong>Containment</strong> — one join key's value domain is contained in the other's
 
-None of them hold in practice, and independence fails most easily. `WHERE city = 'Yokohama' AND prefecture = 'Kanagawa'` estimates $0.01 \times 0.05 = 0.0005$ under independence, but the true value is $0.01$ — Yokohama determines the prefecture. That is a 20× underestimate.
+None of them hold in practice, and independence fails most easily. `WHERE city = 'Yokohama' AND prefecture = 'Kanagawa'` estimates $0.01 \times 0.05 = 0.0005$ under independence, but the true value is $0.01$, because Yokohama determines the prefecture. That is a 20× underestimate.
 
-And the error multiplies with every join level.
+The error also multiplies with every join level.
 
 <CardinalityErrorDiagram />
 
-Leis et al., *"How Good Are Query Optimizers, Really?"* (VLDB 2015), measured join queries over real data (IMDB) and found that estimation errors in major commercial and open-source systems grow exponentially with the number of joins, routinely exceeding a factor of 1,000 once more than two joins are involved — with outliers several orders of magnitude worse. Their conclusion is worth internalizing: <strong>cardinality estimation accuracy matters far more to final plan quality than cost model accuracy does</strong>.
+Leis et al., *"How Good Are Query Optimizers, Really?"* (VLDB 2015), measured join queries over real data (IMDB) and found that estimation errors in major commercial and open-source systems grow exponentially with the number of joins, routinely exceeding a factor of 1,000 once more than two joins are involved, with outliers several orders of magnitude worse. Their central conclusion is that <strong>cardinality estimation accuracy matters far more to final plan quality than cost model accuracy does</strong>.
 
 Mitigations include:
 
@@ -822,7 +822,7 @@ Mitigations include:
 
 ## Chapter 7: The Cost Model — What Actually Gets Counted
 
-With row counts estimated, costs follow. What is measured is neither seconds nor milliseconds but a <strong>dimensionless relative number</strong>: "if reading one page sequentially is 1.0, how much is everything else?"
+With row counts estimated, the planner can compute costs. A cost has no time unit; it is a <strong>dimensionless relative number</strong> that answers "if reading one page sequentially is 1.0, how much is everything else?"
 
 ```python
 import math
@@ -834,7 +834,7 @@ CPU_INDEX_TUPLE_COST = 0.005    # process one index entry
 CPU_OPERATOR_COST    = 0.0025   # evaluate one operator or function
 ```
 
-`random_page_cost = 4.0` does <strong>not</strong> mean PostgreSQL believes a physical random read is only four times a sequential read. The documentation explicitly says the default is lower than raw hardware ratios because many indexed reads are assumed to be cached. On SSD-heavy or fully cached workloads, lowering `random_page_cost` toward the measured range (often 1.1–2, and equal to `seq_page_cost` only when random access is effectively no worse) is a common tuning step. That single constant moves the break-even point between index scans and sequential scans.
+`random_page_cost = 4.0` does not mean PostgreSQL believes a physical random read is only four times a sequential read. The documentation explicitly says the default is lower than raw hardware ratios because many indexed reads are assumed to be cached. On SSD-heavy or fully cached workloads, lowering `random_page_cost` toward the measured range (often 1.1–2, and equal to `seq_page_cost` only when random access is effectively no worse) is a common tuning step. That single constant moves the break-even point between index scans and sequential scans.
 
 ### Scan Costs
 
@@ -851,13 +851,13 @@ seq_scan_cost(CATALOG["users"],  1)   # 1,000 + 1,000 +   250 =  2,250
 seq_scan_cost(CATALOG["orders"], 1)   # 10,000 + 10,000 + 2,500 = 22,500
 ```
 
-Crucially, this formula does <strong>not depend on selectivity</strong>. Returning one row still costs a full scan. An index scan, by contrast, costs roughly in proportion to selectivity. Where those two lines cross is where the plan flips.
+This formula does not depend on selectivity: returning one row still costs a full scan. An index scan, by contrast, costs roughly in proportion to selectivity. Where those two lines cross is where the plan flips.
 
 <AccessPathComparison />
 
 ### The Cost of an Index Scan
 
-Now the other line. Naively, fetching $n$ rows through an index looks like $n$ random reads — but it is not, because several rows share a page. The more rows you fetch, the higher the chance the next one lands on a page you have already read.
+Now the other line. Fetching $n$ rows through an index looks like $n$ random reads, but several rows share a page, so it costs less. The more rows you fetch, the higher the chance the next one lands on a page you have already read.
 
 Mackert and Lohman quantified this in 1989, and PostgreSQL uses their formula verbatim.
 
@@ -886,11 +886,11 @@ Fetch 5,000 rows from `users` (1,000 pages / 100,000 rows):
 
 $$\mathrm{PF} = \frac{2 \times 1{,}000 \times 5{,}000}{2 \times 1{,}000 + 5{,}000} = 1{,}428.6 \;\longrightarrow\; \text{clamped to } T = 1{,}000$$
 
-<strong>Not 5,000 random reads — at most one table's worth of pages.</strong> The "one page per row" intuition collapses as row counts grow.
+The estimate is at most one table's worth of pages, not 5,000 random reads. The "one page per row" intuition breaks down as row counts grow.
 
 ### Correlation — the Same Index, 75× Apart
 
-The other factor is the <strong>correlation</strong> between index order and physical heap order. PostgreSQL computes two endpoints and interpolates between them.
+The other factor is the correlation between index order and physical heap order. PostgreSQL computes two endpoints and interpolates between them.
 
 ```python
 def index_scan_cost(rel, index_pages, selectivity, correlation=0.0,
@@ -917,12 +917,12 @@ Holding selectivity at 5% (5,000 rows) and varying only correlation:
 | Correlation | Heap I/O cost | Meaning |
 | --- | ---: | --- |
 | 0.0 | 4,000 | 1,000 pages, all read randomly |
-| 0.5 | 3,013 | in between (squaring pulls it toward 0) |
+| 0.5 | 3,013 | in between, nearer the 0.0 row (0.5² = 0.25) |
 | 1.0 | 53 | 50 pages read sequentially (4.0 + 49 × 1.0) |
 
-Same index, same row count, <strong>75× difference</strong> from correlation alone. The value of `CLUSTER`, or of time-series data whose insertion order happens to be ascending, is concentrated in that one interpolation.
+Same index, same row count, a 75× difference from correlation alone. The benefit of `CLUSTER`, or of time-series data whose insertion order happens to be ascending, reaches the cost model through this one interpolation.
 
-There is no rigorous derivation for using the <strong>square</strong> of the correlation as the weight. `costsize.c` says so itself:
+There is no rigorous derivation for using the square of the correlation as the weight. `costsize.c` says so itself:
 
 > We currently interpolate linearly between the estimates based on the correlation squared (XXX is that appropriate?).
 
@@ -940,9 +940,9 @@ Take the `users(age)` index at 275 pages, correlation 0, and compare against the
 | 1.0% | 1,000 | 667 | 2,698 | full scan |
 | 5.0% | 5,000 | 1,000 | 4,144 | full scan |
 
-<strong>The crossover sits around 0.8%</strong> — with the HDD-era `random_page_cost = 4.0`. Drop it to the SSD-oriented 1.1 and, for the same table and the same index, the crossover climbs into the <strong>tens of percent</strong>. Once random reads are cheap, the Mackert-Lohman clamp means the index scan's I/O stops growing, while the Seq Scan keeps paying CPU cost for every row in the table.
+The crossover sits around 0.8% with the HDD-era `random_page_cost = 4.0`. Drop it to the SSD-oriented 1.1 and, for the same table and the same index, the crossover climbs into the tens of percent. Once random reads are cheap, the Mackert–Lohman clamp means the index scan's I/O stops growing, while the Seq Scan keeps paying CPU cost for every row in the table.
 
-(This model omits index descent cost and B+ tree height, so real PostgreSQL crosses over sooner. The point is not the exact number but that <strong>one constant moves the boundary by orders of magnitude</strong>.)
+(This model omits index descent cost and B+ tree height, so real PostgreSQL crosses over sooner. The exact number matters less than the fact that <strong>one constant moves the boundary by orders of magnitude</strong>.)
 
 ### Join Costs
 
@@ -981,7 +981,7 @@ def merge_join_cost(left: Plan, right: Plan, out_rows: float) -> float:
 
 (The bounded branch of `sort_cost` is simplified: PostgreSQL's `cost_tuplesort` uses $N \log_2 2K$ for a top-N heapsort. It is a constant-factor difference that never changes the plan ranking, but keep it in mind when comparing these numbers against real `EXPLAIN` output.)
 
-Three candidates for the query from the introduction:
+Three candidates for the join in the running example:
 
 | Candidate | Breakdown | Cost |
 | --- | --- | --- |
@@ -989,13 +989,13 @@ Three candidates for the query from the introduction:
 | MergeJoin (sort both sides) | $6{,}580 + 30{,}805 + 938$ | 38,323 |
 | <strong>HashJoin</strong> (build = `users`) | $2{,}250 + 22{,}500 + 938$ | <strong>25,688</strong> |
 
-The 48.175 in the nested-loop row is the cost of one inner index lookup. Each user has about 10 orders, so we read 2 index pages and 10 heap pages randomly, plus CPU cost $10 \times (0.005 + 0.01 + 0.0025)$. That is $12 \times 4.0 + 0.175 = 48.175$, repeated 55,000 times — hopeless.
+The 48.175 in the nested-loop row is the cost of one inner index lookup. Each user has about 10 orders, so we read 2 index pages and 10 heap pages randomly, plus CPU cost $10 \times (0.005 + 0.01 + 0.0025)$. That is $12 \times 4.0 + 0.175 = 48.175$, repeated 55,000 times, which puts it far above the other two candidates.
 
-But make the outer side a single row (`WHERE u.id = 42`) and the same nested loop becomes the fastest option. <strong>No join algorithm is universally better; the ranking flips with row counts.</strong> That is the entire reason cost-based optimization exists.
+But make the outer side a single row (`WHERE u.id = 42`) and the same nested loop becomes the fastest option. <strong>No join algorithm is universally better; the ranking flips with row counts.</strong> That is why cost-based optimization is needed.
 
 ### Choosing the Build Side
 
-`hash_join_cost` looks symmetric in build and probe, but the build side should be the smaller one. The hash table has to fit in memory (`work_mem` in PostgreSQL); if it does not, execution degrades to a <strong>grace hash join</strong> — both sides are partitioned by hash value, spilled to temporary files, and processed partition by partition — which adds I/O. The planner folds this in by increasing the batch count when the estimated build size exceeds `work_mem`.
+`hash_join_cost` looks symmetric in build and probe, but the build side should be the smaller one. The hash table has to fit in memory (`work_mem` in PostgreSQL). If it does not, execution degrades to a <strong>grace hash join</strong>, which partitions both sides by hash value, spills the partitions to temporary files, and processes them one at a time, adding I/O. The planner folds this in by increasing the batch count when the estimated build size exceeds `work_mem`.
 
 ### Startup Cost and Total Cost
 
@@ -1007,7 +1007,7 @@ Hash Join  (cost=2387.50..25687.50 rows=55000 width=36)
 
 There are two numbers. The first is the <strong>startup cost</strong>: what must be paid before the first row can be returned. The second is the <strong>total cost</strong>: everything, through the last row.
 
-They are tracked separately because <strong>a parent node does not always need every row</strong>. The formula at the top of `costsize.c` says it directly.
+They are tracked separately because a parent node does not always need every row. The cost of a partial retrieval follows from a formula written at the top of `costsize.c`:
 
 ```python
 @dataclass
@@ -1025,7 +1025,7 @@ def cost_for(plan: CostedPlan, tuples_to_fetch: float) -> float:
 
 ### "Blocking" Means "High Startup Cost"
 
-A hash join's startup cost <strong>swallows the entire total cost of the build side</strong>, because no row can be emitted until the hash table is finished. An operator with that property — nothing comes out until the input has been drained — is called <strong>blocking</strong>; chapter 10 implements a few.
+A hash join's startup cost includes the entire total cost of the build side, because no row can be emitted until the hash table is finished. An operator with that property (nothing comes out until the input has been drained) is called <strong>blocking</strong>; chapter 10 implements a few.
 
 ```python
 def hash_join_startup(build: Plan) -> float:
@@ -1033,13 +1033,13 @@ def hash_join_startup(build: Plan) -> float:
     return build.cost + build.rows * CPU_OPERATOR_COST
 ```
 
-For the plan from the introduction that is $2{,}250 + 55{,}000 \times 0.0025 = 2{,}387.5$, against a total of $25{,}687.5$. That pair of numbers <strong>is</strong> the planner's definition of "blocking."
+For the hash join in the running example that is $2{,}250 + 55{,}000 \times 0.0025 = 2{,}387.5$, against a total of $25{,}687.5$. This pair of numbers is how the planner represents "blocking."
 
 (PostgreSQL's `initial_cost_hashjoin` also charges `cpu_tuple_cost` per build row, giving $2{,}250 + 55{,}000 \times (0.0025 + 0.01) = 2{,}937.5$. We stay consistent with this chapter's simplified model here.)
 
 ### Add a LIMIT and the Ranking Inverts
 
-Chapter 9 will claim that `LIMIT` changes the algorithm chosen below it. These two numbers are all it takes to check that claim.
+Chapter 9 will claim that `LIMIT` changes the algorithm chosen below it. These two numbers are enough to check that claim.
 
 | Query | Plan | Arithmetic | Cost |
 | --- | --- | --- | ---: |
@@ -1047,17 +1047,17 @@ Chapter 9 will claim that `LIMIT` changes the algorithm chosen below it. These t
 | `… LIMIT 10` (no ORDER BY) | HashJoin | $2{,}387.5 + 23{,}300 \times \frac{10}{55{,}000}$ | <strong>2,392</strong> |
 | `… LIMIT 10` (no ORDER BY) | NestedLoop + IndexScan | $0 + 2{,}651{,}875 \times \frac{10}{55{,}000}$ | <strong>482</strong> |
 
-For all rows the hash join (25,688) beats the nested loop (2,651,875) by more than 100×. Ask for ten rows and <strong>the ranking flips</strong>, because the nested loop has essentially zero startup cost and only has to spin the outer side as far as needed.
+For all rows the hash join (25,688) beats the nested loop (2,651,875) by more than 100×. Ask for ten rows and the ranking flips, because the nested loop has essentially zero startup cost and only has to spin the outer side as far as needed.
 
-This is also the anatomy of the classic incident <strong>"adding `LIMIT 10` made the query 1000× slower."</strong> The planner assumes ten outer rows will yield ten results and picks the zero-startup nested loop; if matching rows are actually rare, execution scans the outer side to the end. Cardinality misestimates are never more punishing than under a `LIMIT`.
+The same arithmetic explains the classic incident "adding `LIMIT 10` made the query 1000× slower." The planner assumes ten outer rows will yield ten results and picks the zero-startup nested loop; if matching rows are actually rare, execution scans the outer side to the end. Cardinality misestimates are never more punishing than under a `LIMIT`.
 
-Cursors (`DECLARE … CURSOR`) use this machinery permanently. Following `cursor_tuple_fraction` (default 0.1), they are planned as if only 10% of rows will be fetched — which is why the same SQL can get a different plan through a cursor.
+Cursors (`DECLARE … CURSOR`) always use this partial-retrieval costing. Following `cursor_tuple_fraction` (default 0.1), they are planned as if only 10% of rows will be fetched, which is why the same SQL can get a different plan through a cursor.
 
 ---
 
 ## Chapter 8: Join Order — Fighting the Search Space
 
-With three or more relations, <strong>the order of joins</strong> matters more than the algorithm chosen for each one.
+With three or more relations, the order of joins matters more than the algorithm chosen for each one.
 
 ### How Big Is the Space?
 
@@ -1105,35 +1105,35 @@ def submasks(mask: int):
         sub = (sub - 1) & mask
 ```
 
-The `submasks` idiom is worth memorizing: `(sub - 1) & mask` walks the submasks of `mask` in descending order, and enumerating all submasks of all subsets is $O(3^n)$.
+The `submasks` idiom `(sub - 1) & mask` walks the submasks of `mask` in descending order, and enumerating all submasks of all subsets is $O(3^n)$.
 
-The cost function here is `C_out` — minimize only <strong>the sum of intermediate result sizes</strong>. It ignores scan and algorithm costs, yet it captures most of what makes one join order better than another.
+The cost function here is `C_out`, which minimizes only the sum of intermediate result sizes. It ignores scan and algorithm costs, yet it captures most of what makes one join order better than another.
 
-Let's run it.
+The demo below runs it on a four-table join.
 
 <JoinOrderDPVisualizer />
 
-The textual order $((u \bowtie o) \bowtie i) \bowtie p$ costs 605,000; the optimal $((i \bowtie p) \bowtie o) \bowtie u$ costs 15,000 — <strong>roughly 40× cheaper</strong>. The intuition "start from the most selective relation" turns out to have a precise cost-based justification.
+The textual order $((u \bowtie o) \bowtie i) \bowtie p$ costs 605,000; the optimal $((i \bowtie p) \bowtie o) \bowtie u$ costs 15,000, roughly 40× cheaper. The intuition "start from the most selective relation" turns out to have a precise cost-based justification.
 
 ### Pruning Cartesian Products
 
-The `connected(mask)` check inside the loop matters. A subset with no join predicates connecting it implies a Cartesian product and explodes row counts. This single pruning step shrinks the search space enormously — for a chain-shaped join graph, the candidate count drops to $O(n^3)$.
+The `connected(mask)` check inside the loop does much of the work. A subset that no join predicate connects can only be produced by a Cartesian product, which explodes row counts, so skipping such subsets shrinks the search space enormously. For a chain-shaped join graph, the candidate count drops to $O(n^3)$.
 
 Pruning too aggressively has a cost, though. When one relation is tiny (a dimension table, say), the Cartesian product is sometimes genuinely faster, so most implementations fall back to allowing cross products when no connected subset can be formed.
 
 ### When n Gets Large
 
-PostgreSQL abandons dynamic programming once the join count reaches `geqo_threshold` (default 12) and switches to a <strong>genetic algorithm (GEQO)</strong>. Optimality is no longer guaranteed, but planning time stays bounded.
+PostgreSQL abandons dynamic programming once the number of relations being joined reaches `geqo_threshold` (default 12) and switches to a <strong>genetic algorithm (GEQO)</strong>. Optimality is no longer guaranteed, but planning time stays bounded.
 
-In practice, though, <strong>`join_collapse_limit` (default 8) bites first</strong>. Beyond eight relations written with explicit `JOIN` syntax, the planner stops flattening the `FROM` clause and <strong>keeps the written order</strong>. If you reproduce this chapter's DP on a real ten-table explicit-join query and nothing gets reordered, suspect this setting first. (Subquery flattening has its own knob, `from_collapse_limit`.)
+In practice, though, `join_collapse_limit` (default 8) bites first. Beyond eight relations written with explicit `JOIN` syntax, the planner stops flattening the `FROM` clause and keeps the written order. If you reproduce this chapter's DP on a real ten-table explicit-join query and nothing gets reordered, suspect this setting first. (Subquery flattening has its own knob, `from_collapse_limit`.)
 
-Conversely, setting `join_collapse_limit = 1` stops the search entirely, which is the standard way to <strong>pin a join order by hand</strong> — the last resort when estimates simply refuse to be right.
+Conversely, setting `join_collapse_limit = 1` stops the search entirely, which is the standard way to pin a join order by hand, the last resort when the estimates cannot be fixed.
 
-Other systems take other escape routes:
+Other systems and papers take different approaches:
 
 - <strong>DPccp / DPhyp</strong> (Moerkotte & Neumann) — enumerate only connected subgraphs of the join graph, never constructing useless subsets. DPccp, for simple join graphs, is the VLDB 2006 paper; DPhyp, which generalizes it to hypergraphs (outer joins and complex predicates), is *"Dynamic Programming Strikes Back"*, SIGMOD 2008. Used by DuckDB and HyPer.
-- <strong>Cascades / Volcano framework</strong> (Graefe) — top-down search driven by transformation rules and a memo structure. SQL Server, Apache Calcite, and CockroachDB follow this lineage. Unlike bottom-up DP, the search space grows simply by adding rules.
-- <strong>Interesting orders</strong> — treat sort order as part of the state. A sorted intermediate result can be reused by a later merge join or `ORDER BY`, so a locally more expensive plan can win globally. The idea appears already in the System R paper.
+- <strong>Cascades / Volcano framework</strong> (Graefe) — top-down search driven by transformation rules and a memo structure. SQL Server, Apache Calcite, and CockroachDB follow this lineage. Unlike bottom-up DP, it can extend the search space just by adding rules.
+- <strong>Interesting orders</strong> — treat sort order as part of the state. A sorted intermediate result can be reused by a later merge join or `ORDER BY`, so a locally more expensive plan can win globally. The idea already appears in the System R paper.
 
 ---
 
@@ -1164,15 +1164,15 @@ Limit(10)                              rows=10       cost≈26,601
 
 `Sort` became a top-N heapsort because of `LIMIT 10`. Sorting all 55,000 rows costs $0.005 \times 55{,}000 \times \log_2 55{,}000 \approx 4{,}330$; keeping a 10-element heap costs $0.005 \times 55{,}000 \times \log_2 10 \approx 914$. Memory drops from $O(n)$ to $O(10)$ as well.
 
-<strong>A parent node's requirement changes the algorithm chosen below it.</strong> `LIMIT` pushes down "how many rows are needed"; `ORDER BY` pushes down "in what order."
+A parent node's requirement changing the algorithm chosen below it is a common pattern in physical optimization. `LIMIT` pushes down "how many rows are needed"; `ORDER BY` pushes down "in what order."
 
-Properties like these — which do not change *what* is computed but constrain *how* — are called <strong>physical properties</strong>. The canonical examples are sort order (PostgreSQL's `PathKey`) and data distribution (partitioning, in a distributed engine). Cascades-style optimizers make them part of the search state, remembering "the cheapest plan for this subset *in this sort order*" separately for each order. Chapter 8's interesting orders are the ancestor of that idea.
+Properties that constrain *how* a result is produced without changing *what* is computed are called <strong>physical properties</strong>. The canonical examples are sort order (PostgreSQL's `PathKey`) and data distribution (partitioning, in a distributed engine). Cascades-style optimizers make them part of the search state, remembering "the cheapest plan for this subset *in this sort order*" separately for each order. Chapter 8's interesting orders are the ancestor of that idea.
 
 ### Reusing Plans — Prepared Statements and Generic Plans
 
 Everything from chapter 1 to here is expensive. An application firing the same query thousands of times per second should not re-lex it every time, so implementations cache plans.
 
-That introduces a trade-off. Caching a parameterized query means <strong>building a plan without knowing the parameter values</strong> — but chapter 6's `selectivity_gt` has nothing to say without a value.
+That introduces a trade-off. Caching a parameterized query means building a plan without knowing the parameter values, and chapter 6's `selectivity_gt` cannot compute anything without a value.
 
 ```python
 DEFAULT_INEQ_SEL = 0.3333333333333333    # selfuncs.h
@@ -1196,15 +1196,15 @@ Evaluating `WHERE u.age > $1` against the very same histogram:
 
 The generic plan is built for 33,333 rows: too small for `$1 = 30`, too large for `$1 = 79`.
 
-PostgreSQL's compromise is to try first. `choose_custom_plan()` in `plancache.c`:
+PostgreSQL compromises by trying custom plans first. `choose_custom_plan()` in `plancache.c`:
 
-1. always builds a custom plan for the first <strong>five</strong> executions
+1. always builds a custom plan for the first five executions
 2. compares their average estimated cost against the one generic plan
 3. keeps the generic plan thereafter if it is cheaper (and skips planning entirely)
 
-<strong>This is the anatomy of "it was fast for the first few calls and then suddenly 100× slower."</strong> To force the issue, set `plan_cache_mode` to `force_custom_plan` or `force_generic_plan`.
+This explains the pattern "it was fast for the first few calls and then suddenly 100× slower." To force the issue, set `plan_cache_mode` to `force_custom_plan` or `force_generic_plan`.
 
-Avoiding parameters is not a free escape. Interpolating values into the SQL string every time makes estimation exact, but it <strong>defeats plan caching entirely and opens the door to SQL injection</strong>. Estimation accuracy and plan reuse are in tension by construction.
+Avoiding parameters is not a free escape. Interpolating values into the SQL string every time lets the planner estimate with the real values, but it <strong>defeats plan caching entirely and opens the door to SQL injection</strong>. Estimation accuracy and plan reuse are in tension by construction.
 
 ---
 
@@ -1221,7 +1221,7 @@ class Operator:
     def close(self) -> None: ...         # release resources
 ```
 
-Because the interface is uniform, any operator stacks on top of any other, and the planner is free to choose the shape of the tree. That is the essential value of the model.
+The uniform interface is the model's main strength: any operator stacks on top of any other, so the planner is free to choose the shape of the tree.
 
 ### Implementation
 
@@ -1275,13 +1275,13 @@ class NestedLoopJoinExec:
         self.inner.close()
 ```
 
-The demo below follows the call chain one event at a time — `next()` descending from root to leaves, tuples climbing back from leaves to root.
+The demo below follows the call chain one event at a time: `next()` descending from root to leaves, and tuples climbing back from leaves to root.
 
 <VolcanoIteratorVisualizer />
 
 ### Blocking Operators
 
-Not every operator can return one tuple at a time. `Sort` cannot return its first row until it has seen the last one. `HashJoin` cannot probe until the build side is fully consumed. Such operators are called <strong>blocking</strong>, or pipeline breakers. Chapter 7's "Startup Cost and Total Cost" met them from the cost side, as operators whose startup cost is pinned to their total cost; here is what that looks like as code.
+Not every operator can return one tuple at a time. `Sort` cannot return its first row until it has seen the last one. `HashJoin` cannot probe until the build side is fully consumed. These are the blocking operators (also called pipeline breakers) that chapter 7's "Startup Cost and Total Cost" met from the cost side, where their startup cost included the whole cost of the input they drain first. Here is what they look like as code.
 
 ```python
 from collections import defaultdict
@@ -1319,7 +1319,7 @@ class HashJoinExec:
         self.table = None
 ```
 
-Where blocking operators sit determines how a query *feels*. `LIMIT 10` still reads every row when an `ORDER BY` is present, because `Sort` blocks. Without `ORDER BY`, `LIMIT 10` stops calling `next()` after ten rows.
+Where blocking operators sit determines how much a query has to read before it returns its first row. `LIMIT 10` still reads every row when an `ORDER BY` is present, because `Sort` blocks. Without `ORDER BY`, `LIMIT 10` stops calling `next()` after ten rows.
 
 ### The Top-N Heap
 
@@ -1361,7 +1361,7 @@ The `next(seq)` counter in the second tuple position prevents Python from fallin
 
 Every operator so far has treated `predicate(row)` as a plain Python function. Real implementations put one more layer here.
 
-The obvious approach is to walk the bound expression tree recursively, once per row. But the shape of that tree never changes at run time. So PostgreSQL compiles it, <strong>once at executor-init time, into a flat array of steps</strong>, and afterwards just runs a `for` loop over that array. That is what `ExprState` and the `EEOP_*` steps are.
+The obvious approach is to walk the bound expression tree recursively, once per row. Because the shape of that tree never changes at run time, PostgreSQL instead <strong>compiles it once at executor-init time, into a flat array of steps</strong>, and afterwards just runs a `for` loop over that array. That is what `ExprState` and the `EEOP_*` steps are.
 
 `Filter: (total > 100 AND user_id = 42)` becomes roughly this:
 
@@ -1382,23 +1382,23 @@ The obvious approach is to walk the bound expression tree recursively, once per 
 
 Three things this article has discussed elsewhere are embedded in that array, in machine form.
 
-<strong>The `last_var` on `EEOP_SCAN_FETCHSOME`</strong> — this is where chapter 15's `deform_tuple` is actually invoked, and it <strong>stops at the highest attribute number the expression references</strong>. Columns can only be extracted front to back, so if nothing beyond attnum 3 is used, attribute 4 onwards is never touched. That is one reason `SELECT *` on a 40-column table is slower than naming three columns: the executor pays for the longer loop before a single byte reaches the network (per-column output-function calls and transfer volume then pile on top of it).
+<strong>The `last_var` on `EEOP_SCAN_FETCHSOME`.</strong> This is where chapter 15's `deform_tuple` is actually invoked, and it stops at the highest attribute number the expression references. Columns can only be extracted front to back, so if nothing beyond attnum 3 is used, attribute 4 onwards is never touched. That is one reason `SELECT *` on a 40-column table is slower than naming three columns: the executor pays for the longer loop before a single byte reaches the network (per-column output-function calls and transfer volume then pile on top of it).
 
-<strong>The `_STRICT` suffix</strong> — chapter 5's three-valued logic, made mechanical. A strict function returns NULL whenever an argument is NULL, so the step short-circuits to NULL <strong>without calling the function at all</strong>.
+<strong>The `_STRICT` suffix</strong> is chapter 5's three-valued logic, made mechanical. A strict function returns NULL whenever an argument is NULL, so the step short-circuits to NULL without calling the function at all.
 
-<strong>`EEOP_QUAL`</strong> — the rule "`WHERE` only passes TRUE", as an instruction. Whether the previous result was FALSE or NULL, it jumps to the end and fails the row. An `AND` written *inside* an expression uses `EEOP_BOOL_AND_STEP_*` instead. That one must distinguish FALSE from UNKNOWN, so it threads an `anynull` flag through the steps: FIRST clears the flag, the middle steps set it on NULL and bail out early on FALSE, and LAST turns "no FALSE but at least one NULL" into NULL. Splitting those roles across three opcodes (FIRST / middle / LAST) instead of branching at run time is a deliberate performance special-case.
+<strong>`EEOP_QUAL`</strong> turns the rule "`WHERE` only passes TRUE" into an instruction. Whether the previous result was FALSE or NULL, it jumps to the end and fails the row. An `AND` written *inside* an expression uses `EEOP_BOOL_AND_STEP_*` instead. That one must distinguish FALSE from UNKNOWN, so it threads an `anynull` flag through the steps: FIRST clears the flag, the middle steps set it on NULL and bail out early on FALSE, and LAST turns "no FALSE but at least one NULL" into NULL. Splitting those roles across three opcodes (FIRST / middle / LAST) instead of branching at run time is a deliberate performance special-case.
 
-And this flat array is precisely <strong>what PostgreSQL's JIT compiles</strong>: an interpreter loop with an indirect branch per step becomes straight-line native code. When chapter 12 says PostgreSQL's JIT targets expression evaluation and tuple deforming, this array is what it means.
+This flat array is also what PostgreSQL's JIT compiles: an interpreter loop with an indirect branch per step becomes straight-line native code. When chapter 12 says PostgreSQL's JIT targets expression evaluation and tuple deforming, this array is what it means.
 
 ---
 
 ## Chapter 11: When Memory Runs Out — External Sort and Hash Aggregation
 
-Every operator in the previous chapter assumed its intermediate results fit in memory. Sometimes they do not. This chapter looks at what happens when they don't, through the two canonical cases — sorting and aggregation — and the point is that <strong>they fail in completely different ways</strong>.
+Every operator in the previous chapter assumed its intermediate results fit in memory. When they do not, the two canonical cases, sorting and aggregation, <strong>fail in completely different ways</strong>.
 
 ### External Merge Sort
 
-`work_mem` showed up once, back in chapter 7, as the line a hash table has to stay under — but not what happens when that line is crossed. For sorting, this happens:
+Chapter 7 introduced `work_mem` as the line a hash table has to stay under. For sorting, crossing that line looks like this:
 
 ```python
 def sort_external(rows, key, work_mem_rows, tmp):
@@ -1418,7 +1418,7 @@ def sort_external(rows, key, work_mem_rows, tmp):
     return heapq.merge(*(tmp.read(r) for r in runs), key=key)
 ```
 
-One pass would suffice if every run could be merged at once. The reason it cannot is that <strong>each tape in the merge needs its own read buffer</strong>. PostgreSQL budgets 32 blocks (`MERGE_BUFFER_SIZE` = 256 KB) plus per-tape overhead for each one, so at `work_mem = 4MB` roughly 15 runs can be merged simultaneously (`tuplesort_merge_order()`). More runs than that means stacking merge passes.
+One merge pass would suffice if every run could be merged at once, but each tape in the merge needs its own read buffer. PostgreSQL budgets 32 blocks (`MERGE_BUFFER_SIZE` = 256 KB) plus per-tape overhead for each one, so at `work_mem = 4MB` roughly 15 runs can be merged simultaneously (`tuplesort_merge_order()`). More runs than that means stacking merge passes.
 
 $$\text{passes} = \lceil \log_M r \rceil \qquad (r = \text{runs},\; M = \text{merge order})$$
 
@@ -1426,11 +1426,11 @@ PostgreSQL's `cost_tuplesort` writes exactly that:
 
 $$\text{startup} = c\,N \log_2 N \;+\; 2\,\text{npages} \cdot \lceil \log_M r \rceil \times (0.75\,c_{\text{seq}} + 0.25\,c_{\text{rand}})$$
 
-The comment on that last weighting is refreshingly honest:
+The comment on that last weighting admits it is a guess:
 
 > The disk traffic is assumed to be 3/4ths sequential and 1/4th random accesses (XXX can't we refine that guess?)
 
-<strong>Some numbers</strong>, at 60 bytes per row:
+Two sizes, at 60 bytes per row:
 
 - <strong>55,000 rows ≈ 3.3 MB</strong> — fits the default 4 MB `work_mem`, so it is an in-memory quicksort and touches no disk at all.
 - <strong>5,500,000 rows ≈ 330 MB</strong> — $r = 330/4 \approx 79$ runs and $M \approx 15$, so $\lceil \log_{15} 79 \rceil = 2$ passes.
@@ -1439,11 +1439,11 @@ The comment on that last weighting is refreshingly honest:
   - disk $= 161{,}136 \times 1.75 \approx 282{,}000$
   - CPU $= 0.005 \times 5{,}500{,}000 \times \log_2 5{,}500{,}000 \approx 616{,}000$
 
-So <strong>in this cost model, spilling to disk adds about 46% on top of the comparison cost</strong> — not 100×. Sorting <strong>degrades gracefully</strong> past `work_mem`, and that is worth remembering. Hashing is what falls off a cliff: a hash join has to repartition and rewrite <strong>both</strong> inputs, and a hash aggregate — which only ever has one — repartitions that one recursively.
+So in this cost model, spilling to disk adds about 46% on top of the comparison cost, not 100×. Sorting <strong>degrades gracefully</strong> past `work_mem`. Hashing is what falls off a cliff: a hash join has to repartition and rewrite both inputs, and a hash aggregate, which only ever has one, repartitions that one recursively.
 
-One more thing: <strong>temp files bypass the buffer pool entirely</strong>. Chapter 14's `shared_buffers` is for tables and indexes; sort spills are read and written directly under `base/pgsql_tmp/`. That is how "there is plenty of RAM but the sort is slow" happens.
+Also, temp files bypass the buffer pool entirely. Chapter 14's `shared_buffers` is for tables and indexes; sort spills are read and written directly under `base/pgsql_tmp/`. That is how "there is plenty of RAM but the sort is slow" happens.
 
-Actual behaviour shows up in `EXPLAIN ANALYZE`, where chapter 9's three sort variants appear verbatim as strings:
+Actual behavior shows up in `EXPLAIN ANALYZE`, where chapter 9's three sort variants appear verbatim as strings:
 
 ```text
 Sort Method: top-N heapsort  Memory: 25kB
@@ -1453,7 +1453,7 @@ Sort Method: external merge  Disk: 341000kB
 
 ### Aggregation — Hash or Sort
 
-Chapter 9's operator table listed `Aggregate → Hash Aggregate / Sorted Aggregate`. Here are both. The only difference is <strong>whether they block</strong>.
+Chapter 9's operator table listed `Aggregate → Hash Aggregate / Sorted Aggregate`. Here are both. They differ in one respect: whether they block.
 
 ```python
 class HashAggExec:
@@ -1518,32 +1518,32 @@ class SortedAggExec:
         self.child.close()
 ```
 
-<strong>And the two cost exactly the same.</strong> From `cost_agg` in `costsize.c`:
+Their total costs are exactly the same. From `cost_agg` in `costsize.c`:
 
 > Note: in this cost model, AGG_SORTED and AGG_HASHED have exactly the same total CPU cost, but AGG_SORTED has lower startup cost.
 
-Work it out for `SELECT user_id, count(*) FROM orders GROUP BY user_id`. The input is `SeqScan(orders)` — 1,000,000 rows at cost 20,000 — and the group count is `NDV(user_id) = 100,000`.
+Work it out for `SELECT user_id, count(*) FROM orders GROUP BY user_id`. The input is `SeqScan(orders)` (1,000,000 rows at cost 20,000), and the group count is `NDV(user_id) = 100,000`.
 
 | | Startup cost | Total cost |
 | --- | ---: | ---: |
 | HashAgg | $20{,}000 + 0.0025 \times 10^6 = 22{,}500$ | $22{,}500 + 0.01 \times 10^5 = 23{,}500$ |
 | SortedAgg (input already sorted) | $\approx 0$ | $20{,}000 + 2{,}500 + 1{,}000 = 23{,}500$ |
 
-Identical totals of 23,500; startup costs of 22,500 versus 0. Chapter 7's startup-cost section pays off immediately.
+The totals are identical at 23,500; only the startup cost (22,500 versus 0) separates them, which is exactly the distinction chapter 7 introduced.
 
-But <strong>"input already sorted" only counts when the order is free</strong>. Sorting on purpose costs
+But "input already sorted" only counts when the order is free. Sorting on purpose costs
 
 $$20{,}000 + 0.005 \times 10^6 \times \log_2 10^6 \approx 119{,}700$$
 
-which loses to HashAgg's 23,500 by more than 5×. <strong>So the aggregation strategy is decided by whether an existing index or a lower merge join happens to supply the order</strong> — this is where chapter 8's interesting orders become worth actual money.
+which loses to HashAgg's 23,500 by more than 5×. So <strong>the aggregation strategy is decided by whether an existing index or a lower merge join happens to supply the order</strong>. This is where chapter 8's interesting orders pay off in practice.
 
-HashAgg has its own weakness: the hash table can overflow. The budget is not `work_mem` but `work_mem × hash_mem_multiplier` (default 2.0 since PostgreSQL 15) — the same budget a hash join's hash table gets. On spill, `cost_agg` charges `random_page_cost` per written page and `seq_page_cost` per page read back, then doubles both. The comment reads: "HashAgg has somewhat worse IO behavior than Sort on typical hardware/OS combinations." Once again, sorting is the one that copes.
+HashAgg has its own weakness: the hash table can overflow. The budget is `work_mem × hash_mem_multiplier` (default 2.0 since PostgreSQL 15), not plain `work_mem`, and a hash join's hash table gets the same budget. On spill, `cost_agg` charges `random_page_cost` per written page and `seq_page_cost` per page read back, then doubles both. The comment reads: "HashAgg has somewhat worse IO behavior than Sort on typical hardware/OS combinations." Once again, sorting is the one that copes.
 
-Putting the two failure modes side by side makes the difference obvious. Try moving `work_mem` — and note that the demo below feeds <strong>the same input as this chapter's sort example</strong> (5,500,000 rows, 330 MB, grouped on 1,000,000 distinct keys) to both operators, not the 1,000,000-row / 100,000-group example in the table above:
+The demo below puts the two failure modes side by side. Try moving `work_mem`. The demo feeds the same input as this chapter's sort example (5,500,000 rows, 330 MB, grouped on 1,000,000 distinct keys) to both operators, not the 1,000,000-row / 100,000-group example in the table above:
 
 <SpillVisualizer />
 
-Measured behaviour appears on the `HashAggregate` node in `EXPLAIN ANALYZE`:
+Measured behavior appears on the `HashAggregate` node in `EXPLAIN ANALYZE`:
 
 ```text
 HashAggregate  (actual rows=100000 loops=1)
@@ -1556,7 +1556,7 @@ HashAggregate  (actual rows=100000 loops=1)
 
 The Volcano model we have been building is elegant, but it has a performance problem: returning one row costs one function call per operator. Ten million rows times five operators is fifty million calls. At tens of nanoseconds each, that alone is seconds. Worse, virtual calls defeat branch prediction, so the overhead can exceed the actual work (one comparison).
 
-This chapter covers the three directions out of that constraint: <strong>change the granularity</strong> (vectorization), <strong>erase the contract altogether</strong> (code generation), and <strong>clone the tree and run copies side by side</strong> (parallelism).
+There are three ways out of that constraint: change the granularity (vectorization), erase the contract altogether (code generation), and clone the tree and run copies side by side (parallelism).
 
 ### Vectorization and Code Generation
 
@@ -1564,15 +1564,15 @@ This chapter covers the three directions out of that constraint: <strong>change 
 
 <strong>Vectorized execution</strong> makes `next()` return a batch of roughly 1024 rows instead of one tuple. Call counts drop by three orders of magnitude, and the inside of a batch becomes a tight loop where SIMD and loop unrolling pay off. MonetDB/X100 (CIDR 2005) started this line; DuckDB and ClickHouse follow it.
 
-<strong>Code generation</strong> goes further and eliminates the operator tree, fusing it into a single loop. Neumann's *"Efficiently Compiling Efficient Query Plans for Modern Hardware"* (VLDB 2011) formalized the <strong>push-based pipeline</strong>: split the plan at pipeline breakers and compile each pipeline into one loop. Intermediate tuples are never materialized; values stay in registers.
+<strong>Code generation</strong> goes further and eliminates the operator tree, fusing operators into tight loops. Neumann's *"Efficiently Compiling Efficient Query Plans for Modern Hardware"* (VLDB 2011) formalized the push-based pipeline: split the plan at pipeline breakers and compile each pipeline into one loop. Intermediate tuples are never materialized; values stay in registers.
 
-Note that PostgreSQL's LLVM-based JIT does not eliminate the operator tree. It compiles <strong>expression evaluation</strong> and tuple deforming into native code — a different thing from whole-plan code generation, and easy to confuse. The `EEOP_*` array from chapter 10 is what it compiles.
+PostgreSQL's LLVM-based JIT, by contrast, does not eliminate the operator tree. It compiles expression evaluation and tuple deforming into native code. That is different from whole-plan code generation, and the two are easy to confuse. The `EEOP_*` array from chapter 10 is what it compiles.
 
 ### Parallel Execution — Where to Put the Gather
 
-The third direction is running parts of the operator tree in several processes at once. Every plan so far has been serial, and there is a reason for that; the fastest way to see it is through the costs.
+The third direction is running parts of the operator tree in several processes at once. Every plan so far has been serial. Whether parallelism makes a plan cheaper depends on where the `Gather` goes, and the cost arithmetic shows it.
 
-<strong>First, the worker count.</strong> PostgreSQL derives it logarithmically from table size: it starts once the table exceeds `min_parallel_table_scan_size` (default 8 MB = 1,024 pages) and adds a worker on every tripling.
+First, the worker count. PostgreSQL derives it logarithmically from table size: it starts once the table exceeds `min_parallel_table_scan_size` (default 8 MB = 1,024 pages) and adds a worker on every tripling.
 
 | Pages | Size | Workers |
 | ---: | ---: | ---: |
@@ -1582,23 +1582,23 @@ The third direction is running parts of the operator tree in several processes a
 | ≥ 9,216 | 72 MB | 3 |
 | ≥ 27,648 | 216 MB | 4 |
 
-`users` is 1,000 pages: <strong>24 pages short, so it never goes parallel</strong>. `orders` at 10,000 pages would earn 3 workers, but `max_parallel_workers_per_gather` (default 2) caps it at <strong>2</strong>.
+`users` is 1,000 pages: 24 pages short, so it never goes parallel. `orders` at 10,000 pages would earn 3 workers, but `max_parallel_workers_per_gather` (default 2) caps it at 2.
 
-<strong>Next, the divisor.</strong> The leader participates too, so it is not simply the worker count — but the more workers there are, the busier the leader gets collecting their output, so its contribution is discounted by 0.3 per worker, and once that discount leaves nothing (4 workers or more) the leader stops counting at all.
+Next, the divisor. The leader participates too, so the divisor is not simply the worker count. But the more workers there are, the busier the leader gets collecting their output, so its contribution is discounted by 0.3 per worker. Once that discount leaves nothing (4 workers or more), the leader stops counting at all.
 
 $$\text{divisor} = 2 + (1.0 - 0.3 \times 2) = 2.4$$
 
-<strong>And only CPU cost is divided.</strong> The same total number of pages still has to be read, so the I/O term survives intact.
+And only CPU cost is divided. The same total number of pages still has to be read, so the I/O term survives intact.
 
 $$\text{Parallel Seq Scan(orders)} = \underbrace{10{,}000}_{\text{I/O, undivided}} + \frac{10{,}000 + 2{,}500}{2.4} = 15{,}208.3$$
 
-That would be a rout — except that shipping rows from workers to the leader costs something. `parallel_tuple_cost` defaults to <strong>0.1</strong>, ten times `cpu_tuple_cost`, and starting the workers costs `parallel_setup_cost` = 1,000.
+That would be a clear win, but shipping rows from workers to the leader is not free. `parallel_tuple_cost` defaults to 0.1, ten times `cpu_tuple_cost`, and starting the workers costs `parallel_setup_cost` = 1,000.
 
-<strong>Put the `Gather` directly above the scan and you lose:</strong>
+Put the `Gather` directly above the scan and you lose:
 
 $$15{,}208.3 + \underbrace{1{,}000}_{\text{setup}} + \underbrace{0.1 \times 100{,}000}_{\text{tuple transfer}} = 26{,}208 \;>\; 22{,}500\ \text{(serial)}$$
 
-<strong>Put it above the join and you win</strong>, because only 55,000 rows cross the queue instead of 100,000.
+Put it above the join and you win, because only 55,000 rows cross the queue instead of 100,000.
 
 | Node | Cost |
 | --- | ---: |
@@ -1621,17 +1621,17 @@ Gather  (cost=3387.50..24429.00 rows=55000 width=36)
                     Filter: (age > 30)
 ```
 
-The small `rows=` values under `Gather` are not a mistake: they are <strong>per-worker</strong> counts (100,000 / 2.4 = 41,667 and 55,000 / 2.4 = 22,917). This trips up nearly everyone reading their first parallel plan.
+The small `rows=` values under `Gather` are not a mistake: they are per-worker counts (100,000 / 2.4 = 41,667 and 55,000 / 2.4 = 22,917). This often trips up readers of their first parallel plan.
 
-Two rules fall out.
+Two rules follow.
 
-<strong>1. The `Gather` wants to be as high in the tree as possible</strong> — every row crossing the boundary costs 40 `cpu_operator_cost` units. That is why PostgreSQL builds partial paths bottom-up and only caps them with a `Gather` at the top, and why `Gather Merge` exists: preserving order on the way up means the `Sort` need not sit above the `Gather`.
+<strong>1. The `Gather` wants to be as high in the tree as possible</strong>, because every row crossing the boundary costs 40 `cpu_operator_cost` units. That is why PostgreSQL builds partial paths bottom-up and only caps them with a `Gather` at the top, and why `Gather Merge` exists: preserving order on the way up means the `Sort` need not sit above the `Gather`.
 
-<strong>2. The inner side of a join is not divided</strong> — in the plan above every worker builds <strong>its own copy</strong> of the `users` hash table (PostgreSQL 11+ can share one via `Parallel Hash`). So the hash budget is charged <strong>per node per process</strong>, and the leader executes the plan too: 2 workers + the leader = 3 processes × 1 hash node × 8 MB (the previous chapter's `work_mem` 4 MB × `hash_mem_multiplier` 2.0) = 24 MB. A plan with several hash nodes multiplies further. That multiplication is what makes the folk remedy for a spill — "just raise `work_mem`" — dangerous.
+<strong>2. The inner side of a join is not divided</strong>: in the plan above, every worker builds its own copy of the `users` hash table (PostgreSQL 11+ can share one via `Parallel Hash`). So the hash budget is charged per node per process, and the leader executes the plan too: 2 workers + the leader = 3 processes × 1 hash node × 8 MB (the previous chapter's `work_mem` 4 MB × `hash_mem_multiplier` 2.0) = 24 MB. A plan with several hash nodes multiplies further. That multiplication is what makes the folk remedy for a spill ("just raise `work_mem`") dangerous.
 
 Not everything can live below a `Gather`, either. Operations that write or lock rows, executions that might be suspended part way (`DECLARE … CURSOR`, PL/pgSQL's `FOR … IN query LOOP`), and `PARALLEL UNSAFE` functions all force serial execution. (`SERIALIZABLE` isolation did too, through PostgreSQL 11; that restriction was lifted in 12.) A non-zero `max_parallel_workers_per_gather` is necessary but not sufficient.
 
-As you may have noticed, <strong>the running example of this article would in fact go parallel on a default PostgreSQL</strong> (24,429 &lt; 25,688). Presenting the serial plan everywhere else is a simplification that keeps the discussion to a single execution path — the equivalent of `max_parallel_workers_per_gather = 0`.
+The running example of this article <strong>would in fact go parallel on a default PostgreSQL</strong> (24,429 &lt; 25,688). Presenting the serial plan everywhere else is a simplification that keeps the discussion to a single execution path, the equivalent of `max_parallel_workers_per_gather = 0`.
 
 ---
 
@@ -1692,7 +1692,7 @@ class HeapScan:
         return None
 ```
 
-The <strong>visibility check</strong> deserves attention. Not every row physically present on a page is visible to you. Under MVCC, several versions of the same logical row coexist on the page.
+The visibility check is needed because not every row physically present on a page is visible to you: under MVCC, several versions of the same logical row coexist on the page.
 
 ```python
 def visible(tup, snapshot) -> bool:
@@ -1710,15 +1710,15 @@ def visible(tup, snapshot) -> bool:
     return False
 ```
 
-Because this check requires the heap, PostgreSQL's Index Only Scan is harder than it sounds — index entries carry no visibility information, so in principle the heap must still be consulted. The workaround is the <strong>visibility map</strong>, an auxiliary file with one bit per block meaning "every tuple on this block is visible to every transaction." When the bit is set, the heap fetch is skipped. `VACUUM` sets those bits, so heavily updated tables often fail to get the Index Only Scans you expect.
+Because this check requires the heap, PostgreSQL's Index Only Scan is harder than it sounds. Index entries carry no visibility information, so in principle the heap must still be consulted. The workaround is the <strong>visibility map</strong>, an auxiliary file with one bit per block meaning "every tuple on this block is visible to every transaction." When the bit is set, the heap fetch is skipped. `VACUUM` sets those bits, so heavily updated tables often fail to get the Index Only Scans you expect.
 
 ### Index Scans and Bitmap Scans
 
-An index scan walks the index for TIDs and fetches the heap per TID. The problem is that index order (key order) and heap order (physical order) differ. Fetching 100 rows can mean 100 random reads, and the same heap page may be read repeatedly. Chapter 7's Mackert–Lohman formula <strong>priced</strong> that repeated-page effect; here we attack the same problem from the execution side instead.
+An index scan walks the index for TIDs and fetches the heap per TID. The problem is that index order (key order) and heap order (physical order) differ. Fetching 100 rows can mean 100 random reads, and the same heap page may be read repeatedly. Chapter 7's Mackert–Lohman formula priced that repeated-page effect; here we attack the same problem from the execution side instead.
 
-The <strong>bitmap scan</strong> fixes this:
+The bitmap scan fixes this:
 
-1. Walk the index to the end, collecting matching TIDs into a <strong>bitmap</strong> keyed by block number
+1. Walk the index to the end, collecting matching TIDs into a bitmap keyed by block number
 2. Traverse the bitmap in block order and read the heap
 
 Random reads become sequential, and no page is read twice. Multiple indexes can also be combined with bitwise `AND` / `OR`.
@@ -1729,7 +1729,7 @@ The catch is `work_mem`: once the bitmap no longer fits, it degrades to a coarse
 
 ## Chapter 14: The Buffer Pool — Caching Pages
 
-The execution engine never reads pages straight from disk. Everything goes through the <strong>buffer pool</strong>.
+The execution engine never reads pages straight from disk. Everything goes through the buffer pool.
 
 The pool is an array of fixed-size frames plus a hash table mapping `(database, relation, fork, block number)` to a frame index.
 
@@ -1798,21 +1798,21 @@ class BufferPool:
 
 <BufferPoolVisualizer />
 
-Three important rules are embedded here.
+The code encodes three rules.
 
 <strong>1. Pinned pages cannot be evicted.</strong>
 
-`pin_count > 0` means somebody currently holds a pointer into that page's memory. Evicting it would dangle the pointer. The executor pins a page while reading tuples from it and calls `release_buffer()` when moving to the next block. Drop that pairing and you get a buffer leak; eventually every frame is pinned and PostgreSQL fails with `ERROR: no unpinned buffers available` (the bounded loop in `evict_one` above reproduces that).
+`pin_count > 0` means somebody currently holds a pointer into that page's memory. Evicting the page would leave that pointer dangling. The executor pins a page while reading tuples from it and calls `release_buffer()` when moving to the next block. Drop that pairing and you get a buffer leak; eventually every frame is pinned and PostgreSQL fails with `ERROR: no unpinned buffers available` (the bounded loop in `evict_one` above reproduces that).
 
 <strong>2. Clock-sweep, not LRU.</strong>
 
 Strict LRU has to relink a list on every hit, which becomes a lock-contention hotspot. Clock-sweep approximates it: keep a reference counter, decrement it when the hand passes, and evict at zero. A hit costs only a counter increment. PostgreSQL's `usage_count` ranges from 0 to 5.
 
-PostgreSQL also has <strong>ring buffers</strong>. A sequential scan of a large table (bigger than a quarter of `shared_buffers`) uses only a small dedicated ring (256 KB by default) so it does not pollute the whole pool. It prevents a single full scan from evicting everything useful.
+PostgreSQL also has ring buffers. A sequential scan of a large table (bigger than a quarter of `shared_buffers`) uses only a small dedicated ring (256 KB by default), so a single full scan cannot evict everything useful from the pool.
 
 <strong>3. Evicting a dirty page forces a WAL flush.</strong>
 
-This is the <strong>write-ahead logging rule</strong>: before a data page is persisted, the WAL records describing the changes to that page must already be persisted. Reverse the order and a crash leaves data newer than the log that produced it — unrecoverable.
+This is the <strong>write-ahead logging rule</strong>: before a data page is persisted, the WAL records describing the changes to that page must already be persisted. Reverse the order and a crash leaves data newer than the log that produced it, which cannot be recovered.
 
 The rule is also what lets a commit avoid writing data pages at all (NO-FORCE), and lets uncommitted changes be written to data pages (STEAL). STEAL/NO-FORCE is the fastest combination, at the price of needing both REDO and UNDO during recovery.
 
@@ -1840,15 +1840,13 @@ A PostgreSQL heap page is a <strong>slotted page</strong>.
 +--------------------------------------------------+
 ```
 
-Growing from both ends toward the middle is the point. It is the least wasteful way to host a variable-length tuple area and a pointer array in one page, and free space is simply `pd_upper - pd_lower`.
+The two areas grow from opposite ends toward the middle. That is the least wasteful way to host a variable-length tuple area and a pointer array in one page, and free space is simply `pd_upper - pd_lower`.
 
 <SlottedPageVisualizer />
 
 ### Why the Indirection?
 
-The line-pointer array is an obvious extra hop. Why doesn't a TID point straight at a byte offset?
-
-Because <strong>tuples must be movable within a page</strong>. When gaps left by deletions are compacted (`PageRepairFragmentation`), byte offsets change but line-pointer numbers do not. Indexes hold TIDs, so without the indirection every compaction would require rewriting the corresponding entries in every index.
+The line-pointer array adds an extra hop instead of letting a TID point straight at a byte offset. Chapter 13 gave the reason: tuples must be movable within a page. When gaps left by deletions are compacted (`PageRepairFragmentation`), byte offsets change but line-pointer numbers do not. Indexes hold TIDs, so without the indirection every compaction would require rewriting the corresponding entries in every index.
 
 `ItemIdData` is a 4-byte bitfield.
 
@@ -1907,7 +1905,7 @@ def parse_page(buf: bytes):
 
 `pd_lower` sits at byte 12 purely because of the sizes of the header fields before it. Counting offsets to decode structs is daily life in the storage layer.
 
-Let's wrap that in the object chapters 13 and 14 expect — chapter 14's `BufferPool` returns a `Page`, and chapter 13's `HeapScan` calls `page.item(i)`.
+Let's wrap that in the object chapters 13 and 14 expect: chapter 14's `BufferPool` returns a `Page`, and chapter 13's `HeapScan` calls `page.item(i)`.
 
 ```python
 class Page:
@@ -1958,7 +1956,7 @@ def parse_tuple(raw: bytes) -> HeapTuple:
     return HeapTuple(t_xmin, t_xmax, n_atts, null_bits, raw[t_hoff:])
 ```
 
-<strong>The NULL bitmap is omitted entirely when no column is NULL.</strong> Adding a nullable column does not fatten every row. But one NULL anywhere costs one bit per column, rounded up to whole bytes — though up to 8 columns that single byte disappears into the MAXALIGN padding that already rounds 23 up to 24, so it is effectively free. Note that a <strong>1</strong> bit means NOT NULL and a <strong>0</strong> bit means NULL — the opposite of most people's intuition.
+The NULL bitmap is omitted entirely when no column is NULL. Adding a nullable column does not fatten every row. But one NULL anywhere costs one bit per column, rounded up to whole bytes. With up to 8 columns, that single byte fits into the MAXALIGN padding that already rounds 23 up to 24, so it is effectively free. A 1 bit means NOT NULL and a 0 bit means NULL, the opposite of most people's intuition.
 
 ### Deforming a Tuple
 
@@ -2008,12 +2006,12 @@ Alignment padding matters too. Declare `(a boolean, b bigint, c boolean, d bigin
 
 ### TOAST
 
-A tuple cannot span pages — and PostgreSQL goes further, trying to keep a tuple within about a quarter of a page so that several rows fit per page. What happens to rows above that limit? <strong>TOAST</strong> (The Oversized-Attribute Storage Technique). Once a tuple exceeds `TOAST_TUPLE_THRESHOLD` (2032 bytes by default, roughly a quarter of an 8 KB page), large variable-length columns are, in order:
+A tuple cannot span pages, and PostgreSQL goes further: it tries to keep a tuple within about a quarter of a page so that several rows fit per page. Rows above that limit are handled by <strong>TOAST</strong> (The Oversized-Attribute Storage Technique). Once a tuple exceeds `TOAST_TUPLE_THRESHOLD` (2032 bytes by default), large variable-length columns are, in order:
 
 1. compressed (`pglz` or `lz4`), and
 2. if still too large, split into chunks stored in a dedicated TOAST table, leaving an 18-byte pointer in the main tuple.
 
-As a result, `SELECT id FROM docs` (which never touches the TOASTed column) is very fast, while `SELECT body FROM docs` incurs extra lookups in the TOAST table. Selecting fewer columns pays off here too.
+As a result, `SELECT id FROM docs` (which never touches the TOASTed column) stays fast, while `SELECT body FROM docs` incurs extra lookups in the TOAST table. Selecting fewer columns pays off here too.
 
 ### Joining the Layers — a Real-Storage SeqScanExec
 
@@ -2042,9 +2040,9 @@ class HeapScanExec:
         pass
 ```
 
-<strong>Nothing above changes.</strong> `NestedLoopJoinExec`, `HashJoinExec` and `TopNExec` only ever knew that their child implements `open/next/close`. That is the concrete payoff of the uniform interface from chapter 10.
+None of the operators above the scan change. `NestedLoopJoinExec`, `HashJoinExec` and `TopNExec` only ever knew that their child implements `open/next/close`. That is the concrete payoff of the uniform interface from chapter 10.
 
-It also makes the boundary visible: every `next()` call unpacks a 48-byte struct into a Python dictionary. <strong>Tuple deforming is perennially near the top of a row-store's execution profile</strong> for exactly this reason. It is why PostgreSQL's JIT targets expression evaluation and tuple deforming, and why vectorized engines reach for columnar layouts.
+It also makes the boundary visible: every `next()` call unpacks a 48-byte struct into a Python dictionary. Tuple deforming is perennially near the top of a row-store's execution profile for exactly this reason. That cost is why PostgreSQL's JIT compiles tuple deforming along with expression evaluation, and why vectorized engines reach for columnar layouts.
 
 The `self.predicate(row) is True` spelling is there because of chapter 5's three-valued logic: if UNKNOWN is represented as `None`, the result must be compared against TRUE rather than used as a truthy value.
 
@@ -2093,13 +2091,13 @@ Block 4271 sits at $4271 \times 8192 = 34{,}988{,}032$.
 
 ### Why Split at 1 GB?
 
-Historically, 32-bit platforms and some file systems capped files at 2 GB. That constraint is gone, but the split remains for practical reasons — `unlink`ing one enormous file when dropping a table can stall a file system. It is configurable at build time with `--with-segsize`.
+Historically, 32-bit platforms and some file systems capped files at 2 GB. That constraint is gone, but the split remains for practical reasons: `unlink`ing one enormous file when dropping a table can stall a file system. It is configurable at build time with `--with-segsize`.
 
 ### Why Not O_DIRECT?
 
 PostgreSQL goes through the kernel page cache by default, meaning <strong>double caching</strong>: the same page can live in both `shared_buffers` and the page cache.
 
-That looks wasteful but is deliberate. Using `O_DIRECT` would require the database to implement readahead, writeback scheduling, and asynchronous I/O itself. Oracle and MySQL/InnoDB do exactly that; PostgreSQL chose to delegate to the kernel. The calculus is shifting as asynchronous I/O (`io_uring`) lands — see [io_uring and epoll](/en/blog/io-uring-and-epoll).
+That looks wasteful but is deliberate. Using `O_DIRECT` would require the database to implement readahead, writeback scheduling, and asynchronous I/O itself. Oracle and MySQL/InnoDB do exactly that; PostgreSQL chose to delegate to the kernel. The calculus is shifting as asynchronous I/O (`io_uring`) lands (see [io_uring and epoll](/en/blog/io-uring-and-epoll)).
 
 ### fsync and Durability
 
@@ -2112,11 +2110,11 @@ def commit(self, xid: int) -> None:
     os.fsync(self.wal_fd)          # ← no OK to the client until this returns
 ```
 
-A returning `write(2)` guarantees nothing about durability; the data merely reached the kernel page cache. Only `fsync(2)` guarantees it reached the storage device — and even then, a device write cache can undermine that.
+A returning `write(2)` guarantees nothing about durability; the data merely reached the kernel page cache. Only `fsync(2)` guarantees it reached the storage device, and even then a device write cache can undermine that.
 
-`fsync` takes hundreds of microseconds at best and milliseconds at worst. Calling it once per transaction caps throughput at the `fsync` rate, which is why <strong>group commit</strong> — batching several transactions' WAL into one `fsync` — exists. PostgreSQL exposes it as `commit_delay` / `commit_siblings`.
+`fsync` takes hundreds of microseconds at best and milliseconds at worst. Calling it once per transaction caps throughput at the `fsync` rate, which is why <strong>group commit</strong> exists: it batches several transactions' WAL into one `fsync`. PostgreSQL's knobs for it are `commit_delay` / `commit_siblings`.
 
-Setting `synchronous_commit = off` replies to the client without waiting for `fsync`. Latency improves dramatically, at the risk of losing a few hundred milliseconds of committed transactions in a crash. This is the front line of the speed-versus-durability trade-off.
+Setting `synchronous_commit = off` replies to the client without waiting for `fsync`. Latency improves greatly, at the risk of losing a few hundred milliseconds of committed transactions in a crash. This is the speed-versus-durability trade-off in its plainest form.
 
 ---
 
@@ -2174,7 +2172,7 @@ str
 
 ### Checking the Answers Against EXPLAIN
 
-One last exercise: the execution plan for the query from the introduction. Every number in it maps to a chapter of this article.
+One last exercise: the execution plan for the running example. Every number in it maps to a chapter of this article.
 
 (The costs below are this article's model rendered in `EXPLAIN`'s format. Real PostgreSQL uses $N \log_2 2K$ for a top-N sort, so its Sort startup cost comes out slightly higher.)
 
@@ -2224,7 +2222,7 @@ Operationally there are only two lines to watch. If `Batches: 1` has become `Bat
 
 ## Chapter 18: How Real Databases Differ
 
-Everything above leaned on PostgreSQL, but the design decisions vary.
+Everything above leaned on PostgreSQL. Other databases make different design decisions.
 
 | | PostgreSQL | SQLite | MySQL / InnoDB | DuckDB |
 | --- | --- | --- | --- | --- |
@@ -2234,19 +2232,17 @@ Everything above leaned on PostgreSQL, but the design decisions vary.
 | MVCC | Multiple versions on the page | Rollback journal / WAL | UNDO log + read view | Local delta based |
 | Page size | 8 KB (build-time option) | 4 KB (default) | 16 KB (default) | 256 KB blocks |
 
-A few notes.
+<strong>SQLite's execution model</strong> is not Volcano but a bytecode VM of its own (a prepared statement is a VDBE program). `EXPLAIN` prints instructions like `OpenRead`, `Rewind`, `Column`, `Next`. Loops are explicit jumps rather than nested iterators (see [Inside Bytecode VMs](/en/blog/bytecode-vm)).
 
-<strong>SQLite's execution model</strong> is not Volcano but a bytecode VM of its own (a prepared statement is a VDBE program). `EXPLAIN` prints instructions like `OpenRead`, `Rewind`, `Column`, `Next`. Loops are explicit jumps rather than nested iterators — see [Inside Bytecode VMs](/en/blog/bytecode-vm).
+<strong>InnoDB's clustered index</strong> stores the row data itself in the leaves of the primary-key B+ tree. Secondary index leaves therefore hold primary key values, not TIDs, and every secondary-index lookup is a two-level search: secondary index, then primary index. PostgreSQL's indexes, by contrast, all hold TIDs that point into the heap.
 
-<strong>InnoDB's clustered index</strong> stores the row data itself in the leaves of the primary-key B+ tree. Secondary index leaves therefore hold <strong>primary key values</strong>, not TIDs, and every secondary-index lookup is a two-level search: secondary index, then primary index. That is fundamentally different from PostgreSQL's heap-plus-TID design.
-
-<strong>DuckDB</strong> is columnar and vectorized, quite far from the tuple-at-a-time world described here. Yet its front half — a parser forked from PostgreSQL's grammar, a logical plan, DP-based join ordering — is <strong>strikingly similar</strong>. Good evidence that the layering works.
+<strong>DuckDB</strong> is columnar and vectorized, quite far from the tuple-at-a-time world described here. Yet its front half (a parser forked from PostgreSQL's grammar, a logical plan, DP-based join ordering) closely resembles PostgreSQL's, which suggests the layering works.
 
 ---
 
 ## Summary
 
-Tracing one SQL statement down to bytes, the key points are:
+The main points from tracing one SQL statement down to bytes:
 
 <strong>The system is a chain of transformations.</strong> String → tokens → AST → bound AST → logical plan → physical plan → execution tree. Each stage consumes only its predecessor's output and produces only its successor's input.
 
@@ -2254,21 +2250,21 @@ Tracing one SQL statement down to bytes, the key points are:
 
 <strong>Optimization is a bet on cardinality estimation.</strong> No amount of cost-model precision survives a row estimate that is two orders of magnitude off. Most "the query suddenly got slow" incidents live here.
 
-<strong>Cost is not one number but two.</strong> Because startup and total cost are tracked separately, a parent that does not want every row — a `LIMIT`, a cursor — can invert the algorithm choice underneath it. A blocking operator is simply one whose two numbers nearly coincide.
+<strong>Cost is a pair of numbers.</strong> Because startup and total cost are tracked separately, a parent that does not want every row (a `LIMIT`, a cursor) can invert the algorithm choice underneath it. A blocking operator's startup cost includes the whole cost of the input it drains first; for `Sort`, the two numbers nearly coincide.
 
 <strong>Estimate quality and plan reuse are inherently in tension.</strong> A generic plan built without parameter values saves planning time at the cost of accuracy; a plan per value is accurate but uncacheable. "It was fast for the first few calls and then fell off a cliff" is that tension surfacing.
 
-<strong>The execution model rests on a uniform interface.</strong> The `open/next/close` contract is what allows arbitrary operator composition — and it is also the source of per-tuple overhead. Vectorization and code generation win performance by changing the granularity of that contract.
+<strong>The execution model rests on a uniform interface.</strong> The `open/next/close` contract is what allows arbitrary operator composition, and it is also the source of per-tuple overhead. Vectorization and code generation win performance by changing the granularity of that contract.
 
-<strong>Operators run out of memory in different ways.</strong> Sorting degrades gracefully past `work_mem` by switching to an external merge; hashing falls off a cliff — a hash join repartitions both of its inputs, a hash aggregate recursively repartitions its single one. "Not enough memory" does not mean one thing.
+<strong>Operators run out of memory in different ways.</strong> Sorting degrades gracefully past `work_mem` by switching to an external merge. Hashing falls off a cliff: a hash join repartitions both of its inputs, and a hash aggregate recursively repartitions its single one.
 
-<strong>NULL is a third truth value, and it reaches every layer.</strong> Three-valued logic is not a style question but a <strong>constraint on which rewrites are legal</strong>. That `WHERE` discards UNKNOWN, that `NOT IN` cannot become an anti join, that predicates cannot be pushed below an outer join — all of it follows from those truth tables.
+<strong>NULL is a third truth value, and it reaches every layer.</strong> Three-valued logic constrains which rewrites are legal. That `WHERE` discards UNKNOWN, that `NOT IN` cannot become an anti join, that predicates cannot always be pushed below an outer join: all of it follows from those truth tables.
 
 <strong>The physical layer buys flexibility with one level of indirection.</strong> Because a TID names a slot, tuples can move inside a page without rewriting indexes. The buffer pool is another indirection, between the executor and the disk.
 
-<strong>Durability rides entirely on WAL ordering.</strong> One rule — persist the log before the data page — is what makes the fast STEAL/NO-FORCE buffer policy safe.
+<strong>Durability rides entirely on WAL ordering.</strong> A single rule (persist the log before the data page) is what makes the fast STEAL/NO-FORCE buffer policy safe.
 
-`EXPLAIN (ANALYZE, BUFFERS)` should read differently now. The `Hash` node under `Hash Join` is a blocking operator; the left-hand number in `cost=2387.50..25687.50` is chapter 7's startup cost; `rows=55000` is the chapter 6 estimate; and `Buffers: shared hit=1024 read=9976` is chapter 14's buffer pool at work — 9,976 block reads from storage, not a guaranteed one-to-one count of `pread(2)` calls.
+`EXPLAIN (ANALYZE, BUFFERS)` should read differently now. The `Hash` node under `Hash Join` is a blocking operator; the left-hand number in `cost=2387.50..25687.50` is chapter 7's startup cost; `rows=55000` is the chapter 6 estimate; and `Buffers: shared hit=1024 read=9976` is chapter 14's buffer pool at work: 9,976 block reads from storage, which need not map one-to-one to `pread(2)` calls.
 
 ---
 

@@ -1,17 +1,17 @@
 ---
 title: "ORMの内部構造 — ゼロから理解するオブジェクト関係マッピングの設計と実装"
 date: "2026-04-06"
-description: "SQLAlchemy や Django ORM は裏で何をしているのか？メタデータ定義・SQL式木・Identity Map・Unit of Work・遅延読み込みの仕組みを Python でゼロから実装しながら、ORMの設計思想と内部構造を徹底的に解説します。"
+description: "メタデータ定義・SQL式木・Identity Map・Unit of Work・遅延読み込みを Python でゼロから実装し、SQLAlchemy や Django ORM が裏で行っている処理を解説します。"
 tags: ["ORM", "Design Patterns", "Python", "Database", "Architecture"]
 ---
 
-SQLAlchemy のレガシー構文である `session.query(User).filter(User.age > 20).all()` のように書くだけで、SQLが生成され、データベースから取得した行がPythonオブジェクトに変換される——ORMは「魔法」のように見えますが、その裏側には明確な設計原理があります。
+SQLAlchemy のレガシー構文で `session.query(User).filter(User.age > 20).all()` と書くだけで、SQLが生成され、データベースから取得した行がPythonオブジェクトに変換されます。魔法のように見えますが、この処理はいくつかのデザインパターンの組み合わせで説明できます。
 
-この記事では、ORM（Object-Relational Mapping）の内部構造をゼロからPythonで実装しながら解き明かします。Martin Fowlerの<strong>Patterns of Enterprise Application Architecture（PoEAA）</strong>で体系化されたパターンを軸に、SQLAlchemyやDjango ORMなど現実のORMの設計判断を理解できるようになることを目指します。
+この記事では、Martin FowlerのPatterns of Enterprise Application Architecture（PoEAA）で体系化されたパターンに沿って、ORM（Object-Relational Mapping）の主要な部品をPythonでゼロから実装します。そのうえで、実装した部品をSQLAlchemyやDjango ORMなど実際のORMと対応させ、それぞれの設計判断を読み解けるようにします。
 
 ## ORMの全体像
 
-ORMは「オブジェクト指向のドメインモデル」と「リレーショナルデータベースのテーブル」という、本質的に異なる2つの世界を橋渡しするソフトウェアです。この不一致は<strong>インピーダンスミスマッチ</strong>（object-relational impedance mismatch）と呼ばれ、ORMが解決する根本的な問題です。
+ORMは、オブジェクト指向のドメインモデルとリレーショナルデータベースのテーブルを対応付けるソフトウェアです。オブジェクトは参照で関連をたどり、テーブルは外部キーで行を関連付けるなど、両者はデータの表し方が異なります。この食い違いは<strong>インピーダンスミスマッチ</strong>（object-relational impedance mismatch）と呼ばれ、ORMが解決しようとする根本的な問題です。
 
 ```mermaid
 graph TB
@@ -36,7 +36,7 @@ graph TB
     ORM --> DBWorld
 ```
 
-ORMの内部は、以下の主要コンポーネントから構成されています：
+ORMの主要なコンポーネントと、対応するPoEAAのパターンは次のとおりです。
 
 | コンポーネント | 責務 | 対応するPoEAAパターン |
 |---|---|---|
@@ -46,9 +46,9 @@ ORMの内部は、以下の主要コンポーネントから構成されてい�
 | Unit of Work | 変更を追跡し一括でDBに書き込む | Unit of Work |
 | リレーション読み込み | 関連オブジェクトの遅延/先行読み込み | Lazy Load / Eager Load |
 
-## 第1章　Active Recordパターン vs Data Mapperパターン
+## 第1章　Active RecordパターンとData Mapperパターン
 
-ORMの設計は大きく2つのアーキテクチャパターンに分類できます。まずこの2つの違いを理解しましょう。
+ORMの設計は、データベース操作をどこに置くかによって、大きく2つのアーキテクチャパターンに分かれます。
 
 ### Active Record
 
@@ -98,9 +98,9 @@ user.name = "Bob"
 user.save()        # UPDATE文が実行される
 ```
 
-Active Recordの特徴は<strong>シンプルさ</strong>です。テーブルとクラスが1対1に対応し、オブジェクトがデータアクセスロジックを直接持つため、学習コストが低く少ないコードで動作します。Ruby on Rails, Django ORM, Laravel Eloquent がこのパターンを採用しています。
+Active Recordでは、テーブルとクラスが1対1に対応し、オブジェクト自身がデータアクセスのロジックを持ちます。構造が単純なので学習コストが低く、少ないコードで動かせます。Ruby on Rails、Django ORM、Laravel Eloquent がこのパターンを採用しています。
 
-しかし、ドメインモデルがデータベース構造に強く依存する（テーブルの列がそのままオブジェクトの属性になる）ため、複雑なビジネスロジックを持つ大規模アプリケーションでは設計上の制約になることがあります。
+一方で、テーブルの列がそのままオブジェクトの属性になるため、ドメインモデルはデータベース構造に強く依存します。複雑なビジネスロジックを持つ大規模なアプリケーションでは、この依存が設計上の制約になることがあります。
 
 ### Data Mapper
 
@@ -151,7 +151,7 @@ user.name = "Bob"
 mapper.update(user)   # マッパーがUPDATEを実行
 ```
 
-Data Mapperの特徴は<strong>関心の分離</strong>です。ドメインモデルがデータベーススキーマから独立しており、テーブル構造とオブジェクト構造を自由に変えられます。SQLAlchemy（Classicalマッピング）、Hibernate、Entity Framework Coreがこのパターンを基盤としています。
+Data Mapperでは、データベースとの対応をマッパーが受け持つため、ドメインモデルがデータベーススキーマから独立します。テーブル構造とオブジェクト構造を、それぞれ別々に変えられます。SQLAlchemy（Classicalマッピング）、Hibernate、Entity Framework Coreがこのパターンを基盤としています。
 
 ### 2つのパターンの比較
 
@@ -163,7 +163,7 @@ Data Mapperの特徴は<strong>関心の分離</strong>です。ドメインモ�
 | テスト容易性 | DB依存が混入しやすい | ドメインロジックを単体テストしやすい |
 | 代表的なORM | Django ORM, Rails AR, Eloquent | SQLAlchemy, Hibernate, EF Core |
 
-この記事ではこれ以降、より多くのORMの内部構造を学べるData Mapperパターンをベースに、各コンポーネントを実装していきます。
+以降の章では、ORMの内部構造を一通り扱えるData Mapperパターンをもとに、各コンポーネントを実装します。
 
 ## 第2章　メタデータとスキーマ定義
 
@@ -171,7 +171,7 @@ ORMの出発点は「Pythonのクラスがどのテーブル・どのカラム�
 
 ### 2.1 カラムとテーブルの定義
 
-まず、カラムとテーブルを表現するクラスを実装します。
+`Column` は列名・型・制約を保持し、`Table` は列の一覧と主キーを管理して `CREATE TABLE` 文を生成します。
 
 ```python
 from dataclasses import dataclass, field
@@ -227,7 +227,7 @@ class Table:
 
 ### 2.2 マッピングレジストリー
 
-次に、Pythonのクラスとテーブルメタデータの対応関係を管理するレジストリーを作ります。SQLAlchemyでいう `registry` や `MetaData` に相当するコンポーネントです。
+レジストリーは、Pythonのクラスとテーブルメタデータの対応を管理します。SQLAlchemyの `registry` や `MetaData` に相当します。
 
 ```python
 class Registry:
@@ -266,11 +266,11 @@ class User:
 registry.map_class(User, users_table)
 ```
 
-これがSQLAlchemyの「Classicalマッピング」に近い形です。SQLAlchemy 2.0以降では宣言的マッピング（Declarative Mapping）が主流ですが、内部的には同様のレジストリーを構築しています。
+クラスとテーブルを別々に定義してから紐づけるこの形は、SQLAlchemyの「Classicalマッピング」に近いものです。SQLAlchemy 2.0以降は宣言的マッピング（Declarative Mapping）が主流ですが、内部では同様のレジストリーを構築しています。
 
 ### 2.3 宣言的マッピング（メタクラスによる自動登録）
 
-手動での `map_class` は面倒なので、Pythonのメタクラスを使って宣言的に記述できるようにします。
+モデルごとに `map_class` を呼ぶ代わりに、Pythonのメタクラスを使い、クラス定義からマッピングを自動で登録します。
 
 ```python
 _global_registry = Registry()
@@ -321,15 +321,15 @@ print(table.create_table_sql())
 # => CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL)
 ```
 
-この仕組みは、SQLAlchemyの `DeclarativeBase`、Django ORMの `models.Model` と本質的に同じです。メタクラス（またはPython 3.6以降の `__init_subclass__`）を使って、クラス定義時にメタデータを自動収集しています。
+SQLAlchemyの `DeclarativeBase` や Django ORMの `models.Model` も、基本的には同じ仕組みです。メタクラス（またはPython 3.6以降の `__init_subclass__`）を使い、クラス定義時にメタデータを収集しています。
 
 ## 第3章　SQL式木とクエリービルダー
 
-ORMの最も巧妙な部分の一つが、Pythonの式をSQL文に変換する仕組みです。`User.age > 20` と書くとPythonオブジェクトが返り、最終的に `WHERE age > 20` というSQL文字列が生成されます。
+ORMは、Pythonの式からSQL文を組み立てます。`User.age > 20` と書くと、真偽値ではなく式を表すPythonオブジェクトが返り、最終的に `WHERE age > 20` というSQL文字列が生成されます。
 
 ### 3.1 式ノードの定義（AST）
 
-SQL文はツリー構造（抽象構文木 = AST）として表現できます。
+SQL文はツリー構造（抽象構文木 = AST）として表現できます。例えば `age > 20 AND status = 'active'` という条件は、次の木になります。
 
 ```mermaid
 graph TB
@@ -348,7 +348,7 @@ graph TB
     EQ --> LIT2
 ```
 
-この木を定義するクラス群を実装します。
+各ノードを表すクラスを実装します。どのクラスも `to_sql()` で、SQL文字列とパラメーターのリストの組を返します。
 
 ```python
 from abc import ABC, abstractmethod
@@ -466,7 +466,7 @@ def _to_expr(value) -> Expression:
 
 ### 3.2 演算子オーバーロードの仕組み
 
-ここが核心です。Pythonの演算子オーバーロード（`__eq__`, `__gt__` など）を使い、<strong>比較式がSQL式ツリーのノードを返す</strong>ようにしています。
+`ColumnExpr` は、Pythonの演算子オーバーロード（`__eq__`, `__gt__` など）を使い、<strong>比較式がSQL式木のノードを返す</strong>ようにしています。
 
 ```python
 # ColumnExpr を作成
@@ -482,13 +482,13 @@ print(sql)     # => ((users.age > ?) AND (users.status = ?))
 print(params)  # => [20, 'active']
 ```
 
-通常の `User.age > 20` はPythonでは `True` か `False` を返しますが、`age` が `ColumnExpr` のインスタンスの場合、`__gt__` が呼ばれて `BinaryOp(">", ColumnExpr("users", "age"), Literal(20))` という<strong>式ツリーのノード</strong>が返ります。この式ツリーを走査（traverse）してSQL文字列を組み立てるのです。
+`User.age > 20` のような比較は、通常の値どうしなら `True` か `False` を返します。`age` が `ColumnExpr` のインスタンスの場合は `__gt__` が呼ばれ、`BinaryOp(">", ColumnExpr("users", "age"), Literal(20))` という式木のノードが返ります。`to_sql()` はこの式木を走査（traverse）して、SQL文字列を組み立てます。
 
-SQLAlchemyでは、この仕組みを `PropComparator` クラスと `InstrumentedAttribute` ディスクリプターで実現しています。モデルクラスの属性にアクセスすると、ディスクリプターが `ColumnExpr` 相当のオブジェクトを返し、演算子オーバーロードでSQL式ツリーが構築されます。
+SQLAlchemyでは、この仕組みを `PropComparator` クラスと `InstrumentedAttribute` ディスクリプターで実現しています。モデルクラスの属性にアクセスすると、ディスクリプターが `ColumnExpr` 相当のオブジェクトを返し、演算子オーバーロードでSQL式木が構築されます。
 
 ### 3.3 Queryクラスの実装
 
-式ツリーを使って `SELECT` 文を組み立てるクエリービルダーを実装します。
+クエリービルダーの `Query` は、`filter()` で受け取った式をANDで結合し、`build_sql()` で `SELECT` 文を組み立てます。
 
 ```python
 class Query:
@@ -566,11 +566,11 @@ print(params)
 # => [20, 'active']
 ```
 
-このメソッドチェーン方式のクエリービルダーはSQLAlchemy, Django ORM (QuerySet), Entity Framework Core (LINQ) いずれでも採用されています。各メソッドは自身のコピーを返し（イミュータブルなクエリー構築）、最終的にSQLを生成・実行する時点まで遅延評価されます。
+メソッドチェーンでクエリーを組み立てる方式は、SQLAlchemy、Django ORM（QuerySet）、Entity Framework Core（LINQ）のいずれでも採用されています。上の簡略版の `Query` は自身を書き換えて返しますが、これらのORMでは各メソッドがクエリーのコピーを返し（イミュータブルなクエリー構築）、SQLを生成・実行する時点まで評価を遅らせます。
 
 ### 3.4 パラメーターバインド（SQLインジェクション対策）
 
-上の実装で重要なのは、<strong>ユーザー入力の値を直接SQL文字列に埋め込まず、パラメータープレースホルダー（`?`）を使っている</strong>点です。
+上の実装では、ユーザー入力の値をSQL文字列に直接埋め込まず、パラメータープレースホルダー（`?`）で渡しています。
 
 ```python
 # ❌ 危険: SQLインジェクションの脆弱性
@@ -582,15 +582,15 @@ params = [user_input]
 cursor.execute(sql, params)
 ```
 
-全てのORMはパラメーターバインドを内部で使用しており、これがSQLインジェクション攻撃を防ぐ重要な防御線になっています。式ツリーを介することで、ユーザー入力値は常に `Literal` ノードとしてパラメーターリストに分離されます。
+ORMは内部でパラメーターバインドを使っており、これがSQLインジェクション対策の要になっています。この実装でも、式木を介した値は必ず `Literal` ノードになり、SQL文字列ではなくパラメーターリストに入ります。
 
 ## 第4章　Identity Map — 同一行は同一オブジェクト
 
-Identity Mapは、Martin Fowlerが<strong>Patterns of Enterprise Application Architecture</strong>で定義したパターンで、「データベースから読み込んだオブジェクトを辞書に保持し、同じ主キーの行に対して常に同一のオブジェクトインスタンスを返す」仕組みです。
+Identity Mapは、Martin FowlerがPoEAAで定義したパターンです。データベースから読み込んだオブジェクトを辞書に保持し、同じ主キーの行に対しては常に同じオブジェクトインスタンスを返します。
 
-### 4.1 なぜ Identity Map が必要なのか
+### 4.1 Identity Map がない場合の問題
 
-Identity Mapがない場合、以下のような問題が発生します。
+Identity Mapがないと、同じ主キーで2回検索したときに別々のオブジェクトが返ります。
 
 ```python
 # Identity Map なし
@@ -602,7 +602,7 @@ print(user2.name)  # "Alice" — 別オブジェクトなので変更が反映�
 print(user1 is user2)  # False — 同じ行なのに別オブジェクト
 ```
 
-これは<strong>オブジェクトの同一性（identity）が壊れている</strong>状態です。同じデータベース行を表す2つのオブジェクトが独立に存在し、片方の変更がもう片方に反映されません。また、毎回新しいSELECTを発行するのは非効率です。
+この状態では<strong>オブジェクトの同一性（identity）が保たれていません</strong>。同じデータベース行を表す2つのオブジェクトが独立に存在し、片方の変更がもう片方に反映されません。また、同じ行を読むたびにSELECTを発行するので非効率です。
 
 ### 4.2 Identity Map の実装
 
@@ -682,18 +682,18 @@ SQLAlchemyでは `Session` オブジェクトが内部に `IdentityMap` を持�
 
 Unit of Workは、Martin Fowlerが「ビジネストランザクション中に影響を受けたオブジェクトのリストを管理し、変更の書き込みと並行性問題の解決を調整する」パターンとして定義したものです。
 
-### 5.1 なぜ Unit of Work が必要なのか
+### 5.1 Unit of Work がない場合の問題
 
-Identity Mapなしの素朴な実装では、オブジェクトを変更するたびにSQLを発行します。
+Unit of Workを持たない素朴な実装では、属性を変更するたびにSQLを発行します。
 
 ```python
 user.name = "Bob"       # UPDATE users SET name = 'Bob' WHERE id = 1
 user.email = "b@x.com"  # UPDATE users SET email = 'b@x.com' WHERE id = 1
 ```
 
-これは非効率的です。2つの変更を1つの `UPDATE` にまとめるべきです。また、複数のオブジェクトへの変更を一つのデータベーストランザクション内でまとめてコミットしたい場合もあります。
+同じ行への2つの変更で `UPDATE` が2回発行されますが、1つの `UPDATE` にまとめられるはずです。また、複数のオブジェクトへの変更を1つのデータベーストランザクションでまとめてコミットしたい場合もあります。
 
-Unit of Workは、<strong>オブジェクトの変更をメモリー上で追跡し、明示的に「フラッシュ (flush)」するまでSQLを発行しない</strong>という戦略をとります。
+Unit of Workは、オブジェクトの変更をメモリー上で追跡し、明示的にフラッシュ（flush）するまでSQLを発行しません。
 
 ### 5.2 オブジェクトの状態遷移
 
@@ -719,7 +719,7 @@ stateDiagram-v2
 - <strong>Deleted（削除予定）</strong>: 削除がマークされたが、まだDBからDELETEされていない
 - <strong>Detached（分離済み）</strong>: かつてセッションに属していたが、現在は追跡対象外
 
-これはSQLAlchemyの `InstanceState` がまさに管理する状態遷移そのものです。
+SQLAlchemyでは、`InstanceState` がこれらの状態を管理します。ただしSQLAlchemyの状態はTransient・Pending・Persistent・Deleted・Detachedの5つで、Dirtyは独立した状態ではなく、変更のあるPersistentオブジェクトとして扱われます。
 
 ### 5.3 Dirty Tracking（変更検知）の実装
 
@@ -916,13 +916,13 @@ uow.register_deleted(bob)
 uow.commit()  # DELETE FROM users WHERE id = ? が実行される
 ```
 
-SQLAlchemy では `session.add(obj)` → `session.commit()` がこの `register_new` → `commit` に対応します。`commit()` 時に内部で `flush()` が呼ばれ、Unit of Work が `_new`, `_dirty`, `_deleted` を走査してSQL文を発行します。
+SQLAlchemy では `session.add(obj)` → `session.commit()` がこの `register_new` → `commit` に対応します。`commit()` は内部で `flush()` を呼び、新規・変更・削除されたオブジェクト（この実装の `_new`、`_dirty`、`_deleted` に当たるもの）についてSQL文を発行します。
 
 ### 5.6 トポロジカルソートによる書き込み順序の決定
 
-実際のORMでは、外部キー制約のために書き込み順序が重要です。例えば、`users` テーブルの行を `posts` テーブルが参照している場合、INSERT は `users` → `posts` の順、DELETE は `posts` → `users` の順で実行する必要があります。
+実際のORMでは、外部キー制約があるため書き込み順序を考慮しなければなりません。例えば、`users` テーブルの行を `posts` テーブルが参照している場合、INSERT は `users` → `posts` の順、DELETE は `posts` → `users` の順で実行する必要があります。
 
-SQLAlchemy の Unit of Work は、テーブル間の外部キー依存関係を有向グラフとして構築し、<strong>トポロジカルソート</strong>でINSERT/DELETEの適切な実行順序を決定します。
+SQLAlchemy の Unit of Work は、テーブル間の外部キー依存関係を有向グラフにし、<strong>トポロジカルソート</strong>でINSERTとDELETEの実行順序を決めます。
 
 ```python
 from collections import defaultdict
@@ -981,7 +981,7 @@ print(order)  # => ['users', 'posts', 'comments']
 
 ## 第6章　リレーションシップの読み込み
 
-ORMの力が最も発揮されるのが、テーブル間の関連（リレーションシップ）を自動的にオブジェクトグラフとして構築する機能です。しかし、ここにはパフォーマンス上の重要な落とし穴もあります。
+ORMは、テーブル間の関連（リレーションシップ）をもとに、関連するオブジェクトを自動で読み込んでオブジェクトグラフを構築します。便利な一方で、読み込み方によっては性能上の大きな落とし穴になります。
 
 ### 6.1 リレーションシップの定義
 
@@ -1007,7 +1007,7 @@ class Relationship:
 
 ### 6.2 遅延読み込み（Lazy Loading）
 
-遅延読み込みは、リレーション先のオブジェクトが<strong>実際にアクセスされるまでロードしない</strong>戦略です。Pythonのディスクリプターを使って実装できます。
+遅延読み込みは、リレーション先のオブジェクトが実際にアクセスされるまでロードしない戦略です。Pythonのディスクリプターを使って実装できます。
 
 ```python
 class LazyLoader:
@@ -1066,7 +1066,7 @@ print(user.posts)
 
 ### 6.3 N+1問題
 
-遅延読み込みの最大の問題が<strong>N+1問題</strong>です。
+遅延読み込みの最大の問題が<strong>N+1問題</strong>です。親オブジェクトをN件取得したあと、それぞれの関連にアクセスするたびにSELECTが発行されます。
 
 ```python
 from sqlalchemy import select
@@ -1084,15 +1084,15 @@ for user in users:
 # 合計: 1 + N 回のクエリ
 ```
 
-100ユーザーがいれば101回のSQLが発行されます。これは大きなパフォーマンスボトルネックです。
+ユーザーが100人なら、SQLは101回発行されます。クエリー数がユーザー数に比例して増えるため、大きな性能上のボトルネックになります。
 
 ### 6.4 先行読み込み（Eager Loading）
 
-N+1問題の解決策が先行読み込みです。主に2つの方法があります。
+N+1問題は、関連オブジェクトを親と一緒にまとめて読み込む先行読み込みで解決できます。主な方法は2つです。
 
 <strong>方法1: JOINベース</strong>
 
-以下の例では、`parent_table`、`child_table`、`fk_column` が信頼済みの ORM メタデータから来る前提にしています。SQL のバインドパラメーターで守れるのは値であって識別子ではないため、実際の ORM はテーブル名やカラム名をユーザー入力として受け取らず、検証・クォートしてから SQL に埋め込みます。
+以下の例では、`parent_table`、`child_table`、`fk_column` が信頼済みの ORM メタデータから来るものとします。SQL のバインドパラメーターで渡せるのは値だけで、テーブル名やカラム名などの識別子は渡せません。そのため実際の ORM は、識別子をユーザー入力として受け取らず、検証・クォートしてから SQL に埋め込みます。
 
 ```python
 def eager_load_join(connection, parent_table: str, child_table: str,
@@ -1130,7 +1130,7 @@ SELECT * FROM users;
 SELECT * FROM posts WHERE user_id IN (1, 2, 3, ...);
 ```
 
-各ORMでの先行読み込み指定方法：
+SQLAlchemy と Django ORM では、先行読み込みを次のように指定します。
 
 ```python
 from sqlalchemy import select
@@ -1155,11 +1155,11 @@ users = User.objects.select_related("profile").all()  # ForeignKey/OneToOne用
 | JOIN先行読み込み | 1 | 大（重複行あり） | 1対1関連、小規模データ |
 | サブクエリー先行読み込み | 2 | 中 | 1対多関連、大規模データ |
 
-最適な戦略はユースケースによって異なり、安易な「常にeager load」も「常にlazy load」もベストプラクティスではありません。プロファイリングとクエリーログの分析が重要です。
+どの戦略が適するかは、関連先にアクセスするかどうかや、関連の種類・データ量によって変わります。「常にeager load」「常にlazy load」と決め打ちせず、プロファイリングとクエリーログで実際に発行されるクエリーを確かめて選びます。
 
 ## 第7章　Session — すべてを統合する
 
-ここまで実装してきたコンポーネントを統合する `Session` クラスを作ります。SQLAlchemy の `Session` に相当するものです。
+ここまで実装したコンポーネントを1つにまとめ、`Session` クラスを作ります。SQLAlchemy の `Session` に相当します。第5章の `UnitOfWork` と異なり、`flush()` が Identity Map 内のオブジェクトをスナップショットと比べるので、`mark_dirty()` を呼ばなくても属性の変更が書き込まれます。
 
 ```python
 class Session:
@@ -1337,7 +1337,7 @@ session.commit()  # DELETE文が発行される
 
 ## 第8章　現実のORMとの対応関係
 
-ここまで実装したコンポーネントが、実際のORMでどのように実現されているかを見てみましょう。
+ここまで実装したコンポーネントを、SQLAlchemy、Django ORM、Entity Framework Core の部品と対応させます。
 
 ### SQLAlchemy
 
@@ -1358,7 +1358,7 @@ SQLAlchemy は Python で最も広く使われている ORM で、Data Mapperパ
 | `Session` | `Session` |
 | トポロジカルソート | `unitofwork.py` の依存関係ソート |
 
-SQLAlchemy 2.0 では、クエリー構文が `session.query(User)` から `session.execute(select(User))` に変わりました。内部のSQL式ツリーは Core 層で共通化されており、ORM はその上に Identity Map と Unit of Work を重ねた構造になっています。
+SQLAlchemy 2.0 では、推奨されるクエリー構文が `session.query(User)` から `session.execute(select(User))` に変わりました。内部のSQL式木は Core 層で共通化されており、ORM はその上に Identity Map と Unit of Work を重ねた構造になっています。
 
 ### Django ORM
 
@@ -1375,9 +1375,9 @@ Django ORM は Active Record パターンを採用していますが、内部に
 | 遅延読み込み | `ForeignKey` のデフォルト動作 |
 | 先行読み込み | `select_related()`, `prefetch_related()` |
 
-Django ORM の特徴的な点は、<strong>Identity Map と Unit of Work を持たない</strong>ことです。`Model.save()` を呼ぶと即座にSQL文が発行されます。これは Active Record パターンの設計上の選択であり、シンプルさと引き換えにSQLAlchemy のような一括フラッシュの最適化は行いません。
+Django ORM は<strong>Identity Map と Unit of Work を持ちません</strong>。`Model.save()` を呼ぶと、その場でSQL文が発行されます。Active Record パターンとしての設計上の選択で、仕組みが単純になる代わりに、SQLAlchemy のように変更をまとめてフラッシュする最適化は行いません。
 
-Django の `QuerySet` は<strong>遅延評価</strong>を採用しており、`.filter().exclude().order_by()` のチェーンではSQLを発行せず、実際にデータが必要になった時点（イテレーション、`len()`、スライスなど）で初めてSQLを実行します。
+Django の `QuerySet` は遅延評価を採用しており、`.filter().exclude().order_by()` のチェーンではSQLを発行せず、実際にデータが必要になった時点（イテレーション、`len()`、スライスなど）で初めてSQLを実行します。
 
 ### Entity Framework Core
 
@@ -1392,7 +1392,7 @@ Entity Framework Core（EF Core）は .NET のORMで、Data Mapperパターン�
 | `UnitOfWork` | `DbContext.SaveChanges()` |
 | 変更追跡 | `ChangeTracker` (スナップショットベース) |
 
-EF Core は C# のLINQ（Language Integrated Query）を使います。`DbSet<T>` に対するクエリーは `IQueryable<T>` なので、LINQ のラムダ式が<strong>式木（Expression Tree）</strong>として捕捉され、EF Core がその式表現をSQLに変換します。Pythonの演算子オーバーロードによるSQL式生成と同じ原理ですが、言語レベルでサポートされている点が異なります。
+EF Core は C# のLINQ（Language Integrated Query）を使います。`DbSet<T>` に対するクエリーは `IQueryable<T>` なので、LINQ のラムダ式が式木（Expression Tree）として捕捉され、EF Core がその式表現をSQLに変換します。Pythonの演算子オーバーロードで式木を作る第3章の実装と同じ原理ですが、C# では式木の生成が言語に組み込まれています。
 
 ```csharp
 // C# + EF Core: LINQがExpression Treeを生成し、EF CoreがSQLに変換
@@ -1406,7 +1406,7 @@ var users = context.Users
 
 ### 9.1 N+1問題の検出と対策
 
-N+1問題はORMの最も有名なパフォーマンス問題です。検出方法と対策をまとめます。
+N+1問題は、ORMの性能問題として最もよく知られています。SQLログでは、パラメーターの値だけが異なる同じクエリーの繰り返しとして現れます。
 
 <strong>検出方法:</strong>
 
@@ -1444,11 +1444,11 @@ for user in session.scalars(select(User).execution_options(yield_per=1000)):
 session.expunge_all()  # 処理後に Identity Map から全オブジェクトを排出
 ```
 
-SQLAlchemy では、Webアプリケーションにおいて `scoped_session` でリクエストごとにセッションを管理し、リクエスト終了時に `session.close()` でIdentity Mapをクリアするのが一般的なパターンです。
+Webアプリケーションで SQLAlchemy を使う場合は、`scoped_session` でリクエストごとにセッションを管理し、リクエストの終了時に `session.close()` で Identity Map をクリアするのが一般的です。
 
 ### 9.3 Dirty Tracking のオーバーヘッド
 
-ディスクリプターベースの変更追跡は、<strong>属性への全ての代入を横取りする</strong>ため、大量のオブジェクトを扱う場合にオーバーヘッドになり得ます。
+ディスクリプターによる変更追跡は、属性へのすべての代入に処理を挟むため、大量のオブジェクトを扱うとオーバーヘッドになることがあります。
 
 ```python
 # 対策: ORMマッピングを経由せず Core レベルで直接クエリする
@@ -1457,11 +1457,11 @@ from sqlalchemy import select as core_select
 rows = connection.execute(core_select(users_table)).fetchall()
 ```
 
-Core レベルの `connection.execute()` は `Row` オブジェクト（プレーンなタプルライクオブジェクト）を返すため、ORM の変更追跡やIdentity Map のオーバーヘッドが一切発生しません。バッチ更新や大量データの読み取りでは、このアプローチも検討すべきです。
+Core レベルの `connection.execute()` は、タプルに近い `Row` オブジェクトを返します。ORM の変更追跡も Identity Map も通らないため、そのオーバーヘッドは発生しません。バッチ更新や大量データの読み取りでは、この方法も選択肢になります。
 
 ## まとめ
 
-この記事では、ORMの内部構造をPythonでゼロから実装しながら解説しました。
+ここまでの各コンポーネントは、最終的に `Session` からまとめて利用されます。
 
 ```mermaid
 graph TB
@@ -1489,7 +1489,7 @@ graph TB
 | リレーション | ディスクリプターで遅延読み込み / JOINかINで先行読み込み |
 | Session | 上記すべてを統合するユーザー向けAPI |
 
-ORMは「魔法」ではなく、デザインパターン（Identity Map, Unit of Work, Data Mapper, Active Record）の組み合わせです。これらのパターンの挙動と限界を理解していれば、ORMが生成するSQLの予測ができ、N+1問題やメモリーリークといった落とし穴を避けられるようになります。ORMを最も効果的に使うための第一歩は、ORMが何をしているかを正確に知ることです。
+ORMの内部は、Identity Map、Unit of Work、Data Mapper、Active Record といったデザインパターンの組み合わせでできています。これらのパターンの挙動と限界を理解していれば、ORMが生成するSQLを予測でき、N+1問題やメモリーリークといった落とし穴を避けられます。
 
 ## 参考資料
 

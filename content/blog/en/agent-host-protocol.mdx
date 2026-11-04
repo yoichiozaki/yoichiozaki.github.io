@@ -1,7 +1,7 @@
 ---
 title: "Reading the Agent Host Protocol — A State-Synchronization Protocol for Sharing One Agent Session Across Many Screens"
 date: "2026-11-02"
-description: "A close reading of the Agent Host Protocol (AHP) v1.0.0 behind VS Code's Agent Host, based on the spec, the canonical reducers, the SDKs, and VS Code's implementation. Channels and actions, reconnection via serverSeq, implementing write-ahead optimistic updates, why reducers do not enforce invariants, which operations are safe to resend, client-provided tools, authentication and security, and how AHP differs from ACP, MCP, and AG-UI — organized for people implementing clients and hosts."
+description: "A close reading of the Agent Host Protocol (AHP) v1.0.0 behind VS Code's Agent Host, based on the spec, the canonical reducers, the SDKs, and VS Code's implementation. For people implementing clients and hosts, it covers channels and actions, reconnection via serverSeq, write-ahead optimistic updates, why reducers do not enforce invariants, which operations are safe to resend, client-provided tools, authentication and security, and how AHP differs from ACP, MCP, and AG-UI."
 tags: ["Agent Host Protocol", "AI Agent", "Protocol", "VS Code", "JSON-RPC", "Distributed Systems", "Architecture"]
 ---
 
@@ -15,7 +15,7 @@ MCP defines how agents connect to tools, and the Agent Client Protocol (ACP) def
 
 > What has to be agreed on so that an agent session — one that runs for a long time, stops to wait for human decisions, and can be opened from anywhere — can be shared consistently across several screens?
 
-This article reads how the AHP spec answers that question and organizes what you need to get right when implementing a client or a host. Rather than just paraphrasing the spec, I ran the published canonical reducers to check behaviors that the documents do not spell out.
+This article follows the AHP spec's answer to that question and collects what you need to get right when implementing a client or a host. Where the documents do not spell out a behavior, I ran the published canonical reducers to check it.
 
 Sources:
 
@@ -23,9 +23,9 @@ Sources:
 - `@microsoft/agent-host-protocol` 1.0.0 from npm. All verification code in this article runs against the reducers in this package
 - VS Code's [Agent Host documentation](https://code.visualstudio.com/docs/agents/concepts/agent-host) and `src/vs/platform/agentHost` in [microsoft/vscode](https://github.com/microsoft/vscode/tree/main/src/vs/platform/agentHost) (`main` as of November 2, 2026)
 
-One caveat up front. AHP moves fast: there were 11 releases in a little over four months, from 0.2.0 in May 2026 to 1.0.0 in October. Work on the next development version (1.1.0) is already under way on `main`, and since v1.0.0 it has gained windowed delivery (per-subscription flow control), a TCP channel, multiple steering messages, per-chat configuration and per-chat agents, and more. This article treats the v1.0.0 spec as the baseline and labels everything else "draft (`main`)". Note that VS Code tracks `main`: at the time of writing it vendors an AHP commit newer than v1.0.0 (`d7a5579b`, October 30).
+AHP moves fast: there were 11 releases in a little over four months, from 0.2.0 in May 2026 to 1.0.0 in October. Work on the next development version (1.1.0) is already under way on `main`, and since v1.0.0 it has gained windowed delivery (per-subscription flow control), a TCP channel, multiple steering messages, per-chat configuration and per-chat agents, and more. This article treats the v1.0.0 spec as the baseline and labels everything else "draft (`main`)". VS Code tracks `main`: at the time of writing it vendors an AHP commit newer than v1.0.0 (`d7a5579b`, October 30).
 
-Here is the plan. Chapter 1 sets up the problem; chapters 2–3 cover the protocol's skeleton and the connection lifecycle. Chapters 4–6 are the core of the article: implementing optimistic updates, the division of labor between reducers and the host (including a minimal host and how to prepare for host restarts), and reconnection and resending, all with running code. Chapters 7–11 cover human decisions, client-provided tools, terminals, security, and large sessions; chapters 12–14 cover versioning, comparisons with other protocols, and the state of implementations; chapters 15–16 close with an implementation checklist and a discussion.
+Chapter 1 sets up the problem; chapters 2–3 cover the protocol's skeleton and the connection lifecycle. Chapters 4–6 are the core of the article: implementing optimistic updates, the division of labor between reducers and the host (including a minimal host and how to prepare for host restarts), and reconnection and resending, all with running code. Chapters 7–11 cover human decisions, client-provided tools, terminals, security, and large sessions; chapters 12–14 cover versioning, comparisons with other protocols, and the state of implementations; chapters 15–16 close with an implementation checklist and a discussion.
 
 ## The Short Answer
 
@@ -48,7 +48,7 @@ Here is the plan. Chapter 1 sets up the problem; chapters 2–3 cover the protoc
 
 Before the Agent Host, VS Code ran the agent harness (the implementation that calls the model, runs tools, and drives the agent loop) inside each window's extension host. According to the VS Code team's blog post, this tied agent execution to a window: closing the window stopped it, and every window loaded its own copy of the machinery. So they moved session state, harness adapters, and baseline workspace capabilities into a dedicated process, and windows became clients connecting to it.
 
-This is not specific to VS Code. Agent sessions have properties that ordinary chats never had:
+The problem is not specific to VS Code. Agent sessions have properties that ordinary chats never had:
 
 - <strong>They run for a long time.</strong> Work continues for minutes to hours, including while nobody is watching
 - <strong>They stop to wait for humans.</strong> Approving a tool call, answering the agent's question, authenticating
@@ -60,7 +60,7 @@ As long as a UI process owns the session, the first four are hard to satisfy. Bu
 
 ### 1.2 What happens when several screens share a session
 
-Consider a concrete scenario. On your desktop, you ask an agent to fix the build. On the move, you check progress on your phone and approve a tool call. Back home, you look at the result in a browser.
+Suppose that on your desktop you ask an agent to fix the build. On the move, you check progress on your phone and approve a tool call. Back home, you look at the result in a browser.
 
 A straightforward design would have the host stream events to each screen over WebSocket or SSE while screens send operations over HTTP. You would quickly run into problems like these:
 
@@ -74,7 +74,7 @@ Each of these is a restatement of a classic distributed-systems problem: keeping
 
 ### 1.3 AHP's answer
 
-AHP's answer can be summarized like this:
+In outline, AHP's answer is this:
 
 1. The host (the Agent Host) holds the authoritative state
 2. State is split into "channels" named by URIs, and clients subscribe only to the channels they want
@@ -83,7 +83,7 @@ AHP's answer can be summarized like this:
 5. Clients send their own operations as actions too, and apply them locally at the same time. An operation is confirmed when the host sends it back with a sequence number
 6. When the connection drops, the client reports the last number it saw and receives either what it missed or a fresh snapshot
 
-Keeping state in one place and changing it with actions and reducers is the same as Redux. Applying locally first and confirming in the order the server decides resembles client-side prediction and server reconciliation in multiplayer game netcode, or sync engines such as Replicache. AHP does not, however, take the CRDT route of merging concurrent changes. The host resolves conflicts by ordering, and operations that do not go through are sent back with a reason. Section 4.6 explains why that is enough.
+Keeping state in one place and changing it with actions and reducers is the approach Redux takes. Applying locally first and confirming in the order the server decides resembles client-side prediction and server reconciliation in multiplayer game netcode, or sync engines such as Replicache. AHP does not, however, take the CRDT route of merging concurrent changes. The host resolves conflicts by ordering, and operations it does not accept are sent back with a reason. Section 4.6 explains why that is enough.
 
 ```mermaid
 graph TD
@@ -107,7 +107,7 @@ Downstream, the host talks to agents through each agent's SDK or through ACP and
 
 The official guide "[AHP and the Agent Client Protocol](https://microsoft.github.io/agent-host-protocol/guide/ahp-and-acp)" describes the relationship as "AHP is a mutex over ACP." ACP defines a conversation between one client and one agent; AHP wraps that conversation in ordering and synchronization machinery so that N clients can participate without stepping on each other.
 
-The design principles are collected in a document called the "[doctrine](https://microsoft.github.io/agent-host-protocol/guide/doctrine)". In summary:
+The design principles are collected in a document called the "[doctrine](https://microsoft.github.io/agent-host-protocol/guide/doctrine)". Its main points are:
 
 | Principle | Meaning |
 |---|---|
@@ -120,7 +120,7 @@ The design principles are collected in a document called the "[doctrine](https:/
 | Explicit escape hatches | Provider-specific information goes in places like `_meta` and is not required for the baseline experience |
 | Evolution through compatibility and capabilities | Optional fields, ignored unknown metadata, and capability checks are preferred over forcing everyone to upgrade at once |
 
-Conversely, the things AHP explicitly does not define (its anti-goals) are how agents reason, plan, call tools, or manage context; model providers or credential flows; a universal backend tool registry; UI layout; a requirement that every workspace has a local filesystem or Git repository; agent-to-agent coordination; and a replacement for ACP.
+The doctrine also lists anti-goals. AHP does not define how agents reason, plan, call tools, or manage context; model providers or credential flows; a universal backend tool registry; UI layout; or agent-to-agent coordination. It does not require every workspace to have a local filesystem or Git repository, and it is not a replacement for ACP.
 
 ## 2. The Big Picture: Channels, State, Actions, Reducers
 
@@ -144,11 +144,11 @@ There are also session annotations (`ahp-session:/<uuid>/annotations`) and an `m
 
 Channels are also the routing key on the wire. The `params` of every request and every notification must contain a member called `channel`. Session commands carry the session's URI; connection-level commands (`initialize`, `ping`, `reconnect`, `listSessions`, `authenticate`, the `resource*` file operations, and so on) carry `ahp-root://`. As a result, servers, clients, and any proxy in between can route a message by looking only at `(method, params.channel)`. The canonical TypeScript definitions even include a compile-time check for this rule (`types/version/message-checks.ts`).
 
-Note that clients choose session URIs. For chat URIs, the spec's prose says the server allocates them at creation time, while the type definition's `CreateChatParams.chat` says "client-chosen" and makes it a required parameter (in both v1.0.0 and `main`). Since the type definitions decide the wire format, the caller of `createChat` supplies the URI. Either way, receivers treat both kinds of URI as opaque.
+Clients choose session URIs. For chat URIs, the spec's prose says the server allocates them at creation time, while the type definition's `CreateChatParams.chat` says "client-chosen" and makes it a required parameter (in both v1.0.0 and `main`). Since the type definitions decide the wire format, the caller of `createChat` supplies the URI. Either way, receivers treat both kinds of URI as opaque.
 
 ### 2.2 What a phone subscribes to
 
-Let's walk through a concrete flow. For a phone client to show the session list and open one conversation, the steps are:
+For a phone client to show the session list and open one conversation, the steps are:
 
 1. Start the connection with `initialize`, putting `ahp-root://` in `initialSubscriptions`. The response contains a snapshot of `RootState` (available agents and models, the terminal list, and so on)
 2. Fetch the session list with `listSessions`. It can be paginated with `limit` and `cursor`, and results come most recently modified first
@@ -156,7 +156,7 @@ Let's walk through a concrete flow. For a phone client to show the session list 
 4. When a session is opened, subscribe to `ahp-session:/<uuid>`. This delivers the list of chats, the default chat (`defaultChat`), and the aggregate of pending input (`inputNeeded`)
 5. When a conversation is opened, subscribe to `ahp-chat:/<uuid>`. To receive only the last 20 turns, pass `view: { turns: 20 }`, and load older turns with `fetchTurns` when needed
 
-Notice that the session list is not part of the state tree. Because it can grow without bound, it is fetched imperatively and kept fresh through lightweight notifications. For the same reason, each session's summary (title, status, modification time, …) is distributed via `root/sessionSummaryChanged`, so a list screen does not have to subscribe to every session.
+The session list is not part of the state tree. Because it can grow without bound, it is fetched imperatively and kept fresh through lightweight notifications. For the same reason, each session's summary (title, status, modification time, …) is distributed via `root/sessionSummaryChanged`, so a list screen does not have to subscribe to every session.
 
 ### 2.3 State and notifications
 
@@ -169,7 +169,7 @@ A channel delivers two kinds of things: actions that change state, and notificat
 | Sequence number | Carry a `serverSeq` | None |
 | On reconnect | Missed ones are replayed | Not replayed; fetch again if needed |
 
-This distinction is why the doctrine says that user-visible truth must be recoverable from state. Notifications are kept to short-lived signals, and every fact that must persist lives in state. As long as that rule holds, a screen that joins late and a screen that comes back from a disconnect both arrive at the same view from snapshots and actions alone.
+Because notifications are not replayed, the doctrine requires that user-visible truth be recoverable from state. Notifications are kept to short-lived signals, and every fact that must persist lives in state. As long as that rule holds, a screen that joins late and a screen that comes back from a disconnect both arrive at the same view from snapshots and actions alone.
 
 ### 2.4 Actions and envelopes
 
@@ -196,7 +196,7 @@ Actions form a discriminated union keyed by `type`, and they are the only way to
 | `origin` | The `clientId` of the client that sent the action, and the `clientSeq` that client assigned. Absent for actions the host itself originates |
 | `rejectionReason` | A human-readable reason, present only when the host did not accept a client's operation |
 
-Some actions can be sent by clients (client-dispatchable) and some can only be originated by the host. For example, `chat/turnStarted` (send a message), `chat/toolCallConfirmed` (approve or deny a tool call), `chat/turnCancelled` (cancel), and `session/titleChanged` (rename) can be sent by clients. `chat/delta` (append response text), `chat/responsePart` (create a response part), and `chat/toolCallStart` / `chat/toolCallReady` (a tool call starting and becoming ready) come from the agent backend, so only the host originates them. The distinction is generated from the `@clientDispatchable` JSDoc tag in the type definitions and can be checked with `isClientDispatchable()` in the SDKs. The example above is the echo of an approval a client sent. Note that the envelope example in the spec's subscriptions chapter puts an `origin` on `chat/delta`, but actions the host originates carry no `origin`.
+Some actions can be sent by clients (client-dispatchable) and some can only be originated by the host. For example, `chat/turnStarted` (send a message), `chat/toolCallConfirmed` (approve or deny a tool call), `chat/turnCancelled` (cancel), and `session/titleChanged` (rename) can be sent by clients. `chat/delta` (append response text), `chat/responsePart` (create a response part), and `chat/toolCallStart` / `chat/toolCallReady` (a tool call starting and becoming ready) come from the agent backend, so only the host originates them. The distinction is generated from the `@clientDispatchable` JSDoc tag in the type definitions and can be checked with `isClientDispatchable()` in the SDKs. The example above is the echo of an approval a client sent. The envelope example in the spec's subscriptions chapter puts an `origin` on `chat/delta`, but actions the host originates carry none.
 
 ### 2.5 Commands versus actions
 
@@ -208,9 +208,9 @@ AHP messages are JSON-RPC 2.0 and come in two forms: requests, which get respons
 | Sending an action | `dispatchAction` | None. The echoed envelope stands in for a reply |
 | Ending a subscription | `unsubscribe` | None |
 
-The important point is that `dispatchAction` is a notification. It is fire-and-forget, and no JSON-RPC response comes back. Whether an operation was accepted is shown by the envelope the host sends back with a `serverSeq` — the one whose `origin` carries your own `clientId` and `clientSeq`.
+`dispatchAction` is a notification: it is fire-and-forget, and no JSON-RPC response comes back. Whether an operation was accepted is shown by the envelope the host sends back with a `serverSeq` — the one whose `origin` carries your own `clientId` and `clientSeq`.
 
-Also, the operations at the heart of the interaction are sent as actions themselves, not as commands. When a client sends `chat/turnStarted`, the host applies it to state and, as a side effect, starts the agent's processing. `chat/turnCancelled` stops it. The Actions guide explains that this avoids a separate layer that translates commands into actions. Only operations that need to return a result, such as creating a session or reading a file, are commands.
+The operations at the heart of the interaction are themselves actions, not commands. When a client sends `chat/turnStarted`, the host applies it to state and, as a side effect, starts the agent's processing. `chat/turnCancelled` stops it. The Actions guide explains that this avoids a separate layer that translates commands into actions. Only operations that need to return a result, such as creating a session or reading a file, are commands.
 
 ### 2.6 Pure reducers and their conformance tests
 
@@ -227,7 +227,7 @@ Reducers are pure functions without side effects, and the same code runs on both
 
 If the reducer read the current time, the host and each client would get different results. So timestamps travel inside actions too. `chat/turnStarted` carries `startedAt` (an ISO 8601 timestamp) and `chat/turnComplete` carries `duration` (milliseconds), and the reducer computes `modifiedAt` as `startedAt + duration`. A comment in the type definitions stresses that clients must not compute elapsed times from their own clocks, because clocks can differ between clients.
 
-Unknown actions are also handled. The reducers' `switch` statements are exhaustive, so forgetting to handle a newly added type is a compile error. At run time, however, an unknown `type` only produces a log message instead of an exception (`softAssertNever`). That way, an old client connected to a newer host does not crash on an action it does not know.
+The reducers' `switch` statements are exhaustive, so forgetting to handle a newly added type is a compile error. At run time, however, an unknown `type` only produces a log message instead of an exception (`softAssertNever`). That way, an old client connected to a newer host does not crash on an action it does not know.
 
 The types are generated from the canonical TypeScript definitions into Rust, Kotlin, Swift, Go, and .NET. Reducer behavior is kept consistent by language-independent JSON fixtures in `types/test-cases`. As of v1.0.0 there are 308 reducer fixtures, 68 serialization round-trip fixtures, and a set of version-negotiation fixtures, and each SDK's tests load them. A reducer fixture has a simple three-part shape: an initial state, a list of actions, and the expected state.
 
@@ -241,7 +241,7 @@ The types are generated from the canonical TypeScript definitions into Rust, Kot
 }
 ```
 
-If you implement a host or a client yourself, passing these fixtures first is the shortest path.
+If you implement a host or a client yourself, getting your reducers to pass these fixtures is the quickest place to start.
 
 ## 3. The Connection Lifecycle
 
@@ -314,21 +314,19 @@ After connecting, a client subscribes to channels to receive state.
 
 The draft (`main`) adds a rule that a client has at most one subscription per channel, and that sending `subscribe` again for a channel it is already subscribed to changes the existing subscription's settings (it arrived together with windowed delivery and is not in v1.0.0).
 
-One implementation note: a channel's actions can arrive immediately after the `subscribe` response. If you set up the receiver only after the response arrives, you can lose actions in between. The TypeScript SDK's `subscribe()` registers the receiver before sending the request. Do the same in your own code.
+A channel's actions can arrive immediately after the `subscribe` response. If you set up the receiver only after the response arrives, you can lose actions in between. The TypeScript SDK's `subscribe()` registers the receiver before sending the request. Do the same in your own code.
 
 ### 3.3 Properties of serverSeq
 
-A few properties of `serverSeq` are worth knowing before you implement anything:
+Three properties of `serverSeq` affect implementations:
 
-- <strong>It is treated as a single sequence for the whole host.</strong> The `serverSeq` in the `initialize` response, each snapshot's `fromSeq`, and each action's `serverSeq` come from the same sequence, and on reconnect the client sends a single `lastSeenServerSeq`
+- <strong>It is treated as a single sequence for the whole host.</strong> The `serverSeq` in the `initialize` response, each snapshot's `fromSeq`, and each action's `serverSeq` come from the same sequence, and on reconnect the client sends a single `lastSeenServerSeq` (section 16.2 discusses what this means for scaling a host out)
 - <strong>Clients see gaps.</strong> A client receives actions only for the channels it subscribes to, so the numbers it sees skip. Do not treat gaps as loss
 - <strong>Loss on the wire is prevented by the transport's properties.</strong> The spec requires a transport that delivers messages in order, reliably (no silent drops), bidirectionally, and completely (no partial messages). On WebSocket, each text frame carries exactly one JSON-RPC message. Loss on the wire can happen only when the connection drops, and the next `reconnect` fills the gap
 
-Events can still be lost inside the client after they arrive, though. The TypeScript SDK buffers up to 4096 events per subscription by default (1024 for the stream into which `MultiHostClient` merges events from several hosts), and when a reader falls behind and the limit is exceeded, it drops the oldest events and moves the reader forward. Since gaps are normal, the client cannot detect this as loss. The SDK's own comments advise that if you cannot afford to drop a single event, you should drain promptly or raise the limit. Do not let rendering or other heavy work stall event processing.
+Events can still be lost inside the client after they arrive, though. The TypeScript SDK buffers up to 4096 events per subscription by default (1024 for the stream into which `MultiHostClient` merges events from several hosts), and when a reader falls behind and the limit is exceeded, it drops the oldest events and moves the reader forward. Because gaps are normal, the client cannot tell this kind of loss from an ordinary gap. The SDK's own comments advise that if you cannot afford to drop a single event, you should drain promptly or raise the limit. Do not let rendering or other heavy work stall event processing.
 
 To check that a connection is alive, you can use AHP's `ping` command. The host must answer `ping` even before `initialize` and even without subscriptions. It also helps keep proxies and load balancers in between from closing an idle connection on a timeout. WebSocket's own ping frames are also allowed, but as the TypeScript SDK points out, browsers cannot send WebSocket ping frames, so browser clients should use the `ping` command.
-
-Chapter 16 returns to the property that the whole host shares one sequence.
 
 ### 3.4 reconnect
 
@@ -365,7 +363,7 @@ The host answers in one of two ways. If it still has the missed actions, it retu
 }
 ```
 
-It matters that the replayed actions are inside the response: once the client has processed the response, it knows every gap has been filled.
+Because the replayed actions are inside the response, a client that has processed the response knows every gap has been filled.
 
 Ordinary `action` notifications can still arrive before the response, however. v1.0.0 requires the replayed actions to be inside the response, but it does not say the host must not send ordinary notifications before it (the draft forbids that only for windowed subscriptions). With a store that drops duplicates by `serverSeq`, like the one in chapter 4, processing a newer action before the response would cause every replayed action with a lower number to be discarded. Clients should buffer incoming notifications until the `reconnect` response has been applied, then process them in order (section 6.6 puts the whole reconnect procedure in one place). On the host side, it is safest to send the response first and only then resume ordinary delivery to that client (the section 5.5 code does this).
 
@@ -388,7 +386,7 @@ Notifications, on the other hand, are not replayed. A reconnected client must fe
 
 ### 3.5 When the host goes down
 
-For the case where the host process terminates unexpectedly, the spec says in-progress turns SHOULD be considered failed. Clients reconnect to the restarted host through the normal reconnection flow.
+If the host process terminates unexpectedly, the spec says in-progress turns SHOULD be considered failed. Clients reconnect to the restarted host through the normal reconnection flow.
 
 VS Code's documentation also cautions that being able to reconnect does not mean work continued while the host was stopped. VS Code manages the local Agent Host, so to keep local sessions running, you must keep the application itself running even after closing the folder. A session cannot outlive its host process.
 
@@ -414,7 +412,7 @@ Because the reducers are pure, "rebasing" needs no special logic: after `confirm
 
 ### 4.2 A store for one channel
 
-Written directly in TypeScript, it looks like this. I wrote it to verify this article: it passes `tsc --strict` against the types of `@microsoft/agent-host-protocol` 1.0.0 from npm, and it runs in the simulation shown below.
+In TypeScript, it looks like this. I wrote it to check the claims in this article: it passes `tsc --strict` against the types of `@microsoft/agent-host-protocol` 1.0.0 from npm, and it runs in the simulation shown below.
 
 ```typescript
 import type { ActionEnvelope, StateAction } from '@microsoft/agent-host-protocol';
@@ -489,9 +487,9 @@ The code is short, but it encodes several decisions that come from reading the s
 
 <strong>2. Drop duplicates by `serverSeq`.</strong> Actions at or below the snapshot's `fromSeq` are already in the snapshot. As we will see, applying the same `chat/delta` twice appends the text twice. Deduplication is the receiver's job, not the reducer's.
 
-<strong>3. Match echoes by `clientSeq`, and deal with operations that never get an echo at reconnect time.</strong> The guide's algorithm assumes the echo matches the head of the pending queue. But the spec never states that one client's operations are echoed in the order they were sent. Matching by `clientSeq` removes any dependence on order. On the other hand, some operations can be left without an echo. Operations sent just before the connection dropped are the typical case. Beyond that, VS Code's host implementation (`_dispatchClientActionNow` in `protocolServerHandler.ts`) abandons processing without an echo when it notices mid-validation that the connection has been closed. And the host MUST ignore operations addressed to a nonexistent channel without an echo. Take such operations out with `takeUnacknowledged()` once the reconnect result and the buffered notifications have been processed, and handle them by the chapter 6 policy (section 6.6 gives the procedure). Note that `resetTo()` replaces the channel's applied number with the snapshot's `fromSeq`; section 5.6 shows why that number can go down. If an operation goes without an echo for a long time while the connection is up, it can also be worth telling the user.
+<strong>3. Match echoes by `clientSeq`, and deal with operations that never get an echo at reconnect time.</strong> The guide's algorithm assumes the echo matches the head of the pending queue. But the spec never states that one client's operations are echoed in the order they were sent. Matching by `clientSeq` removes any dependence on order. Some operations, however, can go without an echo. Operations sent just before the connection dropped are the typical case. In addition, VS Code's host implementation (`_dispatchClientActionNow` in `protocolServerHandler.ts`) abandons processing without an echo when it notices mid-validation that the connection has been closed. And the host MUST ignore operations addressed to a nonexistent channel without an echo. Take such operations out with `takeUnacknowledged()` once the reconnect result and the buffered notifications have been processed, and handle them by the chapter 6 policy (section 6.6 gives the procedure). `resetTo()` replaces the channel's applied number with the snapshot's `fromSeq`; section 5.6 shows why that number can go down. If an operation goes without an echo for a long time while the connection is up, it can also be worth telling the user.
 
-<strong>4. Do not apply rejected operations to confirmed state.</strong> This sounds obvious, but the convenience mirrors bundled with the SDKs (TypeScript's `AhpStateMirror` and `MultiHostStateMirror`, and the mirrors in Rust, Swift, Go, and .NET) all apply envelopes without checking `rejectionReason` at the commit I read. Moreover, as we will see, VS Code's host delivers rejected envelopes to all subscribers (section 5.2). If you use a convenience mirror as your confirmed state, filter out envelopes that carry `rejectionReason` before passing them in. Also note that neither of the two TypeScript mirrors handles `ahp-chat:` channels (the Rust mirror does), so in TypeScript you have to keep chat state yourself using the reducers directly.
+<strong>4. Do not apply rejected operations to confirmed state.</strong> This sounds obvious, but the convenience mirrors bundled with the SDKs (TypeScript's `AhpStateMirror` and `MultiHostStateMirror`, and the mirrors in Rust, Swift, Go, and .NET) all apply envelopes without checking `rejectionReason` at the commit I read. Moreover, VS Code's host delivers rejected envelopes to all subscribers (section 5.2). If you use a convenience mirror as your confirmed state, filter out envelopes that carry `rejectionReason` before passing them in. Neither of the two TypeScript mirrors handles `ahp-chat:` channels (the Rust mirror does), so in TypeScript you have to keep chat state yourself using the reducers directly.
 
 <strong>5. Recompute the rebase every time.</strong> `view` re-applies the pending operations on every call. There are usually only a handful of pending operations, so this is fast enough.
 
@@ -580,14 +578,14 @@ Finally, I serialized both screens' state to JSON and compared them: they were i
 
 In this simulation, rejected envelopes were sent back only to the sender, but with an implementation that delivers them to everyone, as VS Code's host does, the outcome is the same as long as receivers check `rejectionReason` and skip applying.
 
-The experiment also surfaces a UX problem. The "write tests" typed on the desktop appears for a moment and then vanishes. That is correct as far as the protocol is concerned, but to the user it looks like their input was lost. Showing the rejection reason and either putting the text back into the input box or re-submitting it to the queue (`chat/pendingMessageSet`, covered later) is up to the client.
+The experiment also surfaces a UX problem. The "write tests" typed on the desktop appears for a moment and then vanishes. That is correct as far as the protocol is concerned, but to the user it looks like their input was lost. Showing the rejection reason and either putting the text back into the input box or re-submitting it to the queue (`chat/pendingMessageSet`, section 7.5) is up to the client.
 
 ### 4.6 Why no merging is needed
 
-Collaborative editors merge concurrent changes with OT or CRDTs. AHP does not, because the operations it handles are of a different nature. The guide gives these reasons:
+Collaborative editors merge concurrent changes with OT or CRDTs. AHP does not, because its operations differ in kind from an editor's. The guide gives these reasons:
 
-- Most chat operations are <strong>appends</strong>: adding a turn, appending text, adding a tool call, adding a response part. Rebasing pending operations onto a new confirmed state leaves the turn you created in place, and what you appended is still valid
-- The operations that can truly conflict — approving and denying the same tool call, cancelling the same turn — are adequately resolved by <strong>whichever arrives first wins</strong>. The loser just needs to learn it was rejected and roll back its display
+- Most chat operations are appends: adding a turn, appending text, adding a tool call, adding a response part. Rebasing pending operations onto a new confirmed state leaves the turn you created in place, and what you appended is still valid
+- The operations that can truly conflict — approving and denying the same tool call, cancelling the same turn — are adequately resolved by a simple rule: whichever arrives first wins. The loser just needs to learn it was rejected and roll back its display
 
 In addition, most operations target things by ID: `turnId`, `partId`, `toolCallId`, the `id` of a pending message, and so on. Reducers drop operations whose target cannot be found or whose state does not match (we will verify this in the next chapter). Stale operations do not corrupt state, which is what makes rebasing safe.
 
@@ -595,7 +593,7 @@ In addition, most operations target things by ID: `turnId`, `partId`, `toolCallI
 
 ### 5.1 What I verified
 
-The AHP guide says "only one turn runs at a time per chat." So what happens if another `chat/turnStarted` arrives at a chat that already has an active turn? I ran the `chatReducer` from npm 1.0.0 directly to find out.
+The AHP guide says "only one turn runs at a time per chat." To see what happens when another `chat/turnStarted` arrives at a chat that already has an active turn, I ran the `chatReducer` from npm 1.0.0 directly.
 
 ```js
 import { chatReducer, ActionType, SessionStatus } from '@microsoft/agent-host-protocol';
@@ -610,7 +608,7 @@ const s = [started('t1', 'from A'), started('t2', 'from B')].reduce(chatReducer,
 console.log(s.activeTurn.id, s.turns.length); // → t2 0
 ```
 
-The second `chat/turnStarted` simply overwrote the first turn. The first turn does not even remain in the list of completed turns (`turns`); it is gone. Here is what I found when checking other cases the same way.
+The second `chat/turnStarted` simply overwrote the first turn. The first turn does not even remain in the list of completed turns (`turns`); it is gone. Checking other cases the same way gave these results.
 
 | Input | Result | What it tells us |
 |---|---|---|
@@ -641,13 +639,13 @@ The same idea shows up elsewhere. A session with several working directories can
 
 To reject, the host sends back the original action in an envelope with a `rejectionReason`. VS Code's host implementation (`rejectClientAction` in `agentHostStateManager.ts`) documents this: it assigns a fresh `serverSeq` even to the rejected action and emits an envelope with the original `origin` and the reason, so that the originating client can roll back its optimistic write-ahead action through the normal path instead of leaving it pending until reconnect. The reducer is deliberately not run. And as far as I can tell from `protocolServerHandler.ts`, this envelope goes to all subscribers of the channel, except for certain relay connections. Receivers must check `rejectionReason` even when they are not the sender.
 
-The whole design becomes clearer if you think of it this way: <strong>an action a client sends is a "proposal" until the host echoes it, and becomes a "fact" once it is echoed without rejection.</strong> Actions the host originates itself (such as `chat/delta`) are facts from the start. Reducers are functions that apply facts to state; reviewing proposals is the host's job. It is the same split as in event sourcing, where commands are validated by the aggregate and events are applied without validation.
+<strong>An action a client sends is a "proposal" until the host echoes it, and becomes a "fact" once it is echoed without rejection.</strong> Actions the host originates itself (such as `chat/delta`) are facts from the start. Reducers are functions that apply facts to state; reviewing proposals is the host's job. It is the same split as in event sourcing, where commands are validated by the aggregate and events are applied without validation.
 
 ### 5.3 What the spec leaves open
 
 However, the v1.0.0 validation table says nothing about `chat/turnStarted` when a turn is already active. The error-code list does define `TurnInProgress` (`-32004`, "the operation requires no active turn, but one is in progress"), but nothing in the v1.0.0 documents or type definitions references it. And since `dispatchAction` is a notification, a JSON-RPC error cannot be returned anyway; the only way to signal a rejection is `rejectionReason`.
 
-In other words, what happens when two screens send a message at almost the same time depends on the host implementation. There are two plausible policies:
+So what happens when two screens send a message at almost the same time depends on the host implementation. There are two plausible policies:
 
 - <strong>Reject.</strong> The host in the section 4.5 simulation does this: a later `chat/turnStarted` comes back with a `rejectionReason`
 - <strong>Queue it.</strong> The host treats the later message as a pending message (section 7.5) and starts it after the current turn ends
@@ -664,11 +662,11 @@ First, a reducer must return the same result on every replica when the same sequ
 
 Second, acceptance decisions need information reducers do not have: how the connection was authenticated, the agent's capabilities, the backend's actual state (a message already handed to the provider cannot be withdrawn, for example), and which client owns a tool call.
 
-The consequence of this split is that sharing the reducers does not finish the job for an AHP host author. You have to implement which actions to reject under which conditions, following the spec's validation tables, and decide the cases the tables do not cover yourself.
+Because of this split, sharing the reducers does not finish the job for an AHP host author. You have to implement which actions to reject under which conditions, following the spec's validation tables, and decide the cases the tables do not cover yourself.
 
 ### 5.5 A minimal host
 
-Let's put the host side of all this into one piece of code. It is a minimal setup that handles a single chat; a real host shares `serverSeq` and the log across the whole host and delivers to each client only the channels it subscribes to. This also passes `tsc --strict` against the npm 1.0.0 types, and I ran it with two clients that use the chapter 4 store.
+The following code puts the host side of all this together. It is a minimal setup that handles a single chat; a real host shares `serverSeq` and the log across the whole host and delivers to each client only the channels it subscribes to. This also passes `tsc --strict` against the npm 1.0.0 types, and I ran it with two clients that use the chapter 4 store.
 
 ```typescript
 import { chatReducer, isClientDispatchable, ActionType, ResponsePartKind, ToolCallStatus } from '@microsoft/agent-host-protocol';
@@ -776,7 +774,7 @@ export class ChatChannelHost {
 }
 ```
 
-There are five key points:
+Five points about this code:
 
 - <strong>Validate, then number.</strong> Accepted and rejected operations alike go out on the same `serverSeq` sequence. Only accepted operations go through the reducer
 - <strong>Log rejected operations too.</strong> Even if the sender was disconnected, it learns from the replay on reconnect that its operation was rejected
@@ -784,7 +782,7 @@ There are five key points:
 - <strong>Send the result before resuming delivery.</strong> If an ordinary notification reached the client before the `reconnect` result, the client might discard the replayed actions (section 3.4). So the host sends the result first and only then adds the client back as a delivery target
 - <strong>Run side effects afterwards.</strong> The reducer decides only how state changes; forwarding to the agent happens in a separate layer, after the echo has been delivered
 
-The validation is part of the section 5.2 table (approving a tool call that is not awaiting confirmation; cancelling when there is no active turn or when the cancel names a different turn) plus the section 5.3 policy (reject `chat/turnStarted` while a turn is active) and rejecting duplicate `turnId`s. It omits ignoring operations addressed to nonexistent channels and checking the owner of client tool calls. Note that in 1.0.0 the parameter type of `isClientDispatchable` does not include `ChatAction`, hence the cast (at run time it works for any kind of action).
+The validation is part of the section 5.2 table (approving a tool call that is not awaiting confirmation; cancelling when there is no active turn or when the cancel names a different turn) plus the section 5.3 policy (reject `chat/turnStarted` while a turn is active) and rejecting duplicate `turnId`s. It omits ignoring operations addressed to nonexistent channels and checking the owner of client tool calls. In 1.0.0 the parameter type of `isClientDispatchable` does not include `ChatAction`, hence the cast (at run time it works for any kind of action).
 
 I connected this to two clients with the chapter 4 store (a desktop and a phone) and ran the following scenario. Both clients start a turn at almost the same time, and the phone's is rejected. While the phone is disconnected, the host streams a response and finishes the turn. The desktop tries to start a turn again with the finished turn's `turnId` and is rejected. Then the phone reconnects. With a log limit of 1000, the six actions from the disconnect (creating the response part, three appends, completing the turn, and the desktop's rejected operation) arrived by replay, and no operation was left without an echo. With a limit of 2, the host switched to a snapshot. In both cases, the reconnected phone's state was identical to the desktop's.
 
@@ -818,7 +816,7 @@ The "at or below the current number" condition is unnecessary if every client re
 
 VS Code's host keeps its client records in memory, so after a restart `reconnect` is refused with `NotFound` (`-32008`) and the client starts over with `initialize`. Channels a client subscribed to in `initialize` but has not yet been given a snapshot for (such as chats whose contents cannot be prepared until authentication completes) are remembered as channels "not yet given state", and while any remain, `reconnect` is answered with snapshots. According to the comments, this prevents a bug where an already-finished turn appears to run forever.
 
-In short, there are two ways to prepare for host restarts:
+There are two ways to prepare for host restarts:
 
 - <strong>Persist the number.</strong> Save the state and `serverSeq` before delivering each action. If you save after delivering, a restarted host can reuse numbers the clients have already seen, with different contents. If you do not also save the replay log, treat everything up to the number at startup as impossible to replay (in the section 5.5 code, set `serverSeq` and `evictedUpTo` to the startup number). The "has given state before" condition then becomes unnecessary, and you can keep answering with replays across a restart
 - <strong>Number from 0 again.</strong> Answer with snapshots for clients and channels this process has not yet given state to, and for clients whose `lastSeenServerSeq` exceeds the current number. Like VS Code, you can also refuse `reconnect` from an unknown `clientId` so the client starts over with `initialize`, and remember the channels you could not give a snapshot for
@@ -827,7 +825,7 @@ In short, there are two ways to prepare for host restarts:
 
 ### 6.1 The guide and the SDK say different things
 
-When the connection drops, what should happen to pending operations? The documents describe this differently.
+The documents give different accounts of what should happen to pending operations when the connection drops.
 
 The guide "Write-Ahead Reconciliation" says that after reconnecting, whether by replay or by snapshot, the client resets its confirmed state and clears `pendingActions`. The Swift SDK's README, on the other hand, states explicitly that optimistic outbound action replay is app policy that lives outside the SDK, and its reconnection steps end with "Resume any app-owned pending outbound actions that were not acknowledged." The reason given is that a chat message, a terminal resize, terminal input, and a transient UI toggle may each need different replay and coalescing behavior.
 
@@ -839,15 +837,15 @@ How you determine this depends on the result of `reconnect`.
 
 <strong>For a replay.</strong> Look at the `origin` of the actions in the response. If there is an envelope carrying your `clientId` and the `clientSeq` of a pending operation, the host received and processed it (if it has a `rejectionReason`, it was rejected). If there is none, the host had not processed it <strong>when it built the response</strong>. This echo is the only thing that proves an operation arrived. The absence of an echo, though, does not prove the operation will never be processed. v1.0.0 does not require the host to stop processing the old connection before answering `reconnect`. So an operation that reached an old connection, before the host noticed the disconnect, can be processed later. Its echo then arrives late, as an ordinary notification (the draft requires, for windowed subscriptions, that the old connection be closed before the new one is used and that delayed events from the old connection be ignored). VS Code's host actually expects one client's connections to overlap: it keeps the old connection around so that it can fall back to it if the new one closes first.
 
-So settle things in the section 6.6 order: finish processing the replay and the buffered notifications, and only then call `takeUnacknowledged()` on the chapter 4 store. Whatever remains at the end is an operation that got no echo. Settle those before sending anything new. And when you resend, always use <strong>the same `turnId` or the same message `id`</strong>, so that if the original operation was processed late, the host can reject the resend as a duplicate.
+So settle things in the section 6.6 order: finish processing the replay and the buffered notifications, and only then call `takeUnacknowledged()` on the chapter 4 store. Whatever remains at the end is an operation that got no echo. Settle those before sending anything new. And when you resend, always use the same `turnId` or the same message `id`, so that if the original operation was processed late, the host can reject the resend as a duplicate.
 
-<strong>For a snapshot.</strong> There are no echoes, so you have to inspect the state itself. Here, client-chosen IDs are your clue. The `turnId` in `chat/turnStarted`, the `id` of a pending message, and the session URI are chosen by the client, so if the ID <strong>is</strong> in the snapshot, the operation took effect. But an ID that is <strong>not</strong> there does not prove the operation never arrived. A pending message disappears from state once the host takes it and starts a turn: checking with the npm 1.0.0 reducer, the `queuedMessageId` in `chat/turnStarted` is not stored on the turn, and after consumption the ID appears nowhere in the state. And if you receive only recent turns via `view.turns`, an older turn may simply not have been loaded yet.
+<strong>For a snapshot.</strong> There are no echoes, so you have to inspect the state itself. Here, client-chosen IDs are your clue. The `turnId` in `chat/turnStarted`, the `id` of a pending message, and the session URI are chosen by the client, so if the ID is in the snapshot, the operation took effect. But an ID that is not there does not prove the operation never arrived. A pending message disappears from state once the host takes it and starts a turn: checking with the npm 1.0.0 reducer, the `queuedMessageId` in `chat/turnStarted` is not stored on the turn, and after consumption the ID appears nowhere in the state. And if you receive only recent turns via `view.turns`, an older turn may simply not have been loaded yet.
 
 Commands with responses can be handled the same way. If the connection drops before the response to `createSession` arrives, send it again with the same URI. If the session already exists, you get `SessionAlreadyExists` (`-32003`), which you can interpret as "already created". Having clients choose IDs also makes these retries idempotent.
 
 ### 6.3 Which operations are safe to resend
 
-Whether you know an operation did not arrive or cannot tell, resending it as is is not always right. Here is how the main actions break down:
+Whether you know an operation did not arrive or cannot tell, resending it unchanged is not always right. The main actions break down as follows:
 
 | Action | Resend | Why |
 |---|---|---|
@@ -877,12 +875,12 @@ So a client that provides tools must include the sessions it was participating i
 
 ### 6.6 The reconnect procedure, end to end
 
-Here is everything so far laid out as a client's reconnect procedure.
+Putting this together, a client reconnects as follows.
 
 1. Open a new connection and set up receivers for the subscribed channels' notifications first. Hold incoming notifications unprocessed until step 5
 2. Send `reconnect` with the same `clientId`, the last `serverSeq` you saw, and the list of subscribed channels. If the host refuses with a JSON-RPC error, start over from `initialize` with the same `clientId`, putting the subscribed channels in `initialSubscriptions`. VS Code's host refuses with `NotFound` (`-32008`) after it restarts, or after it has discarded the client's record about five minutes after a disconnect, so after a host restart this is the normal path
-3. Apply the `reconnect` result. For a replay, apply each action in order and drop the channels in `missing`. For a snapshot, replace each channel with `resetTo()`, and drop channels that have state but got no snapshot. Advance the connection-wide `lastSeenServerSeq` to the last replayed action's number for a replay, or <strong>replace</strong> it with the highest `fromSeq` for a snapshot
-4. If you started over with `initialize`, replace each channel that came with a snapshot using `resetTo()`, and <strong>replace</strong> the connection-wide `lastSeenServerSeq` with the response's `serverSeq`. If the host restarted, the number goes down (section 5.6). A channel that has state but got no snapshot stays subscribed, but treat your local state as stale and `subscribe` to it again in step 7. Its store still holds the old process's number, so as it stands it would discard the new actions
+3. Apply the `reconnect` result. For a replay, apply each action in order and drop the channels in `missing`. For a snapshot, replace each channel with `resetTo()`, and drop channels that have state but got no snapshot. Advance the connection-wide `lastSeenServerSeq` to the last replayed action's number for a replay, or replace it with the highest `fromSeq` for a snapshot
+4. If you started over with `initialize`, replace each channel that came with a snapshot using `resetTo()`, and replace the connection-wide `lastSeenServerSeq` with the response's `serverSeq`. If the host restarted, the number goes down (section 5.6). A channel that has state but got no snapshot stays subscribed, but treat your local state as stale and `subscribe` to it again in step 7. Its store still holds the old process's number, so as it stands it would discard the new actions
 5. Process the buffered notifications in order (dropping duplicates by `serverSeq`)
 6. Take out the operations that got no echo with `takeUnacknowledged()`. Do not send any new operations before this point
 7. Authentication status is per connection, so hand tokens over again with `authenticate` if needed. If you provide tools, check whether you are still in the session's `activeClients`, and if you were removed, rejoin with `session/activeClientSet`. Send `subscribe` again here for channels that got no state in step 4 (hold that channel's notifications until you have applied the snapshot in the response)
@@ -938,7 +936,7 @@ The state machine has several details that matter in practice:
 - <strong>Confirmation options.</strong> Beyond plain approve/deny, the host can offer choices such as "always approve in this session" or "deny with a reason" via `options`. Each option is classified as approve or deny (`kind`), and the host is supposed to localize the labels using the `locale` received in `initialize`
 - <strong>Editing arguments.</strong> If `editable` is true, the user can modify the arguments before approving (`editedToolInput`). When the arguments are large and passed by reference (`ContentRef`), the host replaces the referenced content before accepting the approval, and clients must not cache referenced arguments across confirmation
 - <strong>Waiting for authentication is its own state.</strong> `auth-required` is not a generic "blocked" state but one dedicated to MCP step-up authentication, because its resolution (obtain a token and call `authenticate`) differs from approve/deny. The reducer refuses to complete a call successfully from `auth-required`, which prevents skipping authentication by pretending to succeed. Completing it with a failed result cancels it without authenticating. The guide's state-model chapter says a client may send this. Yet the same guide's action list says a client may send `chat/toolCallComplete` only for tools it provides itself
-- <strong>Completion from awaiting confirmation.</strong> The v1.0.0 reducer also accepts `chat/toolCallComplete` for a tool call that is awaiting confirmation (`pending-confirmation`) and completes it without approval (`confirmed` becomes `not-needed`). Passing such an action through from a client as is would let it skip approval. Hosts should narrow the states in which they accept completions from clients, and reject completions of calls that are awaiting confirmation
+- <strong>Completion from awaiting confirmation.</strong> The v1.0.0 reducer also accepts `chat/toolCallComplete` for a tool call that is awaiting confirmation (`pending-confirmation`) and completes it without approval (`confirmed` becomes `not-needed`). Passing such an action through from a client unchanged would let it skip approval. Hosts should narrow the states in which they accept completions from clients, and reject completions of calls that are awaiting confirmation
 - <strong>Cleanup at the end of a turn.</strong> As section 5.1 showed, when a turn ends, tool calls that have not reached a terminal state are cancelled with `skipped`. No tool call is left dangling in "awaiting confirmation"
 
 ### 7.2 SessionStatus is a bitset
@@ -971,7 +969,7 @@ You want to show a "needs your approval" notification on the phone and let the u
 
 Each entry carries the chat's URI and the IDs needed to answer (such as `turnId` and `toolCallId`). The spec allows a client to answer by sending an action to that chat's channel without having subscribed to it.
 
-There is a small trap here, though. Actions on channels you are not subscribed to are not delivered to you, and neither is the echo of your own operation. Do not put operations sent to unsubscribed channels into the pending list of the chapter 4 store; they would never be confirmed. Check the outcome by watching the entry disappear from `inputNeeded`.
+Actions on channels you are not subscribed to are not delivered to you, and that includes the echo of your own operation. Do not put operations sent to unsubscribed channels into the pending list of the chapter 4 store; they would never be confirmed. Check the outcome by watching the entry disappear from `inputNeeded`.
 
 The spec and the reducer disagree about how this list relates to the session's status. The v1.0.0 spec says that whenever the list is non-empty, the session's status carries the input-needed bit. But the v1.0.0 reducer does not set the bit for `toolClientExecution` entries alone. According to the reducer's comment, counting them would report the session as waiting for the user for the entire duration of every client tool call.
 
@@ -979,7 +977,7 @@ The spec and the reducer disagree about how this list relates to the session's s
 
 When the agent asks the user a question, the host inserts an input request into the active turn as a response part with `chat/inputRequested`. Questions are typed — text, number, boolean, single select, multi select — and there are also requests that ask the user to open a URL and review something.
 
-The interesting part is that answer drafts are state, too. With `chat/inputAnswerChanged`, a client can send a draft, an answer, or a skip for a single question. Because drafts live in the response part, everyone subscribed to the chat sees them. The guide notes that a user can answer one question on client A and another on client B, and every subscriber sees the merged answers. Finally, `chat/inputCompleted` with accept, decline, or cancel finalizes the request, which stays in the transcript as a record.
+Answer drafts are part of the state too. With `chat/inputAnswerChanged`, a client can send a draft, an answer, or a skip for a single question. Because drafts live in the response part, everyone subscribed to the chat sees them. The guide notes that a user can answer one question on client A and another on client B, and every subscriber sees the merged answers. Finally, `chat/inputCompleted` with accept, decline, or cancel finalizes the request, which stays in the transcript as a record.
 
 The chat's input box can be shared the same way. `ChatState.draft` is the message the user is composing, and clients may sync it with `chat/draftChanged` (debounced rather than on every keystroke). You can start a message on the desktop and finish and send it from the phone.
 
@@ -1037,7 +1035,7 @@ The guide also says hosts SHOULD keep names unique, for example by prefixing cli
 
 ### 8.2 Why not RPC?
 
-The obvious design would be an RPC from the host to the client: "run this tool and return the result." After the previous chapters, the reasons AHP does not do that are easy to guess:
+The obvious design would be an RPC from the host to the client: "run this tool and return the result." The previous chapters suggest why AHP uses state instead:
 
 - <strong>Everyone can see it.</strong> Which tool is running on which client is state that every client sees. The phone can tell that "the desktop is running tests"
 - <strong>It survives disconnects.</strong> With RPC, a dropped connection loses both the request and the response. As state, the tool call is still there after reconnecting, and sending the result picks up where things left off
@@ -1048,7 +1046,7 @@ The price is that you need to decide what happens when a client goes away. As se
 
 ### 8.3 File operations go both ways
 
-There is another point that is easy to miss. The file commands (`resourceRead`, `resourceWrite`, `resourceList`, `resourceDelete`, and so on) can be sent not only from client to host but also from host to client. The spec mentions uses such as the host reading the content of a URI the client has published — for example, an agent on a remote host reading a file attached on your laptop. `resourceRequest`, which asks for access permission, can also be sent from either side.
+The file commands (`resourceRead`, `resourceWrite`, `resourceList`, `resourceDelete`, and so on) can be sent from host to client as well as from client to host. The spec mentions uses such as the host reading the content of a URI the client has published — for example, an agent on a remote host reading a file attached on your laptop. `resourceRequest`, which asks for access permission, can also be sent from either side.
 
 From a client implementer's perspective, this means you have an endpoint that accepts file-operation requests from the host. Unless you register a handler, the TypeScript SDK's `AhpClient` answers such requests with `MethodNotFound`. What to allow is something the client has to decide for itself (chapter 10).
 
@@ -1077,9 +1075,9 @@ With shell integration, terminal content is split into commands. `terminal/comma
 
 ### 10.1 Authentication has two layers
 
-Authentication in AHP comes in two layers of very different nature.
+Authentication in AHP has two layers with very different jobs.
 
-<strong>Authenticating the connection itself is outside AHP.</strong> The spec's Transport chapter says that gating access to an AHP endpoint is a transport-layer concern outside the scope of the wire protocol, and that implementations that need to gate the connection SHOULD do so during the transport handshake (for WebSocket, via query parameters, headers, or the HTTP upgrade request). In other words, verify the peer before `initialize`.
+<strong>Authenticating the connection itself is outside AHP.</strong> The spec's Transport chapter says that gating access to an AHP endpoint is a transport-layer concern outside the scope of the wire protocol, and that implementations that need to gate the connection SHOULD do so during the transport handshake (for WebSocket, via query parameters, headers, or the HTTP upgrade request). So verify the peer before `initialize`.
 
 VS Code implements this as follows. The standalone host started with `code agent host` listens on localhost by default and is protected by a connection token; with `--tunnel`, it can be exposed through a dev tunnel. For other processes on the same machine, it listens for WebSocket connections on a Unix domain socket (a named pipe on Windows) and writes the endpoint information as files in the VS Code user data directory (according to `src/vs/platform/agentHost/LOCAL_ENDPOINT.md` in the VS Code source). The connection token in those files is passed in the query parameter `?tkn=` during the WebSocket upgrade, and a missing or wrong token is rejected with HTTP 403. Because the browser WebSocket API cannot set arbitrary headers, a host that lets browsers connect has no choice but to accept the token in the query string or a similar place.
 
@@ -1090,9 +1088,9 @@ VS Code implements this as follows. The standalone host started with `code agent
 3. The client passes the resource identifier and token to the host with `authenticate`. Token handling follows the ideas of RFC 6750, which defines how Bearer tokens are used
 4. If an operation lacks authentication, the host returns `AuthRequired` (`-32007`) with the list of required resources. Token expiry or revocation is announced with the `auth/required` notification
 
-There is care in the details. `expiresIn` expresses the remaining lifetime in seconds from when `authenticate` is sent, not an absolute time, so the client and host clocks need not agree. Sending an empty token revokes authentication for that resource. Authentication status is kept out of the root state tree and handled per connection, because root state is visible to everyone while each client authenticates individually. The draft (`main`) adds `target`, which uses session and customization IDs to hand an MCP token to one specific MCP server only.
+`expiresIn` expresses the remaining lifetime in seconds from when `authenticate` is sent, not an absolute time, so the client and host clocks need not agree. Sending an empty token revokes authentication for that resource. Authentication status is kept out of the root state tree and handled per connection, because root state is visible to everyone while each client authenticates individually. The draft (`main`) adds `target`, which uses session and customization IDs to hand an MCP token to one specific MCP server only.
 
-Authentication being per connection also means that when several clients share one session, the host has to decide whose token runs a turn. The spec does not decide this. VS Code's host attaches the credentials of the sending client (`credentials`) to the request that starts a turn (`ITurnStartRequest` in `agentHostTurnStarter.ts`), and it also has a mechanism that remembers the sender's credentials per ID for queued messages (`node/chatContributions/queueDrain/queueDrainContribution.ts`). In other words, it ties a turn to the credentials of the client that started it.
+Authentication being per connection also means that when several clients share one session, the host has to decide whose token runs a turn. The spec does not decide this. VS Code's host attaches the credentials of the sending client (`credentials`) to the request that starts a turn (`ITurnStartRequest` in `agentHostTurnStarter.ts`), and it also has a mechanism that remembers the sender's credentials per ID for queued messages (`node/chatContributions/queueDrain/queueDrainContribution.ts`). In effect, it ties a turn to the credentials of the client that started it.
 
 ### 10.2 Threat model: an AHP endpoint is a shell
 
@@ -1103,9 +1101,9 @@ Anyone who can connect to an AHP host can at least:
 - Create sessions, instruct the agent, and approve its tool calls
 - (Draft) connect into the host's network with a TCP channel
 
-In other words, an unauthenticated AHP endpoint is no different from an unauthenticated SSH server. The README of hydra-ahp, one AHP host, puts this frankly. Its tokens come in levels, but "Every token can drive sessions, which means prompting agents and answering their permission requests, so any token can get a command run as you." The levels only limit what a client can do directly, without going through an agent.
+An unauthenticated AHP endpoint is therefore no different from an unauthenticated SSH server. The README of hydra-ahp, one AHP host, puts this frankly. Its tokens come in levels, but "Every token can drive sessions, which means prompting agents and answering their permission requests, so any token can get a command run as you." The levels only limit what a client can do directly, without going through an agent.
 
-This points to what you should do in operation:
+In operation, this means:
 
 - <strong>Always authenticate connections.</strong> Listen on localhost or a domain socket, and if you expose the host, use an authenticated tunnel or TLS (`wss://`)
 - <strong>Treat connection tokens as secrets.</strong> The hydra-ahp README warns that VS Code stores remote hosts' connection tokens in plain text in `settings.json`, so you should exclude `chat.remoteAgentHosts` and `chat.workspaceRemoteAgentHosts` from Settings Sync and keep tokens out of a workspace's `.vscode/settings.json`
@@ -1124,7 +1122,7 @@ Agent sessions get big: long conversations, huge tool outputs, images, endless b
 
 Large content is not put directly into the state tree but referenced (`ContentRef`). A response part of `kind: 'contentRef'` carries only a URI, an approximate size (`sizeHint`), a content type (`contentType`), and a value that changes when the content changes (`nonce`); the client fetches the content with `resourceRead` when it needs it. Tool-call arguments can also be references, at the host's discretion. This keeps state small and easy to serialize.
 
-There are also the two options from section 3.2. With `view.turns`, a client receives only the most recent turns and loads the rest with `fetchTurns` when needed. With `delivery.maxLatencyMs`, the host may batch small `chat/delta` actions. Both are in v1.0.0.
+The two options from section 3.2 also help. With `view.turns`, a client receives only the most recent turns and loads the rest with `fetchTurns` when needed. With `delivery.maxLatencyMs`, the host may batch small `chat/delta` actions. Both are in v1.0.0.
 
 ### 11.2 Windowed delivery (draft)
 
@@ -1138,9 +1136,9 @@ After v1.0.0, `main` gained windowed delivery (stability 1.0, early development)
 
 Controlling flow per subscription resembles HTTP/2 flow control (`WINDOW_UPDATE`). But HTTP/2 also has a connection-wide window. AHP's credit exists only per subscription; for the connection as a whole, the spec only requires the host to share it fairly among subscriptions and to bound its outgoing queue. Also, HTTP/2's `WINDOW_UPDATE` sends an increment to the window, whereas AHP's `channel/credit` sends the running total consumed; and HTTP/2 counts octets of DATA frames, whereas AHP counts the JSON text in UTF-16 bytes.
 
-The handling of reconnection shows the character of this mechanism well. Windowed subscriptions are not included in the `actions` or `snapshots` of a `reconnect` result. Instead, the client puts each subscription's own `lastAppliedServerSeq` (the last `serverSeq` applied on that channel) in the `windows` of its `reconnect` (and the channel MUST also be in `subscriptions`), and the host chooses per subscription whether to send a new snapshot, replay from where it left off, or send only data created after reconnection.
+Reconnection works differently for windowed subscriptions. They are not included in the `actions` or `snapshots` of a `reconnect` result. Instead, the client puts each subscription's own `lastAppliedServerSeq` (the last `serverSeq` applied on that channel) in the `windows` of its `reconnect` (and the channel MUST also be in `subscriptions`), and the host chooses per subscription whether to send a new snapshot, replay from where it left off, or send only data created after reconnection.
 
-Why is the connection-wide `lastSeenServerSeq` not enough? The spec does not say, but the following reasoning makes sense. As long as the host sends all actions over one connection in `serverSeq` order, you can assume that every action numbered below the last one you saw — on any channel — has already been received. The data of a subscription throttled by its window, however, can arrive later than the others'. You might have received up to 500 on chat X while throttled terminal T is stuck at 300. Resuming from 500 would then lose T's 301 through 499. So a subscription that can lag needs its own resume position.
+The spec does not say why the connection-wide `lastSeenServerSeq` is not enough, but I think the reason is this. As long as the host sends all actions over one connection in `serverSeq` order, you can assume that every action numbered below the last one you saw — on any channel — has already been received. The data of a subscription throttled by its window, however, can arrive later than the others'. You might have received up to 500 on chat X while throttled terminal T is stuck at 300. Resuming from 500 would then lose T's 301 through 499. So a subscription that can lag needs its own resume position.
 
 The same problem can arise with v1.0.0's `delivery.maxLatencyMs`. Nothing forbids the host from sending a newer-numbered action on one subscription while it is holding back updates on another. v1.0.0 does not say what a replay from `lastSeenServerSeq` should do in that case. If you implement a host, either do not send newer-numbered actions on a connection ahead of updates you are still holding, or make sure updates you have not yet sent are always included in the replay on reconnect. The former is simpler, but it makes even a subscription that asked for `maxLatencyMs: 0` wait on another subscription's batch.
 
@@ -1148,13 +1146,13 @@ The same problem can arise with v1.0.0's `delivery.maxLatencyMs`. Nothing forbid
 
 A host can stream OpenTelemetry logs, traces, and metrics on `ahp-otlp:` channels. The payloads are OTLP/JSON `Export*ServiceRequest` objects verbatim; AHP only adds the routing wrapper. The channel URIs are announced in `telemetry` in the `initialize` response, and for logs a URI template with `{level}` lets you choose a minimum severity. The spec also suggests conventions for correlating telemetry with sessions, turns, and tool calls, using attributes such as `ahp.session.id`, `ahp.turn.id`, and `ahp.tool_call.id`. Telemetry consists of notifications, so it is not replayed on reconnect.
 
-v1.0.0 does not make clear what happens to telemetry subscriptions after a reconnect. The subscriptions and telemetry chapters say "clients re-subscribe and resume from the live edge", while the lifecycle chapter says "Stateless channels are simply re-subscribed". Either reading is possible: listing the channel in `reconnect`'s `subscriptions` may be enough, or a new `subscribe` may be needed. The draft rewrote this so that a telemetry subscription resumed by the reconnect receives only batches emitted after reconnection. VS Code's host also rebuilds telemetry subscriptions from `reconnect`'s `subscriptions`. If you cannot confirm that another host keeps the subscription, you can send `subscribe` again after reconnecting (the draft defines `subscribe` on an already-subscribed channel as a change to the existing subscription that loses no data). Note also that the TypeScript `AhpClient` does not pass `otlp/export*` notifications to the app (section 14.2).
+v1.0.0 does not make clear what happens to telemetry subscriptions after a reconnect. The subscriptions and telemetry chapters say "clients re-subscribe and resume from the live edge", while the lifecycle chapter says "Stateless channels are simply re-subscribed". Either reading is possible: listing the channel in `reconnect`'s `subscriptions` may be enough, or a new `subscribe` may be needed. The draft rewrote this so that a telemetry subscription resumed by the reconnect receives only batches emitted after reconnection. VS Code's host also rebuilds telemetry subscriptions from `reconnect`'s `subscriptions`. If you cannot confirm that another host keeps the subscription, you can send `subscribe` again after reconnecting (the draft defines `subscribe` on an already-subscribed channel as a change to the existing subscription that loses no data). The TypeScript `AhpClient` also does not pass `otlp/export*` notifications to the app (section 14.2).
 
 ## 12. Versioning and Extensibility
 
 ### 12.1 The compatibility promise
 
-The spec's Versioning chapter states up front how it differs from LSP and DAP: those effectively guarantee backward compatibility forever, but the design space for agent hosts is still open and moving quickly, so backward-incompatible changes to AHP are inevitable. With that said, it defines compatibility as follows:
+The spec's Versioning chapter states up front how it differs from LSP and DAP: those effectively guarantee backward compatibility forever, but the design space for agent hosts is still open and moving quickly, so backward-incompatible changes to AHP are inevitable. It then defines compatibility as follows:
 
 - Versions are SemVer `MAJOR.MINOR.PATCH`, without prerelease or build metadata
 - The same `MAJOR` at 1 or above means compatible. While at 0.x, the same `MINOR` means compatible
@@ -1179,13 +1177,13 @@ The draft (`main`) adds the TCP channel at 1.0, and stability can now also be ma
 
 ### 12.3 Where extensions go
 
-There are also designated places for adding things outside the standard:
+AHP also designates places for extensions outside the standard:
 
 - <strong>The `x-` prefix.</strong> Channel URI schemes, commands, notifications, and action types starting with `x-` are reserved for implementation-defined extensions. No standard AHP name will start with `x-`. Using them requires prior agreement with the peer
 - <strong>`_meta`.</strong> Many types — messages, model info, usage, actions, and more — have an optional metadata field, `_meta`. It follows MCP's `_meta` convention, and unknown keys must be ignored. `_meta` in the `initialize` response can advertise host-specific capabilities
 - <strong>Promotion.</strong> The doctrine says that a feature that becomes necessary for interoperability should graduate from an escape hatch such as `_meta` into typed state or capability-gated behavior
 
-There is a real example. pi-ahp has its own request for registering a webhook, `x-qusic/ahp-webhook/set`, and advertises support by putting `"me.qusic.ahp-webhook": 1` in the `_meta` of its `initialize` response. It stores one URL and body per client (`clientId`), and an iPhone client uses it to send push notifications. Adding a feature under an `x-` name and advertising it through `_meta` is exactly the usage the spec anticipates.
+pi-ahp, for example, has its own request for registering a webhook, `x-qusic/ahp-webhook/set`, and advertises support by putting `"me.qusic.ahp-webhook": 1` in the `_meta` of its `initialize` response. It stores one URL and body per client (`clientId`), and an iPhone client uses it to send push notifications. Adding a feature under an `x-` name and advertising it through `_meta` is the usage the spec anticipates.
 
 Behavior on encountering unknowns is consistent too: ignore unknown actions (the reducer only logs), ignore unknown `_meta` keys, and do not subscribe to channels with unknown URI schemes. The draft (`main`) adds a rule that a snapshot whose state has an unrecognized shape is ignored rather than treated as an error.
 
@@ -1193,7 +1191,7 @@ Behavior on encountering unknowns is consistent too: ignore unknown actions (the
 
 ### 13.1 Comparison table
 
-There are many protocols around agents. AHP takes on a different layer rather than competing with them.
+Many protocols deal with agents. AHP covers a different layer rather than competing with them.
 
 | | AHP | ACP | MCP | AG-UI | A2A |
 |---|---|---|---|---|---|
@@ -1213,7 +1211,7 @@ The official guide positions the two as "AHP is a coordination layer. ACP is a c
 5. The host's event-mapping layer translates them into AHP actions such as `chat/delta`, `chat/toolCallStart`, and `chat/toolCallReady`
 6. The translated actions get `serverSeq` numbers and reach everyone through the normal synchronization path
 
-Cancellation maps from `chat/turnCancelled` to ACP's `session/cancel`, and permission requests map to the `pending-confirmation` state. ACP's permission requests come with choices such as "allow once" or "always reject" (`allow_once`, `reject_always`, and so on), which map directly onto AHP's confirmation options (`options`). The guide's comparison table says reconnection and replay are "not specified at the protocol level" in ACP, and that is exactly what AHP adds. Indeed, the README of AHP-ACP Gateway, which exposes ACP agents over AHP, says it provides the persistent session state, reconnect and replay, and ACP subprocess lifecycle that ACP agents do not provide on their own.
+Cancellation maps from `chat/turnCancelled` to ACP's `session/cancel`, and permission requests map to the `pending-confirmation` state. ACP's permission requests come with choices such as "allow once" or "always reject" (`allow_once`, `reject_always`, and so on), which map directly onto AHP's confirmation options (`options`). The guide's comparison table says reconnection and replay are "not specified at the protocol level" in ACP, and that is what AHP adds. The README of AHP-ACP Gateway, which exposes ACP agents over AHP, says it provides the persistent session state, reconnect and replay, and ACP subprocess lifecycle that ACP agents do not provide on their own.
 
 ### 13.3 MCP: embedded in sessions
 
@@ -1241,12 +1239,12 @@ The reference implementation lives inside VS Code. According to the [Agent Host 
 
 - <strong>Remote.</strong> The Agents window can connect to hosts on the same machine or over SSH, dev tunnels, or WSL. Through a dev tunnel, the browser-based Agents window can also be a client. With the preview GitHub Environments feature, you register a machine with your GitHub account and can open its sessions from VS Code, the GitHub Copilot app, Copilot CLI, github.com, or GitHub Mobile (supported sessions and actions differ by client)
 - <strong>Sessions that do not use the Agent Host.</strong> Sessions created with the Local harness, and sessions created before the Agent Host existed, still run in the window's extension host. Closing the window stops them, and they cannot be continued from other surfaces
-- <strong>Extension tools.</strong> Tools contributed by extensions are available only in chats in a window where the extension is running — exactly the client-tool mechanism of chapter 8
+- <strong>Extension tools.</strong> Tools contributed by extensions are available only in chats in a window where the extension is running. This is the client-tool mechanism of chapter 8
 - <strong>How the protocol is vendored.</strong> VS Code auto-generates AHP's types into `src/vs/platform/agentHost/common/state/protocol/` and records the vendored commit in `.ahp-version`. At the time of writing it is `d7a5579b`, a `main` commit newer than v1.0.0
 
 ### 14.2 SDKs
 
-There are official SDKs in six languages.
+AHP has official SDKs in six languages.
 
 | Language | Package | Notes |
 |---|---|---|
@@ -1261,7 +1259,7 @@ There is also a `MultiHostClient` for talking to several hosts at once (`/hosts`
 
 The SDKs, however, stop at the protocol and client layer. The Swift README states explicitly that app-specific policy such as server selection, authentication, reconnect UX, durable session caches, and optimistic outbound action replay belongs in the app. You write the chapter 4 store and the chapter 6 resend policy yourself.
 
-We have also seen several SDK caveats along the way. In summary (all checked at the commit I read and in npm 1.0.0):
+Several SDK caveats have come up along the way. All of them were checked at the commit I read and in npm 1.0.0:
 
 - <strong>Convenience mirrors.</strong> The two TypeScript convenience mirrors (`AhpStateMirror` and `MultiHostStateMirror`) do not handle chat channels. The convenience mirrors in every language apply envelopes without checking `rejectionReason` (section 4.3; the only places in the SDKs that reference `rejectionReason` are the generated type definitions and tests)
 - <strong>Event buffers.</strong> The TypeScript `AhpClient` buffers up to 4096 events per subscription, and the stream that `MultiHostClient` merges up to 1024; when a slow reader overflows them, the oldest events are dropped (section 3.3)
@@ -1288,7 +1286,7 @@ The AHP-ACP Gateway README shows concretely what a host adds when exposing ACP a
 
 ## 15. Implementation Checklist
 
-Here is the material so far, condensed into items to check when implementing.
+These lists collect what the earlier chapters say to check when implementing.
 
 ### 15.1 Clients
 
@@ -1337,7 +1335,7 @@ Here is the material so far, condensed into items to check when implementing.
 
 <strong>It separates proposals from facts.</strong> A client's operation is a proposal until it is echoed and a fact once it is. That distinction lets optimistic display and host-decided ordering coexist without strain. Because the reducers are shared, the local prediction and the host's result agree as long as nothing conflicts.
 
-<strong>It comes with tools for interoperability.</strong> Canonical type definitions, SDKs in six languages, and language-independent fixtures. If you write a client in another language, pass the fixtures first.
+<strong>It comes with tools for interoperability.</strong> AHP has canonical type definitions, SDKs in six languages, and language-independent fixtures. If you write a client in another language, get it passing the fixtures first.
 
 <strong>It contains agent differences inside the host.</strong> VS Code can handle Copilot, Claude, and Codex in the same UI because what the UI needs is defined as AHP state and each harness's differences stay inside its adapter. Even a host that implements only some features, like pi-ahp, is usable from existing clients.
 
@@ -1347,7 +1345,7 @@ Here is the material so far, condensed into items to check when implementing.
 
 <strong>The resend policy is described differently in different documents.</strong> As chapter 6 showed, the guide says to drop pending operations and the SDK README says the app resends them. It is not a contradiction at the protocol level, but implementers have to decide for themselves which to treat as the default.
 
-<strong>Other inconsistencies remain, between documents and between documents and implementations.</strong> Here are the ones mentioned in the text.
+<strong>Other inconsistencies remain, between documents and between documents and implementations.</strong> The table collects the ones mentioned earlier.
 
 | Topic | One source says | Another source says | What to do |
 |---|---|---|---|
@@ -1361,19 +1359,19 @@ Here is the material so far, condensed into items to check when implementing.
 
 When in doubt, prefer the type definitions and the spec's normative statements (MUST and SHOULD), and check behavior against the official reducers and fixtures.
 
-<strong>There are gaps between the SDKs and the spec.</strong> Convenience mirrors that do not check `rejectionReason`, TypeScript mirrors that do not handle chats, a multi-host runtime that does not pass session and chat snapshots to the app and keeps sending an old number across host restarts, and an outdated README example (section 14.2). The SDKs are convenient, but using them as confirmed state without reading the spec means accepting rejected operations as facts.
+<strong>There are gaps between the SDKs and the spec.</strong> They include convenience mirrors that do not check `rejectionReason`, TypeScript mirrors that do not handle chats, a multi-host runtime that does not pass session and chat snapshots to the app and keeps sending an old number across host restarts, and an outdated README example (section 14.2). The SDKs are convenient, but using them as confirmed state without reading the spec means accepting rejected operations as facts.
 
 <strong>`serverSeq` is a single sequence for the whole host.</strong> As section 3.3 showed, a client sends just one number when reconnecting, and VS Code's host also numbers actions with a single counter in its state manager. This gives a simple, strong guarantee, but scaling a host out across machines requires either a mechanism that issues one global sequence or a layer that renumbers per connection. The fact that windowed delivery gives each subscription its own resume position (`lastAppliedServerSeq`) can also be read as a sign that a single resume position for the whole connection is no longer enough in some situations.
 
 <strong>The core model assumes a chat.</strong> Its building blocks — turns, response parts, tool calls — are modeled on an exchange between a person and an agent. The author of Jido, an Elixir actor and agent SDK, wrote in a Hacker News post that AHP was close to what he needed "but was centered around 'chat'", and built a different protocol. AHP itself is trying to extend beyond chat by adding channels such as terminals, automations, and canvases.
 
-<strong>It changes quickly.</strong> Eleven releases in a little over four months, with `main` already on the next development version and VS Code tracking `main`. A client of your own is safest if it offers a wide `SUPPORTED_PROTOCOL_VERSIONS`, decides features by capabilities, and minimizes its dependence on less stable channels.
+<strong>It changes quickly.</strong> There have been eleven releases in a little over four months, `main` is already on the next development version, and VS Code tracks `main`. A client of your own is safest if it offers a wide `SUPPORTED_PROTOCOL_VERSIONS`, decides features by capabilities, and minimizes its dependence on less stable channels.
 
 <strong>It leaves most of security to implementations.</strong> Authenticating the connection is outside the spec, and the endpoint is as powerful as a shell. That is unavoidable for a spec that does not fix a transport, but it puts a heavy responsibility on host authors.
 
 ## Conclusion
 
-To sum AHP up in one phrase: it is <strong>a protocol for treating an agent session as replicated state whose order the host decides</strong>.
+AHP is <strong>a protocol for treating an agent session as replicated state whose order the host decides</strong>.
 
 The host holds the authoritative copy, numbers every change, and distributes it. Clients build replicas with the same reducers, apply their own operations ahead of time, and confirm them by echo. Reducers decide only how state changes; the host decides what to accept. Waiting for human decisions and using tools only a client has are both expressed as this shared state. Each of these is a long-known technique in distributed systems; AHP's value lies in reassembling them for agent sessions — things that run for a long time, wait for people, and are opened from anywhere.
 

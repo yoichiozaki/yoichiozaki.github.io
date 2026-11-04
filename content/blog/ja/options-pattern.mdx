@@ -1,13 +1,13 @@
 ---
-title: "Options Pattern 完全解説 — 無名関数でコンフィグを組み立てるデザインパターンの全貌"
+title: "Options Pattern 解説 — 無名関数で設定を組み立てるデザインパターン"
 date: "2026-04-03"
-description: "ASP.NET Core や Go で広く使われる Options Pattern を、動機・内部実装・多言語での実装例・他パターンとの比較まで徹底解説する。"
+description: "ASP.NET Core や Go で広く使われる Options Pattern を、解決する問題、ASP.NET Core の内部実装、Go・C#・TypeScript・Rust・Python での実装例、Builder Pattern などとの使い分けから解説する。"
 tags: ["Design Patterns", "C#", "Go", "TypeScript", "Software Architecture"]
 ---
 
 ## はじめに
 
-ライブラリーやフレームワークのコードを読んでいると、「コンストラクターに無名関数を渡して設定する」というパターンに繰り返し出会う。言語は違えど、その発想は同じだ。ASP.NET Core のコードを読んでいると、こんな書き方に頻繁に出会う。
+ライブラリーやフレームワークの API では、設定を無名関数で渡す書き方をよく見かける。ASP.NET Core ではこう書く。
 
 ```csharp
 builder.Services.AddAuthentication(options =>
@@ -17,7 +17,7 @@ builder.Services.AddAuthentication(options =>
 });
 ```
 
-あるいは Go のコードではこう。
+Go ではこう書く。
 
 ```go
 server := NewServer(
@@ -27,25 +27,15 @@ server := NewServer(
 )
 ```
 
-これらはどちらも **Options Pattern**（オプションパターン）と呼ばれるデザインパターンの実装だ。「無名関数（ラムダ / クロージャ）を使ってオブジェクトの設定を組み立てる」という共通の考え方に基づいている。
+どちらも **Options Pattern**（オプションパターン）と呼ばれるデザインパターンの実装で、無名関数（ラムダ / クロージャ）を使ってオブジェクトの設定を組み立てる。設定を値ではなく関数として渡すので、デフォルト値を保ったまま必要な項目だけを上書きでき、設定項目を増やしても既存の呼び出しは変わらない。
 
-この記事では Options Pattern を以下の観点で徹底解説する。
-
-1. **どんな問題を解決するか** — Telescoping Constructor の地獄
-2. **パターンの本質** — 関数を設定単位として渡す
-3. **C# / ASP.NET Core での実装** — `IOptions<T>` と DI の裏側
-4. **Go での実装** — Functional Options パターン
-5. **TypeScript での実装** — Builder との融合
-6. **他パターンとの比較** — Builder・Fluent API・Configuration Object
-7. **いつ使うべきか** — 適用の判断基準
+この記事では、まずこのパターンが解決する問題と基本の考え方を説明し、Go の Functional Options、ASP.NET Core の `IOptions<T>` と DI の内部動作、TypeScript・Rust・Python での実装を順に示す。最後に Builder Pattern や Config 構造体と比べ、どの場面で使うかを整理する。
 
 ## 問題: Telescoping Constructor
 
-Options Pattern がなぜ必要なのかを理解するには、このパターンが解決しようとする問題を先に見る必要がある。
-
 ### コンストラクター引数の爆発
 
-HTTP サーバーを作るケースを考えよう。最初は引数が少ない。
+HTTP サーバーを作る関数を考える。最初は引数が少ない。
 
 ```go
 func NewServer(port int) *Server {
@@ -53,7 +43,7 @@ func NewServer(port int) *Server {
 }
 ```
 
-しかし機能が増えるにつれて、引数が増殖する。
+機能が増えるにつれて、引数も増えていく。
 
 ```go
 func NewServer(
@@ -72,11 +62,11 @@ func NewServer(
 }
 ```
 
-これが **Telescoping Constructor**（望遠鏡コンストラクター）問題だ。引数が 10 個を超えると、呼び出し側は引数の順番を間違えやすくなり、ほとんどの引数にはデフォルト値を使いたいのに省略できない。
+Java などでは、引数を 1 つずつ増やしたコンストラクターのオーバーロードを並べてこれに対処し、その形は **Telescoping Constructor**（望遠鏡型コンストラクター）と呼ばれる。オーバーロードのない Go では、1 つの関数の引数がこのように増えていく。どちらの場合も、引数がこれだけ多いと呼び出し側は順番を間違えやすい。また、ほとんどの引数にはデフォルト値を使いたいのに、Go の関数では省略できない。
 
 ### 「全部入り Config 構造体」の限界
 
-よくある対策は「Config 構造体を 1 つ渡す」方法だ。
+よくある対策は、Config 構造体を 1 つ渡す方法だ。
 
 ```go
 type ServerConfig struct {
@@ -91,20 +81,16 @@ type ServerConfig struct {
 func NewServer(cfg ServerConfig) *Server { ... }
 ```
 
-これは見た目はきれいだが問題がある。
+呼び出しは短くなるが、次の問題が残る。
 
 - **デフォルト値の表現が難しい**: `Port: 0` は「ポート 0 を使いたい」のか「デフォルトを使いたい」のか区別できない（ゼロ値問題）
 - **必須と任意が区別できない**: すべてのフィールドが同じレベルに見える
 - **拡張時の破壊的変更**: 新しいフィールドを追加すると、既存のコンストラクター呼び出しに影響する可能性がある
 - **組み合わせの制御が難しい**: 「A を設定したなら B の設定は不要」といった制約を表現しにくい
 
-## Options Pattern の本質
+## 設定を関数として渡す
 
-Options Pattern の核心は驚くほどシンプルだ。
-
-> **設定を「値」ではなく「関数」として渡す。**
-
-つまり、「Port は 8080」という**値**を渡すのではなく、「Port を 8080 に設定する**操作**」を渡す。
+Options Pattern では、設定を値ではなく関数として渡す。「Port は 8080」という値の代わりに、「Port を 8080 に設定する操作」を渡す。コンストラクターはデフォルト値で初期化してから、受け取った操作を順に適用する。
 
 ```mermaid
 graph LR
@@ -114,23 +100,23 @@ graph LR
     B -->|"3. 完成した設定で構築"| D["最終オブジェクト"]
 ```
 
-このアプローチにはいくつかの重要な利点がある。
+設定を関数として渡すと、次の性質が得られる。
 
 | 利点 | 説明 |
 |-----|------|
-| **デフォルト値が安全** | Option 関数が呼ばれなければデフォルト値がそのまま使われる |
-| **順序非依存** | Option 関数はどの順番で渡しても良い（後勝ちで上書き可能） |
-| **拡張に開放** | 新しい Option 関数を追加しても既存コードに影響しない（Open-Closed Principle） |
-| **型安全** | 各 Option 関数が正しい型のフィールドだけを操作する |
-| **組み合わせ可能** | Option 関数をスライスにまとめて「プリセット」を作れる |
+| デフォルト値が安全 | Option 関数が呼ばれなければデフォルト値がそのまま使われる |
+| 順序の自由 | 別々の項目を設定する Option はどの順番で渡してもよい。同じ項目を設定する Option は後に渡したものが勝つ |
+| 拡張に開放 | 新しい Option 関数を追加しても既存コードに影響しない（Open-Closed Principle） |
+| 型安全 | 各 Option 関数が正しい型のフィールドだけを操作する |
+| 組み合わせ可能 | Option 関数をスライスにまとめて「プリセット」を作れる |
 
 ## Go での実装 — Functional Options
 
-ここからは各言語での具体的な実装を見ていく。まず Go から始めるのは、Go コミュニティーでこのパターンが最も体系的に提唱され、広く普及したからだ。Go コミュニティーでは、[Rob Pike](https://commandcenter.blogspot.com/2014/01/self-referential-functions-and-design.html) と [Dave Cheney](https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis) が提唱したこのパターンが **Functional Options** として広く知られている。Go にはコンストラクターのオーバーロードもデフォルト引数もないため、Functional Options が事実上の標準的な設定パターンになった。
+まず Go を取り上げる。このパターンを最も体系的に提唱し、広めたのが Go コミュニティーだからだ。[Rob Pike](https://commandcenter.blogspot.com/2014/01/self-referential-functions-and-design.html) と [Dave Cheney](https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis) が提唱したこの書き方は、Go では **Functional Options** の名前で知られている。Go にはコンストラクターのオーバーロードもデフォルト引数もないため、Functional Options が事実上の標準的な設定パターンになった。
 
 ### 基本実装
 
-まずはパターンの全体像を見てみよう。以下のコードには 3 つの構成要素がある。**(1)** 設定を保持する `Server` 構造体、**(2)** 設定を変更する関数型 `Option`、**(3)** デフォルト値で初期化してから Option を順に適用するコンストラクター `NewServer`。この 3 つが Functional Options のすべてだ。
+Functional Options は 3 つの要素でできている。設定を保持する `Server` 構造体、その設定を変更する関数型 `Option`、デフォルト値で初期化してから Option を順に適用するコンストラクター `NewServer` だ。
 
 ```go
 package server
@@ -209,7 +195,7 @@ func NewServer(opts ...Option) *Server {
 
 ### 使い方
 
-上の実装を使ってみよう。引数を一切渡さなければデフォルト値で動き、必要なものだけ指定すればその部分だけが上書きされる。さらに Option をスライスにまとめれば「本番環境用プリセット」のような再利用可能な設定セットも作れる。
+引数を渡さなければデフォルト値で動き、指定した項目だけが上書きされる。Option をスライスにまとめれば、本番環境用のプリセットのように再利用できる設定のセットも作れる。
 
 ```go
 // デフォルト設定
@@ -234,7 +220,7 @@ s3 := server.NewServer(ProductionDefaults...)
 
 ### 内部で何が起きているか
 
-`NewServer` の実行を 1 ステップずつ追ってみよう。
+`NewServer(WithPort(9090), WithTimeout(60s))` を呼んだときの処理は次のように進む。
 
 ```mermaid
 sequenceDiagram
@@ -259,11 +245,11 @@ sequenceDiagram
     New-->>Caller: 完成した *Server を返す
 ```
 
-ポイントは **クロージャ**（closure）だ。`WithPort(9090)` が返すのは「引数 9090 を**キャプチャ**した関数」であり、その関数が後から `Server` に対して適用される。これが Options Pattern の技術的な核心だ。
+この流れを支えるのはクロージャ（closure）だ。`WithPort(9090)` は引数 9090 をキャプチャした関数を返し、`NewServer` がその関数を後から `Server` に適用する。
 
 ### バリデーション付きの実装
 
-実際のプロダクションコードでは、バリデーションを加えたい。ポート番号が範囲外とか、タイムアウトが負の値とか、そういった無効な設定を早期に検出したい。Go では `Option` がエラーを返すバージョンが推奨される。エラーが返された時点で `NewServer` が即座に失敗するので、不正な設定でサーバーが起動してしまう事態を防げる。
+プロダクションコードでは、範囲外のポート番号や負のタイムアウトといった無効な設定を早く検出したい。Go では、`Option` がエラーを返す形が推奨される。`NewServer` はエラーを受け取った時点で失敗するので、不正な設定のままサーバーが起動することはない。
 
 ```go
 // Option はエラーを返せるバージョン
@@ -299,7 +285,7 @@ func NewServer(opts ...Option) (*Server, error) {
 
 ### 実世界での使用例
 
-Functional Options は Go エコシステムで非常に広く使われている。
+Go の主要なライブラリーでも Functional Options が広く使われている。
 
 | ライブラリー | 使用箇所 |
 |-----------|---------|
@@ -311,7 +297,7 @@ Functional Options は Go エコシステムで非常に広く使われている
 
 ## C# / ASP.NET Core での実装
 
-ASP.NET Core の Options Pattern は、Go の Functional Options と**同じ原理**を DI（Dependency Injection）コンテナーの上に構築したものだ。Go ではコンストラクターの引数として Option を渡すが、ASP.NET Core では DI コンテナーに登録した「設定関数」をコンテナーが内部で適用する。つまり、Option の適用タイミングが「コンストラクター呼び出し時」から「依存性解決時」に遅延されている。この遅延が「複数箇所からの段階的な設定」を可能にする鍵だ。
+ASP.NET Core の Options Pattern は、Go の Functional Options と同じ原理を DI（Dependency Injection）コンテナーの上に構築したものだ。Go では Option をコンストラクターの引数として渡すが、ASP.NET Core では DI コンテナーに登録した設定関数をコンテナーが内部で適用する。適用が依存関係の解決時まで遅れるので、複数の箇所で登録した設定関数を段階的に重ねられる。
 
 ### 基本パターン: `Action<TOptions>`
 
@@ -335,11 +321,11 @@ builder.Services.Configure<SmtpOptions>(options =>
 });
 ```
 
-Go の `func(*Server)` と C# の `Action<SmtpOptions>` は言語機能としては別物だが、この文脈では<strong>同じ設計意図</strong>を持つ。どちらも「Options オブジェクトを受け取り、そのフィールドを変更する関数」として設定処理を合成している。
+Go の `func(*Server)` と C# の `Action<SmtpOptions>` は言語機能としては別物だが、どちらも Options オブジェクトを受け取ってそのフィールドを変更する関数で、設計意図は同じだ。
 
 ### `IOptions<T>` インターフェース群
 
-ASP.NET Core が 3 つの Options インターフェースを提供しているのには理由がある。起動時に一度だけ読み込む設定、リクエストごとに最新値を取得したい設定、`appsettings.json` の変更をリアルタイムに反映したい設定 — それぞれユースケースが異なる。
+ASP.NET Core には Options を受け取るインターフェースが 3 つあり、設定値を作り直すタイミングが異なる。起動後に変わらない設定、リクエストごとに最新値を取得したい設定、`appsettings.json` の変更を実行中に反映したい設定で使い分ける。
 
 | インターフェース | ライフタイム | リロード | 用途 |
 |---------------|-----------|---------|------|
@@ -349,7 +335,7 @@ ASP.NET Core が 3 つの Options インターフェースを提供している�
 
 ### DI 内部での動作
 
-`Configure<T>()` を呼ぶと、内部では何が起きているのか。
+`Configure<T>()` は設定関数を DI コンテナーに登録するだけで、関数を実行するのは、Options が要求されたときの `OptionsFactory` だ。
 
 ```mermaid
 sequenceDiagram
@@ -367,14 +353,14 @@ sequenceDiagram
     Consumer->>DI: IOptionsを要求
     DI->>Factory: Create()
     Factory->>Factory: new SmtpOptions()
-    Factory->>Cfg: Configure(options)を全て実行
+    Factory->>Cfg: Configure(options)をすべて実行
     Note over Factory: action1(options), action2(options), ...
     Factory->>Factory: PostConfigure(options)を実行
     Factory->>Factory: Validate(options)を実行
     Factory-->>Consumer: 完成した SmtpOptions
 ```
 
-重要なポイントは、`Configure()` を **複数回呼べる** ことだ。
+`Configure()` は同じ型に対して何度でも呼べる。
 
 ```csharp
 // 基本設定
@@ -395,11 +381,11 @@ builder.Services.Configure<SmtpOptions>(
     builder.Configuration.GetSection("Smtp"));
 ```
 
-これらは**すべて順番に実行される**。最後に書いたものが勝つ。これは Go の `for _, opt := range opts { opt(s) }` とまったく同じメカニズムだ。
+登録した設定はすべて登録順に実行され、同じプロパティーには最後に書いたものが残る。Go の `for _, opt := range opts { opt(s) }` と同じ仕組みだ。
 
 ### 拡張メソッドパターン
 
-ASP.NET Core でよく見る `AddXxx(options => ...)` パターンの内部実装を見てみよう。このパターンはライブラリー作者が提供する「セットアップの窓口」だ。利用者は内部の登録詳細（Options インフラ、バリデーション、サービス登録）を知らなくても、`Action<SmtpOptions>` を渡すだけで正しく設定できる。
+ASP.NET Core でよく見る `AddXxx(options => ...)` は、ライブラリー作者が用意する設定の入口だ。利用者は `Action<SmtpOptions>` を渡すだけで、Options の登録、バリデーション、サービス登録といった内部の詳細を知らなくても正しく設定できる。実装は次のようになる。
 
 ```csharp
 // AddSmtp 拡張メソッドの実装
@@ -431,7 +417,7 @@ builder.Services.AddSmtp(options =>
 });
 ```
 
-この `AddSmtp` メソッドの中で何が起きているかを分解すると、以下の 3 つの関心事が分離されている。
+`AddSmtp` では、次の 3 つを別々の場所で定義している。
 
 1. **デフォルト値** → `SmtpOptions` クラスのプロパティー初期化子
 2. **ユーザー設定** → `Action<SmtpOptions>` で受け取った無名関数
@@ -439,7 +425,7 @@ builder.Services.AddSmtp(options =>
 
 ### PostConfigure と Validate
 
-ASP.NET Core は設定のライフサイクルを 3 段階に分けている。なぜ 3 段階なのか？それは、「値の設定」「値の調整」「値の検証」を分離することで、各段階の責務が明確になるからだ。`Configure` で基本値を設定し、`PostConfigure` で「他の値との整合性調整」（例: SSL が有効なのにポートがデフォルトなら自動で 465 に変更）を行い、最後に `Validate` で最終的な値が正しいか検証する。
+ASP.NET Core は設定の処理を 3 段階に分け、値の設定・調整・検証の責務を分離している。`Configure` で基本値を設定し、すべての `Configure` の後に実行される `PostConfigure` で、ほかの値との整合性を調整する（例: SSL が有効なのにポートがデフォルトのままなら 465 に変更する）。最後に `Validate` で最終的な値を検証する。
 
 ```csharp
 builder.Services.AddOptions<SmtpOptions>()
@@ -476,7 +462,7 @@ graph LR
 
 ### Named Options
 
-同じ型の設定を複数のインスタンスで使い分けたい場合がある。
+同じ型の設定を名前で区別して、複数持たせることもできる。
 
 ```csharp
 // "Primary" と "Backup" の 2 つの SMTP 設定
@@ -545,15 +531,15 @@ public TOptions Create(string name)
 }
 ```
 
-これは Go の `NewServer` における `for _, opt := range opts { opt(s) }` ループの**精巧版**だ。Configure → PostConfigure → Validate の 3 フェーズに分離されているのが ASP.NET Core ならではの工夫である。
+処理の骨格は Go の `NewServer` にある `for _, opt := range opts { opt(s) }` ループと同じだ。ASP.NET Core はこれを Configure → PostConfigure → Validate の 3 段階に分け、名前付きの設定にも対応させている。
 
 ## TypeScript での実装
 
-TypeScript では Options Pattern を複数の方法で実装できる。言語の型システムが豊富なため、Go スタイルの Functional Options も、ASP.NET Core スタイルのコールバックも、そして TypeScript 特有の `Partial<T>` マージも自然に書ける。それぞれのトレードオフを見ていこう。
+TypeScript では、Go スタイルの Functional Options も、ASP.NET Core スタイルのコールバックも書ける。オブジェクトのスプレッド構文と `Partial<T>` を使えば、デフォルト値に部分的な設定をマージする方法も型安全に書ける。
 
 ### 基本: `Partial<T>` パターン
 
-最もシンプルな方法は `Partial<T>` を使うことだ。
+最も単純なのは `Partial<T>` を使う方法だ。
 
 ```typescript
 interface ServerOptions {
@@ -579,11 +565,11 @@ function createServer(overrides?: Partial<ServerOptions>): Server {
 const server = createServer({ port: 9090, timeout: 60_000 });
 ```
 
-しかしこれは Options Pattern とは言えない。設定が**値のマージ**であって**関数の適用**ではないからだ。`Partial<T>` マージはシンプルで直感的だが、バリデーションや「設定値同士の依存関係」（例: SSL 有効ならポートも変える）を表現するのが難しい。そこで、Go スタイルの Functional Options の出番だ。
+ただし、ここでの設定は値のマージで、関数の適用ではないので、Options Pattern とは言えない。`Partial<T>` のマージは単純で分かりやすい反面、バリデーションや設定値同士の依存関係（例: SSL を有効にしたらポートも変える）を表現しにくい。これらを Option 関数の中に書けるのが、次の Functional Options だ。
 
 ### Functional Options
 
-Go スタイルの Functional Options を TypeScript で書くとこうなる。
+Go スタイルの Functional Options を TypeScript で書くと次のようになる。
 
 ```typescript
 interface ServerConfig {
@@ -650,7 +636,7 @@ const prodServer = createServer(...productionDefaults);
 
 ### Callback パターン（ASP.NET Core スタイル）
 
-ASP.NET Core のように「無名関数 1 つで全部設定する」パターンも可能だ。
+ASP.NET Core のように、無名関数 1 つですべてを設定する形も書ける。
 
 ```typescript
 function createServer(configure: (options: ServerConfig) => void): Server {
@@ -675,7 +661,7 @@ const server = createServer((options) => {
 });
 ```
 
-Go の Functional Options と C# の `Action<T>` の**ハイブリッド**も面白い。
+両者を組み合わせ、コールバックで全体を設定してから、Go スタイルの Option で個別に上書きすることもできる。
 
 ```typescript
 function createServer(
@@ -694,11 +680,11 @@ function createServer(
 
 ## Rust での実装
 
-Rust では所有権とライフタイムの制約があるため、Options Pattern の実装が少し異なる。Go では `func(*Server)` を簡単にスライスにまとめられるが、Rust ではクロージャを `Box<dyn FnOnce>` でヒープアロケーションする必要がある。これはパフォーマンスコストが発生するが、「設定のプリセットを `Vec` でまとめる」というユースケースでは有用だ。
+Rust のクロージャはそれぞれ固有の型を持つ。そのため、異なるクロージャを同じ `ServerOption` 型として返したり、配列や `Vec` にまとめたりするには、`Box<dyn FnOnce>` としてヒープに確保する必要がある。Go の `func(*Server)` のようにそのままスライスへ入れることはできず、Option ごとにヒープ確保のコストがかかる。その代わり、設定のプリセットを `Vec<ServerOption>` にまとめられる。
 
-### Builder Pattern との融合
+### `Box<dyn FnOnce>` で Option を表す
 
-Rust コミュニティーでは Builder Pattern が主流だが、Functional Options のエッセンスを取り入れることもできる。
+Rust では Builder Pattern が主流だが、Functional Options も同じ考え方で書ける。`with_host` のようにキャプチャした `String` を設定へ移す Option があるので、ここでは一度だけ呼べる `FnOnce` を使う。
 
 ```rust
 pub struct ServerOptions {
@@ -758,11 +744,11 @@ let server = Server::new([
 ]);
 ```
 
-Rust では `Box<dyn FnOnce>` のアロケーションコストがあるため、大規模に使う場合は従来の Builder Pattern のほうが好まれることが多い。しかし、設定の「プリセット」を `Vec<ServerOption>` としてまとめておきたい場合には有用だ。Rust での実用上のガイドラインとしては、「オプションが少数で静的に決まる場合は Builder、ランタイムでオプションの組み合わせが変わる場合は Functional Options」と言える。
+`Box<dyn FnOnce>` のヒープ確保があるため、Rust で大規模に使う場合は従来の Builder Pattern のほうが好まれることが多い。目安としては、オプションが少数で静的に決まる場合は Builder、実行時にオプションの組み合わせが変わる場合は Functional Options が向いている。
 
 ## Python での実装
 
-Python では可変長キーワード引数 (`**kwargs`) が標準的だが、Options Pattern を明示的に実装することもできる。Python はクロージャをネイティブにサポートしており、ヒープアロケーションなしで関数をファーストクラスオブジェクトとして扱えるため、Go や Rust よりも簡潔に書ける。`@dataclass` と組み合わせれば、デフォルト値の定義も自然だ。
+Python ではキーワード引数（`**kwargs`）で設定を受け取るのが一般的だが、Options Pattern を明示的に実装することもできる。Python の関数はファーストクラスオブジェクトで、クロージャもそのまま返せるので、Rust のように `Box` で包む必要はない。`@dataclass` を使えば、デフォルト値もフィールドの宣言に書ける。
 
 ```python
 from dataclasses import dataclass
@@ -838,21 +824,21 @@ graph TB
 
 | 観点 | Options Pattern | Builder Pattern |
 |------|----------------|-----------------|
-| **構文** | 関数をリストで渡す | メソッドチェーン |
-| **状態管理** | コンストラクターが一元管理 | Builder オブジェクトが中間状態を持つ |
-| **組み合わせ** | 関数のスライス/配列で簡単にプリセット化 | Builder の途中状態を流用するのは難しい |
-| **段階的な設定** | DI コンテナーとの相性が良い（複数箇所から Configure 可能） | 通常 1 箇所で完結 |
-| **型安全性** | 個別の Option 関数で保証 | メソッドの返却型で保証 |
-| **学習コスト** | クロージャの理解が必要 | 直感的 |
+| 構文 | 関数をリストで渡す | メソッドチェーン |
+| 状態管理 | コンストラクターが一元管理 | Builder オブジェクトが中間状態を持つ |
+| 組み合わせ | 関数のスライス/配列で簡単にプリセット化 | Builder の途中状態を流用するのは難しい |
+| 段階的な設定 | DI コンテナーとの相性が良い（複数箇所から Configure 可能） | 通常 1 箇所で完結 |
+| 型安全性 | 個別の Option 関数で保証 | メソッドの返却型で保証 |
+| 学習コスト | クロージャの理解が必要 | 直感的 |
 
 ### Options Pattern vs Configuration Object
 
 | 観点 | Options Pattern | Configuration Object |
 |------|----------------|---------------------|
-| **デフォルト値** | コンストラクター内で安全に設定 | ゼロ値問題がある |
-| **バリデーション** | 各 Option 関数内で実行可能 | 別途バリデーション層が必要 |
-| **拡張性** | 新しい Option 関数を追加するだけ | 構造体にフィールド追加 |
-| **組み合わせ** | 関数の合成で自由自在 | 構造体のマージが必要 |
+| デフォルト値 | コンストラクター内で安全に設定 | ゼロ値問題がある |
+| バリデーション | 各 Option 関数内で実行可能 | 別途バリデーション層が必要 |
+| 拡張性 | 新しい Option 関数を追加するだけ | 構造体にフィールド追加 |
+| 組み合わせ | 関数を合成して自由に組み合わせられる | 構造体のマージが必要 |
 
 ### 使い分けの指針
 
@@ -872,7 +858,7 @@ graph TD
 
 ### Option 関数の合成
 
-複数の Option を 1 つにまとめる「合成」ができる。
+複数の Option を 1 つの Option にまとめることもできる。
 
 ```go
 // 複数の Option を 1 つにまとめる
@@ -903,7 +889,7 @@ s := NewServer(
 )
 ```
 
-これは関数合成（function composition）そのものであり、Options Pattern が**関数型プログラミングの原則**に基づいていることの証左だ。
+`ComposeOptions` は、受け取った Option を順に適用する 1 つの Option を返す関数合成だ。Option が関数なので、プリセット同士もこのように関数として組み合わせられる。
 
 ### 条件付き Option
 
@@ -932,7 +918,7 @@ func WithEnvConfig() Option {
 
 ### Self-Referential Functions（元の値を返す）
 
-Rob Pike の原論文では、Option 関数が「以前の値を返す」ことで**ロールバック**を可能にする手法が紹介されている。
+Rob Pike の元の記事では、Option 関数が以前の値に戻す Option を返し、設定をロールバックできるようにする手法が紹介されている。
 
 ```go
 type Option func(*Server) Option
@@ -953,11 +939,11 @@ func temporarilyChangePort(s *Server, port int) {
 }
 ```
 
-これは実際のプロダクションコードではあまり見かけないが、Options Pattern の**理論的基盤**として興味深い。
+プロダクションコードではあまり見かけないが、設定の変更を関数として表すと、元に戻す操作も同じ `Option` 型の関数として返せることが分かる。
 
 ## まとめ
 
-Options Pattern は「設定を値ではなく関数として渡す」というシンプルな原則に基づくデザインパターンだ。
+Options Pattern は、設定を値ではなく関数として渡すデザインパターンだ。言語ごとの呼び方とシグネチャは次のとおり。
 
 | 言語 | 呼称 | シグネチャ |
 |------|------|----------|
@@ -967,15 +953,15 @@ Options Pattern は「設定を値ではなく関数として渡す」という�
 | Rust | Functional Options | `Box<dyn FnOnce(&mut T)>` |
 | Python | Option Callbacks | `Callable[[T], None]` |
 
-言語が違ってもパターンの本質は同じだ。
+どの言語でも、処理は次の 3 段階で進む。
 
-1. **デフォルト値で初期化する**
-2. **Option 関数を順に適用する**
-3. **完成したオブジェクトを使う**
+1. デフォルト値で初期化する
+2. Option 関数を順に適用する
+3. 完成したオブジェクトを使う
 
-Telescoping Constructor 問題を解決し、Open-Closed Principle に従い、DI コンテナーとの相性も良い。特に「設定が複数箇所から段階的に行われる」ケースでは、Builder Pattern よりも Options Pattern のほうが適している。
+この形にすると Telescoping Constructor の問題を避けられる。引数を増やさずに設定項目を追加でき（Open-Closed Principle）、DI コンテナーとも組み合わせやすい。特に、設定が複数の箇所から段階的に行われる場合は、Builder Pattern より Options Pattern のほうが適している。
 
-Options Pattern を理解すると、ASP.NET Core の `AddXxx(options => ...)` やGoエコシステムのAPI設計の「なぜそうなっているか」が見えてくる。ぜひ自分のコードでも活用してみてほしい。
+ASP.NET Core の `AddXxx(options => ...)` が `Action<T>` を受け取るのも、Go のライブラリーが `WithXxx` 関数を公開するのも、デフォルト値を保ったまま、必要な設定だけを関数として後から適用するためだ。
 
 ## 参考リンク
 

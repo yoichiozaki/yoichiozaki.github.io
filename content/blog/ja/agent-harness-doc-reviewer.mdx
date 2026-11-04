@@ -1,39 +1,25 @@
 ---
-title: "同じ発想を Microsoft Agent Framework で — Agent Harness でツールを足すだけのレビューエージェントを作る"
+title: "同じ発想を Microsoft Agent Framework で — Agent Harness でツールを足すだけの文書レビューエージェントを作る"
 date: "2026-06-11"
-description: "「オーケストレーションは委譲し、ツールを足すだけ」という発想は GitHub Copilot SDK だけのものではない。Microsoft Agent Framework の Agent Harness（HarnessAgent）は、計画・TODO・コンテキスト圧縮・ツール承認まで作り込まれた自律エージェントを 1 行で立ち上げ、あなたはツールを足すだけでよい。同じ文書レビューエージェントを C# で実装し、Copilot SDK 版との設計の違いを論じる。"
+description: "GitHub Copilot SDK で作った「オーケストレーションはランタイムに任せ、ツールを足すだけ」の文書レビューエージェントを、Microsoft Agent Framework の Agent Harness（HarnessAgent）で C# に実装し直す。HarnessAgent は計画・TODO・コンテキスト圧縮・ツール承認を備えた自律エージェントを 1 行で構成する。能力を実行時の承認ではなく構成時に絞る点など、Copilot SDK 版との設計の違いも論じる。"
 tags: ["AI", "Agent", "Microsoft Agent Framework", "Agent Harness", "C#", ".NET", "Tools"]
 ---
 
 ## はじめに
 
-姉妹編「[オーケストレーションを手放す — GitHub Copilot SDK でツールを足すだけの文書レビューエージェントを作る](/ja/blog/copilot-doc-reviewer)」では、こんな発想を実装した。
+姉妹編「[オーケストレーションを手放す — GitHub Copilot SDK でツールを足すだけの文書レビューエージェントを作る](/ja/blog/copilot-doc-reviewer)」では、次の発想で文書レビューエージェントを実装した。
 
-> エージェントの司令塔（計画 → ツール選択 → 実行 → 評価のループ）を自分で書くのをやめ、本番で揉まれたランタイムに丸ごと委譲する。自分はレビューに必要な処理を<strong>ツール</strong>として提供するだけ。
+> エージェントの司令塔（計画 → ツール選択 → 実行 → 評価のループ）を自分で書くのをやめ、本番で揉まれたランタイムに丸ごと委譲する。自分はレビューに必要な処理をツールとして提供するだけ。
 
-GitHub Copilot SDK はこの発想を見事に体現していた。だが——「同じことが Microsoft Agent Framework の <strong>Agent Harness</strong> でもできる」と聞いたら、確かめたくなるのが人情だ。
+今回は、同じ文書レビューエージェントを Microsoft Agent Framework の Agent Harness（`HarnessAgent`）で実装する。ツールと指示を足すだけで動く点は同じだが、設計判断は 2 点で Copilot SDK 版と異なる。任せる先が別プロセスの CLI ではなく同一プロセス内の .NET ライブラリーであることと、エージェントの能力を実行時の承認ではなく構成時の取捨選択で絞ることだ。
 
-本記事では、まったく同じ<strong>文書レビューエージェント</strong>を、今度は Microsoft Agent Framework の `HarnessAgent` で実装する。結論から言えば、できる。しかも Copilot SDK 版とは<strong>異なる設計判断</strong>のもとで、だ。両者を読み比べると、「オーケストレーションを委譲する」という同じ思想が、ランタイムの設計次第でどう違う顔を見せるかがよく分かる。
-
-構成は以下の通り。
-
-1. <strong>Agent Harness とは何か</strong> — `HarnessAgent` が「あらかじめ作り込んでくれているもの」
-2. <strong>Copilot SDK との対比</strong> — 2 つの「委譲」の違い
-3. <strong>設計</strong> — 同じ 5 つのツール、ただし計画機能は最初から付いてくる
-4. <strong>実装</strong> — C# でツール・ハーネス・SSE サーバー・UI
-5. <strong>メリット</strong> — なぜハーネスが効くのか
-6. <strong>デメリットと注意点</strong> — API の安定性・非決定性・セキュリティー
-7. <strong>どれを選ぶか</strong> — Copilot SDK・Agent Harness・明示的ワークフローの使い分け
-
-> 前提として Microsoft Agent Framework 自体の全体像は「[Microsoft Agent Framework 完全解説](/ja/blog/agent-framework)」を参照してほしい。本記事は「Agent Harness」という一点に絞る。
+> Microsoft Agent Framework 自体の全体像は「[Microsoft Agent Framework 完全解説](/ja/blog/agent-framework)」で解説している。ここでは Agent Harness だけを扱う。
 
 ## Agent Harness とは何か
 
-Microsoft Agent Framework の通常の使い方は、`ChatClientAgent` を作り、ツールやコンテキストプロバイダーを自分で組み合わせていくものだ。柔軟だが、「自律的に長いタスクをこなすエージェント」を作るには、計画・TODO 管理・コンテキスト圧縮・ツール承認といった<strong>運用基盤（ハーネス）を自分で組む</strong>必要がある。
+Microsoft Agent Framework の通常の使い方では、`ChatClientAgent` を作り、ツールやコンテキストプロバイダーを自分で組み合わせる。柔軟だが、長いタスクを自律的にこなすエージェントを作るには、計画・TODO 管理・コンテキスト圧縮・ツール承認といった<strong>運用基盤（ハーネス）</strong>を自分で組む必要がある。
 
-<strong>Agent Harness（`HarnessAgent`）</strong>は、その運用基盤を<strong>あらかじめ作り込んだ</strong>エージェントだ。`Microsoft.Agents.AI.Harness` パッケージが提供する。一言でいえば、<strong>「Claude Code 的な自律エージェントを 1 行で立ち上げる」</strong>仕組みである。
-
-`IChatClient` に対して `AsHarnessAgent()` を呼ぶと、次のものが<strong>最初から全部入り</strong>で構成される。
+`Microsoft.Agents.AI.Harness` パッケージの Agent Harness（`HarnessAgent`）は、この運用基盤を組み込み済みのエージェントで、Claude Code のような自律エージェントを 1 行で構成できる。`IChatClient` に対して `AsHarnessAgent()` を呼ぶと、次の機能がまとめて構成される。
 
 ```mermaid
 graph TB
@@ -46,7 +32,7 @@ graph TB
         TODO[TodoProvider（作業項目の管理）]
         MODE[AgentModeProvider（plan / execute モード）]
         MEM[FileMemoryProvider（ファイル記憶）]
-        FILE[FileAccessProvider（作業ディレクトリー）]
+        FILE[FileAccessProvider（作業ディレクトリー、FileAccessStore 指定時のみ）]
         WEB[HostedWebSearchTool（Web 検索）]
         APPROVAL[ToolApprovalAgent（ツール承認）]
         SKILLS[AgentSkillsProvider（スキル探索）]
@@ -56,41 +42,39 @@ graph TB
     HARNESS -.あなたが足す.-> CUSTOM[カスタムツール群]
 ```
 
-開発者がやることは、Copilot SDK 版とまったく同じだ——<strong>ツールと指示を足すだけ</strong>。計画も、TODO も、コンテキスト圧縮も、ツール承認も、自分では書かない。
+開発者が書くのは、Copilot SDK 版と同じくツールと指示だけだ。計画・TODO・コンテキスト圧縮・ツール承認の処理は書かない。
 
-注目すべきは <strong>`AgentModeProvider` の既定モードが "plan"（計画）と "execute"（実行）</strong>であること、そして <strong>`TodoProvider` が作業項目を追跡する</strong>ことだ。つまりハーネスは、「まず計画を立て、TODO に落とし、順に実行する」という Claude Code 的なワークフローを<strong>標準で持っている</strong>。これはハーネスならではの特徴——<strong>明示的な</strong>計画/TODO の仕組みだ。Copilot SDK のランタイムも内部では計画するが、これに相当する plan モードや TODO プロバイダーは外部に公開していない。
+`AgentModeProvider` の既定モードは "plan"（計画）と "execute"（実行）で、`TodoProvider` は作業項目を追跡する。このためハーネスは、まず計画を立てて TODO に分け、順に実行するという Claude Code のような進め方を標準で備えている。この明示的な計画/TODO の仕組みがハーネスの特徴だ。Copilot SDK のランタイムも内部では計画するが、plan モードや TODO プロバイダーに当たるものは外部に公開していない。
 
-> <strong>追記（2026-09-10 時点）</strong>：本記事執筆時点では `HarnessAgent` は実験的（experimental / preview）な API で、コンパイル時に診断 ID `MAAI001` の警告が出ていた。その後これは解消され、現在の `HarnessAgent` は<strong>安定版の `Microsoft.Agents.AI.Harness` パッケージ（本稿更新時点で 1.20.0）で提供される正式 API</strong> であり、公式ドキュメントでも Agent Framework の基礎概念（Agents / Workflows / <strong>Agent Harness</strong>）の一つとして位置づけられている。以降のコード例にある `--prerelease` や `MAAI001` の抑制は、ハーネス自体についてはもう不要だ。ただし `MAAI001` 自体は Agent Framework 全体の実験的機能向け診断 ID として存続しており、ファイル記憶、A2A、Mem0、DevUI、宣言的エージェント、シェル実行などを使う場合は依然として抑制が必要になる。
+> <strong>追記（2026-09-10 時点）</strong>：執筆時点の `HarnessAgent` は実験的（experimental / preview）な API で、コンパイル時に診断 ID `MAAI001` の警告が出ていた。現在は安定版の `Microsoft.Agents.AI.Harness` パッケージ（本稿更新時点で 1.20.0）で正式 API として提供され、公式ドキュメントでも Agent Framework の基礎概念（Agents / Workflows / Agent Harness）の一つに挙げられている。ハーネスを使うためだけに `--prerelease` を付けたり `MAAI001` を抑制したりする必要はもうない。ただし `MAAI001` は Agent Framework 全体の実験的機能を示す診断 ID として残っており、ファイル記憶、A2A、Mem0、DevUI、宣言的エージェント、シェル実行などを使う場合は引き続き抑制が必要だ。
 
 ## Copilot SDK との対比 — 2 つの「委譲」
 
-どちらも「オーケストレーションを委譲し、ツールを足すだけ」という同じ思想だ。だが委譲先のランタイムの性質が違うため、設計判断も変わってくる。
+どちらもオーケストレーションをランタイムに任せ、開発者はツールを足すだけだ。ただし任せる先のランタイムの性質が違うため、設計判断も変わる。
 
 | 観点 | GitHub Copilot SDK | Agent Harness（`HarnessAgent`） |
 |------|--------------------|-------------------------------|
-| <strong>ランタイムの形</strong> | 別プロセスの Copilot CLI に JSON-RPC で接続 | <strong>同一プロセス内</strong>の .NET ライブラリー |
-| <strong>モデル</strong> | Copilot 経由、または BYOM/BYOK で自前のモデル | <strong>自前のモデル</strong>（Azure OpenAI / OpenAI など）を持ち込む |
-| <strong>課金</strong> | 使用量ベース（GitHub AI Credits、トークン消費量で課金） | 利用したモデルプロバイダーへの課金のみ |
-| <strong>計画・TODO</strong> | 明示的な計画/TODO の仕組みは持たない（ランタイムが内部で計画。具体は指示で誘導） | <strong>plan/execute モードと TodoProvider が標準装備</strong> |
-| <strong>能力の絞り込み</strong> | 実行時に `onPermissionRequest` で承認/拒否 | <strong>構成時に</strong> `Disable*` フラグと提供ツールで決める |
-| <strong>言語</strong> | Node/Python/Go/.NET/Java/Rust | .NET が最も成熟（Python も正式提供、Go は public preview） |
-| <strong>配布</strong> | CLI ランタイム同梱 | NuGet ライブラリー（安定版） |
+| ランタイムの形 | 別プロセスの Copilot CLI に JSON-RPC で接続 | 同一プロセス内の .NET ライブラリー |
+| モデル | Copilot 経由、または BYOM/BYOK で自前のモデル | 自前のモデル（Azure OpenAI / OpenAI など）を持ち込む |
+| 課金 | 使用量ベース（GitHub AI Credits、トークン消費量で課金） | 利用したモデルプロバイダーへの支払いのみ |
+| 計画・TODO | 明示的な仕組みはない（ランタイムが内部で計画し、進め方は指示で誘導する） | plan/execute モードと TodoProvider を標準で備える |
+| 能力の絞り込み | 実行時に `onPermissionRequest` で承認/拒否 | 構成時に `Disable*` フラグと提供ツールで決める |
+| 言語 | Node/Python/Go/.NET/Java/Rust | .NET が最も成熟（Python も正式提供、Go は public preview） |
+| 配布 | CLI ランタイム同梱 | NuGet ライブラリー（安定版） |
 
-最も本質的な違いは<strong>能力の絞り込み方</strong>だ。Copilot SDK は「強力なランタイムに対し、実行時に一つひとつ許可を出す（または拒否する）」という<strong>動的なゲート</strong>で安全性を担保した。一方ハーネスは「どの能力を組み込むかを<strong>構成時に</strong>選ぶ」という<strong>静的な組み立て</strong>で安全性を担保する。`DisableWebSearch = true` のように要らない組み込み能力を外し、`FileAccessStore` のような opt-in 能力は最初から渡さないわけだ。
-
-この違いは後の実装とセキュリティーの議論で効いてくる。
+設計に最も影響する違いは、能力の絞り込み方だ。Copilot SDK 版では、強力なランタイムが操作を要求するたびに、実行時に許可または拒否する<strong>動的なゲート</strong>で安全性を確保した。ハーネスでは、どの能力を組み込むかを構成時に選ぶ<strong>静的な組み立て</strong>で安全性を確保する。`DisableWebSearch = true` のように不要な組み込み能力を外し、`FileAccessStore` のように指定したときだけ有効になる能力は最初から渡さない。
 
 ## 設計 — 同じ 5 つのツール
 
-レビューに必要な能力は Copilot SDK 版と変わらない。同じ 5 つのツールを提供する。
+ツールは Copilot SDK 版と同じ 5 つだ。
 
-1. <strong>`list_documents`</strong> — レビュー対象の一覧
-2. <strong>`read_document`</strong> — 本文の読み込み
-3. <strong>`check_links`</strong> — リンク切れの確認
-4. <strong>`check_terminology`</strong> — 用語の表記ゆれ確認
-5. <strong>`save_review`</strong> — レビュー結果の保存
+1. `list_documents` — レビュー対象の一覧
+2. `read_document` — 本文の読み込み
+3. `check_links` — リンク切れの確認
+4. `check_terminology` — 用語の表記ゆれ確認
+5. `save_review` — レビュー結果の保存
 
-違いは、<strong>「まず計画を立てて TODO に分解し、順に実行する」という進め方を、ハーネスが最初から持っている</strong>ことだ。Copilot SDK 版ではシステムメッセージで進め方を誘導したが、ハーネスでは `AgentModeProvider`（plan/execute）と `TodoProvider` がその骨組みを与えてくれる。私たちは観点（リンク・用語・明確さ）と出力形式を指示するだけでよい。
+違いは、計画を立てて TODO に分解し、順に実行するという進め方をハーネスが最初から持っていることだ。Copilot SDK 版ではシステムメッセージでこの進め方を誘導したが、ハーネスでは `AgentModeProvider`（plan/execute）と `TodoProvider` がその骨組みになる。指示に書くのは、レビューの観点（リンク・用語・明確さ）と出力形式だけでよい。
 
 ```mermaid
 sequenceDiagram
@@ -117,7 +101,7 @@ sequenceDiagram
 
 ### プロジェクト構成と依存
 
-最終的な構成は Copilot SDK 版と対になっている。
+ファイル構成は Copilot SDK 版と対応させてある。
 
 ```text
 agent-harness-doc-reviewer/
@@ -129,10 +113,10 @@ agent-harness-doc-reviewer/
 ├── docs/                   # レビュー対象
 ├── reviews/                # 出力先
 └── wwwroot/
-    └── index.html          # ブラウザ UI（バニラ JS、Copilot SDK 版と同一）
+    └── index.html          # ブラウザ UI（バニラ JS、Copilot SDK 版とはタイトルとアクセントカラーだけが異なる）
 ```
 
-依存パッケージを追加する。執筆時点では Agent Harness が実験的だったため `--prerelease` が必要だった（現在は `Microsoft.Agents.AI.Harness` に安定版があるので、ハーネスのためだけにこのフラグを付ける必要はない）。
+依存パッケージを追加する。執筆時点では Agent Harness が実験的だったため `--prerelease` が必要だったが、現在は `Microsoft.Agents.AI.Harness` に安定版があるので、ハーネスのためにこのフラグを付ける必要はない。
 
 ```bash
 dotnet add package Microsoft.Agents.AI.Harness
@@ -141,7 +125,7 @@ dotnet add package Azure.AI.OpenAI
 dotnet add package Azure.Identity
 ```
 
-執筆時点の `HarnessAgent` は実験的 API だったので、`.csproj` で警告を抑制しておく（現行版では `MAAI001` の抑制はハーネスのためだけには不要。他の実験的機能を使う場合は引き続き必要）。
+執筆時点の `HarnessAgent` は実験的 API だったため、`.csproj` で `MAAI001` の警告を抑制している。現行版でハーネスだけを使うならこの抑制は不要だが、ほかの実験的機能を使う場合は引き続き必要になる。
 
 ```xml
 <PropertyGroup>
@@ -152,7 +136,7 @@ dotnet add package Azure.Identity
 
 ### ツールを定義する
 
-Copilot SDK 版では `defineTool` + Zod を使った。Agent Framework では、ツールは `Microsoft.Extensions.AI` の <strong>`AIFunction`</strong> であり、`AIFunctionFactory.Create()` でデリゲートから生成する。各ツールが UI 通知用の `emit` を閉じ込める点は Copilot SDK 版と同じだ。
+Copilot SDK 版では `defineTool` と Zod でツールを定義した。Agent Framework のツールは `Microsoft.Extensions.AI` の `AIFunction` で、`AIFunctionFactory.Create()` でデリゲートから生成する。各ツールが UI 通知用の `emit` を閉じ込める点は Copilot SDK 版と同じだ。
 
 ```csharp
 // ReviewTools.cs
@@ -258,13 +242,13 @@ public static class ReviewTools
 }
 ```
 
-`AIFunctionFactory.Create(デリゲート, 名前, 説明)` でツールになる。引数の `[Description]` 属性がモデルに渡るパラメーター説明になる。戻り値（匿名オブジェクト）は自動的に JSON 化されてモデルに返る。Copilot SDK 版と同様、<strong>「実際の処理」はすべて自分のコードの中</strong>にあり、`fetch` 相当の `HttpClient` も `save_review` のファイル書き込みも完全に管理下にある。
+`AIFunctionFactory.Create(デリゲート, 名前, 説明)` にデリゲートを渡すとツールになり、引数の `[Description]` 属性はモデルに渡すパラメーター説明になる。戻り値の匿名オブジェクトは JSON に変換されてモデルに返る。Copilot SDK 版と同様に、実際の処理はすべて自分のコードの中にある。`fetch` に当たる `HttpClient` による外部アクセスも、`save_review` のファイル書き込みも、自分で制御できる。
 
 ### ハーネスを組み立てる — 能力を絞り込む
 
-ここが Copilot SDK 版と最も異なる部分だ。Copilot SDK では実行時に権限ハンドラーで拒否したが、ハーネスでは<strong>構成時に要らない能力を外す</strong>。
+Copilot SDK 版では実行時に権限ハンドラーで操作を拒否したが、ハーネスでは<strong>構成時に不要な能力を外す</strong>。
 
-文書レビューに、ハーネスが標準で持つ Web 検索・ファイル記憶・スキル探索は要らない。任意のファイル IO は `FileAccessStore` を渡した場合だけ有効になるため、この例では最初から構成しない。むしろ、信頼できない文書を読む以上、<strong>攻撃面は最小化すべき</strong>だ。そこで `Disable*` フラグでそれらを外し、<strong>計画機能（TodoProvider・AgentModeProvider）と自前のツールだけ</strong>を残す。
+文書レビューには、ハーネスが標準で持つ Web 検索・ファイル記憶・スキル探索は要らない。信頼できない文書を読むので、使わない能力は攻撃面を広げるだけだ。そこで `Disable*` フラグでこれらを外し、計画機能（`TodoProvider`・`AgentModeProvider`）と自前のツールだけを残す。任意のファイル IO は `FileAccessStore` を渡した場合だけ有効になるので、この例では渡さない。
 
 ```csharp
 // Program.cs（抜粋）— ハーネスの組み立て
@@ -294,15 +278,13 @@ AIAgent CreateReviewer(IChatClient client, Action<string, string> emit) =>
     });
 ```
 
-`FileAccessStore` と `ShellExecutor` を設定していないので、<strong>任意ファイル IO とシェル実行はそもそも構成されない</strong>。`DisableToolAutoApproval = true` にしているのは、承認必須のツールを使わず、サーバー側では自前ツールだけに絞るためだ。その代わり、<strong>提供する能力自体を安全なものだけに絞る</strong>ことで安全性を担保している——これがハーネス流の防御だ。
+`FileAccessStore` と `ShellExecutor` を設定していないので、任意のファイル IO とシェル実行は構成されない。承認が必要なツールは使わず自前のツールだけに絞っているので、`DisableToolAutoApproval = true` で自動承認のミドルウェアも外した。実行時の承認に頼る代わりに、提供する能力を安全なものに限って安全性を確保する。これがハーネスでの防御の基本になる。
 
-これらのフラグが「何を制御し、何を制御しないか」は明確にしておきたい。`Disable*` フラグが無効化するのは、ハーネスの<strong>組み込みプロバイダー</strong>（`HostedWebSearchTool`、`FileMemoryProvider` など）だ。`FileAccessProvider` はそもそも `FileAccessStore` を明示的に渡した場合だけ追加される。自分のツールには<strong>影響しない</strong>——`save_review` は依然としてファイルを書き、`check_links` は依然として外部へアクセスする。これらはハーネスのプロバイダーではなく、自分の `AIFunction` だからだ。Copilot SDK 版と同じく、カスタムツールにとっての本当の防御線は<strong>ツールの内側</strong>（パストラバーサル対策・タイムアウト・許可ドメイン）にある。
-
-> <strong>能力の最小化こそがハーネスの防御線。</strong> もし `ShellExecutor` や `FileAccessStore` を渡したり、`DisableWebSearch` を外したりすれば、エージェントは強力になるが攻撃面も一気に広がる。信頼できない入力（レビュー対象の文書）を読ませる以上、「何を組み込まないか」がセキュリティー設計の中心になる。
+`Disable*` フラグが無効化するのは、`HostedWebSearchTool` や `FileMemoryProvider` などハーネスの組み込みプロバイダーだけだ（`FileAccessProvider` は `FileAccessStore` を明示的に渡したときだけ追加される）。自前のツールはハーネスのプロバイダーではなく自分で渡した `AIFunction` なので、フラグを立てても `save_review` はファイルを書き、`check_links` は外部へアクセスする。Copilot SDK 版と同じく、カスタムツールの防御はツールの内側（パストラバーサル対策・タイムアウト・許可ドメイン）で行う。
 
 ### サーバーとストリーミング
 
-`IChatClient`（モデルクライアント）は起動時に 1 つだけ作り、リクエストごとにハーネスエージェントを生成する（ツールがそのリクエストの `emit` を閉じ込めるため）。応答は `RunStreamingAsync` でストリーミングし、SSE で UI に流す。
+`IChatClient`（モデルクライアント）は起動時に 1 つだけ作る。ツールがリクエストごとの `emit` を閉じ込めるので、ハーネスエージェントはリクエストごとに生成する。応答は `RunStreamingAsync` でストリーミングし、SSE で UI に流す。
 
 ```csharp
 // Program.cs
@@ -378,13 +360,13 @@ app.Run();
 record ReviewRequest(string Instruction);
 ```
 
-`agent.RunStreamingAsync(instruction, session)` が返す更新の `.Text` を、SSE の `delta` イベントとして流している。ツールの実行状況は、ツール内の `emit` が `tool` イベントを送ることで通知される。
+`agent.RunStreamingAsync(instruction, session)` が返す更新の `.Text` は SSE の `delta` イベントとして送る。ツールの実行状況は、ツール内の `emit` が `tool` イベントとして送る。
 
-> <strong>観測性は二段構え。</strong> ハーネスは `OpenTelemetry` 計装を標準で持つので、ツール呼び出し・モデル呼び出し・コンパクションといった内部活動はトレースとして収集できる（`DisableOpenTelemetry = true` で無効化可能）。それに加えて、本実装では Copilot SDK 版と同じく<strong>ツールハンドラーの内側から `emit`</strong> することで、UI 用の「どのツールが何をしたか」を自分が完全に把握した情報として出している。委譲アプローチでは内部が見えにくくなりがちなので、この自前の可視化が効く。
+> ハーネスは OpenTelemetry の計装を標準で持つので、ツール呼び出し・モデル呼び出し・コンテキスト圧縮といった内部の動きはトレースとして収集できる（`DisableOpenTelemetry = true` で無効化できる）。UI に出す「どのツールが何をしたか」は、これとは別に、Copilot SDK 版と同じくツールハンドラーの内側から `emit` している。ランタイムに任せた部分は内部が見えにくくなりがちだが、ツールの動きは自分のコードが出す情報として確実に表示できる。
 
 ### レビュー指示
 
-進め方の骨組み（計画 → 実行）はハーネスが持つので、指示は<strong>観点と出力形式</strong>に集中できる。
+進め方の骨組み（計画 → 実行）はハーネスが持つので、指示は観点と出力形式に絞れる。
 
 ```csharp
 // ReviewPrompt.cs
@@ -410,11 +392,11 @@ public static class ReviewPrompt
 }
 ```
 
-この指示は `HarnessAgentOptions.ChatOptions.Instructions` に渡され、ハーネス自身の<strong>ハーネス指示（`HarnessInstructions`、ツールの使い方や進め方の一般則）</strong>の<strong>後ろ</strong>に連結される。つまり「一般的な進め方はハーネスが、ドメイン固有の観点は私たちが」与える、という役割分担になる。
+この指示は `HarnessAgentOptions.ChatOptions.Instructions` に渡り、ツールの使い方や進め方の一般則を定めたハーネス自身の指示（`HarnessInstructions`）の後ろに連結される。一般的な進め方はハーネスが、レビュー固有の観点はこちらが与えるという分担だ。
 
 ### UI
 
-フロントエンドは Copilot SDK 版と<strong>ほぼ同一</strong>でよい——変えたのはタイトルとアクセントカラーだけで、SSE を捌くスクリプトはそのままだ。サーバーが流す SSE のイベント形式（`tool` / `delta` / `error`）を揃えてあるからだ。これは「ランタイムを差し替えても、ツール群と UI はそのまま使い回せる」という委譲アプローチの利点を地で行っている。
+サーバーが送る SSE のイベント形式（`tool` / `delta` / `error`）を Copilot SDK 版と揃えたので、フロントエンドはタイトルとアクセントカラーを変えただけで、SSE を処理するスクリプトはそのまま使える。ランタイムを差し替えても同じツール構成と UI を使い回せることは、オーケストレーションをランタイムに任せる方式の利点だ。
 
 ```html
 <!-- wwwroot/index.html -->
@@ -476,11 +458,9 @@ public static class ReviewPrompt
 </html>
 ```
 
-これで完成だ。Copilot SDK 版と同じく、レビューのワークフローは一行も書いていない。違いは、<strong>計画・TODO・コンテキスト圧縮といった運用基盤を、SDK 越しの別プロセスではなく、自前プロセス内の .NET ライブラリーとして手に入れた</strong>ことだ。
-
 ### 動かす
 
-プロジェクトは Web SDK で作る（`dotnet new web`）。これで `WebApplication` などの暗黙の using が有効になり、前掲の `dotnet add package` でパッケージを足せる。前掲の `CreateReviewer` は同じ `Program.cs` 内のローカル関数だ——トップレベル文では `using` をファイル先頭にまとめ、ローカル関数はその後ろに、`record ReviewRequest` は末尾に置けばよい。
+プロジェクトは `dotnet new web` で Web SDK のプロジェクトとして作り、前掲の `dotnet add package` でパッケージを足す。Web SDK では `WebApplication` などの暗黙の using が有効になる。`CreateReviewer` は同じ `Program.cs` 内のローカル関数だ。トップレベル文では `using` をファイル先頭にまとめ、その後ろにローカル関数を、末尾に `record ReviewRequest` を置けばよい。
 
 `glossary.json` は Copilot SDK 版と同じ形式（正規表記 → 表記ゆれの配列）でルートに置く。実行前に、Azure OpenAI への認証（`az login` など `DefaultAzureCredential` が解決できる方法）とエンドポイントの環境変数を用意する。
 
@@ -494,63 +474,62 @@ dotnet run   # → 起動時に表示される URL（http://localhost:5000 な�
 
 ## メリット
 
-ハーネスならではの効きどころを整理する（「オーケストレーションを書かなくてよい」という委譲共通の利点は姉妹編を参照）。
+オーケストレーションを書かなくてよいという、ランタイムに任せる方式に共通する利点は姉妹編で述べた。ここではハーネス固有の利点を挙げる。
 
-1. <strong>運用基盤が全部入り</strong> — 計画（plan/execute モード）・TODO 管理・コンテキスト圧縮・ツール承認・ファイル記憶・テレメトリーが最初から構成される。Claude Code 的な自律エージェントを 1 行で立ち上げられる。
-2. <strong>同一プロセス・自前モデル</strong> — 別プロセスの CLI ランタイムに依存せず、`IChatClient` として Azure OpenAI でも OpenAI でも自由に差せる。追加のサブスクリプションも不要で、課金は自分のモデルプロバイダーに対してだけ発生する。
-3. <strong>能力を構成で組み立てる</strong> — `Disable*` フラグで要る能力だけを残す。安全性を「実行時の承認」ではなく「構成時の取捨選択」で担保でき、サーバーのような非対話環境と相性がよい。
-4. <strong>コンテキスト圧縮が組み込み</strong> — `MaxContextWindowTokens` / `MaxOutputTokens` を渡せば、関数呼び出しループがコンテキストを溢れさせないよう自動で圧縮する。長いレビューでも破綻しにくい。
-5. <strong>OpenTelemetry 標準装備</strong> — ツール呼び出し・モデル呼び出し・圧縮などが Semantic Conventions に沿ったトレースとして出る。
-6. <strong>オープンソースの .NET ライブラリー</strong> — 中身を読め、拡張でき、依存はパッケージだけ。
+1. <strong>運用基盤が組み込み済み</strong> — 計画（plan/execute モード）・TODO 管理・コンテキスト圧縮・ツール承認・ファイル記憶・テレメトリーを、自分で実装せずに使える。
+2. <strong>同一プロセス・自前モデル</strong> — 別プロセスの CLI ランタイムに依存せず、Azure OpenAI でも OpenAI でも `IChatClient` として差し替えられる。追加のサブスクリプションは要らず、料金はモデルプロバイダーにだけ支払う。
+3. <strong>能力を構成で組み立てる</strong> — `Disable*` フラグで必要な能力だけを残す。安全性を実行時の承認ではなく構成時の取捨選択で確保できるので、人が承認できないサーバーのような非対話環境に向く。
+4. <strong>コンテキスト圧縮が組み込み</strong> — `MaxContextWindowTokens` / `MaxOutputTokens` を渡すと、関数呼び出しループがコンテキストを溢れさせないよう自動で圧縮する。長いレビューでもコンテキスト超過で止まりにくい。
+5. <strong>OpenTelemetry を標準で備える</strong> — ツール呼び出し・モデル呼び出し・圧縮などが、Semantic Conventions に沿ったトレースとして出力される。
+6. <strong>オープンソースの .NET ライブラリー</strong> — ソースを読んで拡張でき、必要なのはパッケージの追加だけだ。
 
 ## デメリットと注意点
 
-委譲アプローチ共通の代償（非決定性・テストの難しさ・コスト/レイテンシー）は姉妹編で詳述した。ここではハーネス固有の注意点を挙げる。
+非決定性・テストの難しさ・コストとレイテンシーといった、ランタイムに任せる方式に共通する代償は姉妹編で詳しく述べた。ここではハーネスを使う場合の注意点を挙げる。
 
 ### API の安定性（執筆時は実験的 API だった）
 
-執筆時点の `HarnessAgent` は実験的（`MAAI001`）で、Copilot SDK が GA（一般提供）なのと対照的だった。<strong>この差はすでに埋まっている</strong>。現在の `HarnessAgent` は安定版 `Microsoft.Agents.AI.Harness`（本稿更新時点で 1.20.0）で提供され、`[Experimental]` 属性も付いていない。
+執筆時点の `HarnessAgent` は実験的（`MAAI001`）で、GA（一般提供）の Copilot SDK とはこの点で差があった。現在は安定版の `Microsoft.Agents.AI.Harness`（本稿更新時点で 1.20.0）で提供され、`[Experimental]` 属性も付いていないので、この差はすでに埋まっている。
 
-ただし、「ハーネス本体が安定した」ことと「周辺機能すべてが安定した」ことは別だ。.NET 側では A2A、Mem0、DevUI、宣言的エージェント、シェルツールなどが依然 `MAAI001` の対象であり、Python 側でも background agents・file access・looping は実験的、シェルツールはプレリリースパッケージのままだ。本番採用では「どの機能を使うか」単位で安定性を確かめるのが良い。
+ただし、ハーネス本体が安定しても、周辺機能がすべて安定したわけではない。.NET では A2A、Mem0、DevUI、宣言的エージェント、シェルツールなどが今も `MAAI001` の対象で、Python では background agents・file access・looping が実験的、シェルツールはプレリリースのパッケージで提供されている。本番で採用するなら、使う機能ごとに安定性を確かめるとよい。
 
 ### 非決定性とコストは委譲共通
 
-ツールの呼び出し順序も呼ぶかどうかもモデル次第で、決定論的な手順保証はない。さらにハーネスは計画・TODO・圧縮のために<strong>モデルを多めに呼ぶ</strong>傾向があり、その分のトークンコストとレイテンシーは自前ループより読みにくい。Copilot SDK が GitHub AI Credits で使用量課金されるのと同様に、ハーネスも消費トークンに応じて課金される——ただし支払う先が GitHub ではなく自分のモデルプロバイダーになるだけで、「使うほどかかる」構造は同じだ。
+どのツールをどの順で呼ぶか、そもそも呼ぶかどうかはモデルが決めるので、手順が毎回同じになる保証はない。さらにハーネスは計画・TODO・圧縮のためにモデルを多めに呼ぶ傾向があり、その分のトークンコストとレイテンシーは自前のループより見積もりにくい。Copilot SDK が GitHub AI Credits で使用量に応じて課金されるのと同じく、ハーネスも消費トークンに応じて課金される。違うのは支払先が GitHub ではなく自分のモデルプロバイダーになる点だけで、使うほど料金がかかる構造は変わらない。
 
 ### セキュリティー — 防御線は「構成」にある
 
-信頼できない文書を強力なランタイムに読ませるリスクは Copilot SDK 版と同じだ。違いは防御の置き所である。
+信頼できない文書を強力なランタイムに読ませるリスクは Copilot SDK 版と同じで、違うのは防御を置く場所だ。
 
-- <strong>プロンプトインジェクション</strong> — 文書内の悪意ある指示への対策は、ハーネスでは<strong>能力の最小化</strong>が中心になる。`FileAccessStore` や Web 検索を有効化したり `ShellExecutor` を渡したりするほど、インジェクションの被害は大きくなる。
-- <strong>SSRF</strong> — `check_links` のような外部アクセスにはタイムアウトと許可ドメインを設ける。Web 検索やファイルアクセスを安易に有効化しないことも重要だ。
-- <strong>承認モデルの選択</strong> — 本実装は非対話サーバーなので `DisableToolAutoApproval = true` とし、能力の絞り込みで代替した。対話的な用途なら、逆にツール承認を有効にして人間に判断させる設計もありうる。<strong>「構成で絞る」か「実行時に承認する」か</strong>は、用途に応じて選ぶ。
+- <strong>プロンプトインジェクション</strong> — 文書に埋め込まれた悪意ある指示への対策は、ハーネスでは能力の最小化が中心になる。`FileAccessStore` や Web 検索を有効にしたり `ShellExecutor` を渡したりするほど、インジェクションの被害は大きくなる。
+- <strong>SSRF</strong> — `check_links` のように外部へアクセスするツールには、タイムアウトと許可ドメインを設ける。Web 検索やファイルアクセスも、必要がなければ有効にしない。
+- <strong>承認モデルの選択</strong> — 本実装は非対話のサーバーなので `DisableToolAutoApproval = true` とし、承認の代わりに能力を絞った。対話的な用途なら、ツール承認を有効にして人に判断させる設計も取れる。
 
 ### .NET 中心
 
-最も成熟しているのは .NET 実装だ。Agent Framework のハーネスは Python でも正式に提供されており（`create_harness_agent`。リポジトリーに [Python のハーネスサンプル](https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents/harness)もある）、Agent Framework 自体は Go 向け実装（public preview）も持つ。ただし Go には現時点でパッケージ化されたハーネスがなく、各パッケージを自分で組み上げる必要がある。本記事では検証済みの C# を用いた。多言語チームでは言語選択が制約になりうる。
+最も成熟しているのは .NET 実装だ。Agent Framework のハーネスは Python でも正式に提供されている（`create_harness_agent`。リポジトリーに [Python のハーネスサンプル](https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents/harness)もある）。Agent Framework 自体には Go 向けの実装（public preview）もあるが、Go には現時点でパッケージ化されたハーネスがなく、各パッケージを自分で組み合わせる必要がある。ここでは検証済みの C# を使った。複数の言語を使うチームでは、この点が制約になりうる。
 
 ## どれを選ぶか
 
-「ツールを足すだけ」の委譲アプローチには、いまや複数の実装手段がある。整理しよう。
+ツールを足すだけの方式には複数の実装手段があり、手順を明示的に書く方式も選択肢になる。それぞれが向いている場面は次の通りだ。
 
 | 選択肢 | 向いている場面 |
 |--------|--------------|
-| <strong>GitHub Copilot SDK</strong> | 多言語（特に Node/TS）で素早く。GitHub エコシステム/サブスクの中で。実行時の細かい権限制御がほしい。 |
-| <strong>Agent Harness</strong> | .NET 中心。自前モデル（Azure OpenAI 等）を使いたい。計画・TODO・圧縮込みの自律エージェントを 1 行で。能力を構成で絞りたい。 |
-| <strong>明示的ワークフロー</strong>（[Agentic Workflow](/ja/blog/agentic-workflow) / [Agent Framework のワークフローエンジン](/ja/blog/agent-framework)） | 決定論的な手順保証・再現性・テスト容易性・コスト制御が要件のとき。 |
+| GitHub Copilot SDK | Node/TS をはじめ多言語で素早く作りたい。GitHub のエコシステムやサブスクリプションの中で使いたい。実行時に細かく権限を制御したい。 |
+| Agent Harness | .NET 中心で開発する。自前のモデル（Azure OpenAI など）を使いたい。計画・TODO・圧縮込みの自律エージェントを 1 行で作りたい。能力を構成時に絞りたい。 |
+| 明示的ワークフロー（[Agentic Workflow](/ja/blog/agentic-workflow) / [Agent Framework のワークフローエンジン](/ja/blog/agent-framework)） | 手順の決定性、再現性、テストのしやすさ、コスト制御が要件になる。 |
 
-そして現実的には<strong>併用</strong>が強い。定型部分は明示的ワークフローで固め、探索的な判断が要る部分だけをハーネス（または Copilot SDK）に委譲する。制御と柔軟性のバランスを、用途ごとに引き直していくのが本筋だ。
+実際には<strong>併用</strong>も有力だ。定型的な部分は明示的なワークフローで固め、探索的な判断が要る部分だけをハーネス（または Copilot SDK）に任せれば、手順の制御と判断の柔軟性を用途ごとに配分できる。
 
 ## まとめ
 
-「オーケストレーションを委譲し、ツールを足すだけ」という発想を、本記事では Microsoft Agent Framework の <strong>Agent Harness</strong> で実装した。要点を振り返る。
+Agent Harness でも、オーケストレーションをランタイムに任せてツールを足すだけという発想はそのまま成り立った。書いたのは Copilot SDK 版と同じ 5 つのツールとレビュー指示で、計画・TODO・コンテキスト圧縮・ツール承認・テレメトリーはハーネスが受け持つ。
 
-1. <strong>同じ発想が成立する</strong> — `HarnessAgent` は計画・TODO・コンテキスト圧縮・ツール承認・テレメトリーを作り込んだ自律エージェントを 1 行で立ち上げる。私たちは Copilot SDK 版とまったく同じ 5 つのツールと指示を足すだけだった。
-2. <strong>違いは「委譲先の性質」</strong> — 別プロセスの CLI に委譲する Copilot SDK に対し、ハーネスは同一プロセス内の .NET ライブラリーに委譲し、自前モデルを持ち込む。能力の絞り込みも、実行時の承認ではなく<strong>構成時の取捨選択</strong>で行う。
-3. <strong>UI とツールは使い回せる</strong> — SSE のイベント形式を揃えれば、フロントエンドは Copilot SDK 版とほぼそのまま共有できた（違いはタイトルとアクセントカラーだけだ）。委譲アプローチの「ランタイムは差し替え可能」という性質がよく表れている。
-4. <strong>代償は委譲共通</strong> — 非決定性・コスト・セキュリティーという委譲共通の代償はここでも付いて回る。なお、執筆時にあった「ハーネスは実験的 API」という制約はすでに解消され、現在は安定版として提供されている。
+違いは任せる先の性質にある。Copilot SDK が別プロセスの CLI に任せるのに対し、ハーネスは同一プロセス内の .NET ライブラリーに任せ、自前のモデルを使う。能力も、実行時の承認ではなく構成時の取捨選択で絞る。一方で、SSE のイベント形式を揃えたので、フロントエンドはタイトルとアクセントカラー以外をそのまま共有できた。
 
-同じゴールへ向かう道が複数あるとき、選ぶべきは「どれが偉いか」ではなく「自分の制約（言語・モデル・運用・安定性要件）にどれが噛み合うか」だ。Copilot SDK 版と本記事を並べて読み、あなたの現場に合う委譲の形を見つけてほしい。
+非決定性・コスト・セキュリティーという代償は、どちらの方式にも付いて回る。執筆時にあった「ハーネスは実験的 API」という制約は解消され、現在は安定版として提供されている。
+
+どれを選ぶかは、優劣ではなく、言語・モデル・運用・安定性要件といった自分の制約に合うかで決まる。姉妹編と並べて読み、自分の現場に合う方式を選んでほしい。
 
 ### 参考文献
 

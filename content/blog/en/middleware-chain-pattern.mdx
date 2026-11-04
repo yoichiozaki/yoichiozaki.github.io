@@ -1,39 +1,38 @@
 ---
-title: "Understanding the Middleware Chain as an Implementation Pattern"
+title: "Understanding the Middleware Chain by Building One in Python"
 date: "2026-04-06"
-description: "Express.js's next(), Django's get_response, ASP.NET Core's pipeline — every web framework uses the 'middleware chain' pattern. Build one from scratch in Python to understand the design principles."
+description: "Express.js's next(), Django's get_response, and ASP.NET Core's pipeline share one pattern: the middleware chain. Build one from scratch in Python to see what next is, why registration order matters, and how short-circuiting works."
 tags: ["Middleware", "Design Patterns", "Python", "Web Framework", "Architecture"]
 ---
 
 ## Introduction
 
-Express.js's `next()`, Django's `get_response`, ASP.NET Core's `Use()` / `Run()`, Go's `http.Handler` wrapper — across the web framework landscape, virtually every framework employs an architectural pattern called the "middleware chain."
+Express.js's `next()`, Django's `get_response`, ASP.NET Core's `Use()` / `Run()`, and Go's `http.Handler` wrappers are all forms of one architectural pattern: the middleware chain.
 
-A middleware chain is a mechanism that lets you <strong>plug in and remove processing steps</strong> (authentication, logging, error handling, etc.) from the HTTP request/response pipeline. If you are just using a framework, knowing the surface API is sufficient. But to truly understand <strong>why you need to call `next()`</strong> or <strong>why middleware registration order matters</strong>, the best approach is to <strong>build one yourself</strong>.
+A middleware chain lets you add and remove processing steps such as authentication, logging, and error handling in the HTTP request/response pipeline. Using a framework only requires knowing its API. To understand why you must call `next()` and why middleware registration order matters, the best approach is to build a chain yourself.
 
-In this article, we will <strong>build a middleware chain from scratch in Python</strong> and thoroughly understand its design principles. After implementing it, we will look at the actual middleware APIs of Express.js, Django, ASP.NET Core, and Go, and you will be able to recognize: "this `next()` is the exact mechanism I built."
+The sections below build a middleware chain from scratch in Python and then compare it with the middleware APIs of Express.js, Django, ASP.NET Core, and Go. The comparison shows where each framework's `next()` fits in the mechanism you built.
 
 ### Topics Covered
 
-1. The core of middleware chains — function composition and what `next` really is
-2. Relationship to GoF design patterns (Chain of Responsibility, Decorator)
-3. Building from scratch in Python
-4. The onion model — the symmetry of request and response
-5. Short-circuiting — early termination of the pipeline
+1. What middleware is and why it forms a chain
+2. Roots in GoF design patterns (Chain of Responsibility, Decorator)
+3. What `next` is: function composition and closures
+4. Assembling the chain with `compose`, and the onion model
+5. Short-circuiting: ending the pipeline early
 6. Error-handling middleware
-7. Middleware composition and execution order
-8. Real-world framework comparison (Express.js / Django / ASP.NET Core / Go)
-9. Testing strategies
+7. Registration order and execution order
+8. Comparison with Express.js, Django, ASP.NET Core, and Go
+9. Testing middleware
+10. Class-based middleware
 
 ### Target Audience
 
-- Developers who have used middleware in web frameworks but want to deeply understand the internals
-- Anyone who wants to learn design patterns through hands-on implementation
-- Readers who understand basic Python (functions, classes, decorators)
+This article is for developers who have used middleware in a web framework and want to understand how it works internally, including those who want to learn design patterns by implementing them. It assumes basic Python: functions, classes, and decorators.
 
 ### A World Without Middleware — The Motivating Problem
 
-To appreciate the value of middleware chains, let us first imagine a world without them.
+Without middleware, every handler has to repeat the same logging, authentication, and error-handling code:
 
 ```python
 def handle_users(request):
@@ -75,13 +74,13 @@ def handle_products(request):
         return Response(status=500, body="Internal Server Error")
 ```
 
-In this example, <strong>cross-cutting concerns</strong> — logging, authentication, and error handling — are copy-pasted into every handler. Three handlers might be tolerable, but what happens when you have 50 or 100?
+Here, the <strong>cross-cutting concerns</strong> of logging, authentication, and error handling are copied into every handler. With three handlers the duplication is manageable, but with 50 or 100:
 
-- Changing the log format requires grepping and modifying every handler
-- A bug in auth logic must be fixed in every handler identically
-- Every new handler must copy these boilerplate blocks (with risk of forgetting)
+- Changing the log format means finding and editing every handler.
+- A bug in the authentication logic has to be fixed identically in every handler.
+- Every new handler needs the same boilerplate, and it is easy to forget part of it.
 
-A middleware chain fundamentally solves this by <strong>separating cross-cutting concerns from handlers</strong> and consolidating them into a single pipeline. Each handler can then focus exclusively on its own business logic:
+A middleware chain removes the duplication by separating cross-cutting concerns from handlers and defining them once in a pipeline. Each handler then contains only its business logic:
 
 ```python
 # With a middleware chain, handlers contain only business logic
@@ -98,19 +97,15 @@ def handle_products(request):
 app = compose(router, [error_handling, logging, auth])
 ```
 
-Why this separation of concerns works, and exactly how it is achieved — that is what we will discover by building one from scratch.
+The following chapters build `compose` and these middlewares from scratch.
 
 ## Chapter 1: What Is Middleware?
 
 ### Basic Definition
 
-Middleware is a <strong>processing layer</strong> that sits between the request and the response.
+Middleware is a processing layer between the request and the response. It receives a request, performs some processing such as logging, authentication, or adding headers, and then either passes the request to the next middleware or returns a response itself.
 
-- It receives a request
-- It performs some processing (logging, authentication, header manipulation, etc.)
-- It either passes processing to the next middleware or generates a response itself
-
-The Express.js official documentation lists four capabilities of middleware:
+The Express.js documentation lists four things middleware can do:
 
 1. Execute any code
 2. Make changes to the request and response objects
@@ -119,7 +114,7 @@ The Express.js official documentation lists four capabilities of middleware:
 
 ### Why "Chain"?
 
-Multiple middlewares are <strong>linked in sequence</strong>, and the request passes through them from first to last. Each middleware can choose to either "call the next middleware (`next()`)" or "return a response itself (short-circuit)."
+Multiple middlewares are linked in sequence, and a request passes through them from first to last. Each middleware either calls the next middleware (`next()`) or returns a response itself (short-circuiting).
 
 ```mermaid
 graph LR
@@ -133,13 +128,13 @@ graph LR
     M1 --> Client
 ```
 
-Notice that the arrows go <strong>both directions</strong>. The request flows left to right, and the response flows right to left. This is the essence of the middleware chain, and it is why it is called the <strong>onion model</strong>.
+The arrows go both ways: the request travels from left to right, and the response returns from right to left through the same middlewares. Because each middleware wraps the ones inside it like the layers of an onion, this structure is called the <strong>onion model</strong>.
 
 ## Chapter 2: Design Pattern Roots
 
 ### GoF's Chain of Responsibility Pattern
 
-The middleware chain is rooted in the GoF (Gang of Four) <strong>Chain of Responsibility pattern</strong>. Its definition is:
+The middleware chain derives from the GoF (Gang of Four) Chain of Responsibility pattern, which the book describes as follows:
 
 > "Avoid coupling the sender of a request to its receiver by giving more than one object a chance to handle the request. Chain the receiving objects and pass the request along the chain until an object handles it." — Gang of Four, Design Patterns (1994)
 
@@ -151,7 +146,7 @@ graph LR
     H3 -->|"Handles it"| Response["Response"]
 ```
 
-However, there is an important difference between the GoF definition and web middleware.
+Web middleware differs from the GoF definition in three ways:
 
 | Property | GoF Chain of Responsibility | Web Middleware Chain |
 |----------|---------------------------|---------------------|
@@ -161,19 +156,17 @@ However, there is an important difference between the GoF definition and web mid
 
 ### Similarity to the Decorator Pattern
 
-As Wikipedia notes, Chain of Responsibility is structurally nearly identical to the <strong>Decorator pattern</strong>. In the Decorator pattern, each decorator adds behavior to its wrapped target and delegates processing. Web middleware does exactly this — "pre-processing → delegation → post-processing."
-
-In other words, web middleware chains are a <strong>hybrid of Chain of Responsibility and Decorator</strong>.
+As Wikipedia notes, Chain of Responsibility is structurally nearly identical to the Decorator pattern, in which each decorator adds behavior to the object it wraps and delegates to it. Web middleware behaves like a decorator: it runs pre-processing, delegates, and then runs post-processing. Like a handler in a Chain of Responsibility, it can also stop the chain by returning a response itself. Web middleware chains therefore combine <strong>Chain of Responsibility and Decorator</strong>.
 
 ## Chapter 3: The Core Abstraction — What `next` Really Is
 
 ### `next` Is Function Composition
 
-The essence of a middleware chain can be expressed in one phrase: <strong>function composition</strong>.
+At its core, a middleware chain is <strong>function composition</strong>.
 
-Each middleware receives a function representing "the next processing step" and chooses whether or not to call it. "The next processing step" is "all subsequent middlewares + the final handler" collapsed into a single function.
+Each middleware receives a function representing the next processing step and decides whether to call it. That function combines all subsequent middlewares and the final handler into one.
 
-Here is the simplest expression in Python:
+The following Python code defines the types:
 
 ```python
 from __future__ import annotations
@@ -214,16 +207,11 @@ Handler = Callable[[Request], Response]
 Middleware = Callable[[Handler], Handler]
 ```
 
-This is the single most important point:
-
-- `Handler` is a "request → response" function
-- `Middleware` is a <strong>higher-order function</strong> that "takes a handler and returns a new handler"
-
-Let us see what the `Middleware` signature `Callable[[Handler], Handler]` means in practice.
+The two type aliases carry the whole design: `Handler` maps a request to a response, and `Middleware` is a higher-order function that takes a handler and returns a new handler.
 
 ### Writing the First Middleware
 
-Let us implement a logging middleware:
+A logging middleware looks like this:
 
 ```python
 def logging_middleware(next_handler: Handler) -> Handler:
@@ -243,22 +231,20 @@ def logging_middleware(next_handler: Handler) -> Handler:
     return handler
 ```
 
-Understanding the structure of this function is the key to understanding the entire middleware chain:
+Every middleware that follows has the same structure:
 
-1. It receives `next_handler` as an argument (= a reference to "the next step")
-2. It defines and returns a new `handler` function
-3. Inside that `handler`:
-   - It performs pre-processing <strong>before</strong> calling `next_handler`
-   - It delegates by calling `next_handler(request)`
-   - It performs post-processing <strong>after</strong> `next_handler` returns
+1. It receives `next_handler` as an argument (a reference to the next step).
+2. It defines and returns a new `handler` function.
+3. Inside that `handler`, it:
+   - performs pre-processing before calling `next_handler`
+   - delegates by calling `next_handler(request)`
+   - performs post-processing after `next_handler` returns
 
-`next_handler` is "everything after me — all subsequent middlewares plus the final handler — collapsed into one function." This is what `next` really is.
+`next_handler` combines the next middleware, every middleware after it, and the final handler into one function. That is what `next` is.
 
 ### Why `next_handler` Stays Alive — The Closure Mechanism
 
-When `logging_middleware(some_handler)` is called, the inner `handler` function is returned. But `handler` does not receive `some_handler` as its own argument. So how can `handler` access `next_handler` when it is called later?
-
-The answer is <strong>closures</strong>. In Python, when an inner function references a variable from an enclosing function, that variable is "captured" by the inner function.
+Calling `logging_middleware(some_handler)` returns the inner `handler` function. `handler` takes only `request` as its argument, yet it can still call `next_handler` when it runs later. This works because of closures: in Python, when an inner function references a variable of an enclosing function, the inner function "captures" that variable.
 
 ```python
 def logging_middleware(next_handler: Handler) -> Handler:
@@ -276,15 +262,15 @@ def logging_middleware(next_handler: Handler) -> Handler:
     #    handler retains a reference to next_handler
 ```
 
-This mechanism underpins the entire middleware chain. When `compose` nests each middleware, every layer's `next_handler` holds a closure reference to the next layer. This is how all middlewares link together like a chain.
+When `compose` nests the middlewares, each layer's closure holds a reference to the next layer, and these references link the whole chain together.
 
-> <strong>A language-agnostic principle</strong>: Closures are not Python-specific — they exist in virtually every major language: JavaScript, Go, Ruby, Rust, and more. The reason Express.js's `next()` knows about "the next middleware," and the reason Go's `func(http.Handler) http.Handler` can form chains, are both powered by closures.
+> Closures exist in JavaScript, Go, Ruby, Rust, and almost every other major language. They are also how Express.js's `next()` knows which middleware comes next and how Go's `func(http.Handler) http.Handler` functions form chains.
 
 ## Chapter 4: Assembling the Middleware Chain
 
 ### The `compose` Function — Building the Chain
 
-To assemble multiple middlewares, we perform a <strong>reverse fold</strong> (reduce). Why reverse? Because the last registered middleware wraps closest to the handler (the innermost layer).
+The first middleware in the list should run first, so it must be the outermost layer. `compose` therefore wraps the handler starting from the last middleware, which makes the last registered middleware the innermost layer. This is a <strong>reverse fold</strong> (reduce).
 
 ```python
 def compose(handler: Handler, middlewares: list[Middleware]) -> Handler:
@@ -299,7 +285,7 @@ def compose(handler: Handler, middlewares: list[Middleware]) -> Handler:
     return composed
 ```
 
-Let us trace what happens step by step:
+The diagram shows the three wrapping steps for `[A, B, C]`:
 
 ```mermaid
 graph TD
@@ -314,12 +300,12 @@ graph TD
     end
 ```
 
-The resulting `A(B(C(handler)))`, when it receives a request, executes:
+When the resulting `A(B(C(handler)))` receives a request, the steps run in this order:
 
 1. A pre → B pre → C pre → handler (request direction)
 2. handler → C post → B post → A post (response direction)
 
-This is the <strong>onion model</strong>.
+This order is the onion model.
 
 ### Visualizing the Onion Model
 
@@ -338,7 +324,7 @@ graph LR
 
 ### Tracing the Call Stack
 
-Abstract descriptions only go so far. Let us trace the <strong>call stack</strong> concretely when a single request flows through `compose(handler, [logging, timing, auth])`.
+The following trace shows the call stack when one request passes through a pipeline built with `compose(handler, [logging, timing, auth])`.
 
 ```text
 compose execution (wiring phase, before any request):
@@ -377,19 +363,19 @@ app(Request("GET /")) invocation (execution phase):
   v
 ```
 
-Key observations:
+The trace shows three properties of the chain:
 
-- The <strong>wiring phase</strong> (`compose` execution) and the <strong>execution phase</strong> (`app(request)` call) are completely separated. Wiring happens once; thousands of requests flow through the same pipeline.
-- The call stack forms a <strong>nested structure</strong>. Each middleware's pre-processing runs on the way in, and post-processing runs <strong>on the way out</strong>. This is the reality behind the onion model's "round trip."
-- The handler (business logic) sits at the deepest point of the stack. No matter how many middlewares are added, the handler never needs to change.
+- The wiring phase (`compose` execution) and the execution phase (`app(request)` calls) are separate. Wiring runs once, and every later request passes through the same pipeline.
+- The calls are nested. Each middleware's pre-processing runs on the way in and its post-processing runs on the way out, which produces the round trip of the onion model.
+- The handler (business logic) sits at the bottom of the stack. Adding middlewares does not require changing it.
 
 Django's official documentation uses the onion analogy:
 
 > "You can think of it like an onion: each middleware class is a 'layer' that wraps the view, which is in the core of the onion. If the request passes through all the layers of the onion (each one calls `get_response` to pass the request in to the next layer), all the way to the view at the core, the response will then pass through every layer (in reverse order) on the way back out." — Django documentation
 
-### Running a Test
+### Running the Chain
 
-Let us add an authentication middleware and test the chain:
+The following code adds authentication and timing middlewares, then sends one request with an `Authorization` header and one without:
 
 ```python
 def auth_middleware(next_handler: Handler) -> Handler:
@@ -454,15 +440,15 @@ Body: Hello, World!
 Status: 401, Body: Unauthorized
 ```
 
-When there is no auth header, `auth_middleware` returns 401 directly without calling `next_handler`. Yet `logging_middleware` and `timing_middleware`'s post-processing still runs — this is the onion model in action. Middlewares outside the short-circuiting middleware always see both the request and the response.
+Without the header, `auth_middleware` returns 401 without calling `next_handler`. The post-processing of `logging_middleware` and `timing_middleware` still runs, so the log shows `<-- 401`. Middlewares outside the one that short-circuits always see both the request and the response.
 
 ## Chapter 5: Short-Circuiting — Early Pipeline Termination
 
 ### What Is Short-Circuiting?
 
-Short-circuiting means a middleware returns a response without calling `next`, <strong>skipping the rest of the pipeline</strong>.
+Short-circuiting means a middleware returns a response without calling `next`, skipping the rest of the pipeline.
 
-The `auth_middleware` from the previous chapter is exactly this. When authentication fails, there is no point executing the business logic (handler), so the pipeline is terminated there.
+`auth_middleware` from the previous chapter short-circuits: when authentication fails, running the handler would serve no purpose, so the middleware ends the pipeline there.
 
 ```mermaid
 sequenceDiagram
@@ -479,21 +465,21 @@ sequenceDiagram
     L-->>C: 401 Unauthorized
 ```
 
-Short-circuiting is essential for <strong>avoiding unnecessary work</strong>. The ASP.NET Core documentation emphasizes this:
+Short-circuiting lets a middleware avoid unnecessary work, as the ASP.NET Core documentation explains:
 
 > "Short-circuiting the request pipeline is often desirable because it avoids unnecessary work. For example, Static File Middleware can act as a terminal middleware by processing a request for a static file and short-circuiting the rest of the pipeline." — ASP.NET Core documentation
 
 ### Design Considerations for Short-Circuiting
 
-There are important design considerations when using short-circuiting:
+Three points affect how short-circuiting middleware is designed:
 
-- <strong>Outer middlewares are unaffected</strong> — Post-processing of middlewares outside the one that short-circuited always runs. This is why `logging_middleware`'s log appeared in the previous example.
-- <strong>Registration order matters</strong> — If you place auth middleware before logging middleware, failed auth attempts will not be logged. Typically, logging is placed at the outermost position.
-- <strong>Do not call `next` after sending a response</strong> — The ASP.NET Core documentation explicitly warns that calling `next` after a response has been sent to the client will cause an exception.
+- The post-processing of middlewares outside the one that short-circuits still runs. This is why `logging_middleware` logged the 401 response in the previous example.
+- Registration order matters. If you place the authentication middleware before the logging middleware, failed authentication attempts are not logged. Logging is usually placed at the outermost position.
+- The ASP.NET Core documentation warns against calling `next` after the response has been sent to the client, because changing a response that has already started throws an exception.
 
 ### Practical Example: Cache Middleware
 
-Another case where short-circuiting is particularly effective is <strong>cache middleware</strong>.
+A cache middleware also short-circuits: on a cache hit, it returns the stored response without calling the rest of the pipeline.
 
 ```python
 class CacheMiddleware:
@@ -530,13 +516,13 @@ class CacheMiddleware:
         return handler
 ```
 
-This pattern follows the same idea as ASP.NET Core's Static File Middleware. When a public static file or a precomputed public response is available, it can be served without executing heavier processing — authentication, authorization, business logic. Place only public static assets before auth; protected files must remain behind the appropriate authentication and authorization middleware.
+ASP.NET Core's Static File Middleware works the same way: a public static file or a precomputed public response can be returned without running authentication, authorization, or business logic. Only public content should be served before authentication; protected files must stay behind the appropriate authentication and authorization middleware.
 
 ## Chapter 6: Error-Handling Middleware
 
 ### Catching Exceptions with Middleware
 
-Error handling is one of the biggest strengths of middleware chains. Place an error-handling middleware at the outermost layer, and it will catch exceptions from anywhere inside the pipeline.
+An error-handling middleware placed at the outermost layer catches exceptions raised anywhere inside the pipeline.
 
 ```python
 def error_handling_middleware(next_handler: Handler) -> Handler:
@@ -552,7 +538,7 @@ def error_handling_middleware(next_handler: Handler) -> Handler:
     return handler
 ```
 
-This simple implementation is remarkably powerful. By wrapping the `next_handler(request)` call in `try/except`, it reliably catches exceptions from any middleware or handler in the pipeline.
+Because it wraps the `next_handler(request)` call in `try/except`, this short function catches exceptions from every middleware and handler inside it.
 
 ### Why Place It at the Outermost Layer?
 
@@ -567,17 +553,17 @@ graph LR
     H -.->|"Exception!"| E
 ```
 
-The reason for placing error-handling middleware at the outermost layer is clear:
+Placing the error-handling middleware at the outermost layer has three effects:
 
-1. <strong>Maximum coverage</strong> — At the outermost layer, it catches exceptions from all inner middlewares and handlers.
-2. <strong>Consistent error responses</strong> — If exceptions reach the client uncaught, framework-specific error pages or stack traces may be exposed.
-3. <strong>Logging integration</strong> — If logging middleware is inside error handling, 500 responses are also logged.
+1. It catches exceptions from all inner middlewares and the handler.
+2. An uncaught exception may reach the client as a framework-specific error page or stack trace; the middleware returns the same 500 response instead.
+3. `error_handling_middleware` prints each exception before returning 500. A logging middleware inside it does not log a status for these requests, because the exception skips its post-processing.
 
-ASP.NET Core's middleware ordering guidelines also instruct placing exception handling middleware at the earliest position in the pipeline.
+ASP.NET Core's middleware ordering guidelines also place exception-handling middleware at the earliest position in the pipeline.
 
 ### Express.js Error-Handling Middleware
 
-Express.js has a unique mechanism for distinguishing error-handling middleware from regular middleware. A function with four arguments (`err, req, res, next`) is recognized as error-handling middleware:
+Express.js distinguishes error-handling middleware from regular middleware by the number of parameters: it treats a function with four arguments (`err, req, res, next`) as error-handling middleware:
 
 ```javascript
 // Express.js error-handling middleware
@@ -590,11 +576,11 @@ app.use((err, req, res, next) => {
 
 ## Chapter 7: Middleware Composition and Execution Order
 
-### Registration Order Determines Everything
+### The Typical Registration Order
 
-Middleware registration order governs the application's <strong>security, performance, and correctness</strong>.
+Middleware registration order affects the application's security, performance, and correctness.
 
-A typical order based on ASP.NET Core documentation (simplified):
+A typical order based on the ASP.NET Core documentation (simplified):
 
 1. Exception handling
 2. HTTPS redirection
@@ -606,15 +592,15 @@ A typical order based on ASP.NET Core documentation (simplified):
 8. Custom middleware
 9. Endpoints
 
-This order has clear rationale:
+Three of these positions have specific reasons:
 
-- <strong>Exception handling first</strong> — To catch exceptions from all subsequent middlewares.
-- <strong>Public static files early</strong> — Public CSS and images do not need authentication/authorization; short-circuiting early improves performance. Protected assets should stay behind auth.
-- <strong>Authentication before authorization</strong> — You must determine "who the user is" before determining "what they can do." There is a logical dependency.
+- Exception handling goes first so that it catches exceptions from all later middlewares.
+- Public CSS and images need no authentication or authorization, so serving public static files early short-circuits the pipeline and saves work. Protected assets should stay behind authentication.
+- Authorization decides what the user can do, so it needs the identity that authentication establishes first. Authorization therefore comes after authentication.
 
 ### What Happens When You Get the Order Wrong
 
-Being told "order matters" is not the same as seeing the bugs it causes. Here are two classic failure patterns.
+Two common mistakes show what a wrong order breaks.
 
 <strong>Failure Pattern 1: Error handling is inside auth</strong>
 
@@ -627,7 +613,7 @@ bad_pipeline = compose(my_handler, [
 ])
 ```
 
-With this order, if `auth_middleware` itself throws an exception (e.g., unexpected header value during parsing), `error_handling_middleware` is inside auth and <strong>cannot catch the exception</strong>. Depending on framework and environment settings, the unhandled exception may expose framework error pages or stack traces — a security risk.
+With this order, if `auth_middleware` itself raises an exception (for example, on an unexpected header value during parsing), `error_handling_middleware` sits inside it and cannot catch the exception. Depending on the framework and environment settings, the unhandled exception may expose a framework error page or stack trace, which is a security risk.
 
 ```python
 # Correct order: error handling at the outermost layer
@@ -648,7 +634,7 @@ bad_pipeline = compose(my_handler, [
 ])
 ```
 
-Requests that fail authentication are short-circuited by `auth_middleware`, so they never reach `logging_middleware`. This means <strong>unauthorized access attempts are never logged</strong> — a critical gap from a security audit perspective.
+Requests that fail authentication are short-circuited by `auth_middleware` and never reach `logging_middleware`, so unauthorized access attempts are never logged. For a security audit, which needs a record of those attempts, this is a critical gap.
 
 ```python
 # Correct order
@@ -658,11 +644,11 @@ good_pipeline = compose(my_handler, [
 ])
 ```
 
-As these examples show, middleware registration order is not just configuration — it <strong>defines the security boundaries</strong> of your application.
+In both cases, the registration order decides which failures the error-handling and logging middlewares can observe. Registration order therefore <strong>defines the security boundaries</strong> of the application.
 
 ### Testing Composition — Verifying Execution Order
 
-Let us verify with code how registration order maps to execution order:
+The following trace middleware prints when each layer runs:
 
 ```python
 def make_trace_middleware(name: str) -> Middleware:
@@ -708,11 +694,11 @@ Execution order:
   [A] post-processing
 ```
 
-Pre-processing runs A → B → C (registration order); post-processing runs C → B → A (reverse order) — a perfect demonstration of the onion model.
+Pre-processing runs A → B → C (registration order), and post-processing runs C → B → A (reverse order), exactly as the onion model predicts.
 
 ## Chapter 8: Real-World Framework Comparison
 
-Let us see how the mechanism we built maps to actual frameworks. You will notice the structures are remarkably similar.
+The following sections map the mechanism we built to four frameworks.
 
 ### Express.js (Node.js)
 
@@ -749,7 +735,7 @@ Mapping to our implementation:
 
 ### Django (Python)
 
-Django middleware is a factory that takes `get_response` and returns a callable. This is virtually identical to our `Middleware = Callable[[Handler], Handler]`.
+Django middleware is a factory that takes `get_response` and returns a callable, which matches our `Middleware = Callable[[Handler], Handler]` almost exactly.
 
 ```python
 # Django middleware (function style)
@@ -781,7 +767,7 @@ From Django's documentation:
 
 > "The `get_response` callable provided by Django might be the actual view (if this is the last listed middleware) or it might be the next middleware in the chain. The current middleware doesn't need to know or care what exactly it is, just that it represents whatever comes next."
 
-This is exactly our `next_handler` — "everything ahead collapsed into one function."
+`get_response` plays the same role as our `next_handler`: it is everything ahead, combined into one function.
 
 ### ASP.NET Core (C#)
 
@@ -821,11 +807,11 @@ Middleware 2: after
 Middleware 1: after
 ```
 
-Pre-processing runs 1 → 2; post-processing runs 2 → 1 — perfectly matching our onion model.
+Pre-processing runs 1 → 2, and post-processing runs 2 → 1, the same order as in our onion model.
 
 ### Go (net/http)
 
-In Go, middleware is expressed as a function that takes an `http.Handler` and returns an `http.Handler`. This is the most direct form of function composition.
+In Go, middleware is a function that takes an `http.Handler` and returns an `http.Handler`.
 
 ```go
 func loggingMiddleware(next http.Handler) http.Handler {
@@ -849,7 +835,7 @@ func authMiddleware(next http.Handler) http.Handler {
 handler := loggingMiddleware(authMiddleware(myHandler))
 ```
 
-Go's `func(http.Handler) http.Handler` is <strong>structurally analogous</strong> to our `Callable[[Handler], Handler]`: it wraps one handler and returns another, even though Go's concrete handler signature uses `ResponseWriter` and `*Request`.
+Go's `func(http.Handler) http.Handler` is structurally analogous to our `Callable[[Handler], Handler]`: it wraps one handler and returns another, although Go's concrete handler signature uses `ResponseWriter` and `*Request`.
 
 ### Framework Comparison Table
 
@@ -865,7 +851,7 @@ Go's `func(http.Handler) http.Handler` is <strong>structurally analogous</strong
 
 ### Why Middleware Is Easy to Test
 
-Because middleware is designed as "a function that takes a handler and returns a handler," testing is remarkably simple. Just pass a <strong>mock handler</strong> to the middleware under test to write unit tests.
+Because a middleware takes a handler and returns a handler, you can unit-test it by passing it a mock handler.
 
 ```python
 def test_auth_middleware_rejects_unauthenticated() -> None:
@@ -930,13 +916,13 @@ def test_compose_order() -> None:
     assert order == ["A:pre", "B:pre", "handler", "B:post", "A:post"]
 ```
 
-Note that we can test middleware behavior through pure function calls without starting an HTTP server. This is a major advantage of the "middleware = higher-order function" design.
+These tests call functions directly and never start an HTTP server. Treating middleware as a higher-order function is what makes this possible.
 
 ## Chapter 10: Class-Based Middleware
 
 ### From Functions to Classes
 
-We have been implementing middleware in function style, but when middleware needs to hold internal state (configuration, counters, etc.), class-based implementations are more appropriate. This is why Django supports class-based middleware.
+The middlewares so far have been functions. When a middleware holds internal state such as configuration values or counters, a class-based implementation fits better. Django also supports class-based middleware.
 
 ```python
 class RateLimitMiddleware:
@@ -978,20 +964,20 @@ rate_limiter = RateLimitMiddleware(max_requests=10, window_seconds=60.0)
 app = compose(my_handler, [logging_middleware, rate_limiter, auth_middleware])
 ```
 
-By implementing the `__call__` method, the class instance becomes callable, conforming to the same `Callable[[Handler], Handler]` type as function-style middleware.
+Implementing `__call__` makes each instance callable, so it fits the same `Callable[[Handler], Handler]` type as function-style middleware.
 
 ## Conclusion
 
-In this article, we built a middleware chain from scratch in Python and learned the following design principles:
+Building a middleware chain in Python exposes the design principles behind it:
 
-1. <strong>Middleware = Higher-Order Function</strong> — "A function that takes a handler and returns a new handler." `next` is really just the rest of the chain collapsed into a single function.
-2. <strong>Onion Model</strong> — Pre-processing runs in registration order; post-processing runs in reverse. Requests and responses pass symmetrically through the middleware stack.
-3. <strong>Short-Circuiting</strong> — By returning a response without calling `next`, unnecessary processing is skipped. Post-processing of outer middlewares still runs.
-4. <strong>Function Composition</strong> — The `compose` function performs a reverse fold to assemble multiple middlewares into a single handler.
-5. <strong>Registration Order Matters</strong> — Security (auth → authorization), performance (early public static file serving), and correctness (outermost exception handling) all depend on order.
-6. <strong>Testability</strong> — Because middleware is a higher-order function, unit testing requires only passing a mock handler. No HTTP server needed.
+1. Middleware is a higher-order function: it takes a handler and returns a new handler. `next` is the rest of the chain combined into one function.
+2. Onion model: pre-processing runs in registration order and post-processing in reverse, so requests and responses pass through the same layers in opposite directions.
+3. Short-circuiting: returning a response without calling `next` skips unnecessary processing, while the post-processing of outer middlewares still runs.
+4. Function composition: `compose` assembles multiple middlewares into one handler with a reverse fold.
+5. Registration order: security (authentication before authorization), performance (serving public static files early), and correctness (exception handling at the outermost layer) all depend on it.
+6. Testability: passing a mock handler is enough for a unit test; no HTTP server is needed.
 
-Express.js's `next()`, Django's `get_response`, ASP.NET Core's `next.Invoke()`, Go's `next.ServeHTTP()` — the names and syntax differ, but the <strong>underlying design principle is the same</strong>. Having built one yourself, you should now be able to read any framework's middleware documentation and immediately recognize: "that's the mechanism I built."
+Express.js's `next()`, Django's `get_response`, ASP.NET Core's `next.Invoke()`, and Go's `next.ServeHTTP()` differ in name and syntax, but they share the same design principle. With your own implementation in mind, you can read any framework's middleware documentation and map it onto the mechanism you built.
 
 ## References
 

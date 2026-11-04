@@ -1,24 +1,22 @@
 ---
-title: "ベクトルデータベースの内部構造 — 近似最近傍探索を支えるアルゴリズムの深層"
+title: "ベクトルデータベースの内部構造 — 近似最近傍探索のアルゴリズム"
 date: "2026-04-17"
-description: "ベクトルデータベースが実現する近似最近傍探索 (ANN) を、距離計算・IVF・Product Quantization・HNSW・DiskANN まで、理論と実装の両面から解説します。"
+description: "ベクトルデータベースの中核にある近似最近傍探索 (ANN) を、距離計算から IVF・Product Quantization・HNSW・DiskANN まで、論文と FAISS などの実装に沿って説明します。"
 tags: ["Vector Database", "ANN", "HNSW", "Embedding", "RAG"]
 ---
 
-大規模言語モデル (LLM) の実用化とともに、埋め込み (embedding) ベクトルを保存し高速に検索する「ベクトルデータベース」は、検索・推薦・RAG (Retrieval-Augmented Generation) の基盤として一気に主流になりました。しかしその内部では、<strong>高次元空間における近似最近傍探索 (Approximate Nearest Neighbor Search; ANN)</strong> という、数十年にわたって研究されてきた難問が解かれています。
+大規模言語モデル (LLM) の普及とともに、埋め込み (embedding) ベクトルを保存して検索する「ベクトルデータベース」が、検索・推薦・RAG (Retrieval-Augmented Generation) の基盤として広く使われるようになりました。その内部で解いているのは、数十年にわたって研究されてきた<strong>高次元空間の近似最近傍探索 (Approximate Nearest Neighbor Search; ANN)</strong> です。
 
-この記事では、ベクトルデータベースの中核アルゴリズムを、素朴な全探索から出発して <strong>IVF (Inverted File)</strong> → <strong>Product Quantization (PQ)</strong> → <strong>HNSW (Hierarchical Navigable Small World)</strong> → <strong>DiskANN (Vamana)</strong> まで積み上げるように解説します。論文・OSS 実装（FAISS、Milvus、pgvector、Qdrant）の実コードに根ざした具体的な設計判断まで踏み込みます。
+この記事では、素朴な全探索から始めて IVF (Inverted File)、Product Quantization (PQ)、HNSW (Hierarchical Navigable Small World)、DiskANN (Vamana) の順に中核アルゴリズムを説明します。設計判断は、論文と OSS 実装（FAISS、Milvus、pgvector、Qdrant）のコードに沿って取り上げます。
 
-> <strong>たとえ話で押さえる全体像</strong>
+> <strong>図書館にたとえた全体像</strong>
 >
-> 巨大な図書館を想像してください。全探索は「1 冊ずつ手に取って『近いか？』と確かめる」司書。当然、蔵書 10 億冊なら一生かかります。
+> 巨大な図書館で、探している本に似た本を見つける場面を考えます。全探索は、1 冊ずつ手に取って似ているかを確かめる方法で、蔵書が 10 億冊あれば終わりません。
 >
-> - <strong>IVF</strong> は本棚ごとに『分類カード』を立てる司書。いきなり 10 億冊は見ず、まずカードで「探している本」に近い本棚を 10 棚選び、そこだけ見る。
-> - <strong>Product Quantization</strong> は「本の表紙写真を 256 色パレットから 64 個の色コードで要約する」司書。本そのものではなく色コード同士の一致度で距離を測る。比較がめちゃくちゃ速い代わりに、少しだけ精度を捨てる。
-> - <strong>HNSW</strong> は「知り合いネットワーク」。本同士が『似ている友達』のリンクを持っていて、疎な世界地図→密な市街地図とズームしながら目的の本にたどり着く。
-> - <strong>DiskANN</strong> はそのネットワークを <strong>SSD に寝かせた</strong> バージョン。RAM には<strong>全棚の縮刷版サムネイル</strong> (PQ で圧縮したベクトル) だけ並べておき、気になった本だけ SSD から原本を引っ張り出す。
->
-> この記事では全部『ちゃんと中身を見る』ので最初は抽象的な図式だけ覚えていただければ大丈夫です。
+> - <strong>IVF</strong>：本棚ごとに分類カードを立てておき、探している本に近いカードの本棚を 10 棚だけ選んで、その中を探します。
+> - <strong>Product Quantization</strong>：各本の表紙を、256 色のパレットから選んだ 64 個の色コードで要約します。表紙ではなく色コード同士を比べるので比較は速くなり、その代わり精度が少し下がります。
+> - <strong>HNSW</strong>：似た本同士を「友達」としてリンクしておき、疎な世界地図から密な市街地図へズームするように、リンクをたどって目的の本に近づきます。
+> - <strong>DiskANN</strong>：そのリンクのネットワークを SSD に置きます。RAM には全冊分の縮刷版 (PQ で圧縮したベクトル) だけを置き、有望な本だけ SSD から原本を読み出します。
 
 <ArticleVideo slug="vector-database-internals" />
 
@@ -26,7 +24,7 @@ tags: ["Vector Database", "ANN", "HNSW", "Embedding", "RAG"]
 
 ### 1.1 埋め込みベクトルとは
 
-テキスト・画像・音声などを、意味的な近さがユークリッド空間上の距離に対応するよう、<strong>固定次元の実数ベクトル</strong> に写像したものが埋め込みベクトルです。代表的なモデルの次元数は以下のようになります。
+テキスト・画像・音声などを、意味が近いものほどユークリッド空間上で近くなるように<strong>固定次元の実数ベクトル</strong>へ写像したものが、埋め込みベクトルです。代表的なモデルの次元数は次のとおりです。
 
 | モデル | 次元 | 距離指標 |
 | --- | --- | --- |
@@ -36,11 +34,11 @@ tags: ["Vector Database", "ANN", "HNSW", "Embedding", "RAG"]
 | BGE-M3 | 1024 | cosine |
 | CLIP ViT-L/14 | 768 | cosine |
 
-次元数 $d$ が 1000 を超えるのが普通で、このスケールでは <strong>全探索が現実的でない</strong> ことが問題の出発点です。
+次元数 $d$ は 1000 を超えることが多く、この規模で大量のベクトルを全探索するのは現実的ではありません。
 
 ### 1.2 距離・類似度の定義
 
-ベクトル $\mathbf{x}, \mathbf{y} \in \mathbb{R}^d$ に対して、代表的な指標は 3 つです。
+ベクトル $\mathbf{x}, \mathbf{y} \in \mathbb{R}^d$ に対する代表的な指標は 3 つです。
 
 <strong>ユークリッド距離（L2）:</strong>
 
@@ -60,27 +58,27 @@ $$
 \cos(\mathbf{x}, \mathbf{y}) = \frac{\mathbf{x} \cdot \mathbf{y}}{\|\mathbf{x}\|\,\|\mathbf{y}\|}
 $$
 
-重要な性質として、ベクトルを単位ベクトルに正規化 ($\|\mathbf{x}\|=1$) すると、
+ベクトルを単位ベクトルに正規化 ($\|\mathbf{x}\|=1$) すると、
 
 $$
 d_{L2}(\mathbf{x}, \mathbf{y})^2 = 2 - 2\,\mathbf{x}\cdot\mathbf{y}
 $$
 
-が成り立ち、<strong>コサイン類似度・内積・L2 距離は単調変換 (大小関係を保ったままスケールをつけ替える変換) で等価</strong> になります。つまり順位だけが意味を持つ検索では三者を使い分ける必要がなく、多くの ANN ライブラリーは内部的に L2 または内積に統一し、事前正規化で三者を切り替えます。
+が成り立ちます。このとき<strong>コサイン類似度・内積・L2 距離は、互いに単調変換 (大小関係を保ったまま値を変換すること) で移り合う</strong>ので、どれを使っても検索結果の順位は同じです。そのため多くの ANN ライブラリーは内部で L2 か内積のどちらかに統一し、事前に正規化するかどうかで三者を切り替えます。
 
 ### 1.3 次元の呪い (Curse of Dimensionality)
 
-高次元空間では直感が通じなくなります。具体的には：
+高次元空間では、低次元での直感が通じなくなります。
 
-- <strong>距離の集中</strong>: 任意の点対の距離の比 $\max/\min$ が $1$ に収束し、「最近傍」と「遠点」の差が相対的に消える。
-- <strong>ボリュームの偏り</strong>: 単位球の体積のほぼすべてが「表皮近傍」に集中する。
-- <strong>空間分割の非効率</strong>: 低次元で有効な kd-tree (座標軸と平行に空間を二分木で区切る古典的な最近傍索引) のような軸平行分割は、$d > 20$ 程度で全探索と同等のノード訪問を要する。
+- <strong>距離の集中</strong>：点対の距離の比 $\max/\min$ が $1$ に近づき、最近傍と遠い点の差が相対的に小さくなる。
+- <strong>体積の偏り</strong>：単位球の体積のほぼすべてが表面近くに集中する。
+- <strong>空間分割の非効率</strong>：kd-tree (座標軸に沿って空間を二分していく古典的な最近傍索引) のような軸平行の分割は、低次元では有効だが、$d > 20$ 程度になると全探索と同程度のノードを訪問する。
 
-そのため <strong>近似的に解く</strong> （厳密解でなく、再現率 (真の上位 k 件のうち ANN が実際に返せた件数の割合) 95%+ を狙う）という割り切りが、実用的なベクトル検索の前提となります。これが ANN の本質です。
+そのため実用的なベクトル検索では、厳密解を諦め、再現率 (真の上位 k 件のうち、ANN が実際に返せた件数の割合) 95% 以上を狙って<strong>近似的に解きます</strong>。これが ANN の前提です。
 
 ## 2. ベースライン: 全探索 (Flat)
 
-最初に押さえるべきは「全探索が十分速い条件ではそれで良い」という事実です。FAISS でいう `IndexFlatL2` / `IndexFlatIP` がこれに相当します。
+全探索で十分速い条件なら、全探索を使えば済みます。FAISS の `IndexFlatL2` / `IndexFlatIP` がこれに当たります。
 
 ```python
 # 素朴な全探索 (pseudocode)
@@ -91,23 +89,21 @@ def search(query: np.ndarray, xb: np.ndarray, k: int):
     return idx[np.argsort(dists[idx])]
 ```
 
-計算量は $O(Nd)$ で、$N=10^6$、$d=1024$、単精度 float で、1 クエリーあたり <strong>4GB メモリー走査</strong> (≒ フル HD 映画 1 本分のバイト数を毎クエリー読む) が必要です。ただし SIMD (AVX-512 / NEON; CPU の 1 命令で複数の数値をまとめて計算する機構) と BLAS GEMM (高度に最適化された行列積ルーチン) を使うと、$N \le 10^5$ 程度までは全探索のほうが HNSW より速いことすらあります。FAISS の `IndexFlat` が「真値計算用のリファレンス」として残っているのはこのためです。
+計算量は $O(Nd)$ です。$N=10^6$、$d=1024$ の単精度 float なら、1 クエリーごとに 4GB のメモリーを走査します。それでも SIMD (AVX-512 / NEON; 1 命令で複数の数値をまとめて計算する CPU の機構) と BLAS の GEMM (高度に最適化された行列積ルーチン) を使えば、$N \le 10^5$ 程度までは全探索のほうが HNSW より速い場合もあります。FAISS が `IndexFlat` を、正解を求めるためのリファレンスとして残しているのはこのためです。
 
-ANN の工夫は、この $O(Nd)$ を <strong>(a) アクセスするベクトル数を減らす</strong> か <strong>(b) 1 本あたりの距離計算を圧縮する</strong> の 2 方向で削ります。IVF が前者、PQ が後者、HNSW が前者を別角度で、DiskANN が両者を組み合わせます。
+ANN は、この $O(Nd)$ を <strong>(a) 調べるベクトルの数を減らす</strong>か、<strong>(b) 1 本あたりの距離計算を軽くする</strong>かの 2 方向で削ります。IVF は (a)、PQ は (b) です。HNSW は IVF とは別の方法で (a) を実現し、DiskANN は (a) と (b) を組み合わせます。
 
 ## 3. IVF: 空間分割による候補削減
 
-> <strong>一言で言うと</strong>: 「全部見ないで、近くの本棚だけ見る」アプローチ。まずデータを「似たもの同士のグループ」に分けておく（インデックス構築）、検索時はそのグループのうちクエリーに近いものを数個だけ開いて中を見る。グループ内は全探索するので、<strong>「見ないグループに正解が潜んでいたらライバル</strong>」になるのがこの手法の弱点です。
+> 全部を調べず、近い本棚だけを調べる方法です。インデックス構築時にデータを似たもの同士のグループに分けておき、検索時はクエリーに近いグループを数個だけ開いて中を全探索します。開かなかったグループに正解があると見逃す点が、この手法の弱点です。
 
 ### 3.1 k-means クラスタリングによる粗分割
 
-IVF (Inverted File index) は、古典的な文字列転置索引のアナロジーです。
+IVF (Inverted File index) という名前は、文書検索の転置索引になぞらえたものです。
 
-> <strong>発想のたとえ</strong>: 街中で「近くの美味しいラーメン店」を探すとき、まず東京 23 区ぜんぶを回るのではなく、<strong>クエリー地点 (例えば自宅) に近い渋谷区・新宿区・目黒区の 3 区だけに絞ってから店を探す</strong>、あの動き方です。最初に粗い地区 (セントロイド) で絞り、次に地区内だけ全探索する、という二段構えです。
-
-1. 学習: 全データに k-means を走らせ $n_{\text{list}}$ 個のセントロイド (各グループの中心に立てる代表ベクトル) $\{\mathbf{c}_1, \dots, \mathbf{c}_{n_{\text{list}}}\}$ を作る（典型値 $n_{\text{list}} = \sqrt{N}$）。
-2. 構築: 各ベクトルを「最も近いセントロイド」に割り当て、<strong>セントロイドごとの posting list (そのセントロイドに所属する点の ID 一覧。本の巻末索引で 1 つの見出し語にぶら下がるページ番号リストと同じ構造)</strong> に格納する。
-3. 検索: クエリー $\mathbf{q}$ に対して近いセントロイド上位 $n_{\text{probe}}$ 個を選び、それらの posting list 内だけを走査する。
+1. 学習：全データに k-means を適用し、$n_{\text{list}}$ 個のセントロイド (各グループの中心を表す代表ベクトル) $\{\mathbf{c}_1, \dots, \mathbf{c}_{n_{\text{list}}}\}$ を求める（典型値は $n_{\text{list}} = \sqrt{N}$）。
+2. 構築：各ベクトルを最も近いセントロイドに割り当て、その ID をセントロイドごとの <strong>posting list</strong> (本の巻末索引で、1 つの見出し語に並ぶページ番号のリストに当たる) に格納する。
+3. 検索：クエリー $\mathbf{q}$ に近いセントロイドを上位 $n_{\text{probe}}$ 個選び、それらの posting list だけを走査する。
 
 ```mermaid
 graph LR
@@ -122,27 +118,26 @@ graph LR
 
 ### 3.2 パラメーターの設計
 
-- <strong>`nlist`</strong> — 大きいほど 1 リストが短くなり検索は速いが、再現率のために `nprobe` も増やす必要がある。経験則 $n_{\text{list}} \approx 4\sqrt{N} \sim 16\sqrt{N}$。
-- <strong>`nprobe`</strong> — 検索時に訪問するセル数。$n_{\text{probe}} = 1$ は非常に速いが再現率が低下。つまり「真の最近傍が隣のセルにいたら見逃す」リスクが大きくなるということ。実用的には 10 〜 128 で再現率 90-99% に到達する。
-- <strong>訓練データ量</strong> — FAISS のクラスタリング既定値は `min_points_per_centroid = 39`、`max_points_per_centroid = 256`。目安として `nlist` の 39-256 倍のサンプルが「安心して学習できる」レンジ（下回ると警告、上回ると自動サブサンプリング）。
+- <strong>`nlist`</strong> — 大きいほど 1 リストが短くなって検索は速くなるが、同じ再現率を保つには `nprobe` も増やす必要がある。経験則は $n_{\text{list}} \approx 4\sqrt{N} \sim 16\sqrt{N}$。
+- <strong>`nprobe`</strong> — 検索時に訪問するセルの数。$n_{\text{probe}} = 1$ は非常に速いが、真の最近傍が隣のセルにあると見逃すため再現率が下がる。実用的には 10〜128 で再現率 90〜99% に届く。
+- <strong>訓練データ量</strong> — FAISS のクラスタリングの既定値は `min_points_per_centroid = 39`、`max_points_per_centroid = 256`。`nlist` の 39〜256 倍のサンプル数が目安で、下回ると警告が出て、上回ると自動でサブサンプリングされる。
 
 ### 3.3 IVF 単体の限界
 
-IVF はセル内では依然として全探索であり、セルが長いと速度が稼げません。次節の Product Quantization と組み合わせるのが定石です（FAISS の `IndexIVFPQ`）。
+IVF もセル内は全探索なので、1 つのセルに含まれる点が多いと速くなりません。そのため、次節の Product Quantization と組み合わせて使うのが一般的です（FAISS の `IndexIVFPQ`）。
 
 ## 4. Product Quantization (PQ)
 
-> <strong>一言で言うと</strong>: 本そのものではなく<strong>「要約コード」同士を比べる</strong> 方式です。長いベクトルをいくつかの短い区間に切り、区間ごとに<strong>256 色パレットから 1 色を選ぶようにラベルを付ける</strong>ことで、ベクトル 1 本を最終的に数十バイトの整数列に圧縮します。記憶量も距離計算も桁違いに速くなる代わり、要約の粒度だけ精度を捨てます。
+> ベクトルそのものではなく、短い要約コード同士を比べる方法です。長いベクトルをいくつかの区間に切り、区間ごとに 256 色のパレットから 1 色を選ぶようにラベルを付けて、ベクトル 1 本を数十バイトの整数列に圧縮します。メモリー使用量が減り、距離計算も桁違いに速くなる代わりに、要約の粗さの分だけ精度が下がります。
 
 ### 4.1 アイデア: ベクトルを「部分ベクトルのコード」に分解
 
-PQ は 2011 年の Jégou ら<sup>[1]</sup> による手法で、<strong>高次元ベクトルを少ビット整数に圧縮</strong> して距離計算を高速化します。
+PQ は 2011 年に Jégou ら<sup>[1]</sup> が提案した手法で、<strong>高次元ベクトルを少ないビット数の整数に圧縮</strong>して距離計算を速くします。
+1. ベクトル $\mathbf{x} \in \mathbb{R}^d$ を $m$ 個の部分ベクトルに分割する：$\mathbf{x} = [\mathbf{x}^{(1)}, \dots, \mathbf{x}^{(m)}]$、各 $\mathbf{x}^{(i)} \in \mathbb{R}^{d/m}$。
+2. 部分空間ごとに独立に k-means を適用し、$k^* = 256$ 個のセントロイドからなるコードブック (部分空間ごとの 256 色のパレット) $\{\mathbf{c}^{(i)}_1, \dots, \mathbf{c}^{(i)}_{256}\}$ を得る。
+3. 各 $\mathbf{x}^{(i)}$ を、最も近いセントロイドの 8 ビットの ID で置き換える。
 
-1. ベクトル $\mathbf{x} \in \mathbb{R}^d$ を $m$ 個の部分ベクトルに分割: $\mathbf{x} = [\mathbf{x}^{(1)}, \dots, \mathbf{x}^{(m)}]$、各 $\mathbf{x}^{(i)} \in \mathbb{R}^{d/m}$。
-2. 部分空間ごとに独立に k-means を走らせ、$k^* = 256$ 個のコードブック (部分空間ごとに用意する 256 色のパレット) $\{\mathbf{c}^{(i)}_1, \dots, \mathbf{c}^{(i)}_{256}\}$ を得る。
-3. 各 $\mathbf{x}^{(i)}$ を最も近いコードブックの <strong>8 ビット ID</strong> で置き換える。
-
-結果として、$d$ 次元 float32（$4d$ バイト）のベクトルが <strong>$m$ バイト</strong> に圧縮されます。$d=1024$, $m=64$ なら 4096 → 64 バイト、<strong>64 倍の圧縮</strong>です。
+その結果、$d$ 次元 float32（$4d$ バイト）のベクトルが $m$ バイトになります。$d=1024$、$m=64$ なら 4096 バイトが 64 バイトになり、64 分の 1 に圧縮されます。
 
 ```mermaid
 graph TD
@@ -159,69 +154,67 @@ graph TD
 
 ### 4.2 非対称距離計算 (ADC)
 
-PQ の速さの鍵は <strong>Asymmetric Distance Computation</strong> です。クエリー $\mathbf{q}$ は圧縮せず浮動小数のまま保持し、検索時に次のようなルックアップテーブル (LUT) を事前計算します。
+PQ が速い理由は Asymmetric Distance Computation にあります。クエリー $\mathbf{q}$ は圧縮せず浮動小数点数のまま使い、検索時に次のルックアップテーブル (LUT) を先に計算します。
 
-1. クエリーを同じく $m$ 個の部分に分割: $\mathbf{q} = [\mathbf{q}^{(1)}, \dots, \mathbf{q}^{(m)}]$。
-2. 各部分空間 $i$ について、コードブックの全 256 セントロイドとの距離を事前計算:
+1. クエリーも同じく $m$ 個の部分に分割する：$\mathbf{q} = [\mathbf{q}^{(1)}, \dots, \mathbf{q}^{(m)}]$。
+2. 各部分空間 $i$ について、コードブックの 256 個のセントロイドすべてとの距離を計算しておく：
    $$
    \text{LUT}_i[j] = \|\mathbf{q}^{(i)} - \mathbf{c}^{(i)}_j\|^2, \quad j \in \{0, \dots, 255\}
    $$
-3. あるデータ点 $\mathbf{x}$ のコード $(id_1, \dots, id_m)$ に対する距離の近似は、単なる <strong>$m$ 回のテーブル参照の総和</strong>:
+3. データ点 $\mathbf{x}$ のコード $(id_1, \dots, id_m)$ に対する近似距離は、$m$ 回のテーブル参照の総和で求まる：
    $$
    d(\mathbf{q}, \mathbf{x})^2 \approx \sum_{i=1}^{m} \text{LUT}_i[id_i]
    $$
 
-LUT 構築後は<strong>1 回の距離計算に浮動小数乗算が 0 回</strong>です。$m=64$ なら、格納コードごとに 64 回のバイト ID によるテーブル参照と、テーブル値の加算で済みます。FAISS の `pq4_fast_scan` のような SIMD fast-scan カーネルは大きなバッチを高速に走査できますが、実スループットはコードサイズ、CPU の SIMD 幅、メモリー配置、再現率設定に依存します。
-
-<strong>要するに</strong>: PQ の距離計算は「$d$ 次元の差分計算と二乗」から「あらかじめ作った表の足し算」にすり替わっており、これが PQ が桁違いに速い本質的な理由です。
+LUT を作った後は、<strong>距離 1 回あたりの浮動小数点数の乗算は 0 回</strong>です。$d$ 次元の差の二乗和の代わりに表の値を足すだけなので、PQ は桁違いに速くなります。$m=64$ なら、格納されたコード 1 つにつき、バイト ID による 64 回のテーブル参照と、その値の加算で済みます。FAISS の `pq4_fast_scan` のような SIMD fast-scan カーネルは大きなバッチを高速に走査できますが、実際のスループットはコードサイズ、CPU の SIMD 幅、メモリー配置、再現率の設定に依存します。
 
 <ProductQuantizationVisualizer />
 
 
-<strong>小さな具体例</strong>: $d=4$、$m=2$（部分ベクトル次元 2）、$k^*=4$（2 ビット ID）とします。クエリー $\mathbf{q} = [1, 0, 0, 1]$ を 2 分割して $\mathbf{q}^{(1)} = [1, 0]$、$\mathbf{q}^{(2)} = [0, 1]$。部分空間 1 のコードブックが $\{[1,0], [0,1], [-1,0], [0,-1]\}$（ID 0〜3）なら、
+<strong>小さな計算例</strong>：$d=4$、$m=2$（部分ベクトルは 2 次元）、$k^*=4$（2 ビットの ID）とします。クエリー $\mathbf{q} = [1, 0, 0, 1]$ を 2 つに分けると $\mathbf{q}^{(1)} = [1, 0]$、$\mathbf{q}^{(2)} = [0, 1]$ です。部分空間 1 のコードブックが $\{[1,0], [0,1], [-1,0], [0,-1]\}$（ID 0〜3）なら、
 
 $$
 \text{LUT}_1 = [\,0,\ 2,\ 4,\ 2\,]
 $$
 
-（各 $\|\mathbf{q}^{(1)} - \mathbf{c}^{(1)}_j\|^2$）。部分空間 2 も同様に $\text{LUT}_2 = [2, 0, 2, 4]$。格納済みベクトルの PQ コードが $(id_1, id_2) = (0, 1)$（つまり $\hat{\mathbf{x}} \approx [1, 0, 0, 1]$）なら、近似距離の二乗は $\text{LUT}_1[0] + \text{LUT}_2[1] = 0 + 0 = 0$。乗算は一度もなく、<strong>2 回のテーブル参照と 1 回の加算</strong> のみです。実データでは $m=64$、256 エントリーの LUT が 64 個並び、同じ操作を SIMD で 16-32 本並列に回します。
+（各要素は $\|\mathbf{q}^{(1)} - \mathbf{c}^{(1)}_j\|^2$）です。部分空間 2 も同じコードブックなら $\text{LUT}_2 = [2, 0, 2, 4]$ です。格納済みベクトルの PQ コードが $(id_1, id_2) = (0, 1)$（つまり $\hat{\mathbf{x}} \approx [1, 0, 0, 1]$）なら、近似距離の二乗は $\text{LUT}_1[0] + \text{LUT}_2[1] = 0 + 0 = 0$ です。乗算は一度もなく、2 回のテーブル参照と 1 回の加算だけで求まります。実際のインデックスでは 256 要素の LUT が 64 個並び、同じ操作を SIMD で 16〜32 個のコードについて並列に実行します。
 
 ### 4.3 誤差とチューニング
 
-PQ は圧縮なので誤差が出ます。経験的なパラメーター：
+PQ は非可逆な圧縮なので誤差が出ます。経験的なパラメーターの目安は次のとおりです。
 
-- <strong>`m`</strong> — 部分ベクトル数。$d$ を割り切ること、$d/m$ が 4-16 程度が精度・速度のバランスが良い。
-- <strong>`nbits`</strong> — 通常 8（256 セントロイド）。16 ビット（65536 セントロイド）もあるがコードブック訓練が重い。
-- <strong>Optimized Product Quantization (OPQ)</strong><sup>[2]</sup> — 部分空間に分ける前に直交行列 $R$ で回転させ、部分空間ごとの分散を均す前処理。再現率を数 %〜10% 向上させる。
+- <strong>`m`</strong> — 部分ベクトルの数。$d$ を割り切る必要があり、$d/m$ が 4〜16 程度だと精度と速度のバランスが良い。
+- <strong>`nbits`</strong> — 通常は 8（256 セントロイド）。16 ビット（65536 セントロイド）も使えるが、コードブックの訓練が重くなる。
+- <strong>Optimized Product Quantization (OPQ)</strong><sup>[2]</sup> — 部分空間に分ける前に直交行列 $R$ でベクトルを回転させ、部分空間ごとの分散を均す前処理。再現率が数 %〜10% 向上する。
 
 ### 4.4 IVFPQ: 二段構成
 
 実用的なベクトルDBで最も広く使われる構成の 1 つが IVF + PQ です。
 
-- IVF でクエリーが落ちるセルを数個に絞り込む。
-- セル内のベクトルは PQ コードで保持。
-- セル重心からの残差 $\mathbf{x} - \mathbf{c}$ を PQ 符号化する（<strong>residual PQ</strong>）ことで、PQ の表現力を最大化。
+- IVF で、調べるセルを数個に絞る。
+- セル内のベクトルは PQ コードで保持する。
+- PQ で符号化するのはベクトルそのものではなく、セル重心からの残差 $\mathbf{x} - \mathbf{c}$ にする（<strong>residual PQ</strong>）。
 
-<strong>残差の幾何的な直観</strong>: 生のベクトル $\mathbf{x}$ は「原点から遠く、広い空間に散らばった点」ですが、所属セルの重心 $\mathbf{c}$ を引くと、残差 $\mathbf{x} - \mathbf{c}$ は<strong>そのセルの内側の「ずれ」だけ</strong>を表す、ずっと小さいベクトルになります。分布がコンパクトになる分、同じ 256 個のセントロイドでも細かい差を表現でき、量子化誤差が下がります。セル数 $n_{\text{list}}$ が多いほどこの効果は強くなります。
+残差を符号化する理由は幾何的に説明できます。生のベクトル $\mathbf{x}$ は広い空間に散らばっていますが、所属セルの重心 $\mathbf{c}$ を引いた残差 $\mathbf{x} - \mathbf{c}$ は、そのセルの内側でのずれだけを表す小さなベクトルです。分布がまとまる分、同じ 256 個のセントロイドで細かい差を表現でき、量子化誤差が下がります。セル数 $n_{\text{list}}$ が多いほど、この効果は強くなります。
 
-FAISS の `IndexIVFPQ` は $N=10^9$ 規模 (≒ 10 億ベクトル。英語版 Wikipedia 全記事を 100 倍にしたぐらいの量) までスケール可能で、`nprobe` を抑えれば単機で数 ms〜数十 ms 程度のレイテンシーに到達します（具体的な値はハード・`nprobe`・再現率目標に強く依存 — FAISS wiki の [Indexing 1G vectors](https://github.com/facebookresearch/faiss/wiki/Indexing-1G-vectors) 参照）。再現率は HNSW より低くなりがちで、GPU 検索（FAISS GPU）、大量メモリーが許されない環境、ディスクバックアップ用途で第一候補になります。
+FAISS の `IndexIVFPQ` は $N=10^9$ 規模 (10 億ベクトル) まで単機でスケールし、`nprobe` を抑えれば数 ms〜数十 ms 程度のレイテンシーで検索できます（具体的な値はハードウェア・`nprobe`・再現率の目標によって大きく変わります。FAISS wiki の [Indexing 1G vectors](https://github.com/facebookresearch/faiss/wiki/Indexing-1G-vectors) を参照）。再現率は HNSW より低くなりがちですが、メモリー使用量が小さく GPU でも動くので、GPU 検索（FAISS GPU）、大量のメモリーを確保できない環境、ディスクを併用する構成では第一候補になります。
 
-<strong>本番でのハマりどころ</strong>: 学習データがドメインに合わないと、<strong>コードブック崩壊</strong>（ほぼ全ベクトルが一握りのセントロイドに割り当てられ、残りが空になる現象）が起きて再現率が急落します。FAISS が警告するように `min_points_per_centroid` 以上の学習サンプルを確保すること、そして<strong>本番と同じ分布からサンプリングして訓練する</strong>（例: 多言語 BGE を使うなら言語比率も本番に合わせる）のが予防策です。IVF 側でも、データが一部トピックに偏っているとセルのサイズが不均衡になり、`nprobe` を増やしてもロングテール posting list が p99 を押し上げます。定期的にクラスターの最大/最小サイズをメトリクス化しておくと早期に気付けます。
+<strong>本番での落とし穴</strong>：学習データが本番のデータ分布に合っていないと、<strong>コードブック崩壊</strong>（ほぼ全ベクトルが一握りのセントロイドに割り当てられ、残りが空になる現象）が起き、再現率が急落します。予防策は、FAISS が警告を出す `min_points_per_centroid` 以上の学習サンプルを確保することと、本番と同じ分布からサンプリングして訓練する（例：多言語 BGE を使うなら言語の比率も本番に合わせる）ことです。IVF 側でも、データが一部のトピックに偏るとセルのサイズが不均衡になり、`nprobe` を増やしても一部の長い posting list が p99 レイテンシーを押し上げます。クラスターの最大・最小サイズを定期的にメトリクスとして記録しておくと、早く気付けます。
 
 ## 5. HNSW: 階層的ナビゲーション可能スモールワールド
 
-> <strong>一言で言うと</strong>: ベクトル同士を<strong>「似た友達のリンク」</strong>でつないだグラフを前もって作っておき、検索時は<strong>どこか 1 点から「よりクエリーに近い友達」へどんどん歩いていく</strong>方式です。世界地図 → 国地図 → 市街地図と層を下りながら近づくので、実効速度・再現率共に現在のデファクト候補。ただし <strong>全データが RAM に載る前提</strong>です。
+> 似たベクトル同士を「友達」としてリンクしたグラフを前もって作り、検索時は 1 点から出発して、よりクエリーに近い友達へ移動を繰り返す方法です。世界地図、国の地図、市街地図と層を下りながら近づきます。メモリー内のベクトル検索では現在の標準的な選択肢ですが、<strong>全データが RAM に載ることが前提</strong>です。
 
 ### 5.1 着想: スキップリスト × スモールワールドグラフ
 
-HNSW<sup>[3]</sup>（Malkov & Yashunin, 2016）は、<strong>グラフベースの ANN</strong> で現在最も広く使われる手法です。2 つの洞察を組み合わせています。
+HNSW<sup>[3]</sup>（Malkov & Yashunin, 2016）は、グラフベースの ANN で現在最も広く使われる手法です。次の 2 つの考え方を組み合わせています。
 
-1. <strong>Navigable Small World (NSW)</strong>: 近傍だけでなく長距離エッジも持つグラフは、貪欲ルーティング (各ステップで『今いる点の隣人のうち、クエリーに最も近い 1 本』にだけ進み続ける単純な探索) が対数時間で任意のノードに到達できる（Kleinberg 2000 の小さな世界モデル）。Kleinberg の要諦は、<strong>その格子モデルではノード間距離 $r$ に対して確率 $\propto 1/r^d$ で長距離エッジを張るとき、そしてその時に限って</strong>、局所情報だけを見る貪欲アルゴリズムが $O(\log^2 N)$ ホップで目的地に着く、というものです。HNSW は確率的な階層と多様性を重視した近傍選択でこの直観を借りますが、Kleinberg の厳密な長距離エッジ分布を明示的にサンプリングするわけではありません。
-2. <strong>スキップリスト</strong>: 確率的に階層を作ると、高次元探索が「粗く始めて徐々に細かく」できる。
+1. <strong>Navigable Small World (NSW)</strong>：近傍へのエッジに加えて長距離エッジも持つグラフでは、貪欲ルーティング (各ステップで、今いる点の隣人のうちクエリーに最も近い点へ進み続ける単純な探索) が、少ないホップ数で任意のノードに到達できる（Kleinberg 2000 のスモールワールドモデル）。Kleinberg の結果の要点は、格子モデルでノード間距離 $r$ に対して確率 $\propto 1/r^d$ で長距離エッジを張る場合、かつその場合に限り、局所的な情報だけを使う貪欲アルゴリズムが $O(\log^2 N)$ ホップで目的地に着く、というものです。HNSW は確率的な階層と、多様性を重視した近傍選択でこの考え方を取り入れていますが、Kleinberg の長距離エッジの分布を明示的にサンプリングするわけではありません。
+2. <strong>スキップリスト</strong>：確率的に階層を作ると、探索を粗い層から始めて徐々に細かい層へ進められる。
 
 ### 5.2 構造
 
-HNSW は <strong>多層グラフ</strong> です。
+HNSW は多層グラフです。
 
 ```mermaid
 graph TD
@@ -238,15 +231,15 @@ graph TD
     A1 -.-> A0
 ```
 
-- すべての点は <strong>Layer 0</strong> に含まれる。
-- 各点の最上位層は指数分布 $\ell = \lfloor -\ln(U(0,1)) \cdot m_L \rfloor$ に従ってランダムに決まる（$m_L = 1/\ln(M)$ が既定）。
-- 各層のノードは最大 $M$ 本のエッジ（Layer 0 は $M_{\max 0} = 2M$）を持つ。
+- すべての点は Layer 0 に含まれる。
+- 各点が属する最上位の層は、指数分布に従う $\ell = \lfloor -\ln(U(0,1)) \cdot m_L \rfloor$ でランダムに決まる（既定は $m_L = 1/\ln(M)$）。
+- 各層のノードは最大 $M$ 本のエッジを持つ（Layer 0 では $M_{\max 0} = 2M$）。
 
 ### 5.3 検索アルゴリズム
 
 <HNSWSearchVisualizer />
 
-文字で書くと次のようになります。
+疑似コードで書くと次のとおりです。
 
 ```text
 search(q, k):
@@ -274,13 +267,11 @@ greedy_search_layer(q, ep, ef, level):
     return W
 ```
 
-重要な点：
+探索は二段構えです。上位層ではおおまかに近い方向へ降り、最下層では複数の候補を並行にたどります。
 
-- <strong>`efSearch`</strong> — 候補集合のサイズ。大きいほど再現率が上がるが遅くなる。実運用では 50-200 が多い。再現率 99% を狙うなら 300+ も。
-- <strong>上位層は `ef=1`</strong>: 貪欲に一番近い方向へ進むだけ。
-- <strong>Layer 0 で `ef=efSearch`</strong>: ビームサーチ (候補を複数本同時に保持しながら並行に歩く幅優先的な探索) で候補を広げる。
-
-<strong>要するに</strong>: 上層で「ざっくり近い方向」へ一直線に降り、下層で「複数の有望候補を並行にたどる」二段構えになっています。
+- <strong>`efSearch`</strong> — 候補集合のサイズ。大きいほど再現率が上がるが遅くなる。実運用では 50〜200 が多く、再現率 99% を狙うなら 300 以上にすることもある。
+- <strong>上位層では `ef=1`</strong> — クエリーに最も近い方向へ貪欲に進むだけ。
+- <strong>Layer 0 では `ef=efSearch`</strong> — ビームサーチ (複数の候補を同時に保持し、並行して探索を進める方法) で候補を広げる。
 
 ### 5.4 挿入アルゴリズムとエッジ選択
 
@@ -302,7 +293,7 @@ insert(x):
     if ℓ > top_level: top_level = ℓ; entry_point = x
 ```
 
-エッジの<strong>選び方</strong>が HNSW の品質を決めます。単純な「最も近い $M$ 本」ではなく、<strong>多様性を保つヒューリスティック (select_neighbors_heuristic)</strong> が使われます。
+HNSW の品質は、エッジの選び方で決まります。単純に最も近い $M$ 本を選ぶのではなく、<strong>近傍の多様性を保つヒューリスティック (select_neighbors_heuristic)</strong> を使います。
 
 ```text
 select_neighbors_heuristic(x, W, M):
@@ -315,32 +306,30 @@ select_neighbors_heuristic(x, W, M):
     return R
 ```
 
-これは「既に採用した近傍より、$x$ のほうが $e$ に近い場合だけ採用する」ルール。<strong>異なる方向に分散した近傍</strong>を選ぶことで、グラフが局所クラスターに縮退するのを防ぎ、後の検索で行き詰まりにくくします。`faiss/impl/HNSW.cpp` の `shrink_neighbor_list` がこれを実装しています。
+このルールでは、候補 $e$ を、既に採用したどの近傍よりも $x$ のほうが $e$ に近い場合だけ採用します。既存の近傍と同じ方向にある候補は除かれるので、近傍がさまざまな方向に散らばります。その結果、グラフが局所的なクラスターに閉じず、検索中に局所最適に陥りにくくなります。FAISS では `faiss/impl/HNSW.cpp` の `shrink_neighbor_list` がこれを実装しています。
 
-<strong>要するに</strong>: 「近い順に $M$ 本」ではなく「既存の近傍と方向が被らないやつを優先して $M$ 本」に変えるだけで、グラフの枝が四方八方に伸び、検索中に局所最適に閉じ込められにくくなります。
-
-論文の完全版 Algorithm 4 は、さらに 2 つのオプション引数を持ちます: <strong>`extendCandidates`</strong>（候補集合 $W$ をその近傍で拡張してから選別 — 疎な層で有効）と <strong>`keepPrunedConnections`</strong>（$|R| < M$ で終わった場合、捨てた候補から距離順に補填）。FAISS を含む多くの実装は既定で両方 false にしていますが、論文の推奨設定は高層でのみ `extendCandidates=true` です。
+論文の完全版 Algorithm 4 には、さらに 2 つのオプションがあります。`extendCandidates` は候補集合 $W$ を各候補の近傍で広げてから選別するもので、疎な層で有効です。`keepPrunedConnections` は、$|R| < M$ で終わった場合に、除外した候補から距離の近い順に補います。FAISS を含む多くの実装は既定で両方を false にしていますが、論文は高い層でのみ `extendCandidates=true` にすることを推奨しています。
 
 ### 5.5 パラメーターと性能
 
-- <strong>`M`</strong>: 12-48 が標準。値が大きいほど再現率が上がるがメモリーを食う（1 点あたり $M \cdot 4 \text{B}$ のリンク）。
-- <strong>`efConstruction`</strong>: 100-500。構築時のみ影響。大きいほどインデックス品質が上がるが構築時間が線形に伸びる。
-- <strong>計算量</strong>: 検索は期待 $O(\log N)$、構築は $O(N \log N)$。
-- <strong>メモリー</strong>: $N$ ベクトル + 約 $N \cdot M_0 \cdot 4$ バイトのリンク（大半のノードは Layer 0 のみに存在するため、上位層のリンクは無視できるほど小さい）。$M=16$ ($M_0=2M=32$), $d=1024$, $N=10^6$ → ベクトル 4GB + リンク 約 128MB（リンクのオーバーヘッドはベクトル本体の 3% 程度に収まる）。
+- <strong>`M`</strong>：12〜48 が標準。大きいほど再現率が上がるが、メモリーを多く使う（1 点あたり $M \cdot 4 \text{B}$ のリンク）。
+- <strong>`efConstruction`</strong>：100〜500。構築時だけに影響する。大きいほどインデックスの品質が上がるが、構築時間がほぼ比例して伸びる。
+- <strong>計算量</strong>：検索は期待値で $O(\log N)$、構築は $O(N \log N)$。
+- <strong>メモリー</strong>：$N$ 本のベクトルに加えて、約 $N \cdot M_0 \cdot 4$ バイトのリンク（大半のノードは Layer 0 にしか存在しないので、上位層のリンクは無視できるほど小さい）。$M=16$ ($M_0=2M=32$)、$d=1024$、$N=10^6$ なら、ベクトル 4GB に対してリンクは約 128MB で、ベクトル本体の 3% 程度です。
 
-HNSW の弱点は <strong>メモリーフットプリントが大きい</strong> ことと <strong>削除が難しい</strong> ことです。グラフからノードを実際に抜いてエッジを貼り替えると連結性が壊れる可能性があるため、多くの実装は <strong>tombstone（墓石：削除済みフラグをつけてグラフには残しつつ検索結果から除外する方式）</strong> でマークし、定期的な再構築 (compaction; 墓石が付いたノードをまとめて物理削除してインデックスを作り直す処理) でグラフから物理削除します。この方式は<strong>削除が累積するほどグラフのスカスカが進み</strong>（到達不能になるクラスターが生まれる）、最悪の場合 efSearch を大きくしても再現率が戻らなくなるので、<strong>tombstone 比率 5〜10% を超えたら再構築</strong>という運用ルールを持つチームが多いです。
+HNSW の弱点は、メモリー使用量が大きいことと削除が難しいことです。グラフからノードを実際に取り除いてエッジを張り替えると、連結性が壊れるおそれがあります。そのため多くの実装は、削除したノードに <strong>tombstone</strong>（削除済みフラグ。ノードはグラフに残したまま、検索結果からは除外する）を付けておき、定期的な再構築 (compaction; tombstone の付いたノードをまとめて物理削除し、インデックスを作り直す処理) で取り除きます。削除が累積するとグラフが疎になって到達できない領域が生まれ、最悪の場合は efSearch を大きくしても再現率が戻らなくなります。そこで、tombstone の比率が 5〜10% を超えたら再構築するという運用ルールを設けるチームが多くあります。
 
 ## 6. DiskANN / Vamana: SSD 向けグラフ索引
 
-> <strong>一言で言うと</strong>: HNSW と同じ 「友達リンクをたどる」 方式のまま、本体を <strong>SSD に寝かせて RAM には縮刻版だけ置く</strong> 設計。RAM が載らない 10 億本規模まで扱えるが、同時クエリーが增えると SSD の IOPS がボトルネックになりやすいのが特徴です。
+> HNSW と同じく近傍のリンクをたどる方式のまま、ベクトル本体を SSD に置き、RAM には圧縮版だけを置く設計です。RAM に載らない 10 億本規模まで扱えますが、同時クエリーが増えると SSD の IOPS がボトルネックになりやすくなります。
 
 ### 6.1 動機
 
-HNSW は全データが RAM に載る前提のアルゴリズムです。$10^9$ 次元 1024 の float32 ベクトルは素で 4TB (≒ ハイエンドサーバー 1 台の DRAM 容量 512GB〜1TB の数倍。明らかに単機 RAM には収まらない) になり、単機メモリーに収まりません。DiskANN<sup>[4]</sup> は Microsoft が 2019 年に発表した、<strong>SSD を前提とする単層グラフ索引</strong> です。
+HNSW は全データが RAM に載ることを前提にしたアルゴリズムです。1024 次元の float32 ベクトルが $10^9$ 本あると、生データだけで 4TB になります。ハイエンドサーバー 1 台の DRAM は 512GB〜1TB 程度なので、その数倍にあたり、1 台のメモリーには収まりません。DiskANN<sup>[4]</sup> は Microsoft が 2019 年に発表した、<strong>SSD を前提とする単層グラフ索引</strong>です。
 
 ### 6.2 Vamana グラフ
 
-HNSW と同じく貪欲検索ベースですが、階層を持たず <strong>単層で長短のエッジを混在</strong> させます。検索エントリーポイントはグラフ全体の<strong>メドイド（medoid）</strong>で、構築時に一度計算して固定します。メドイドは平均 (centroid) と違い — セントロイドは計算された数学的な点であり実データ点ではないのに対し、メドイドは<strong>既存データ点の中でそれらの平均に最も近いもの</strong>です。全データの「重心に位置する実在のノード」なので、ここから始めればどんなクエリーに対しても最短経路の期待値が短くなります。構築は次の手順で、$\alpha$-pruning と呼ばれる規則を使います。
+HNSW と同じく貪欲検索を使いますが、階層を持たず、単層のグラフに長いエッジと短いエッジを混在させます。検索のエントリーポイントはグラフ全体の<strong>メドイド（medoid）</strong>で、構築時に一度計算して固定します。セントロイド (centroid) は計算で求めた点で、実在のデータ点とは限りません。一方メドイドは、既存のデータ点のうち全体の平均に最も近い点です。データの中心付近にある実在のノードから始めるので、多くのクエリーで目的地までのホップ数が少なくて済むと期待できます。構築は次の手順で、$\alpha$-pruning と呼ばれる規則を使います。
 
 ```text
 build_vamana(X, R, α):
@@ -368,43 +357,41 @@ robust_prune(p, V, α, R):
     return P
 ```
 
-論文では<strong>第 1 パスで $\alpha=1.0$、第 2 パスで $\alpha > 1$（典型的に 1.2）</strong>と設定します。$\alpha > 1$ にすることで、HNSW の多様性ヒューリスティックより <strong>意図的に長距離エッジを残します</strong>。これが SSD 上の探索を強力にする理由です。
-
-<strong>要するに</strong>: $\alpha$ を 1 より大きくするほど「近くて似た隣人」を切り捨てて「遠いが別方向の隣人」を残す、つまり 1 ホップでグラフ上をより遠くまで飛べるようにします。SSD は 1 ホップ = 1 回のランダムリードなので、ホップ数を減らすことが直接レイテンシーに効きます。
+論文では第 1 パスで $\alpha=1.0$、第 2 パスで $\alpha > 1$（典型的には 1.2）にします。$\alpha > 1$ にすると、HNSW の多様性ヒューリスティックよりも<strong>長距離エッジが多く残ります</strong>。$\alpha$ が大きいほど、近くて似た方向の隣人が除かれ、遠くても別方向の隣人が残るので、1 ホップでグラフ上をより遠くまで移動できます。SSD 上では 1 ホップが 1 回のランダムリードにあたるので、ホップ数が減ればそのままレイテンシーが下がります。
 
 ### 6.3 SSD レイアウト
 
-- ベクトル本体と隣接リストを一緒にディスク上のページに配置（<strong>Vamana page layout</strong>）。
-- 検索経路上のノードを訪問するとき、<strong>1 回の 4KB ランダムリード</strong> でベクトルと隣接リスト両方を取得できる。
-- 精度損失を防ぐため、メモリーには <strong>PQ 圧縮版</strong> を常駐させ「粗距離」で枝刈り、ディスクからは数十ノード分の「真距離」だけ読む。
+- ベクトル本体と隣接リストを、ディスク上の同じページにまとめて配置する（Vamana page layout）。
+- 検索経路上のノードを訪問するときは、1 回の 4KB ランダムリードでベクトルと隣接リストの両方を取得できる。
+- メモリーには PQ 圧縮版を常駐させ、探索中の距離計算と枝刈りにはこの近似距離を使う。ディスクから読んだ元の精度のベクトルで候補を並べ替え (re-rank) て、圧縮による精度の低下を抑える。
 
 ### 6.4 ディスク IOPS と再現率
 
-DiskANN の典型的な性能は、NVMe SSD 1 台で <strong>クエリーあたり 50-150 の 4KB ランダムリード</strong>（論文の SIFT1B ベンチマークでは recall@1=95% で約 100 回前後）、p99 レイテンシー 5-10ms。同じ予算の RAM 制約では HNSW が不可能な規模（10 億ベクトル超）を扱えます。FreshDiskANN（2021）では <strong>挿入/削除と再構築を背景で行う</strong> スキームも提案されています。
+DiskANN の典型的な性能は、NVMe SSD 1 台でクエリーあたり 50〜150 回の 4KB ランダムリード（論文の SIFT1B ベンチマークでは recall@1=95% で約 100 回前後）、p99 レイテンシー 5〜10ms です。同じ予算の RAM では HNSW が扱えない規模（10 億ベクトル超）にも対応できます。FreshDiskANN（2021）では、挿入・削除と再構築をバックグラウンドで行う方式も提案されています。
 
-<strong>本番でのハマりどころ</strong>: 上記の数値は低並行度時のもので、同時クエリーが増えると SSD の<strong>IOPS (1 秒あたりのランダム I/O 回数) が飽和してテールレイテンシーが急激に悪化</strong>します。典型的なコンシューマー SSD は 4KB ランダム読み出しが 50-200 k IOPS、サーバー向け NVMe で 500 k-1 M IOPS 程度なので、QPS ×（クエリーあたりリード数）がこの上限に近づくと待ち行列が発生し、p99 (ワースト 1% のレイテンシー) が一気に二桁伸びます。RAID0 での複数 SSD ストライピング、より大きい PQ 圧縮率によるメモリー側枝刈り強化、あるいは算出ノード数を抑える `beam_width` の調整が定石の対策です。
+<strong>本番での落とし穴</strong>：上記の数値は同時実行数が少ないときのものです。同時クエリーが増えると、SSD の <strong>IOPS (1 秒あたりのランダム I/O 回数) が飽和し、テールレイテンシーが急激に悪化</strong>します。4KB ランダム読み出しの性能は、一般的なコンシューマー SSD で 50〜200 k IOPS、サーバー向け NVMe で 500 k〜1 M IOPS 程度です。QPS ×（クエリーあたりのリード数）がこの上限に近づくと待ち行列ができ、中央値はほとんど変わらないまま、p99 (遅いほうから 1% のレイテンシー) が 10 ms 程度から数百 ms に跳ね上がります。よく使われる対策は、RAID0 による複数 SSD のストライピング、PQ の圧縮率を上げてメモリー側の枝刈りを強めること、探索ノード数を抑える `beam_width` の調整です。
 
 ## 7. ScaNN: Google の異方性量子化
 
-ここで §4 の PQ に戻り、一つの精度拡張を見ておきます。Google が 2020 年に発表した ScaNN<sup>[5]</sup> は、内積最大化に特化した量子化 (ベクトルを少数のビット列に圧縮する操作の総称) を提案しました。
+ScaNN<sup>[5]</sup> は、§4 の PQ を内積検索向けに改良したものです。Google が 2020 年に発表し、内積最大化に特化した量子化 (ベクトルを少数のビット列に圧縮する操作の総称) を提案しました。
 
-通常の PQ は <strong>再構成誤差 $\|\mathbf{x} - \hat{\mathbf{x}}\|^2$</strong> を最小化します。しかし検索で重要なのは内積 $\mathbf{q} \cdot \mathbf{x}$ の誤差であり、これはクエリー方向の成分への誤差が支配的です。ScaNN の <strong>anisotropic quantization loss</strong>:
+通常の PQ は再構成誤差 $\|\mathbf{x} - \hat{\mathbf{x}}\|^2$ を最小化します。しかし検索で問題になるのは内積 $\mathbf{q} \cdot \mathbf{x}$ の誤差です。上位に来るべきデータ点 $\mathbf{x}$ とは内積の大きいクエリーで、そのようなクエリーは $\mathbf{x}$ とほぼ同じ向きを向いています。そのため、内積の誤差には $\mathbf{x}$ と平行な成分の誤差が大きく効きます。ScaNN の <strong>anisotropic quantization loss</strong> は次の式です。
 
 $$
 L(\mathbf{x}, \hat{\mathbf{x}}) = h_\parallel(\mathbf{x}) \cdot \|(\mathbf{x} - \hat{\mathbf{x}})_\parallel\|^2 + h_\perp(\mathbf{x}) \cdot \|(\mathbf{x} - \hat{\mathbf{x}})_\perp\|^2
 $$
 
-ここで $\parallel$ は $\mathbf{x}$ と平行な成分、$\perp$ は直交成分、$h_\parallel \gg h_\perp$ とすることで「ノルム方向の誤差を小さく」する量子化器を学習します。内積検索では同じビット数の PQ より 5-10% 再現率が高くなる傾向があります。
+ここで $\parallel$ は $\mathbf{x}$ と平行な成分、$\perp$ は直交する成分です。$h_\parallel \gg h_\perp$ とすることで、$\mathbf{x}$ と平行な方向の誤差を特に小さくする量子化器を学習します。内積検索では、同じビット数の PQ より再現率が 5〜10% 高くなる傾向があります。
 
 ## 8. フィルター付き検索 (Pre-filter / Post-filter / In-filter)
 
-実用では「公開済みドキュメントのみ」「ユーザー X の保有データのみ」といった <strong>メタデータフィルター付き ANN</strong> が必要です。
+実際のサービスでは、「公開済みのドキュメントだけ」「ユーザー X が持つデータだけ」といったメタデータフィルター付きの ANN が必要になります。
 
-- <strong>Post-filter</strong>: ANN で $k'$ 件（$k' \gg k$）を取り、その後にフィルター適用。選択率 (全件中フィルターを通過する行の割合) が低いと壊滅的に遅くなる。
-- <strong>Pre-filter</strong>: フィルターに合致する ID 集合を作り、その集合内だけで全探索。小さい部分集合には強いが、ANN グラフが活かせない。
-- <strong>In-filter (統合)</strong>: グラフ探索中に「フィルター合致ノードだけを候補に残す」。到達可能性が壊れるのを防ぐため、各 DB は独自の工夫を入れる。Milvus は現行ドキュメント上 <strong>standard filtering（スカラー索引で先に絞り込む pre-filter）</strong> と <strong>iterative filtering（ベクトル検索を iterator 化してスカラーで逐次フィルター）</strong> の 2 モードを提供し、クエリープランナーが選択。Qdrant は <strong>filterable HNSW index</strong> を採用し、payload のカテゴリーに基づいて HNSW グラフに<strong>追加のリンク</strong>を張ることで、フィルター適用後も連結性を維持する（カーディナリティーが低い場合は HNSW を諦め payload index の走査にフォールバック）。
+- <strong>Post-filter</strong>：ANN で $k'$ 件（$k' \gg k$）を取得してからフィルターを適用する。選択率 (全件のうちフィルターを通過する行の割合) が低いと、$k'$ 件の大半が除外されて $k$ 件に届かず、$k'$ を大きくして再検索することになる。
+- <strong>Pre-filter</strong>：フィルターに合う ID 集合を作り、その集合の中だけを全探索する。部分集合が小さければ速いが、ANN グラフを活用できない。
+- <strong>In-filter (統合)</strong>：グラフ探索の途中で、フィルターに合うノードだけを候補に残す。到達可能性が損なわれないよう、各 DB が独自の工夫を入れている。Milvus は現行ドキュメント上、standard filtering（スカラー索引で先に絞り込む pre-filter）と iterative filtering（ベクトル検索を iterator 化し、スカラー条件で逐次フィルターする）の 2 モードを提供し、クエリープランナーがどちらかを選ぶ。Qdrant は filterable HNSW index を採用し、payload のカテゴリーに基づいて HNSW グラフに追加のリンクを張ることで、フィルター適用後も連結性を保つ（カーディナリティーが低い場合は HNSW を使わず、payload index の走査に切り替える）。
 
-方式の得意不得意をまとめると：
+選択率ごとの向き不向きは次のとおりです。
 
 | 方式 | 強い場面 | 弱い場面 | 代表例 |
 | --- | --- | --- | --- |
@@ -412,22 +399,22 @@ $$
 | Pre-filter | 選択率 ≤ 1%（部分集合が小さい） | 中間だと ANN が効かず遅い | Milvus standard filtering |
 | In-filter | 選択率 1〜50% の中間帯 | 実装が複雑、グラフ連結性の維持が難しい | Qdrant filterable HNSW、Filtered-DiskANN |
 
-最近の研究 (ACORN, 2024; Filtered-DiskANN, 2023) は、グラフ構築時にフィルターラベルも考慮する手法を提案しています。
+最近の研究 (ACORN, 2024; Filtered-DiskANN, 2023) は、グラフの構築時にフィルターラベルも考慮する手法を提案しています。
 
 ## 9. 実装の比較
 
-ここまでの §2–§8 で見てきたアルゴリズム群を、実際の OSS / SaaS が <strong>どう組み合わせて出荷しているか</strong> の早見表です。「FAISS = ライブラリー」「Milvus / Qdrant / Weaviate = 分散・永続化まで含む DB 製品」「pgvector = PostgreSQL の拡張」「Pinecone = フルマネジド SaaS」と言う金行レイヤーを頭に入れると表が読みやすくなります。
+§2〜§8 のアルゴリズムを、主な OSS や SaaS がどう組み合わせて提供しているかを表にまとめます。FAISS はライブラリー、Milvus・Qdrant・Weaviate は分散処理や永続化まで含む DB 製品、pgvector は PostgreSQL の拡張、Pinecone はフルマネージド SaaS です。
 
 | ライブラリー | 主なアルゴリズム | 特徴 |
 | --- | --- | --- |
-| <strong>FAISS</strong> | Flat, IVF, IVFPQ, HNSW, OPQ | Meta 製。GPU/SIMD 最適化。研究のリファレンス実装。 |
-| <strong>Milvus</strong> | FAISS/HNSW/DiskANN をラップ | 分散・永続化・フィルター・マルチテナント。Kubernetes 前提。 |
-| <strong>Qdrant</strong> | HNSW (独自 Rust 実装) | Payload フィルターとの統合が強い。gRPC / REST。 |
-| <strong>Weaviate</strong> | HNSW | モジュール型ベクトライザー。GraphQL API。 |
-| <strong>pgvector</strong> | IVFFlat, HNSW | PostgreSQL 拡張。既存 SQL と JOIN 可能。 |
-| <strong>Pinecone</strong> | 独自ハイブリッド（非公開） | フルマネージド SaaS。 |
-| <strong>LanceDB</strong> | IVFPQ, HNSW + Arrow/Parquet | カラムナー永続化。埋め込み版 DuckDB 的位置づけ。 |
-| <strong>Elasticsearch/OpenSearch</strong> | Lucene HNSW | 既存全文検索との BM25 ハイブリッド。 |
+| FAISS | Flat, IVF, IVFPQ, HNSW, OPQ | Meta 製。GPU/SIMD 最適化。研究のリファレンス実装。 |
+| Milvus | FAISS/HNSW/DiskANN をラップ | 分散・永続化・フィルター・マルチテナント。Kubernetes 前提。 |
+| Qdrant | HNSW (独自 Rust 実装) | Payload フィルターとの統合が強い。gRPC / REST。 |
+| Weaviate | HNSW | モジュール型ベクトライザー。GraphQL API。 |
+| pgvector | IVFFlat, HNSW | PostgreSQL 拡張。既存 SQL と JOIN 可能。 |
+| Pinecone | 独自ハイブリッド（非公開） | フルマネージド SaaS。 |
+| LanceDB | IVFPQ, HNSW + Arrow/Parquet | カラムナー永続化。埋め込み版 DuckDB 的位置づけ。 |
+| Elasticsearch/OpenSearch | Lucene HNSW | 既存全文検索との BM25 ハイブリッド。 |
 
 ### 9.1 アルゴリズム選択の指針
 
@@ -446,7 +433,7 @@ graph TD
 
 ## 10. ハイブリッド検索: BM25 + ベクトル
 
-実務では ANN 単独より、<strong>語彙一致 (BM25; クエリーと文書に同じ単語がどれだけ現れるかを TF-IDF 系の重みで測る古典的なスコア) と意味類似 (vector)</strong> を組み合わせる方が品質が高くなります。代表的な結合手法：
+実務では ANN 単独より、語彙の一致 (BM25; クエリーと文書に同じ単語がどれだけ現れるかを TF-IDF 系の重みで測る古典的なスコア) と意味の類似 (vector) を組み合わせたほうが品質が上がります。代表的な結合方法は次の 2 つです。
 
 ### 10.1 Reciprocal Rank Fusion (RRF)
 
@@ -454,13 +441,13 @@ $$
 \text{score}(d) = \sum_{r \in R} \frac{1}{k + \text{rank}_r(d)}
 $$
 
-$R$ は複数検索系（BM25, vector, 他）、$k \approx 60$ が経験則。<strong>スコアスケールを正規化する必要がない</strong> のが利点で、Elasticsearch や Weaviate のデフォルトでも採用されています。
+$R$ は複数の検索系（BM25、vector など）で、$k \approx 60$ が経験的な値です。順位だけを使うので<strong>スコアのスケールを揃える必要がない</strong>のが利点で、Elasticsearch や Weaviate でもハイブリッド検索の結合方法として選べます。
 
-### 10.2 Learned fusion / Cross-encoder re-rank
+### 10.2 Cross-encoder re-rank
 
-ANN で 100 件取り、その上で BERT 系 cross-encoder で再スコアリング。RAG のプロダクションでほぼ標準的なパイプラインです。
+ANN で 100 件を取得し、その中を BERT 系の cross-encoder で採点し直します。RAG の本番環境でよく使われる構成です。
 
-<strong>bi-encoder と cross-encoder の違い</strong>: ベクトル検索で使うのは <strong>bi-encoder</strong> で、クエリーと文書を<strong>独立に</strong>埋め込み、コサイン類似度で比べます（文書側の埋め込みをオフラインで事前計算できるので高速）。一方の <strong>cross-encoder</strong> はクエリーと文書を「連結して 1 回の Transformer に流し、Attention で相互作用させて直接関連スコアを出す」モデルで、<strong>精度は高いがクエリーごとに全文書を計算し直さないといけないので遅い</strong>。そこで、安い bi-encoder で 100 件まで絞り、高い cross-encoder でその 100 件だけ再評価するという 2 段構成がコストパフォーマンスの最適解になります。
+<strong>bi-encoder と cross-encoder の違い</strong>：ベクトル検索で使うのは bi-encoder で、クエリーと文書を別々に埋め込み、コサイン類似度で比べます（文書側の埋め込みをオフラインで計算しておけるので高速）。一方 cross-encoder は、クエリーと文書を連結して 1 回の Transformer に通し、Attention で両者を相互作用させて関連スコアを直接出すモデルです。<strong>精度は高いものの、クエリーごとに全文書を計算し直す必要があるので遅く</strong>なります。そこで、計算の安い bi-encoder で 100 件まで絞り、計算の重い cross-encoder ではその 100 件だけを評価し直す 2 段構成にすると、コストを抑えながら精度を上げられます。
 
 ```mermaid
 sequenceDiagram
@@ -481,45 +468,45 @@ sequenceDiagram
 
 | 指標 | 意味 |
 | --- | --- |
-| <strong>Recall@k</strong> | ANN が返す top-k に真の top-k がどれだけ含まれるか |
-| <strong>QPS (Queries/sec)</strong> | スループット |
-| <strong>p50 / p95 / p99 レイテンシー</strong> | 中央値 / 上位 5% / 上位 1% のレイテンシー。特に p99 (テール) は GC・ディスクIO の影響を大きく受ける |
-| <strong>構築時間</strong> | バッチ全再構築の所要時間 |
-| <strong>インデックスサイズ</strong> | ベクトル圧縮効率を示す |
-| <strong>Insert / delete 速度</strong> | ストリーミング更新可能か |
+| Recall@k | ANN が返す top-k に真の top-k がどれだけ含まれるか |
+| QPS (Queries/sec) | スループット |
+| p50 / p95 / p99 レイテンシー | 中央値 / 上位 5% / 上位 1% のレイテンシー。特に p99 (テール) は GC・ディスクIO の影響を大きく受ける |
+| 構築時間 | バッチ全再構築の所要時間 |
+| インデックスサイズ | ベクトル圧縮効率を示す |
+| Insert / delete 速度 | ストリーミング更新可能か |
 
-[ann-benchmarks](https://github.com/erikbern/ann-benchmarks) は HNSW / IVFPQ / ScaNN などを統一条件で比較するデファクトです。再現率を x 軸、QPS を y 軸にとった <strong>Pareto frontier プロット</strong> で比較するのが標準です。Pareto frontier（パレート境界）は<strong>「再現率を下げずに QPS を上げる」あるいは「その逆」がもう不可能な点を結んだ曲線</strong>で、つまり「トレードオフを継ぐ命綱の線」です。この曲線が外側にあるアルゴリズムほど「どんな動作点でも他より優れている」ことを意味します。「方法 A が B より速い」という単一数値の勝負ではなく、<strong>再現率 95% の点で A が速いが、99% では B が速い</strong>といったトレードオフを見るのが目的です。
+[ann-benchmarks](https://github.com/erikbern/ann-benchmarks) は、HNSW・IVFPQ・ScaNN などを同じ条件で比較する定番のベンチマークです。比較には、再現率を x 軸、QPS を y 軸にとった Pareto frontier プロットを使うのが一般的です。Pareto frontier（パレート境界）は、再現率を下げずに QPS を上げることも、その逆も、もうできない点を結んだ曲線です。あるアルゴリズムの曲線全体が他より外側にあれば、どの動作点でもそちらが優れています。曲線が交差する場合は、<strong>再現率 95% では A が速いが、99% では B が速い</strong>といったトレードオフになり、「A は B より速い」という 1 つの数値では比較できません。
 
 ## 12. 最新動向 (〜2026)
 
-ここまでの「定番手法」の延長線上で、<strong>2026 年時点で「次の定番」候補</strong>になりそうな研究を拾っておきます。共通テーマは「<strong>更なる大規模化」「更なる圧縮」「更なる更新容易性</strong>」です。
+2026 年時点で注目されている研究や実装には、さらなる大規模化、さらなる圧縮、更新のしやすさという共通のテーマがあります。
 
-- <strong>SPANN / SPFresh</strong> (Microsoft, 2021-2023) — IVF の枝だけを SSD に置き、posting list をクラスタリングして更新容易性を得る。DiskANN の後継系。
-- <strong>Learned indexes</strong> — セントロイド選択や階層構造をニューラルネットで学習し、データ分布に適応させる研究分野（FAISS 本体には未取り込み）。
-- <strong>RaBitQ</strong> — PQ よりも厳しい誤差上限保証を持つランダム化バイナリー量子化（Gao & Long, 2024）。FAISS は `faiss::IndexRaBitQ` / `IndexIVFRaBitQ` として実装を追加済み。pgvector 0.8 でも採用検討中。
-- <strong>GPU 向け HNSW (CAGRA, 2023)</strong> — NVIDIA RAPIDS の一部。HNSW をグラフ的に GPU 展開する CUDA 実装。
-- <strong>Hybrid DRAM-PMem レイアウト</strong> — Intel Optane 終息後は NVMe + 大 RAM が主流だが、CXL メモリープールを使った新トポロジーが研究段階。
+- <strong>SPANN / SPFresh</strong> (Microsoft, 2021〜2023) — IVF 系の方式で、セントロイドをメモリーに、posting list を SSD に置く。SPFresh は posting list をその場で更新できるようにした。DiskANN と同じく、SSD 上で 10 億規模を扱うことを狙っている。
+- <strong>Learned indexes</strong> — セントロイドの選択や階層構造をニューラルネットで学習し、データ分布に合わせる研究分野（FAISS 本体には取り込まれていない）。
+- <strong>RaBitQ</strong> — PQ よりも厳しい誤差上限の保証を持つ、ランダム化したバイナリー量子化（Gao & Long, 2024）。FAISS は `faiss::IndexRaBitQ` / `IndexIVFRaBitQ` として実装済み。pgvector 0.8 でも採用が検討されている。
+- <strong>GPU 向けグラフ索引 (CAGRA, 2023)</strong> — NVIDIA RAPIDS (cuVS) の一部。HNSW の移植ではなく、GPU での並列処理向けに設計した階層を持たないグラフ索引の CUDA 実装。
+- <strong>Hybrid DRAM / CXL レイアウト</strong> — Intel Optane の終息後は NVMe と大容量 RAM の組み合わせが主流だが、CXL メモリープールを使った新しい構成が研究されている。
 
 ## 13. まとめ
 
-ベクトル検索の設計空間を 3 軸で整理すると以下になります。
+ベクトル検索の設計の選択肢は、次の 3 つの軸で整理できます。
 
 | 軸 | 手法 |
 | --- | --- |
-| <strong>候補を減らす</strong> | IVF / Graph (HNSW, Vamana) |
-| <strong>距離計算を圧縮</strong> | PQ / OPQ / ScaNN / RaBitQ |
-| <strong>メモリー階層の活用</strong> | DiskANN / SPANN (SSD), CAGRA (GPU) |
+| 候補を減らす | IVF / Graph (HNSW, Vamana) |
+| 距離計算を圧縮 | PQ / OPQ / ScaNN / RaBitQ |
+| メモリー階層の活用 | DiskANN / SPANN (SSD), CAGRA (GPU) |
 
-実用プロジェクトでは、<strong>「データ量・メモリー予算・更新頻度・再現率目標」</strong> の 4 点で選択肢が絞り込まれます。
+実際のプロジェクトでは、データ量、メモリー予算、更新頻度、再現率の目標の 4 点で選択肢が絞られます。
 
 - $N \le 10^5$ → Flat
-- $10^5 \le N \le 10^7$ かつ RAM 潤沢 → HNSW
-- $10^7 \le N$ かつ RAM 制約 → IVFPQ
+- $10^5 \le N \le 10^7$ かつ RAM に余裕がある → HNSW
+- $10^7 \le N$ かつ RAM に制約がある → IVFPQ
 - $N \ge 10^9$ → DiskANN / SPANN
-- 既存 PostgreSQL → pgvector (HNSW)
-- 分散必要 → Milvus / Qdrant / Weaviate
+- 既存の PostgreSQL がある → pgvector (HNSW)
+- 分散が必要 → Milvus / Qdrant / Weaviate
 
-ベクトルDB は「魔法の箱」ではなく、<strong>古典的な転置索引のアイデアを高次元空間に拡張したもの</strong> と見ると全体像が透けて見えるはずです。内部で何が起きているかを理解しているかどうかで、再現率のデグレを追い込む時の判断力、コスト試算、障害対応力が大きく変わります。
+ベクトルDBは、<strong>古典的な転置索引のアイデアを高次元空間に拡張したもの</strong>と見ることができます。IVF はクラスターごとの posting list、PQ は距離計算の圧縮、HNSW と DiskANN は候補をたどるグラフです。この仕組みを知っていれば、再現率が落ちたときに efSearch や nprobe のどれを疑うか、メモリーと SSD のどちらに費用をかけるか、p99 が悪化したときに何を見るかを判断できます。
 
 ## 参考文献
 

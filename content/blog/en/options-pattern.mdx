@@ -1,13 +1,13 @@
 ---
-title: "The Options Pattern Explained — Building Configuration with Anonymous Functions"
+title: "The Options Pattern: Building Configuration with Anonymous Functions"
 date: "2026-04-03"
-description: "A deep dive into the Options Pattern used in ASP.NET Core and Go — motivation, internal implementation, multi-language examples, and comparison with other patterns."
+description: "How the Options Pattern used in ASP.NET Core and Go works: the problem it solves, ASP.NET Core internals, implementations in Go, C#, TypeScript, Rust, and Python, and when to choose it over Builder and similar patterns."
 tags: ["Design Patterns", "C#", "Go", "TypeScript", "Software Architecture"]
 ---
 
 ## Introduction
 
-When reading library or framework code, you repeatedly encounter a pattern: "pass anonymous functions to a constructor to configure it." The languages differ, but the idea is the same. If you've read ASP.NET Core code, you've seen this pattern everywhere:
+Library and framework APIs often take configuration as an anonymous function. In ASP.NET Core:
 
 ```csharp
 builder.Services.AddAuthentication(options =>
@@ -17,7 +17,7 @@ builder.Services.AddAuthentication(options =>
 });
 ```
 
-Or in Go:
+In Go:
 
 ```go
 server := NewServer(
@@ -27,25 +27,15 @@ server := NewServer(
 )
 ```
 
-Both of these are implementations of the **Options Pattern** — a design pattern based on the idea of "using anonymous functions (lambdas / closures) to assemble object configuration."
+Both implement the **Options Pattern**, a design pattern that uses anonymous functions (lambdas or closures) to assemble an object's configuration. Because configuration is passed as functions rather than values, callers can keep the defaults and override only the settings they need, and adding a setting leaves existing calls unchanged.
 
-This article provides a thorough exploration of the Options Pattern:
-
-1. **The problem it solves** — Telescoping Constructor hell
-2. **Core concept** — Passing functions as configuration units
-3. **C# / ASP.NET Core implementation** — `IOptions<T>` and the DI internals
-4. **Go implementation** — Functional Options pattern
-5. **TypeScript implementation** — Merging with Builder
-6. **Comparison with other patterns** — Builder, Fluent API, Configuration Object
-7. **When to use it** — Decision criteria
+This article first explains the problem the pattern solves and its core idea. It then shows Go's Functional Options, ASP.NET Core's `IOptions<T>` and its DI internals, and implementations in TypeScript, Rust, and Python. Finally, it compares the pattern with Builder and configuration structs to show when to use it.
 
 ## The Problem: Telescoping Constructor
 
-To understand why the Options Pattern is needed, we first need to see the problem it solves.
-
 ### Constructor Argument Explosion
 
-Consider building an HTTP server. It starts simple:
+Consider a function that creates an HTTP server. It starts with few arguments:
 
 ```go
 func NewServer(port int) *Server {
@@ -53,7 +43,7 @@ func NewServer(port int) *Server {
 }
 ```
 
-But as features grow, arguments proliferate:
+As features grow, so does the argument list:
 
 ```go
 func NewServer(
@@ -72,7 +62,7 @@ func NewServer(
 }
 ```
 
-This is the **Telescoping Constructor** problem. With 10+ arguments, callers easily confuse argument order, and most arguments should use defaults but can't be omitted.
+In Java and similar languages, a common response is a series of constructor overloads, each adding one more parameter; this is known as the **Telescoping Constructor**. Go has no overloading, so a single function's parameter list grows as shown above. Either way, with this many arguments callers easily confuse their order. And although most arguments should use defaults, a Go function cannot omit them.
 
 ### The "Kitchen Sink Config Struct" Limitation
 
@@ -91,20 +81,16 @@ type ServerConfig struct {
 func NewServer(cfg ServerConfig) *Server { ... }
 ```
 
-This looks clean but has issues:
+This shortens the call, but problems remain:
 
 - **Default values are ambiguous**: Is `Port: 0` "use port 0" or "use the default"? (the zero-value problem)
 - **Required vs. optional is unclear**: All fields appear at the same level
 - **Breaking changes on extension**: Adding new fields can affect existing constructor calls
 - **Hard to express constraints**: Rules like "if A is set, B is unnecessary" are hard to enforce
 
-## The Essence of the Options Pattern
+## Passing Configuration as Functions
 
-The core idea is surprisingly simple:
-
-> **Pass configuration as functions, not values.**
-
-Instead of passing "Port is 8080" as a **value**, pass "set Port to 8080" as an **operation**.
+The Options Pattern passes configuration as functions, not values. Instead of the value "Port is 8080," the caller passes the operation "set Port to 8080." The constructor initializes the defaults and then applies the operations in order.
 
 ```mermaid
 graph LR
@@ -114,23 +100,23 @@ graph LR
     B -->|"3. Build with final config"| D["Final object"]
 ```
 
-This approach has several key benefits:
+Passing configuration as functions provides these properties:
 
 | Benefit | Description |
 |---------|-------------|
-| **Safe defaults** | If an Option function isn't called, the default value is preserved |
-| **Order-independent** | Option functions can be passed in any order (last-write-wins) |
-| **Open for extension** | Adding new Option functions doesn't affect existing code (Open-Closed Principle) |
-| **Type-safe** | Each Option function operates on the correct field type |
-| **Composable** | Option functions can be grouped into "presets" via slices/arrays |
+| Safe defaults | If an Option function isn't called, the default value is preserved |
+| Flexible order | Options that set different fields can be passed in any order; for the same field, the later Option wins |
+| Open for extension | Adding new Option functions doesn't affect existing code (Open-Closed Principle) |
+| Type-safe | Each Option function operates on the correct field type |
+| Composable | Option functions can be grouped into "presets" via slices/arrays |
 
 ## Go Implementation — Functional Options
 
-Let's now look at concrete implementations across different languages, starting with Go — where this pattern was most systematically advocated and widely adopted. In the Go community, this pattern — proposed by [Rob Pike](https://commandcenter.blogspot.com/2014/01/self-referential-functions-and-design.html) and [Dave Cheney](https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis) — is widely known as **Functional Options**. Go lacks constructor overloading and default arguments, making Functional Options the de facto standard configuration pattern.
+We start with Go, whose community advocated this pattern most systematically and spread it widely. Proposed by [Rob Pike](https://commandcenter.blogspot.com/2014/01/self-referential-functions-and-design.html) and [Dave Cheney](https://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis), it is known in Go as **Functional Options**. Go lacks constructor overloading and default arguments, so Functional Options became the de facto standard configuration pattern.
 
 ### Basic Implementation
 
-Let's look at the full picture. The code below has three components: **(1)** the `Server` struct holding configuration, **(2)** the `Option` function type that modifies configuration, and **(3)** the `NewServer` constructor that initializes with defaults then applies Options in sequence. These three elements are all there is to Functional Options.
+Functional Options have three components: the `Server` struct that holds the configuration, the `Option` function type that modifies it, and the `NewServer` constructor that initializes defaults and then applies Options in order.
 
 ```go
 package server
@@ -209,7 +195,7 @@ func NewServer(opts ...Option) *Server {
 
 ### Usage
 
-Let's use the implementation above. Pass no arguments and you get defaults; specify only what you need and just those parts get overridden. Bundle Options into a slice, and you've got a reusable "production defaults" preset.
+With no arguments, the server uses the defaults; arguments override only the fields they set. Bundling Options into a slice gives a reusable set of settings, such as production defaults.
 
 ```go
 // Default configuration
@@ -234,7 +220,7 @@ s3 := server.NewServer(ProductionDefaults...)
 
 ### What Happens Internally
 
-Let's trace the execution of `NewServer` step by step:
+Calling `NewServer(WithPort(9090), WithTimeout(60s))` proceeds as follows:
 
 ```mermaid
 sequenceDiagram
@@ -259,11 +245,11 @@ sequenceDiagram
     New-->>Caller: Return completed *Server
 ```
 
-The key is **closures**. `WithPort(9090)` returns a function that has **captured** the argument 9090, and that function is later applied to the `Server`. This is the technical heart of the Options Pattern.
+Closures make this work. `WithPort(9090)` returns a function that has captured the argument 9090, and `NewServer` later applies that function to the `Server`.
 
 ### Implementation with Validation
 
-In production code, you'll want validation. Invalid port numbers, negative timeouts — you want to catch these early. In Go, returning errors is the idiomatic approach. When an error is returned, `NewServer` fails immediately, preventing the server from starting with invalid configuration.
+Production code should catch invalid settings, such as an out-of-range port or a negative timeout, early. In Go, the idiomatic approach is for each `Option` to return an error. `NewServer` fails as soon as it receives one, so the server never starts with an invalid configuration.
 
 ```go
 // Option that can return errors
@@ -299,7 +285,7 @@ func NewServer(opts ...Option) (*Server, error) {
 
 ### Real-World Usage
 
-Functional Options are extremely widespread in the Go ecosystem:
+Functional Options are widely used in major Go libraries:
 
 | Library | Usage |
 |---------|-------|
@@ -311,7 +297,7 @@ Functional Options are extremely widespread in the Go ecosystem:
 
 ## C# / ASP.NET Core Implementation
 
-ASP.NET Core's Options Pattern is built on the **same principle** as Go's Functional Options, but layered on top of a DI (Dependency Injection) container. In Go, Options are passed as constructor arguments; in ASP.NET Core, "configuration functions" registered in the DI container are applied internally by the container. In other words, the timing of Option application shifts from "at constructor call time" to "at dependency resolution time." This deferred application is the key that enables "incremental configuration from multiple places."
+ASP.NET Core's Options Pattern applies the same principle as Go's Functional Options, built on a DI (Dependency Injection) container. In Go, Options are passed as constructor arguments; in ASP.NET Core, the container applies the configuration functions registered with it. Because application waits until dependency resolution, configuration functions registered in several places can be layered.
 
 ### Basic Pattern: `Action<TOptions>`
 
@@ -335,11 +321,11 @@ builder.Services.Configure<SmtpOptions>(options =>
 });
 ```
 
-Go's `func(*Server)` and C#'s `Action<SmtpOptions>` are different language constructs, but in this pattern they express the <strong>same design intent</strong>: a function that receives an Options object and mutates its fields.
+Go's `func(*Server)` and C#'s `Action<SmtpOptions>` are different language constructs, but both are functions that receive an Options object and mutate its fields, so they serve the same design intent.
 
 ### `IOptions<T>` Interface Family
 
-There's a reason ASP.NET Core provides three Options interfaces. Configuration that's read once at startup, configuration that needs the latest value per request, and configuration that should reflect `appsettings.json` changes in real-time — each has different use cases.
+ASP.NET Core has three interfaces for consuming options, and they differ in when the value is rebuilt. Use them for settings that don't change after startup, settings that should be current for each request, and settings that should reflect `appsettings.json` changes while the app runs.
 
 | Interface | Lifetime | Reload | Use Case |
 |-----------|----------|--------|----------|
@@ -349,7 +335,7 @@ There's a reason ASP.NET Core provides three Options interfaces. Configuration t
 
 ### Internal DI Mechanics
 
-What happens internally when you call `Configure<T>()`?
+`Configure<T>()` only registers a configuration function with the DI container. `OptionsFactory` runs it when the options are requested:
 
 ```mermaid
 sequenceDiagram
@@ -374,7 +360,7 @@ sequenceDiagram
     Factory-->>Consumer: Completed SmtpOptions
 ```
 
-The key point is that `Configure()` can be **called multiple times**:
+`Configure()` can be called any number of times for the same type:
 
 ```csharp
 // Base configuration
@@ -395,11 +381,11 @@ builder.Services.Configure<SmtpOptions>(
     builder.Configuration.GetSection("Smtp"));
 ```
 
-These are **all executed in order**. The last one wins. This is exactly the same mechanism as Go's `for _, opt := range opts { opt(s) }`.
+All registered configurations run in registration order, and for any given property the last one wins. This is the same mechanism as Go's `for _, opt := range opts { opt(s) }`.
 
 ### Extension Method Pattern
 
-Let's look at the internal implementation of the common `AddXxx(options => ...)` pattern in ASP.NET Core. This pattern is the "setup window" that library authors provide. Consumers don't need to know the internal registration details (Options infrastructure, validation, service registration) — they just pass an `Action<SmtpOptions>` and everything is configured correctly.
+The `AddXxx(options => ...)` methods common in ASP.NET Core are the setup entry points that library authors provide. Consumers pass an `Action<SmtpOptions>` and get a correct configuration without knowing the internal details: options registration, validation, and service registration. An implementation looks like this:
 
 ```csharp
 // AddSmtp extension method implementation
@@ -431,7 +417,7 @@ builder.Services.AddSmtp(options =>
 });
 ```
 
-Breaking down what happens inside `AddSmtp`, three concerns are separated:
+`AddSmtp` defines three concerns in separate places:
 
 1. **Default values** → Property initializers in the `SmtpOptions` class
 2. **User configuration** → The anonymous function received as `Action<SmtpOptions>`
@@ -439,7 +425,7 @@ Breaking down what happens inside `AddSmtp`, three concerns are separated:
 
 ### PostConfigure and Validate
 
-ASP.NET Core divides the configuration lifecycle into 3 stages. Why three? Because separating "setting values," "adjusting values," and "validating values" makes each stage's responsibility clear. `Configure` sets the base values, `PostConfigure` handles "cross-value consistency adjustments" (e.g., auto-switching port to 465 when SSL is enabled), and finally `Validate` checks that the final values are correct.
+ASP.NET Core divides configuration processing into three stages, separating the responsibilities of setting, adjusting, and validating values. `Configure` sets the base values. `PostConfigure` runs after every `Configure` and adjusts values for consistency with one another (for example, switching the port to 465 when SSL is enabled but the port is still the default). Finally, `Validate` checks the resulting values.
 
 ```csharp
 builder.Services.AddOptions<SmtpOptions>()
@@ -476,7 +462,7 @@ graph LR
 
 ### Named Options
 
-Sometimes you need multiple instances of the same options type:
+Several configurations of the same type can coexist when each has a name:
 
 ```csharp
 // Two SMTP configurations: "Primary" and "Backup"
@@ -545,11 +531,11 @@ public TOptions Create(string name)
 }
 ```
 
-This is the **sophisticated version** of Go's `for _, opt := range opts { opt(s) }` loop. The separation into Configure → PostConfigure → Validate phases is an ASP.NET Core refinement.
+The core is the same as the `for _, opt := range opts { opt(s) }` loop in Go's `NewServer`. ASP.NET Core splits it into Configure → PostConfigure → Validate stages and adds support for named options.
 
 ## TypeScript Implementation
 
-TypeScript offers several ways to implement the Options Pattern. Thanks to its rich type system, Go-style Functional Options, ASP.NET Core-style callbacks, and TypeScript-specific `Partial<T>` merging all feel natural. Let's look at the tradeoffs of each approach.
+TypeScript can express both Go-style Functional Options and ASP.NET Core-style callbacks. With object spread and `Partial<T>`, it can also merge partial settings into defaults with type checking.
 
 ### Basic: `Partial<T>` Pattern
 
@@ -579,11 +565,11 @@ function createServer(overrides?: Partial<ServerOptions>): Server {
 const server = createServer({ port: 9090, timeout: 60_000 });
 ```
 
-However, this isn't really the Options Pattern — configuration is **value merging**, not **function application**. `Partial<T>` merging is simple and intuitive, but it's hard to express validation or "inter-value dependencies" (e.g., change port when SSL is enabled). That's where Go-style Functional Options come in.
+However, this configuration is value merging, not function application, so it isn't really the Options Pattern. `Partial<T>` merging is simple and intuitive, but it makes validation and dependencies between values (for example, changing the port when SSL is enabled) hard to express. Functional Options, shown next, put that logic inside the Option functions.
 
 ### Functional Options
 
-Go-style Functional Options in TypeScript:
+Go-style Functional Options in TypeScript look like this:
 
 ```typescript
 interface ServerConfig {
@@ -650,7 +636,7 @@ const prodServer = createServer(...productionDefaults);
 
 ### Callback Pattern (ASP.NET Core Style)
 
-The "single anonymous function configures everything" pattern works too:
+Like ASP.NET Core, a single anonymous function can configure everything:
 
 ```typescript
 function createServer(configure: (options: ServerConfig) => void): Server {
@@ -675,7 +661,7 @@ const server = createServer((options) => {
 });
 ```
 
-A **hybrid** of Go's Functional Options and C#'s `Action<T>` is also interesting:
+The two can also be combined: a callback configures everything, and Go-style Options then override individual settings.
 
 ```typescript
 function createServer(
@@ -694,11 +680,11 @@ function createServer(
 
 ## Rust Implementation
 
-In Rust, ownership and lifetime constraints make the Options Pattern implementation slightly different. In Go, you can easily bundle `func(*Server)` into slices, but in Rust, closures need to be heap-allocated via `Box<dyn FnOnce>`. This incurs a performance cost, but it's useful for the use case of bundling configuration as `Vec` presets. A practical guideline for Rust: "use Builder when options are few and statically determined; use Functional Options when option combinations vary at runtime."
+Each Rust closure has its own unique type. To return different closures as the same `ServerOption` type, or to collect them in an array or `Vec`, they must be heap-allocated as `Box<dyn FnOnce>`. Unlike Go's `func(*Server)`, they can't go into a slice as is, and each Option costs a heap allocation. In exchange, configuration presets can be bundled into a `Vec<ServerOption>`.
 
-### Fusion with Builder Pattern
+### Representing Options with `Box<dyn FnOnce>`
 
-The Rust community favors the Builder Pattern, but the essence of Functional Options can be incorporated:
+The Rust community favors the Builder Pattern, but Functional Options can be written with the same idea. Some Options, such as `with_host`, move a captured `String` into the settings, so this example uses `FnOnce`, which can be called only once:
 
 ```rust
 pub struct ServerOptions {
@@ -758,11 +744,11 @@ let server = Server::new([
 ]);
 ```
 
-In Rust, the `Box<dyn FnOnce>` allocation cost exists, so the traditional Builder Pattern is often preferred for high-frequency use. However, when bundling configurations as `Vec<ServerOption>` presets, it's useful. A practical guideline: "use Builder when options are few and statically known; use Functional Options when option combinations change at runtime."
+Because of the `Box<dyn FnOnce>` allocations, the traditional Builder Pattern is often preferred for heavy use in Rust. As a rule of thumb, use Builder when options are few and statically known, and Functional Options when option combinations change at runtime.
 
 ## Python Implementation
 
-Python's `**kwargs` is standard, but the Options Pattern can be implemented explicitly. Python natively supports closures and treats functions as first-class objects without heap allocation, making it more concise than Go or Rust. Combined with `@dataclass`, default value definitions feel natural too.
+Python commonly takes settings as keyword arguments (`**kwargs`), but the Options Pattern can also be implemented explicitly. Python functions are first-class objects and closures can be returned directly, so there is no need to wrap them in a `Box` as in Rust. With `@dataclass`, the defaults go in the field declarations.
 
 ```python
 from dataclasses import dataclass
@@ -838,21 +824,21 @@ graph TB
 
 | Aspect | Options Pattern | Builder Pattern |
 |--------|----------------|-----------------|
-| **Syntax** | Pass functions as a list | Method chaining |
-| **State management** | Constructor manages centrally | Builder holds intermediate state |
-| **Composability** | Easy preset creation via function slices/arrays | Reusing intermediate Builder state is difficult |
-| **Incremental config** | Great DI affinity (Configure from multiple places) | Usually completed in one place |
-| **Type safety** | Guaranteed per Option function | Guaranteed by method return types |
-| **Learning curve** | Requires understanding closures | Intuitive |
+| Syntax | Pass functions as a list | Method chaining |
+| State management | Constructor manages centrally | Builder holds intermediate state |
+| Composability | Easy preset creation via function slices/arrays | Reusing intermediate Builder state is difficult |
+| Incremental config | Works well with DI containers (Configure from multiple places) | Usually completed in one place |
+| Type safety | Guaranteed per Option function | Guaranteed by method return types |
+| Learning curve | Requires understanding closures | Intuitive |
 
 ### Options Pattern vs Configuration Object
 
 | Aspect | Options Pattern | Configuration Object |
 |--------|----------------|---------------------|
-| **Default values** | Safely set in constructor | Zero-value ambiguity |
-| **Validation** | Executable within each Option function | Requires separate validation layer |
-| **Extensibility** | Just add new Option functions | Add fields to struct |
-| **Composability** | Free composition via function composition | Requires struct merging |
+| Default values | Safely set in constructor | Zero-value ambiguity |
+| Validation | Executable within each Option function | Requires separate validation layer |
+| Extensibility | Just add new Option functions | Add fields to struct |
+| Composability | Options combine freely through function composition | Requires struct merging |
 
 ### Decision Guide
 
@@ -872,7 +858,7 @@ graph TD
 
 ### Option Function Composition
 
-Multiple Options can be combined into one:
+Several Options can be combined into a single Option:
 
 ```go
 // Compose multiple Options into one
@@ -903,7 +889,7 @@ s := NewServer(
 )
 ```
 
-This is function composition itself — evidence that the Options Pattern is rooted in **functional programming principles**.
+`ComposeOptions` is function composition: it returns one Option that applies the given Options in order. Because Options are functions, presets can be combined as functions too.
 
 ### Conditional Options
 
@@ -932,7 +918,7 @@ func WithEnvConfig() Option {
 
 ### Self-Referential Functions (Returning Previous Values)
 
-Rob Pike's original post describes a technique where Option functions return the "previous value," enabling **rollback**:
+Rob Pike's original post describes a technique in which an Option function returns another Option that restores the previous value, enabling rollback:
 
 ```go
 type Option func(*Server) Option
@@ -953,11 +939,11 @@ func temporarilyChangePort(s *Server, port int) {
 }
 ```
 
-This is rarely seen in production code, but it's a fascinating **theoretical foundation** for the Options Pattern.
+This is rare in production code, but it shows that when a configuration change is a function, the operation that undoes it can be returned as a function of the same `Option` type.
 
 ## Summary
 
-The Options Pattern is a design pattern based on the simple principle: "pass configuration as functions, not values."
+The Options Pattern passes configuration as functions rather than values. Its names and signatures by language:
 
 | Language | Name | Signature |
 |----------|------|-----------|
@@ -967,15 +953,15 @@ The Options Pattern is a design pattern based on the simple principle: "pass con
 | Rust | Functional Options | `Box<dyn FnOnce(&mut T)>` |
 | Python | Option Callbacks | `Callable[[T], None]` |
 
-The essence is the same regardless of language:
+In every language, the process has three steps:
 
-1. **Initialize with default values**
-2. **Apply Option functions in order**
-3. **Use the completed object**
+1. Initialize with default values
+2. Apply Option functions in order
+3. Use the completed object
 
-It solves the Telescoping Constructor problem, follows the Open-Closed Principle, and works well with DI containers. Especially when "configuration happens incrementally from multiple places," the Options Pattern is more suitable than the Builder Pattern.
+This structure avoids the Telescoping Constructor problem. New settings can be added without new parameters (the Open-Closed Principle), and the pattern fits well with DI containers. When configuration happens incrementally from multiple places, the Options Pattern is more suitable than the Builder Pattern.
 
-Understanding the Options Pattern reveals the "why" behind ASP.NET Core's `AddXxx(options => ...)` and the Go ecosystem's API design. Consider applying it in your own code.
+ASP.NET Core's `AddXxx(options => ...)` takes an `Action<T>`, and Go libraries expose `WithXxx` functions, for the same reason: to keep the defaults and apply only the needed settings later, as functions.
 
 ## References
 

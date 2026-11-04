@@ -1,7 +1,7 @@
 ---
 title: "GitHub Copilot SDK をサーバーサイドで動かす — ステートレスに設計できるのか"
 date: "2026-08-25"
-description: "GitHub Copilot SDK をバックエンドに組み込むとき、水平スケールするステートレス設計は成立するのか。ランタイムの状態モデル、セッション永続化、単一ライター制約、resume コスト、ストリーミング、容量計画まで、実運用の観点で深掘りする。"
+description: "GitHub Copilot SDK をバックエンドに組み込むとき、水平スケールするステートレス設計は成立するのか。ランタイムの状態モデル、セッション永続化、単一ライター制約、resume コスト、ストリーミング、容量計画まで、実運用の観点で検討する。"
 tags: ["GitHub Copilot", "Copilot SDK", "Architecture", "Scalability", "Agent", "Distributed Systems"]
 ---
 
@@ -9,17 +9,17 @@ tags: ["GitHub Copilot", "Copilot SDK", "Architecture", "Scalability", "Agent", 
 
 GitHub Copilot SDK は、Copilot CLI の背後にあるエージェントランタイムをプログラムから呼び出すためのライブラリーだ。Node.js/TypeScript、Python、Go、.NET、Java、Rust 向けに提供されており、自社プロダクトに「Copilot 相当のエージェント」を埋め込める。
 
-サーバーサイドで使うことを検討し始めると、最初に突き当たる問いはたいてい同じである。
+サーバーサイドで使うなら、まず次の問いに答える必要がある。
 
 > このSDKを使ったバックエンドは、ステートレスに設計して水平スケールできるのか？
 
-結論を先に言うと、<strong>「アプリ層はステートレスにできる。ランタイム層はできない」</strong>。そしてこの記事で本当に議論したいのは、Yes/No ではなく次の3点だ。
+結論は<strong>「アプリ層はステートレスにできるが、ランタイム層はできない」</strong>である。設計で問題になるのは、可否よりも次の3点だ。
 
 - 状態はどこに、どんな粒度で存在するのか
 - その状態境界を跨ぐコストはいくらか
 - 境界の置き方を間違えたとき、どんな壊れ方をするのか
 
-本稿は 2026-08 時点の公開ドキュメントと `@github/copilot-sdk` v1.0.13 の README を一次情報として書いている。SDKは活発に更新されているので、採用時は必ず手元のバージョンの型定義で再確認してほしい。
+この記事は 2026-08 時点の公開ドキュメントと `@github/copilot-sdk` v1.0.13 の README を一次情報としている。SDKは活発に更新されているので、採用時は手元のバージョンの型定義で確認してほしい。
 
 ## 先に結論
 
@@ -36,7 +36,7 @@ GitHub Copilot SDK は、Copilot CLI の背後にあるエージェントラン�
 
 ### SDK はクライアントであって、本体ではない
 
-まず、アーキテクチャを正確に把握する必要がある。SDKは自前でLLMを叩いているわけではない。<strong>Copilot CLI ランタイムに JSON-RPC でつなぐクライアント</strong>である。
+SDKは自前でLLMを呼び出すわけではない。Copilot CLI ランタイムに JSON-RPC でつなぐクライアントである。
 
 ```mermaid
 flowchart LR
@@ -46,7 +46,7 @@ flowchart LR
     RT --> Disk[(COPILOT_HOME)]
 ```
 
-つまり、あなたのプロセスの外に、もう一つ状態を持ったプロセスがいる。この事実がステートレス設計のすべてを規定する。
+そのため、アプリケーションのプロセスの外に、状態を持つプロセスがもう一つある。どこまでステートレスにできるかは、このプロセスの扱いで決まる。
 
 接続方法は `RuntimeConnection` のファクトリーで選ぶ。
 
@@ -57,23 +57,23 @@ flowchart LR
 | 外部URI | `RuntimeConnection.forUri(url, { connectionToken })` | 起動済みランタイムに接続。寿命は別管理 |
 | in-process | `RuntimeConnection.forInProcess()` | 同一プロセス内（C ABI/FFI、実験的） |
 
-サーバーサイドで意味を持つのは主に `forUri` だ。ランタイムを `copilot --headless --port 4321` で常駐サーバーとして起動し、APIプロセスからはそこに接続する。ランタイムのライフサイクルがリクエストハンドラーから切り離されるので、Podの再起動やデプロイの単位を分けられる。
+サーバーサイドで主に使うのは `forUri` だ。ランタイムを `copilot --headless --port 4321` で常駐サーバーとして起動し、APIプロセスからはそこに接続する。ランタイムのライフサイクルがリクエストハンドラーから切り離されるので、Podの再起動やデプロイの単位を分けられる。
 
-なお headless サーバーは既定でループバック（`127.0.0.1`）からの接続しか受け付けない。別コンテナーから繋ぐなら `--host 0.0.0.0` が必要になるが、その瞬間に「SDKとランタイム間に組み込みの認証がない」という制約が効いてくる。`forUri` / `forTcp` には `connectionToken` を渡す余地はあるものの、ドキュメントはこれを制限事項として明記しており、共有シークレット1本を認証の代替にはできない。ネットワーク境界（同一Pod、サイドカー、mTLSを張ったVPC内など）で守るのが前提になる。
+headless サーバーは既定でループバック（`127.0.0.1`）からの接続しか受け付けない。別コンテナーから接続するには `--host 0.0.0.0` が必要で、そうするとSDKとランタイムの間に組み込みの認証がないことが問題になる。`forUri` / `forTcp` は `connectionToken` を受け取るが、ドキュメントは認証がないことを制限事項として挙げている。共有シークレット1つは認証の代わりにならないので、ネットワーク境界（同一Pod、サイドカー、mTLSを張ったVPC内など）で守る必要がある。
 
 ### 状態の棚卸し
 
-「ステートレスにできるか」を議論する前に、状態を分類する。Copilot SDK を使うシステムには、少なくとも5種類の状態がある。
+Copilot SDK を使うシステムには、少なくとも次の5種類の状態がある。
 
 | 状態の種類 | 実体 | 永続化されるか | 外部化できるか |
 |---|---|---|---|
 | 会話状態 | メッセージ列、ツール呼び出し結果 | される（checkpoints） | できる（共有FS / `sessionFs`） |
 | 計画・成果物 | `plan.md`、`files/` 配下 | される | できる |
 | ランタイム内メモリー | 生きたセッションオブジェクト、購読中のイベントハンドラー | されない | できない |
-| 認証情報 | BYOKのAPIキー、per-session GitHubトークン | <strong>されない</strong>（意図的） | 自前の秘密管理に置く |
+| 認証情報 | BYOKのAPIキー、per-session GitHubトークン | されない（意図的） | 自前の秘密管理に置く |
 | ツール実装の状態 | `defineTool` ハンドラーが握るインメモリー状態 | されない | 自分で設計する |
 
-公式ドキュメントの記述をそのまま整理すると、`COPILOT_HOME/session-state/{sessionId}/` の中身はこうなる。
+公式ドキュメントによると、`COPILOT_HOME/session-state/{sessionId}/` の中身は次のとおりだ。
 
 ```text
 ~/.copilot/session-state/
@@ -86,14 +86,14 @@ flowchart LR
     └── files/
 ```
 
-ここで押さえるべき重要な非対称性が2つある。
+永続化の扱いには、注意すべき非対称が2つある。
 
-1. <strong>会話は永続化されるが、接続は永続化されない。</strong> ディスク上のセッションは残るが、そのセッションを握っていた「生きたオブジェクト」とイベント購読は、プロセスが死ねば消える。
-2. <strong>鍵は永続化されない。</strong> BYOK構成では、`resumeSession` のたびに `provider` 設定を再投入しなければならない。これはセキュリティー上まっとうな設計だが、ステートレスな resume パスを書くときに必ず踏む地雷でもある。
+1. <strong>会話は永続化されるが、接続は永続化されない。</strong>ディスク上のセッションは残るが、そのセッションを握っていた「生きたオブジェクト」とイベント購読は、プロセスが死ねば消える。
+2. <strong>鍵は永続化されない。</strong> BYOK構成では、`resumeSession` のたびに `provider` 設定を再投入しなければならない。鍵をディスクに残さないのはセキュリティー上妥当な設計だが、ステートレスな resume 処理を書くときに見落としやすい。
 
 ## 「ステートレス」を層で定義し直す
 
-「ステートレス」はシステム全体の性質ではなく、<strong>層の性質</strong>だ。Copilot SDK を使うシステムは、次の3層に分けて考えると設計が急に楽になる。
+ステートレスかどうかは、システム全体ではなく層ごとに決まる。Copilot SDK を使うシステムは、次の3層に分けると、どの層で状態を扱うかを決めやすくなる。
 
 ```mermaid
 flowchart TB
@@ -128,15 +128,15 @@ flowchart TB
     A3 --> REG
 ```
 
-- <strong>L1（APIティア）</strong> は12ファクター的な意味で完全にステートレスにできる。リクエストが持つのはセッションIDだけ。
-- <strong>L2（ランタイムティア）</strong> は本質的にステートフルだ。プロセスが生きたセッションを握っている。ここをステートレスにしようとするのは、PostgreSQLをステートレスにしようとするのと同じ種類の誤りである。
-- <strong>L3（永続ティア）</strong> は共有ファイルシステム、あるいは `sessionFs` 経由のオブジェクトストレージ、そして<strong>あなた自身が持つべきセッションレジストリー</strong>からなる。
+- <strong>L1（APIティア）</strong>は12ファクター的な意味で完全にステートレスにできる。リクエストが持つのはセッションIDだけ。
+- <strong>L2（ランタイムティア）</strong>は本質的にステートフルだ。プロセスが生きたセッションを握っている。ここをステートレスにしようとするのは、PostgreSQLをステートレスにしようとするのと同じ種類の誤りである。
+- <strong>L3（永続ティア）</strong>は共有ファイルシステム、あるいは `sessionFs` 経由のオブジェクトストレージ、そしてアプリケーション側で用意するセッションレジストリーからなる。
 
-3つ目が抜けている設計をよく見る。SDKは `listSessions()` を提供するが、これはランタイムが見えているストレージ上のセッションを列挙するだけで、「誰のものか」「今どのランタイムが握っているか」「まだ有効か」は答えてくれない。<strong>所有権とルーティングは、あなたのDBの責務</strong>である。
+このうちセッションレジストリーが抜けている設計をよく見る。SDKは `listSessions()` を提供するが、これはランタイムが見えているストレージ上のセッションを列挙するだけで、「誰のものか」「今どのランタイムが握っているか」「まだ有効か」は答えてくれない。<strong>所有権とルーティングは、アプリケーション側のDBで管理する</strong>。
 
 ## ステートレス度の4段階
 
-「ステートレスか否か」の二値ではなく、段階として捉える。
+用途に応じて、ステートレスの度合いを次の4段階から選ぶ。
 
 ```mermaid
 flowchart TD
@@ -188,11 +188,11 @@ app.post("/api/analyze", async (req, res) => {
 - `sendAndWait` にはタイムアウトを必ず渡す。エージェントは原理的に停止性が保証されないので、上限は呼び出し側が握る。
 - `finally` で `disconnect()` する。これはディスク上のデータを消さず、インメモリーのリソースだけ解放する。捨ててよいセッションなら `deleteSession()` まで走らせる。
 
-Level 0の代償は明快で、<strong>文脈が残らない</strong>。マルチターンにしたければ、毎回自前で会話履歴をプロンプトに詰め直すことになり、それはトークン課金とレイテンシーに直撃する。
+Level 0 では文脈が残らない。マルチターンにするには毎回会話履歴をプロンプトに詰め直すことになり、その分トークン課金とレイテンシーが増える。
 
 ### Level 1: 共有ストレージ + 毎ターン resume
 
-APIティアを完全にステートレスにしたまま、マルチターンを成立させる正攻法。セッション状態を共有ストレージ（NFS/CSI PVC/`sessionFs` 経由のオブジェクトストレージ）に置き、どのランタイムからでも resume できるようにする。
+APIティアを完全にステートレスにしたまま、マルチターンを成立させる標準的な方法だ。セッション状態を共有ストレージ（NFS/CSI PVC/`sessionFs` 経由のオブジェクトストレージ）に置き、どのランタイムからでも resume できるようにする。
 
 ```typescript
 app.post("/api/chat", async (req, res) => {
@@ -222,17 +222,17 @@ app.post("/api/chat", async (req, res) => {
 });
 ```
 
-この形は美しいが、コストがある。1ターンあたりの実時間が
+この形ならAPIティアをステートレスに保てるが、1ターンの実時間が次のように伸びる。
 
 $$
 W_{\text{L1}} = W_{\text{lease}} + W_{\text{resume}} + W_{\text{turn}} + W_{\text{disconnect}}
 $$
 
-になる。この差が容量に効く話は後述する。
+この差が容量に与える影響は「resume のコストと容量計画」で扱う。
 
 ### Level 2: リース経路制御によるウォームセッション
 
-resume コストを避けたいなら、セッションを一定時間ランタイム内に生かしておき、APIティアは「そのセッションを持っているランタイムはどれか」を<strong>レジストリーに問い合わせて</strong>転送する。APIティア自体はステートレスなまま、実質的なアフィニティーを得る。
+resume コストを避けたいなら、セッションを一定時間ランタイム内に生かしておき、APIティアは「そのセッションを持っているランタイムはどれか」をレジストリーに問い合わせて転送する。APIティア自体はステートレスなまま、実質的なアフィニティーを得る。
 
 ```mermaid
 sequenceDiagram
@@ -250,11 +250,11 @@ sequenceDiagram
     API-->>U: 200 OK
 ```
 
-ここで重要なのは、<strong>ロードバランサーのスティッキーセッションに頼らない</strong>ことだ。LBのアフィニティーはクライアント接続の性質であって、セッション所有権の真実ではない。Podが落ちたときにLBは黙って別のPodに振り、そこで二重ライターが発生する。所有権はレジストリー（リース）で表現し、APIティアはそれを引くだけにする。
+このとき、<strong>ロードバランサーのスティッキーセッションには頼らない</strong>。LBのアフィニティーはクライアント接続の振り分けであって、セッションの所有権を表すものではない。Podが落ちるとLBは黙って別のPodに振り分け、そこで二重ライターが発生する。所有権はレジストリーのリースで表し、APIティアはそれを参照するだけにする。
 
 ### Level 3: テナント専用ランタイム
 
-コンプライアンス要件が厳しい場合や、テナントごとに別の認証情報でランタイムを走らせたい場合は、テナント単位でランタイムを分ける。分離は最強だが、密度は最悪だ。アイドルテナント分のプロセスとメモリーを払い続けることになる。
+コンプライアンス要件が厳しい場合や、テナントごとに別の認証情報でランタイムを走らせたい場合は、テナント単位でランタイムを分ける。分離は最も強いが、集約密度は最も低い。アイドルなテナントの分もプロセスとメモリーを確保し続けることになる。
 
 | | Level 0 | Level 1 | Level 2 | Level 3 |
 |---|---|---|---|---|
@@ -268,23 +268,23 @@ sequenceDiagram
 
 ## 外部ストレージ化で解決すること・しないこと
 
-ここでよくある誤解を潰しておく。「セッションデータを外部ストレージに出せばステートレスになる」——これは<strong>半分しか正しくない</strong>。
+「セッションデータを外部ストレージに出せばステートレスになる」という理解は半分しか正しくない。
 
 ### 得られるのは「ステートレス」ではなく「再配置可能」
 
-外部化で手に入るのは、セッションが<strong>どのノードからでも開ける</strong>という性質だけだ。残る2種類の状態は、原理的に外部化できない。
+外部化で手に入るのは、セッションがどのノードからでも開けるという性質だけだ。残る2種類の状態は、原理的に外部化できない。
 
 | 状態 | 外部化 | 理由 |
 |---|---|---|
 | 会話履歴・checkpoint・`plan.md`・`files/` | できる | 単なるデータ。`sessionFs` はこのためにある |
-| 実行中ターンの待ち合わせ | <strong>できない</strong> | データではなく、<strong>あなたのプロセスへのRPC</strong>だから |
-| ストリーミング中のイベント | <strong>できない</strong> | そもそもディスクに書かれない（後述） |
+| 実行中ターンの待ち合わせ | できない | データではなく、アプリケーションのプロセスへのRPCだから |
+| ストリーミング中のイベント | できない | そもそもディスクに書かれない（後述） |
 
-2つ目が本質的だ。ツール実行、`onPermissionRequest`、hooks は、ランタイムからあなたのプロセスへ JSON-RPC で問い合わせが飛び、<strong>ランタイムは応答を待って停止する</strong>。ターン実行中に API Pod が落ちると、ランタイム側には答え手のいない保留リクエストが残る。ディスクを共有しても、この「通話中の回線」は別の Pod に転送できない。
+この表で影響が最も大きいのは、実行中ターンの待ち合わせだ。ツール実行、`onPermissionRequest`、hooks では、ランタイムからアプリケーションのプロセスへ JSON-RPC で問い合わせが飛び、ランタイムは応答を待って停止する。ターン実行中に API Pod が落ちると、ランタイム側には応答する相手のいない保留リクエストが残る。ディスクを共有しても、この応答待ちのRPCは別の Pod に引き継げない。
 
-つまり外部化が守るのは<strong>ターンとターンのあいだ</strong>であって、<strong>ターンの途中</strong>ではない。Level 1 のハンドラーがリトライするとき安全に仮定できるのは「直前の checkpoint まで戻っている」ことだけで、ツールの副作用は<strong>冪等に設計する</strong>しかない。
+外部化が守るのは<strong>ターンとターンのあいだ</strong>であって、<strong>ターンの途中</strong>ではない。Level 1 のハンドラーがリトライするとき安全に仮定できるのは「直前の checkpoint まで戻っている」ことだけで、ツールの副作用は冪等に設計するしかない。
 
-これは推測ではない。SDK 自身が、Agent Factories の durable step の実装にこう書いている。
+SDK 自身も、Agent Factories の durable step の実装に次のコメントを残している。
 
 ```typescript
 // nodejs/src/session.ts
@@ -292,13 +292,11 @@ sequenceDiagram
 // concurrent callers, so authors must make side effects idempotent.
 ```
 
-「クラッシュや並行呼び出しをまたぐと at-least-once になるので、副作用は冪等にせよ」。SDK の中で最も durability に配慮された機構ですら、保証は at-least-once である。
+クラッシュや並行呼び出しをまたぐと at-least-once になるので、副作用を冪等にせよ、という内容だ。SDK の中で durability に最も配慮した機構でも、保証は at-least-once にとどまる。
 
 ### 外部化すると「偶然の単一ライター性」を失う
 
-もう一つ、見落とされやすい副作用がある。
-
-ローカルディスク構成では、セッション状態が特定 Pod のディスクにしかないため、<strong>その Pod しか触れない</strong>という排他が偶然成立していた。共有ストレージにした瞬間、この保護が消える。そして SDK にロック機構はない。
+ローカルディスク構成では、セッション状態が特定 Pod のディスクにしかないため、その Pod しか触れないという排他が偶然成立していた。共有ストレージにするとこの保護が消えるが、SDK にはその代わりになるロック機構がない。
 
 `nodejs/src` 全体を検索して見つかる排他は2つだけで、どちらもセッションとは無関係だ。
 
@@ -309,7 +307,7 @@ sequenceDiagram
 
 `createSession` / `resumeSession` には、そのセッションが既に他のクライアントに掴まれているかを確認する処理がない。2つの Pod が同じ `sessionId` を resume しても、両方とも成功する。
 
-興味深いのは、SDK が "already active" という概念自体は持っていることだ。ただし対象はセッションではなく Factory Run である。
+一方で、SDK は "already active" という概念を持っている。ただし対象はセッションではなく Factory Run である。
 
 ```typescript
 // nodejs/src/factory.ts
@@ -324,36 +322,36 @@ export type FactoryResumeErrorCode =
     | "factory_storage_corrupt";
 ```
 
-つまり実装漏れではなく、<strong>セッションの排他はアプリケーションの責務</strong>という設計判断と読むのが自然だ。ライブラリーは自分より上のレイヤーの構成（Pod が何個あるか、LB がどう振るか）を知らないので、排他を提供しようがない。提供しようとすれば SDK 自身が Redis や etcd への依存を要求することになり、それは筋が悪い。
+これは実装漏れではなく、<strong>セッションの排他はアプリケーションの責務</strong>という設計判断と読むのが自然だ。ライブラリーは自分より上のレイヤーの構成（Pod が何個あるか、LB がどう振るか）を知らないので、排他を提供しようがない。提供しようとすれば SDK 自身が Redis や etcd への依存を要求することになり、それは筋が悪い。
 
-ただし、排他を提供しないレイヤーでも<strong>競合の検出手段</strong>は普通は用意される。HTTP の `If-Match`、オブジェクトストレージの条件付き書き込み、`git push` の非 fast-forward 拒否がそれだ。Copilot SDK には `listSessions()` が返す `modifiedTime` はあるが、<strong>書き込み時にバージョンを検証する compare-and-swap がない</strong>。したがって、
+ただし、排他を提供しないレイヤーでも競合の検出手段は普通は用意される。HTTP の `If-Match`、オブジェクトストレージの条件付き書き込み、`git push` の非 fast-forward 拒否がそれだ。Copilot SDK には `listSessions()` が返す `modifiedTime` はあるが、<strong>書き込み時にバージョンを検証する compare-and-swap がない</strong>。したがって、
 
-- 二重書き込みを<strong>防ぐ</strong>ことはできない（レイヤー的に妥当）
-- 二重書き込みが<strong>起きたことを知る</strong>手段も薄い（ここは物足りない）
+- 二重書き込みを防ぐことはできない（レイヤー的に妥当）
+- 二重書き込みが起きたことを知る手段も薄い（ここは物足りない）
 
 責任分界は次のように整理できる。
 
-| SDK が提供するもの | あなたが用意するもの |
+| SDK が提供するもの | アプリケーション側で用意するもの |
 |---|---|
 | 識別 — `sessionId` でセッションを指せる | 排他 — 同時に書き手が1つであることの保証 |
 | 永続化 — checkpoint への保存と復元 | 所有権 — そのセッションが誰のものか |
 | 配置の自由 — `sessionFs` で置き場所を選べる | 経路 — いまどのランタイムが握っているか |
 
-ストレージの外部化は左列の3つ目を手に入れる話であり、右列は最初から最後まであなたの仕事のまま残る。
+ストレージの外部化で得られるのは左列の「配置の自由」で、右列はすべてアプリケーション側の仕事として残る。
 
-## セッションIDは主キーであり、ACLである
+## セッションIDは主キーであって、ACLではない
 
-`createSession({ sessionId })` でIDを自分で決められる。指定しなければランダムIDが振られ、その場合は resume できない（IDを控えていなければ、という意味で）。
+`createSession({ sessionId })` でIDを自分で決められる。指定しなければランダムなIDが振られるので、resume するにはそのIDを控えておく必要がある。
 
 公式ドキュメントは `user-{userId}-{taskId}` のような構造化IDを推奨し、`sessionId.split("-")` でユーザーIDをパースして所有権を検証するサンプルを載せている。<strong>このサンプルをそのまま本番に持ち込んではいけない。</strong>
 
-理由は単純で、これはIDの文字列表現を信頼境界にしてしまう設計だからだ。
+この設計では、IDの文字列表現が信頼境界になってしまう。
 
 - ユーザーIDにハイフンが含まれれば境界がずれる（`user-alice-smith-42` をどう分割する？）
 - 攻撃者は任意の `sessionId` を送れる。`createSession` にクライアント由来のIDをそのまま渡すと、他人のIDを名乗れる
 - テナント削除・ユーザーIDの再利用に追随できない
 
-正しいのは、<strong>セッションIDは不透明な識別子として扱い、所有権は自分のDBで持つ</strong>ことだ。
+<strong>セッションIDは不透明な識別子として扱い、所有権は自前のDBで管理する</strong>。
 
 ```typescript
 // 生成: 衝突しない不透明IDにテナント接頭辞だけ付ける
@@ -371,17 +369,17 @@ async function authorize(sessionId: string, user: User) {
 }
 ```
 
-テナント接頭辞を残すのは、`sessionFs` でテナント別のストレージパスに振り分けるときや、障害調査でIDだけを見るときに効く。ただし<strong>認可の根拠にはしない</strong>。存在有無を漏らさないために、他テナントのセッションには 403 ではなく 404 を返す。
+テナント接頭辞を残すのは、`sessionFs` でテナント別のストレージパスに振り分けるときや、障害調査でIDだけを見るときに役立つ。ただし認可の根拠にはしない。存在有無を漏らさないために、他テナントのセッションには 403 ではなく 404 を返す。
 
 ## 単一ライター制約 — ロックではなくパーティションで解く
 
-SDKドキュメントは明言している。「セッションのロック機構は組み込まれていない」。同じセッションIDに対して2つのクライアントが同時に `resumeSession` して書き込んだ場合の挙動は未定義だ。checkpoint は連番のJSONファイルとして書かれるので、失われた更新（lost update）が起きうる。
+SDKドキュメントには「セッションのロック機構は組み込まれていない」と明記されている。同じセッションIDに対して2つのクライアントが同時に `resumeSession` して書き込んだ場合の挙動は未定義だ。checkpoint は連番のJSONファイルとして書かれるので、失われた更新（lost update）が起きうる。
 
 公式サンプルは Redis の `SET NX EX` によるロックを示している。方向性は正しいが、そのままだと2つ問題がある。
 
 ### 問題1: ロック解放が競合する
 
-ドキュメントのサンプルには `GET` してから `DEL` する形のものがある。この2ステップの間にTTLが切れて別クライアントがロックを取ると、<strong>他人のロックを消す</strong>。解放は必ず Lua でアトミックにする。
+ドキュメントのサンプルには `GET` してから `DEL` する形のものがある。この2ステップの間にTTLが切れて別クライアントがロックを取ると、他人のロックを消してしまう。解放は必ず Lua でアトミックにする。
 
 ```typescript
 const RELEASE = `
@@ -423,23 +421,23 @@ async function withSessionLease<T>(
 }
 ```
 
-見落としやすいのは<strong>更新側にも同じ競合がある</strong>ことだ。素の `EXPIRE` は「そのキーが今も自分のものか」を確かめない。TTLが切れて別クライアントがロックを取った後に更新タイマーが発火すると、他人のロックのTTLを延長してしまう。解放と同じく、更新もトークン照合込みのLuaにする。
+更新側にも同じ競合がある。素の `EXPIRE` は「そのキーが今も自分のものか」を確かめない。TTLが切れて別クライアントがロックを取った後に更新タイマーが発火すると、他人のロックのTTLを延長してしまう。解放と同じく、更新もトークン照合込みのLuaにする。
 
 ### 問題2: そもそもロックは相互排他を保証しない
 
-Redisロックは<strong>アドバイザリー</strong>であって、相互排他の証明にはならない。GCの長時間停止、ネットワーク分断、コンテナーのフリーズが起きれば、TTL切れ後も自分がロックを持っていると思い込んだプロセスが書き込みを続ける。分散ロックの一般的な処方箋は「リソース側でフェンシングトークンを検証する」ことだが、<strong>Copilotランタイムはフェンシングトークンを受け取らない</strong>。つまり、ロックだけでは原理的に守り切れない。
+Redisロックはアドバイザリーであって、相互排他の証明にはならない。GCの長時間停止、ネットワーク分断、コンテナーのフリーズが起きれば、TTL切れ後も自分がロックを持っていると思い込んだプロセスが書き込みを続ける。分散ロックの一般的な処方箋は「リソース側でフェンシングトークンを検証する」ことだが、<strong>Copilotランタイムはフェンシングトークンを受け取らない</strong>。つまり、ロックだけでは原理的に守り切れない。
 
 実務的な解は2つある。
 
-<strong>(a) 設計で単一ライターを作る。</strong> セッションIDをキーにしたパーティション付きキュー（Kafkaのパーティション、SQS FIFOのMessageGroupId、Redis Streamsのコンシューマグループなど）を使い、同じセッションのターンは常に同じワーカーが順に処理する。相互排他が「ロックの成否」ではなく「配送の性質」から出てくるので、はるかに堅い。
+<strong>(a) 設計で単一ライターを作る。</strong>セッションIDをキーにしたパーティション付きキュー（Kafkaのパーティション、SQS FIFOのMessageGroupId、Redis Streamsのコンシューマーグループなど）を使い、同じセッションのターンは常に同じワーカーが順に処理する。相互排他が「ロックの成否」ではなく「配送の性質」から出てくるので、はるかに堅い。
 
-<strong>(b) 破損を検出可能にする。</strong> それでも二重ライターは起きうる、という前提で、`listSessions()` が返す `modifiedTime` や自前のターンカウンターを使い、期待したバージョンから進んでいたら異常として扱う。エージェントセッションは金銭取引ではないので、「検出して当該セッションを隔離し、ユーザーに再開を促す」で十分なことが多い。
+<strong>(b) 破損を検出可能にする。</strong>それでも二重ライターは起きうる、という前提で、`listSessions()` が返す `modifiedTime` や自前のターンカウンターを使い、期待したバージョンから進んでいたら異常として扱う。エージェントセッションは金銭取引ではないので、「検出して当該セッションを隔離し、ユーザーに再開を促す」で十分なことが多い。
 
-そして最も安価な緩和策として、<strong>同一セッションへの同時リクエストは 409 Conflict で即座に落とす</strong>。UIが「前の応答の生成中です」と出せば、それで大半のケースは解決する。
+最も安価な緩和策は、同一セッションへの同時リクエストを 409 Conflict で即座に落とすことだ。UIが「前の応答の生成中です」と出せば、それで大半のケースは解決する。
 
 ## resume のコストと容量計画
 
-Level 1 の設計は「毎ターン resume」を受け入れる。そのコストを定量的に扱う。
+Level 1 では毎ターン resume するので、その時間が必要な容量に跳ね返る。
 
 必要な同時アクティブセッション数はリトルの法則で出る。
 
@@ -455,13 +453,13 @@ $$
 N = \left\lceil \frac{L}{C} \right\rceil \times (1 + \text{headroom})
 $$
 
-ここで Level 1 と Level 2 の差が効く。resume を挟むと $W$ が伸び、$L$ が線形に増える。
+Level 1 と Level 2 の差はここに現れる。resume を挟むと $W$ が伸び、$L$ が線形に増える。
 
 $$
 \frac{L_{\text{L1}}}{L_{\text{L2}}} = \frac{W_{\text{resume}} + W_{\text{turn}}}{W_{\text{turn}}}
 $$
 
-$W_{\text{lease}}$ は Level 1 / Level 2 の両方にかかるので約分され、$W_{\text{disconnect}}$ は $W_{\text{resume}}$ に比べて十分小さいとして落としている。
+$W_{\text{lease}}$ は Level 1 / Level 2 の両方にかかるが、$W_{\text{turn}}$ に比べて小さいとして省いた。$W_{\text{disconnect}}$ も $W_{\text{resume}}$ に比べて十分小さいとして省いている。
 
 | $W_{\text{turn}}$ | $W_{\text{resume}} = 1\text{s}$ | $W_{\text{resume}} = 5\text{s}$ |
 |---|---|---|
@@ -470,24 +468,22 @@ $W_{\text{lease}}$ は Level 1 / Level 2 の両方にかかるので約分され
 | 5 s（短い問い合わせ） | +20% | +100% |
 | 1 s（補完的な用途） | +100% | +500% |
 
-つまり、<strong>ステートレス化のコストはターン長に反比例する</strong>。長時間走るエージェントワークフローなら Level 1 でほぼ無料。逆に、短いターンを高頻度で捌くAPIでは、resume がそのままインフラ費用になる。ここが Level 1 と Level 2 の分岐点だ。
+$W_{\text{resume}}$ が一定なら、<strong>ステートレス化のコストはターン長に反比例する</strong>。長時間走るエージェントワークフローなら、Level 1 の追加コストはほとんどない。逆に、短いターンを高頻度で捌くAPIでは、resume の時間がそのままインフラ費用になる。Level 1 と Level 2 のどちらを選ぶかは、この比で決まる。
 
-ただし $W$ を平均で見てはいけない。エージェントのターン長は裾が重い（ツール実行が支配的で、リトライやコンパクションが混ざる）。キャパシティーは p95/p99 で見積もり、さらに<strong>同時実行に上限を設けて待たせる</strong>。上限がないと、遅いターンが積み上がってメモリーを食い潰し、全体が崩れる。
+ただし $W$ を平均で見てはいけない。エージェントのターン長は裾が重い（ツール実行が支配的で、リトライやコンパクションが混ざる）。キャパシティーは p95/p99 で見積もり、さらに同時実行に上限を設けて待たせる。上限がないと、遅いターンが積み上がってメモリーを食い潰し、全体が崩れる。
 
-$C$ については、公開ドキュメントに具体的な数値は載っていない。ランタイムはシングルプロセスで、スレッドではなくインスタンスを増やしてスケールする設計だと明記されているだけだ。<strong>必ず自分のワークロードで実測する</strong>。測るべきは、ランタイム1本に対して同時セッション数を増やしながらの、
+$C$ の具体的な数値は公開ドキュメントに載っていない。ランタイムはシングルプロセスで、スレッドではなくインスタンスを増やしてスケールする設計だと明記されているだけだ。$C$ は自分のワークロードで実測する。ランタイム1本に対して同時セッション数を増やしながら、次の4つを測る。
 
 - ターンレイテンシーの p50 / p95 / p99
 - RSS（生きたセッション数に対する傾き）
 - `session-state` のディスクI/Oとサイズ増加率
 - エラー率とタイムアウト率
 
-の4つ。「何セッション載るか」ではなく「どこでレイテンシーが崩れるか」を探す。
+探すのは、何セッション載るかではなく、どこでレイテンシーが崩れ始めるかだ。
 
 ## ストリーミングがステートレス化を壊す
 
-ここが実装で一番よく詰まる。
-
-`createSession({ streaming: true })` にすると、ランタイムは `assistant.message_delta` を `deltaContent` 付きで流してくる。これを購読しているのは、<strong>そのセッションを握っているSDKクライアントのプロセス</strong>だ。ブラウザーに向けたSSE/WebSocketは、別のAPI Podで終端しているかもしれない。
+実装で最もつまずきやすいのがストリーミングだ。`createSession({ streaming: true })` にすると、ランタイムは `assistant.message_delta` を `deltaContent` 付きで流してくる。これを購読しているのは、そのセッションを握っているSDKクライアントのプロセスだ。ブラウザーに向けたSSE/WebSocketは、別のAPI Podで終端しているかもしれない。
 
 ```mermaid
 flowchart LR
@@ -497,13 +493,13 @@ flowchart LR
     RT -->|assistant.message_delta| A1
 ```
 
-素朴に組むとこうなる。Pod 1 がデルタを受け取っているのに、ブラウザーは Pod 2 に繋がっていて何も届かない。
+素朴に組むと、Pod 1 がデルタを受け取っているのに、ブラウザーは Pod 2 につながっていて何も届かない。
 
 ### エフェメラルイベント — 取り戻せないものがある
 
-ここには配送以上の問題がある。<strong>ストリーミング系のイベントはディスクに書かれない</strong>。
+問題は配送だけではない。<strong>ストリーミング系のイベントはディスクに書かれない</strong>。
 
-生成された型定義を見ると、すべてのセッションイベントが `ephemeral` フラグを持っている。
+生成された型定義では、すべてのセッションイベントが `ephemeral` フラグを持っている。
 
 ```typescript
 // nodejs/src/generated/session-events.ts
@@ -513,24 +509,24 @@ flowchart LR
 ephemeral?: boolean;
 ```
 
-そして一部のイベントは、この値がリテラル型 `true` に固定されている。つまり<strong>型レベルで永続化されないことが保証されている</strong>。該当するイベントは 63 種類あり、その中には次のものが含まれる。
+一部のイベントでは、この値がリテラル型 `true` に固定されており、型レベルで永続化されないことが保証されている。該当するイベントは 63 種類あり、その中には次のものが含まれる。
 
 | イベント | 失われるもの |
 |---|---|
 | `assistant.message_delta` / `assistant.message_start` | 途中まで生成された応答 |
 | `assistant.reasoning_delta` / `assistant.tool_call_delta` | 推論とツール呼び出しのストリーム |
-| `assistant.usage` | <strong>モデル呼び出し1回ごとのトークン数とコスト</strong> |
+| `assistant.usage` | モデル呼び出し1回ごとのトークン数とコスト |
 | `tool.execution_progress` / `tool.execution_partial_result` | ツール実行の途中経過 |
 | `session.usage_info` | コンテキストウィンドウの使用状況 |
 | `session_limits_exhausted.requested` / `.completed` | 予算切れの通知 |
 | `user_input.requested` / `elicitation.requested` | ユーザー入力・フォーム要求 |
 | `session.idle` / `model.call_failure` | アイドル遷移とモデル呼び出し失敗 |
 
-これがステートレス設計に効いてくる。`getEvents()` を呼んでも、<strong>途中まで流れたターンを復元することはできない</strong>。ディスクに残っているのは checkpoint に落ちた確定分だけだ。
+そのため、`getEvents()` を呼んでも途中まで流れたターンは復元できない。ディスクに残っているのは checkpoint に落ちた確定分だけだ。
 
-だからストリーミングの問題は「イベントをどう配送するか」ではなく「<strong>イベントをどう耐久化するか</strong>」である。ブローカーへの publish は配送のためだけではない。それが唯一の記録になる。追記専用バッファーは、あれば便利なものではなく、<strong>欠けたら二度と取り戻せないものの保管庫</strong>だ。
+したがってストリーミングでは、イベントの配送に加えて耐久化も設計する必要がある。ブローカーに publish したイベントが唯一の記録になり、後述の追記専用バッファーは、欠けたら二度と取り戻せないイベントの保管先になる。
 
-なお、イベントは `parentId` を持ち、「直前のイベントへのリンクを辿る鎖」を形成する。順序と因果はこの鎖で表現されているので、自前のバッファーを作るときは `parentId` をそのまま持ち回ると再構成が楽になる。
+イベントは `parentId` で直前のイベントを指し、鎖をなす。順序と因果はこの鎖で表されるので、自前のバッファーでも `parentId` をそのまま保持すると再構成しやすい。
 
 打ち手は3つある。
 
@@ -540,21 +536,21 @@ ephemeral?: boolean;
 | 所有Podへのルーティング | レジストリーを引いて、SSE接続自体を所有Podへプロキシー／リダイレクト | ホップが少なく低遅延 | Pod間の内部ルーティングが必要。ドレイン時の扱いが面倒 |
 | ストリーミングを捨てる | `streaming` を使わず最終 `assistant.message` だけ返す | バッチ処理、非対話UI | 体感が悪い。長いターンでは無応答に見える |
 
-イベントブローカー方式を採るなら、<strong>追記専用のターンバッファー</strong>を併設するとよい。デルタを publish すると同時に Redis の List か Stream に追記し、SSE接続はまず既存バッファーを吐いてから購読に切り替える。これで「接続が一瞬切れて再接続したら途中が欠けた」を潰せる。SSE の `Last-Event-ID` と組み合わせれば再開位置も決まる。
+イベントブローカー方式を採るなら、追記専用のターンバッファーを併設するとよい。デルタを publish すると同時に Redis の List か Stream に追記し、SSE接続はまず既存バッファーを吐いてから購読に切り替える。これで、接続が一瞬切れて再接続したときに途中のデルタが欠ける問題を防げる。SSE の `Last-Event-ID` と組み合わせれば再開位置も決まる。
 
-なお、`streaming` の設定に関わらず最終的な `assistant.message` は必ず送られる。だからバッファーの整合性は、最後に届く完全なコンテンツで検算できる。
+`streaming` の設定に関わらず最終的な `assistant.message` は必ず送られるので、バッファーの整合性は最後に届く完全な内容で検算できる。
 
-クラウドセッション（`cloud: { repository: ... }`）を使う場合はもう一段の罠がある。`createSession` は Mission Control がタスクを予約した時点で解決するが、リモートワーカーが接続するのは1〜2秒後だ。その前に `send` すると、ランタイム側は `"Remote session is still starting"` を投げるにもかかわらず、<strong>スキーマ側のラッパーがそのエラーを握り潰し、新しい messageId を返す</strong>。プロンプトはサーバー側で捨てられる。`session.start` イベントのうち `producer === "copilot-agent"` のものを待ってから送る必要がある。ステートレスなAPIハンドラーでこれをやるなら、「セッション作成」と「最初のプロンプト送信」を別リクエストに割るか、作成側で ready を待ってからレスポンスを返す。
+クラウドセッション（`cloud: { repository: ... }`）を使う場合は、もう一つ注意点がある。`createSession` は Mission Control がタスクを予約した時点で解決するが、リモートワーカーが接続するのは1〜2秒後だ。その前に `send` すると、ランタイム側は `"Remote session is still starting"` を投げるにもかかわらず、<strong>スキーマ側のラッパーがそのエラーを握り潰し、新しい messageId を返す</strong>。プロンプトはサーバー側で捨てられる。`session.start` イベントのうち `producer === "copilot-agent"` のものを待ってから送る必要がある。ステートレスなAPIハンドラーでこれをやるなら、「セッション作成」と「最初のプロンプト送信」を別リクエストに割るか、作成側で ready を待ってからレスポンスを返す。
 
-## sessionFs — 状態をローカルディスクから剥がす
+## sessionFs — 状態をローカルディスクから切り離す
 
-`baseDirectory` は `COPILOT_HOME` を指定する。既定は `~/.copilot`。`RuntimeConnection.forUri` で外部ランタイムに繋ぐ場合、SDKクライアント側の `baseDirectory` は<strong>無視される</strong>（ランタイムプロセス側で環境変数として設定する必要がある）。ここは間違えやすい。
+`baseDirectory` は `COPILOT_HOME` を指定する。既定は `~/.copilot`。`RuntimeConnection.forUri` で外部ランタイムに繋ぐ場合、SDKクライアント側の `baseDirectory` は<strong>無視される</strong>（ランタイムプロセス側で環境変数として設定する必要がある）。
 
-そして同じことが `sessionIdleTimeoutSeconds` と `enableRemoteSessions` にも当てはまる。外部ランタイムに接続する構成では、これらのクライアントオプションは例外も警告もなく黙って無視され、ランタイムプロセス側の設定が効く。本稿が推奨する headless 常駐構成は、まさにこの「無視される側」に該当する。
+同じことが `sessionIdleTimeoutSeconds` と `enableRemoteSessions` にも当てはまる。外部ランタイムに接続する構成では、これらのクライアントオプションは例外も警告もなく無視され、ランタイムプロセス側の設定が使われる。この記事で勧めている headless 常駐構成は、まさにこの構成に当たる。
 
-共有ストレージを用意する古典的な方法は、`COPILOT_HOME/session-state` を PVC や Azure File にマウントすることだ。ドキュメントにも Kubernetes と ACI の例がある。だが、ネットワークファイルシステムを複数ランタイムから同時マウントする構成は、ロック・整合性・レイテンシーのすべてで面倒を抱え込む。
+共有ストレージを用意する古典的な方法は、`COPILOT_HOME/session-state` を PVC や Azure File にマウントすることだ。ドキュメントにも Kubernetes と ACI の例がある。だが、ネットワークファイルシステムを複数ランタイムから同時マウントする構成は、ロック・整合性・レイテンシーのいずれにも課題を抱える。
 
-そこで `sessionFs` が用意されている。セッションスコープのファイルI/Oを、ランタイムのローカルディスクではなくアプリケーション側のストレージへ経路づけする仕組みだ。
+`sessionFs` を使うと、セッションスコープのファイルI/Oを、ランタイムのローカルディスクではなくアプリケーション側のストレージへ振り向けられる。
 
 ```typescript
 const client = new CopilotClient({
@@ -578,23 +574,23 @@ const client = new CopilotClient({
 | Rust | `with_session_fs(...)` | `with_session_fs_provider(...)` |
 | Java | （公開APIなし） | — |
 
-Javaには現時点で検証済みの公開 `sessionFs` オプションがない。JVMスタックで組むなら、共有ファイルシステム前提の設計になる点は先に織り込んでおくべきだ。
+Javaには現時点で検証済みの公開 `sessionFs` オプションがない。JVMスタックで組む場合は、共有ファイルシステムを前提に設計することになる。
 
 `sessionFs` を使う実務上の利点は3つある。
 
 1. <strong>ローカルディスクをエフェメラルにできる。</strong> Podが消えても状態が消えない。Cloud Run や Container Apps のようにディスクが揮発する環境で必須になる。
-2. <strong>テナント境界をパスで強制できる。</strong> プロバイダー実装の中でテナントプレフィックスを強制すれば、セッションIDの取り違えがあってもストレージ層で止まる。多層防御になる。
-3. <strong>ライフサイクル管理を自分のツールに寄せられる。</strong> オブジェクトストレージのライフサイクルポリシーでTTL削除、バージョニング、監査ログが乗る。
+2. <strong>テナント境界をパスで強制できる。</strong>プロバイダー実装の中でテナントプレフィックスを強制すれば、セッションIDの取り違えがあってもストレージ層で止まる。多層防御になる。
+3. <strong>ライフサイクル管理を自分のツールに寄せられる。</strong>オブジェクトストレージのライフサイクルポリシーでTTL削除、バージョニング、監査ログが乗る。
 
-代償はレイテンシーだ。checkpoint の読み書きがネットワーク越しになる。特に Level 1 の毎ターン resume と組み合わせると、$W_{\text{resume}}$ が直撃する。ここは Level 2 のウォームセッションと相性がよい。
+代償はレイテンシーだ。checkpoint の読み書きがネットワーク越しになる。Level 1 の毎ターン resume と組み合わせると、この遅延がそのまま $W_{\text{resume}}$ に加わる。resume の回数が少ない Level 2 のウォームセッションの方が、この遅延の影響を受けにくい。
 
 ## `mode: "empty"` — マルチテナントの前提条件
 
-これは1行の設定だが、<strong>マルチテナント設計における最重要の分岐</strong>だ。
+`mode` は1行の設定だが、共有ランタイムをマルチテナントで使えるかどうかはこの設定で決まる。
 
-`CopilotClient` の `mode` は `"copilot-cli"`（既定）と `"empty"` の2択で、ドキュメントは明確に述べている。共有サーバーで既定の `"copilot-cli"` を使ってはいけない、と。理由は、そのモードがCLIライクなコーディングエージェントを想定していて、<strong>ホストのファイルシステムへアクセスできる環境依存（ambient）のツール群を露出しうる</strong>からだ。
+`CopilotClient` の `mode` は `"copilot-cli"`（既定）と `"empty"` の2択で、ドキュメントは共有サーバーで既定の `"copilot-cli"` を使ってはいけないと明記している。そのモードはCLIライクなコーディングエージェントを想定していて、<strong>ホストのファイルシステムへアクセスできる環境依存（ambient）のツール群を露出しうる</strong>からだ。
 
-ランタイムはあなたのサーバーのプロセスとして動いている。そのプロセスが読めるものは、原理的に全テナントの共有物だ。`.env`、サービスアカウントのトークン、他テナントのセッションディレクトリー、`/proc`、クラウドのインスタンスメタデータエンドポイント。エージェントに「サーバー上のファイルを読んで」と頼めるツールが暗黙に有効になっている状態は、それだけで OWASP A01（アクセス制御の不備）と A05（セキュリティー設定ミス）に直行する。
+ランタイムはサーバー上のプロセスとして動くので、そのプロセスが読めるものは原理的に全テナントの共有物になる。`.env`、サービスアカウントのトークン、他テナントのセッションディレクトリー、`/proc`、クラウドのインスタンスメタデータエンドポイントなどだ。エージェントに「サーバー上のファイルを読んで」と頼めるツールが暗黙に有効になっていれば、それだけで OWASP A01（アクセス制御の不備）と A05（セキュリティー設定ミス）に該当する。
 
 ```typescript
 const client = new CopilotClient({
@@ -629,13 +625,13 @@ const session = await client.createSession({
 | セッション状態 | `COPILOT_HOME/session-state/{sessionId}` 単位 |
 | GitHubアイデンティティー | セッションに `gitHubToken` を設定すればセッション単位 |
 | ツール | `mode: "empty"` では明示的、`"copilot-cli"` では環境依存 |
-| ホストファイルシステム | ホストツールが有効なら<strong>ランタイムプロセスで共有</strong> |
+| ホストファイルシステム | ホストツールが有効ならランタイムプロセスで共有 |
 
-最後の行がすべてを物語っている。`mode: "empty"` は、共有ランタイムパターンを成立させるための前提条件そのものだ。
+最後の行のとおり、ホストツールが有効だとホストのファイルシステムはランタイムプロセス内で共有される。そのため `mode: "empty"` は、共有ランタイムパターンを成立させるための前提条件になる。
 
-### `mode: "empty"` は「既定値の切替」ではなく「検証」でもある
+### `mode: "empty"` は設定の検証も行う
 
-ガイドを読むだけだと単なるデフォルト変更に見えるが、型定義を読むと違う。
+ガイドからは既定値を切り替えるだけに見えるが、型定義のコメントによると、設定の検証も行う。
 
 ```typescript
 // nodejs/src/types.ts
@@ -648,22 +644,22 @@ const session = await client.createSession({
  */
 ```
 
-`mode: "empty"` は次の2つを<strong>強制</strong>する。設定漏れは実行時エラーになる。
+`mode: "empty"` は次の2つを強制する。設定漏れは実行時エラーになる。
 
-1. `baseDirectory` <strong>または</strong> `sessionFs` のいずれかが設定されていること（`CopilotClient` 構築時に検証）
+1. `baseDirectory` または `sessionFs` のいずれかが設定されていること（`CopilotClient` 構築時に検証）
 2. すべてのセッションで `availableTools` が指定されていること（`createSession` 時に検証）
 
-で1点目には落とし穴がある。前述のとおり `baseDirectory` は `RuntimeConnection.forUri` 接続では無視される。したがって「外部ランタイム + `mode: "empty"`」という本稿推奨の構成では、<strong>実質的に `sessionFs` を用意するのが筋</strong>になる。`baseDirectory` を渡せば検証は通るが、それは何も設定していないのと同じだ。
+1点目には落とし穴がある。前述のとおり `baseDirectory` は `RuntimeConnection.forUri` 接続では無視される。したがって「外部ランタイム + `mode: "empty"`」というこの記事で勧める構成では、<strong>実質的に `sessionFs` を用意する必要がある</strong>。`baseDirectory` を渡しても検証は通るが、何も設定していないのと同じだ。
 
-2点目は嬉しい方の驚きだ。「許可リストを書くべき」ではなく「書かないと動かない」。安全側に倒れている。
+2点目では、許可リストを書かないとセッションを作成できない。設定を漏らしても、ツールが露出するのではなくエラーになるので、安全側に倒れている。
 
 ### deny-by-default にするための設定リファレンス
 
-`mode: "empty"` は多くの既定を安全側に倒すが、<strong>全部を塞ぐわけではない</strong>。型定義から、モードで既定が変わるフィールドと、マルチテナントで明示的に固定すべきフィールドを拾うと次のようになる。
+`mode: "empty"` は多くの既定を安全側に倒すが、全部を塞ぐわけではない。型定義から、モードで既定が変わるフィールドと、マルチテナントで明示的に固定すべきフィールドを拾うと次のようになる。
 
 | フィールド | モードによる既定の変化 | マルチテナントでの推奨 |
 |---|---|---|
-| `availableTools` | `empty` では<strong>必須</strong>（未指定はエラー） | 明示的な許可リスト |
+| `availableTools` | `empty` では必須（未指定はエラー） | 明示的な許可リスト |
 | `skipCustomInstructions` | `false` → `empty` では `true` | `true`（既定のまま） |
 | `customAgentsLocalOnly` | `false` → `empty` では `true` | `true`（既定のまま） |
 | `coauthorEnabled` | `true` → `empty` では `false` | `false`（既定のまま） |
@@ -671,18 +667,18 @@ const session = await client.createSession({
 | `enableExperimentalMode` | ランタイム依存 → `empty` では `false` | `false`（既定のまま） |
 | `enableSessionStore` | `copilot-cli` では有効 → `empty` では無効 | 明示的に `false` |
 | `memory` | `copilot-cli` はランタイム既定 → `empty` では無効 | 明示的に `{ enabled: false }` |
-| `skipEmbeddingRetrieval` | モード別の既定の記載なし | <strong>`true`</strong> |
-| `embeddingCacheStorage` | モード別の既定の記載なし | <strong>`"in-memory"`</strong> |
+| `skipEmbeddingRetrieval` | モード別の既定の記載なし | `true` |
+| `embeddingCacheStorage` | モード別の既定の記載なし | `"in-memory"` |
 | `enableFileHooks` | モード別の既定の記載なし | `false` |
 | `enableOnDemandInstructionDiscovery` | 同上 | `false` |
 | `enableHostGitOperations` | 同上 | `false` |
 | `enableSkills` | 同上 | 必要なければ `false` |
 
-`skipCustomInstructions` の意味は重要だ。既定の `copilot-cli` モードでは、ランタイムが作業ディレクトリーから `.github/copilot-instructions.md`、`AGENTS.md`、`CLAUDE.md` を読み込んでシステムプロンプトに混ぜる。テナントがファイルをアップロードできる、あるいは作業ディレクトリーに影響を与えられる設計だと、これは<strong>プロンプトインジェクションの直通経路</strong>になる。`enableOnDemandInstructionDiscovery` も同じ系統で、ファイル閲覧後に指示ファイルを追加発見する機能だ。
+既定の `copilot-cli` モード（`skipCustomInstructions: false`）では、ランタイムが作業ディレクトリーから `.github/copilot-instructions.md`、`AGENTS.md`、`CLAUDE.md` を読み込んでシステムプロンプトに混ぜる。テナントがファイルをアップロードできる、あるいは作業ディレクトリーに影響を与えられる設計だと、これは<strong>プロンプトインジェクションの直通経路</strong>になる。`enableOnDemandInstructionDiscovery` も同じ系統で、ファイル閲覧後に指示ファイルを追加発見する機能だ。
 
 ### 埋め込みキャッシュという見落とされやすい漏洩経路
 
-型定義の中に、公式ガイドではまず触れられていない注意書きがある。
+公式ガイドではほとんど触れられていない注意書きが、型定義にある。
 
 ```typescript
 // nodejs/src/types.ts
@@ -694,13 +690,13 @@ const session = await client.createSession({
 skipEmbeddingRetrieval?: boolean;
 ```
 
-<strong>共有された埋め込みキャッシュを経由したセッション間の情報漏洩</strong>。SDK 自身がマルチテナント環境での使用を名指しで推奨しているフィールドだ。関連する `embeddingCacheStorage` は `"persistent"`（ディスクに保存され、セッションと再起動をまたいで共有）と `"in-memory"`（セッション終了とともに破棄）を選べる。
+SDK 自身が、共有された埋め込みキャッシュを経由したセッション間の情報漏洩を防ぐために、マルチテナント環境でこのフィールドを使うよう名指しで勧めている。関連する `embeddingCacheStorage` は `"persistent"`（ディスクに保存され、セッションと再起動をまたいで共有）と `"in-memory"`（セッション終了とともに破棄）を選べる。
 
 `mode: "empty"` はツールの露出面を塞ぐが、<strong>この2つについてはモード別の既定が型定義に記載されていない</strong>。マルチテナントSaaSなら、`skipEmbeddingRetrieval: true` か、少なくとも `embeddingCacheStorage: "in-memory"` を明示的に設定すべきだ。
 
-`onPermissionRequest` についても、深いところで注意点がある。ハンドラーを省略すると、パーミッション要求はイベントとして発行され、<strong>保留状態のまま残る</strong>。誰かが解決するまでセッションは進まない。バックエンドサービスでハンドラーを付け忘れると、セッションが静かにハングして、アイドルタイムアウトまで居座る。必ず明示的に付ける。
+`onPermissionRequest` にも注意点がある。ハンドラーを省略すると、パーミッション要求はイベントとして発行され、保留状態のまま残る。誰かが解決するまでセッションは進まない。バックエンドサービスでハンドラーを付け忘れると、セッションが静かにハングして、アイドルタイムアウトまで居座る。必ず明示的に付ける。
 
-また、`approve-for-session` / `approve-for-location` / `approve-permanently` といったスコープは、承認をセッションを越えて永続化する。マルチテナントでは、`approve-for-location` の `locationKey` や `approve-permanently` のドメイン承認が意図せず共有される可能性がある。共有ランタイムでは `approve-once` と `reject` だけに絞るのが安全側だ。
+また、`approve-for-session` / `approve-for-location` / `approve-permanently` といったスコープは、承認をセッションを越えて永続化する。マルチテナントでは、`approve-for-location` の `locationKey` や `approve-permanently` のドメイン承認が意図せず共有される可能性がある。共有ランタイムでは `approve-once` と `reject` だけに絞るのが安全だ。
 
 ## 認証とトークンのライフサイクル
 
@@ -709,19 +705,19 @@ skipEmbeddingRetrieval?: boolean;
 - <strong>クライアント／ランタイムレベル</strong>: `COPILOT_GITHUB_TOKEN` などの環境変数、あるいは `gitHubToken` オプション。ランタイムプロセス自体の身元。
 - <strong>セッションレベル</strong>: `createSession({ gitHubToken })`。リクエスト元ユーザーの身元。
 
-ドキュメントは、マルチユーザーサーバーでは<strong>セッション単位のトークンを渡せ</strong>と明言している。コンテンツ除外（content exclusion）、モデルルーティング、クォータ、ユーザーごとのCopilotアクセス可否が、これに依存するからだ。単一のサービストークンを全ユーザーで使い回すと、これらの組織ポリシーが全部バイパスされる。
+ドキュメントは、マルチユーザーサーバーではセッション単位のトークンを渡せと明言している。コンテンツ除外（content exclusion）、モデルルーティング、クォータ、ユーザーごとのCopilotアクセス可否が、これに依存するからだ。単一のサービストークンを全ユーザーで使い回すと、これらの組織ポリシーが全部バイパスされる。
 
 認証の優先順位は、明示的なSDKトークン → Copilot API環境変数認証 → 環境変数のGitHubトークン → 保存済みCLI認証情報 → GitHub CLI認証情報、の順だ。危険なのは後ろの2つで、<strong>明示的なトークンを渡し忘れたコードが、ディスクに残った認証情報を拾って動いてしまう</strong>。開発中に `copilot` へログインした痕跡が `COPILOT_HOME`（既定 `~/.copilot`）に残ったままイメージを本番に出すと、ローカルでは動くのに本番で落ちる（あるいは逆に、本番で意図しないアイデンティティーで動く）典型パターンになる。
 
-なお、クライアントオプションの `useLoggedInUser` は `RuntimeConnection.forUri` と併用できない（クライアントレベルの `gitHubToken` も同様）。したがって外部ランタイム構成でこの事故が起きるのはSDKクライアント側ではなく<strong>ランタイムプロセス側</strong>であり、対処もランタイム側に打つ。コンテナーイメージに `~/.copilot` を持ち込まない、ランタイムプロセスの `COPILOT_HOME` を専用ディレクトリーに固定する、が具体策になる（SDKクライアントの `baseDirectory` は `forUri` では効かない）。
+なお、クライアントオプションの `useLoggedInUser` は `RuntimeConnection.forUri` と併用できない（クライアントレベルの `gitHubToken` も同様）。したがって外部ランタイム構成でこの事故が起きるのはSDKクライアント側ではなくランタイムプロセス側であり、対処もランタイム側に打つ。コンテナーイメージに `~/.copilot` を持ち込まない、ランタイムプロセスの `COPILOT_HOME` を専用ディレクトリーに固定する、が具体策になる（SDKクライアントの `baseDirectory` は `forUri` では効かない）。
 
-ステートレスなハンドラーで特に厄介なのが、<strong>トークンの寿命とセッションの寿命が一致しない</strong>点だ。ユーザーのOAuthトークンは数時間で失効しうるが、セッションは何日も生き残る。したがって、
+ステートレスなハンドラーで特に厄介なのが、<strong>トークンの寿命とセッションの寿命が一致しない</strong>点だ。ユーザーのOAuthトークンは数時間で失効しうるが、セッションは何日も生き残る。そのため、次のように扱う。
 
 - セッションレコードにトークンそのものを保存しない
-- resume のたびに、あなたの認証基盤から新しいトークンを取り直して `gitHubToken` に渡す
+- resume のたびに、自前の認証基盤から新しいトークンを取り直して `gitHubToken` に渡す
 - トークンが取れない（ユーザーが退職した、アクセスを取り消した）場合、セッションは resume できないものとして扱う
 
-BYOK も同型の問題を持つ。APIキーはセキュリティー上ディスクに永続化されないので、<strong>`resumeSession` のたびに `provider` を再投入する必要がある</strong>。ここを忘れると、作成直後は動くのに resume 後に認証エラーになる、という再現性の低いバグになる。
+BYOK にも同じ問題がある。APIキーはセキュリティー上ディスクに永続化されないので、`resumeSession` のたびに `provider` を再投入する必要がある。ここを忘れると、作成直後は動くのに resume 後に認証エラーになる、という再現性の低いバグになる。
 
 ```typescript
 async function resumeWithFreshCredentials(sessionId: string, rec: SessionRecord) {
@@ -734,10 +730,11 @@ async function resumeWithFreshCredentials(sessionId: string, rec: SessionRecord)
 }
 ```
 
-なお、BYOK は静的なAPIキーだけではない。`provider` には `apiKey` のほかに `bearerToken`（静的な文字列）と `bearerTokenProvider`（オンデマンドでトークンを返すコールバック）があり、公式ドキュメントには Azure Managed Identity 専用のガイドが独立して用意されている。`DefaultAzureCredential` で `https://ai.azure.com/.default` スコープのトークンを取り、`bearerTokenProvider` に渡す形だ。
+BYOK の認証は静的なAPIキーに限らない。`provider` には `apiKey` のほかに `bearerToken`（静的な文字列）と `bearerTokenProvider`（オンデマンドでトークンを返すコールバック）があり、公式ドキュメントには Azure Managed Identity 専用のガイドが独立して用意されている。`DefaultAzureCredential` で `https://ai.azure.com/.default` スコープのトークンを取り、`bearerTokenProvider` に渡す形だ。
 
-ステートレス設計の観点では、この差は大きい。`apiKey` や `bearerToken` は「resume のたびに秘密管理から取り直して再投入する値」だが、`bearerTokenProvider` は<strong>コールバックそのもの</strong>を渡すので、トークンの取得と更新をIdentity SDK側に委譲できる。長寿命の鍵をセッションレコードにも環境変数にも置かずに済む。ただし `provider` オブジェクト自体を resume のたびに渡し直す必要がある点は変わらない（コールバック参照もディスクには残らない）。逆に、静的な `bearerToken` は自動更新されないと明記されているので、長時間セッションでは必ず `bearerTokenProvider` を使う。
-そして、resume で再投入が必要なものは認証情報だけではない。型定義にはもう一つ、より危険なものがある。
+ステートレス設計の観点では、この差は大きい。`apiKey` や `bearerToken` は「resume のたびに秘密管理から取り直して再投入する値」だが、`bearerTokenProvider` はコールバックそのものを渡すので、トークンの取得と更新をIdentity SDK側に委譲できる。長寿命の鍵をセッションレコードにも環境変数にも置かずに済む。ただし `provider` オブジェクト自体を resume のたびに渡し直す必要がある点は変わらない（コールバック参照もディスクには残らない）。逆に、静的な `bearerToken` は自動更新されないと明記されているので、長時間セッションでは必ず `bearerTokenProvider` を使う。
+
+resume で再投入が必要なものは、認証情報のほかにもある。型定義のコメントによると、権限に関わる `managedSettings` も resume のたびに渡し直す必要がある。
 
 ```typescript
 // nodejs/src/types.ts — SessionConfigBase.managedSettings
@@ -746,9 +743,9 @@ async function resumeWithFreshCredentials(sessionId: string, rec: SessionRecord)
 // the layer, so warm and cold resume behave identically).
 ```
 
-`managedSettings` は、ホストが注入するエンタープライズ管理ポリシーだ。`deny`/`ask` ルールは和集合で合成され、`disableBypassPermissionsMode: "disable"` は deny-wins で適用される。つまり<strong>権限を絞る側の設定</strong>であり、これを resume で渡し忘れると層ごと消えて<strong>ポリシーが緩む</strong>。
+`managedSettings` は、ホストが注入するエンタープライズ管理ポリシーだ。`deny`/`ask` ルールは和集合で合成され、`disableBypassPermissionsMode: "disable"` は deny-wins で適用される。権限を絞る側の設定なので、これを resume で渡し忘れると層ごと消えて<strong>ポリシーが緩む</strong>。
 
-BYOK の鍵を忘れた場合は認証エラーで即座に気づけるが、`managedSettings` を忘れても<strong>セッションは正常に動く</strong>。失敗が静かなので、レビューで見つけるしかない。resume パスで再投入すべきものを一つの関数に集め、テストを書くのが現実的だ。
+BYOK の鍵を忘れた場合は認証エラーで即座に気づけるが、`managedSettings` を忘れてもセッションは正常に動く。失敗が静かなので、レビューで見つけるしかない。resume パスで再投入すべきものを一つの関数に集め、テストを書くのが現実的だ。
 
 なお `enableManagedSettings`（ランタイムが自ら組織ポリシーを取得するモード）はセッションの `gitHubToken` を必要とし、未設定ならセッション作成を拒否する（fail-closed）と型定義に書かれている。ここだけは安全側に倒れている。
 
@@ -768,19 +765,22 @@ BYOK の鍵を忘れた場合は認証エラーで即座に気づけるが、`ma
 | アイドルセッションが溜まる | アイドルタイムアウト未設定 | 明示的に設定（チャットなら15〜30分が出発点）。外部ランタイム接続ではクライアントの `sessionIdleTimeoutSeconds` は無視されるので、ランタイムプロセス側で設定する |
 | 1テナントがコストを食い潰す | セッション予算がない | `sessionLimits.maxAiCredits` + `session_limits_exhausted.requested` のハンドリング |
 | 他テナントのファイルが読まれる | `mode: "copilot-cli"` のまま共有 | `mode: "empty"` + `availableTools` 許可リスト |
+| 他テナントの内容が検索結果に混ざる | 共有された埋め込みキャッシュ、またはセッション横断のストア | `skipEmbeddingRetrieval: true`、`embeddingCacheStorage: "in-memory"`、`enableSessionStore: false` |
+| resume 後に権限ポリシーが緩む | resume で `managedSettings` を再投入していない（省略すると層ごと消える） | resume パスで必ず渡し、テストで担保する |
+| テナントのファイルがプロンプトに混入する | `AGENTS.md` などの自動読み込み | `skipCustomInstructions: true`、`enableOnDemandInstructionDiscovery: false` |
 | セッションが無言でハングする | `onPermissionRequest` 未指定で要求が保留のまま | ハンドラーを必ず指定。保留を検知する監視も置く |
 | デプロイのたびにターンが失われる | ドレイン設計がない | SIGTERMで新規受付停止 → 進行中ターン完了待ち → `disconnect()` → リース解放 |
 
-最後の項目を補足する。Kubernetesでは `terminationGracePeriodSeconds` を<strong>ターン長の p99 より長く</strong>取る必要がある。エージェントのターンは分単位になりうるので、既定の30秒ではほぼ確実に切られる。かといって無制限に長くするとローリングアップデートが終わらない。現実的には、
+デプロイ時は実行中のターンをドレインしてから Pod を止める。Kubernetesでは `terminationGracePeriodSeconds` をターン長の p99 より長く取る必要がある。エージェントのターンは分単位になりうるので、既定の30秒ではほぼ確実に切られる。かといって無制限に長くするとローリングアップデートが終わらない。現実的には、
 
 1. preStop フックで新規ターンの受付を止める
 2. 進行中ターンの完了を待つ（上限つき）
 3. 上限を超えたものは `session.abort()` してから `disconnect()`
 4. リースを解放し、クライアントには「再送してください」を返す
 
-という段階的な打ち切りにする。`disconnect()` がディスク上の状態を保持することが、ここで効いてくる。
+という段階的な打ち切りにする。`disconnect()` はディスク上の状態を残すので、打ち切ったセッションも後で resume できる。
 
-プロセス終了時は `client.stop()` を呼ぶ。これは全セッションを閉じ、<strong>後始末で発生したエラーの配列 `Error[]` を返す</strong>（例外を投げない）ので、戻り値を捨てずにログへ出す。停止が長引く場合の脱出口として `forceStop()` があるが、graceful なクリーンアップを飛ばすので、ドレインの最後の手段として扱う。
+プロセス終了時は `client.stop()` を呼ぶ。これは全セッションを閉じ、後始末で発生したエラーの配列 `Error[]` を返す（例外を投げない）ので、戻り値を捨てずにログへ出す。停止が長引く場合の脱出口として `forceStop()` があるが、graceful なクリーンアップを飛ばすので、ドレインの最後の手段として扱う。
 
 ## 観測性と予算制御
 
@@ -815,18 +815,18 @@ const client = new CopilotClient({
 
 ### 使用量イベントは2種類あり、片方は消える
 
-チャージバック（テナント別課金）を作るなら、ここは必ず押さえる必要がある。使用量に関するイベントは2系統ある。
+使用量に関するイベントは2系統あり、チャージバック（テナント別課金）を作るときはこの違いが問題になる。
 
 | イベント | 粒度 | 永続化 | 主要フィールド |
 |---|---|---|---|
-| `assistant.usage` | モデル呼び出し1回ごと | <strong>されない</strong>（型で `ephemeral: true`） | `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, `cost`, `duration`, `timeToFirstTokenMs`, `interTokenLatencyMs`, `finishReason`, `isByok`, `serviceRequestId`, `providerCallId` |
+| `assistant.usage` | モデル呼び出し1回ごと | されない（型で `ephemeral: true`） | `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, `cost`, `duration`, `timeToFirstTokenMs`, `interTokenLatencyMs`, `finishReason`, `isByok`, `serviceRequestId`, `providerCallId` |
 | `session.usage_checkpoint` | セッションの累積 | される | `totalNanoAiu`, `totalPremiumRequests?` |
 
-つまり、<strong>細かい方は消える</strong>。`assistant.usage` を購読していない、あるいは購読していた Pod が落ちたら、その呼び出しのトークン数もコストも二度と取れない。GitHub 側の課金は当然発生しているのに、あなたの会計には穴が空く。
+呼び出しごとの細かい記録である `assistant.usage` は永続化されない。購読していない、あるいは購読していた Pod が落ちたら、その呼び出しのトークン数もコストも二度と取れない。GitHub 側では課金されているのに、自社の会計には記録が残らない。
 
-したがってチャージバックの設計はこうなる。
+そのため、チャージバックは次のように設計する。
 
-1. `assistant.usage` を<strong>受け取った瞬間に</strong>外部の追記先（キュー、時系列DB、イベントストア）へ流す。ここを非同期のベストエフォートにしない
+1. `assistant.usage` を受け取った瞬間に外部の追記先（キュー、時系列DB、イベントストア）へ流す。ここを非同期のベストエフォートにしない
 2. 帳簿の正としては `session.usage_checkpoint` の累積値を使う。こちらは永続化されるので resume 後も一貫している
 3. 両者を突き合わせて欠損を検出する。差分が出たら、それは Pod 障害でイベントを取りこぼした量そのものだ
 
@@ -834,7 +834,7 @@ const client = new CopilotClient({
 
 なお `quotaSnapshots` と `toolCounts` は型定義で `@internal` と印が付いている。使えてしまうが、後方互換の対象外と考えるのが安全だ。
 
-コスト面では `sessionLimits.maxAiCredits` が使える。これはセッションの現在の会計ウィンドウに対する<strong>ソフトキャップ</strong>で、使用量はモデル呼び出しが返ってから検査される。つまり<strong>1レスポンス分は設定値を超えうる</strong>。厳密な上限ではなく、暴走を止めるためのブレーキだと理解する。
+コスト面では `sessionLimits.maxAiCredits` が使える。これはセッションの現在の会計ウィンドウに対するソフトキャップで、使用量はモデル呼び出しが返ってから検査されるので、<strong>1レスポンス分は設定値を超えうる</strong>。厳密な上限ではなく、暴走を止めるためのブレーキとして使う。
 
 予算切れは `session_limits_exhausted.requested` イベントで通知され、続行にはユーザー判断が要る。ステートレスなHTTPハンドラーの中でこれをどう扱うかは設計判断になる。素直なのは、イベントを受けたらセッションを一旦 `disconnect()` して「予算上限に達しました」を返し、増額の意思決定を別のリクエストで受けることだ。ハンドラーの中で人間の入力を待つと、リクエストがそのまま滞留する。
 
@@ -842,7 +842,7 @@ const client = new CopilotClient({
 
 ## コンテキスト圧縮という隠れた状態
 
-長時間セッションでは infinite sessions が効く。既定で有効で、コンテキストウィンドウの上限をバックグラウンドのコンパクションで自動管理する。
+長時間セッションでは infinite sessions が役立つ。既定で有効で、コンテキストウィンドウの上限をバックグラウンドのコンパクションで自動管理する。
 
 ```typescript
 const session = await client.createSession({
@@ -857,17 +857,17 @@ const session = await client.createSession({
 
 閾値は絶対トークン数ではなく<strong>コンテキスト利用率（0.0〜1.0）</strong>である。ここを誤解して `8000` のような値を入れる事故がありうる。
 
-ステートレス設計の文脈で重要なのは、コンパクションが<strong>非同期に走る背景プロセス</strong>だという点だ。つまり、
+コンパクションは非同期に走るバックグラウンド処理なので、ステートレス設計には次の影響がある。
 
 - ターンの実時間 $W$ は、コンパクションが挟まった回で跳ねる。レイテンシー分布の裾が重くなる主要因の一つ
-- `bufferExhaustionThreshold` に達すると、コンパクション完了まで<strong>ブロックする</strong>。同時実行制御の上限設計はこれを見込む必要がある
-- コンパクションの最中にプロセスが死ぬと、次の resume がどの checkpoint から始まるかは、あなたのコードからは制御できない
+- `bufferExhaustionThreshold` に達すると、コンパクション完了までブロックする。同時実行制御の上限設計はこれを見込む必要がある
+- コンパクションの最中にプロセスが死ぬと、次の resume がどの checkpoint から始まるかは、アプリケーションのコードからは制御できない
 
-対処としては、`session.compaction_start` / `session.compaction_complete` を購読してメトリクス化し、コンパクション頻度が上がってきたら「セッションを畳んで新規に切り直す」判断をアプリ側で持つのが現実的だ。無限に伸びるセッションは、無限に伸びる resume コストでもある。
+対処としては、`session.compaction_start` / `session.compaction_complete` を購読してメトリクス化し、コンパクション頻度が上がってきたら「セッションを畳んで新規に切り直す」判断をアプリ側で持つのが現実的だ。セッションが伸び続ければ、resume のコストも伸び続ける。
 
 ## ドキュメントの記述ゆれに注意
 
-SDKは更新が速く、公式ドキュメントの中でも記述が食い違っている箇所がある。設計判断の根拠にする前に、<strong>手元のバージョンの型定義で確認する</strong>のが安全だ。2026-08 時点で確認できた主な食い違いを挙げておく。
+SDKは更新が速く、公式ドキュメントの中でも記述が食い違っている箇所がある。2026-08 時点で確認できた主な食い違いは次のとおりだ。
 
 | 項目 | 記述A | 記述B | 実務上の扱い |
 |---|---|---|---|
@@ -879,11 +879,11 @@ SDKは更新が速く、公式ドキュメントの中でも記述が食い違�
 | resume で渡せる設定 | Session Persistence の Resume options 表に `gitHubToken` と `sessionLimits` の記載なし | 型定義: `ResumeSessionConfig` は `SessionConfigBase` を継承し `gitHubToken` を持つ。Session limits のガイドは resume でも `sessionLimits` を設定している | 表は網羅的ではない。型定義を正とする |
 | イベントの永続化 | ガイドでは一部のイベントを ephemeral と説明 | 生成型定義: 63 種類が `ephemeral: true` のリテラル型 | 依存する前に `session-events.ts` で該当イベントを確認する |
 
-こうした食い違い自体は、GAしたばかりで進化中のSDKでは珍しくない。重要なのは、<strong>プロダクションの設計をブログ記事やガイドのサンプルコードに依存させない</strong>ことだ。`node_modules/@github/copilot-sdk` の `.d.ts` を読むのが常に正解である。
+GAしたばかりで進化中のSDKでは、こうした食い違いは珍しくない。<strong>本番の設計は、ブログ記事やガイドのサンプルコードではなく、手元の `node_modules/@github/copilot-sdk` の `.d.ts` で確認した内容に基づいて決める</strong>。
 
 ## 設計判断のまとめ
 
-最後に、実際にレビューで確認すべきチェックリストの形にする。
+設計レビューで確認する項目をチェックリストにまとめる。
 
 <strong>アーキテクチャ</strong>
 
@@ -924,13 +924,13 @@ SDKは更新が速く、公式ドキュメントの中でも記述が食い違�
 
 ## おわりに
 
-「Copilot SDK でステートレスなバックエンドは書けるか」という問いへの答えは、「書けるが、ステートレスなのはあなたのコードであって、システムではない」だ。
+「Copilot SDK でステートレスなバックエンドは書けるか」という問いへの答えは、「書ける。ただしステートレスになるのはアプリケーションのコードであって、システム全体ではない」だ。
 
-エージェントは本質的に状態を持つ。会話履歴、計画、ツールの副作用、圧縮されたコンテキスト。これらを消し去ることはできないし、消し去るべきでもない。設計者の仕事は状態をなくすことではなく、<strong>状態の置き場所を明示的に選び、その境界を跨ぐコストを測り、境界が破れたときの壊れ方を設計すること</strong>である。
+エージェントは、会話履歴、計画、ツールの副作用、圧縮されたコンテキストといった状態を本質的に持つ。これらをなくすことはできないし、なくすべきでもない。設計者がすべきなのは、<strong>状態の置き場所を明示的に選び、その境界を跨ぐコストを測り、境界が破れたときの壊れ方を設計すること</strong>だ。
 
-Copilot SDK は、その選択肢をかなり丁寧に用意している。`sessionFs` で状態の物理的な置き場所を選べる。`mode: "empty"` でツールの露出面を選べる。per-session トークンでアイデンティティーの境界を選べる。`sessionLimits` でコストの上限を選べる。一方で、<strong>セッションのロック、所有権、ルーティング、イベント配送は明示的にあなたの責務として残されている</strong>。この責務分担を理解した上で設計すれば、Copilot SDK は十分に本番のマルチテナントバックエンドに載る。
+Copilot SDK は、そのための選択肢を設定として用意している。`sessionFs` で状態の物理的な置き場所を、`mode: "empty"` でツールの露出面を、per-session トークンでアイデンティティーの境界を、`sessionLimits` でコストの上限を選べる。一方で、セッションのロック、所有権、ルーティング、イベント配送はアプリケーション側の責務として明示的に残されている。この分担を踏まえて設計すれば、Copilot SDK は本番のマルチテナントバックエンドに十分使える。
 
-理解しないまま「とりあえず動いた」を本番に出すと、二重ライターで会話が壊れ、`mode: "copilot-cli"` でテナント境界が漏れ、resume 時の認証エラーが再現しないバグとして残る。この記事が、その手前で立ち止まるための材料になれば幸いだ。
+この分担を理解しないまま「とりあえず動いた」状態で本番に出すと、二重ライターで会話が壊れ、`mode: "copilot-cli"` でテナント境界が漏れ、resume 時の認証エラーが再現しにくいバグとして残る。
 
 ## 参考
 

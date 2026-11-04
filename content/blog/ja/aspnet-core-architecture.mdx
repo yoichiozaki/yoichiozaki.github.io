@@ -1,19 +1,19 @@
 ---
-title: "ASP.NET Core アーキテクチャの深層 — リクエストが到達してからレスポンスを返すまで"
+title: "ASP.NET Core の内部構造 — リクエストが到達してからレスポンスを返すまで"
 date: "2026-04-05"
-description: "ASP.NET Core のホスティングモデル、ミドルウェアパイプライン、DI コンテナー、ルーティング、フィルターパイプラインなど、フレームワークの内部実装を徹底的に解説します。"
+description: "ASP.NET Core がリクエストを受けてからレスポンスを返すまでに通る、ホスティングモデル、ミドルウェアパイプライン、DI コンテナー、ルーティング、フィルターパイプラインなどの内部実装を、簡略化したコードと図で説明します。"
 tags: ["ASP.NET Core", ".NET", "Architecture", "Middleware", "Dependency Injection"]
 ---
 
 ## はじめに
 
-ASP.NET Core は、Microsoft が開発するクロスプラットフォームの高性能 Web フレームワークです。しかし、`app.MapGet("/hello", () => "Hello World")` というシンプルな一行の裏側で、フレームワークは驚くほど複雑な処理を行っています。
+ASP.NET Core は、Microsoft が開発するクロスプラットフォームの Web フレームワークです。`app.MapGet("/hello", () => "Hello World")` の一行で書いたハンドラーにも、リクエストは Kestrel での HTTP 解析、DI スコープの作成、ミドルウェアパイプライン、ルーティングなどを経て届きます。
 
-この記事では、HTTP リクエストが到達してからレスポンスが返るまでの全過程を、ソースコードレベルで追いかけながら解説します。
+以降の章では、リクエストが通る順に各段階を取り上げ、それを担うコンポーネントの内部実装を、簡略化したコードと図で説明します。
 
 ## 全体アーキテクチャの俯瞰
 
-まず、ASP.NET Core の主要コンポーネントとリクエストの流れを俯瞰しましょう。
+リクエストは Kestrel から `HostingApplication` を経てミドルウェアパイプラインに入り、登録順にミドルウェアを通ってエンドポイントのハンドラーに届きます。レスポンスは同じミドルウェアを逆順にたどって返ります。
 
 ```mermaid
 graph TD
@@ -42,7 +42,7 @@ graph TD
 
 ### Generic Host の構造
 
-ASP.NET Core アプリケーションは **Generic Host**（`Microsoft.Extensions.Hosting`）の上に構築されます。`WebApplication.CreateBuilder()` を呼び出すと、内部では以下の処理が行われます。
+ASP.NET Core アプリケーションは Generic Host（`Microsoft.Extensions.Hosting`）の上に構築されます。`WebApplication.CreateBuilder()` を呼び出すと、内部では次の処理が行われます。
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -54,7 +54,7 @@ var builder = WebApplication.CreateBuilder(args);
 // 5. DI コンテナ (ServiceCollection) を初期化
 ```
 
-[`WebApplication.CreateBuilder()`](https://github.com/dotnet/aspnetcore/blob/main/src/DefaultBuilder/src/WebApplication.cs) の内部実装を見てみましょう。
+[`WebApplication.CreateBuilder()`](https://github.com/dotnet/aspnetcore/blob/main/src/DefaultBuilder/src/WebApplication.cs) 自体は、引数を `WebApplicationOptions` に渡して `WebApplicationBuilder` を生成するだけです。
 
 ```csharp
 // dotnet/aspnetcore の簡略化した実装イメージ
@@ -66,7 +66,7 @@ public static WebApplicationBuilder CreateBuilder(string[] args)
 }
 ```
 
-`WebApplicationBuilder` のコンストラクターでは、以下の順序で初期化が進みます：
+構成ソースの登録や `ServiceCollection` の作成は `WebApplicationBuilder` のコンストラクターで進み、`Build()` で DI コンテナーと `WebApplication` が作られます。`app.UseXxx()` で登録したミドルウェアは、`app.Run()` でホストが起動するときにパイプラインとして組み立てられます。
 
 ```mermaid
 sequenceDiagram
@@ -85,14 +85,14 @@ sequenceDiagram
     WAB-->>App: WebApplicationBuilder
     App->>WAB: Build()
     WAB->>WAB: BuildServiceProvider()
-    WAB->>WAB: ミドルウェアパイプライン構築
+    WAB->>WAB: WebApplication を生成
     WAB-->>App: WebApplication
-    App->>App: app.Run()
+    App->>App: app.Run()（ホスト起動時にパイプラインを構築）
 ```
 
-### Kestrel — 高性能 Web サーバー
+### Kestrel — 既定の HTTP サーバー
 
-Kestrel は ASP.NET Core の既定のインプロセス HTTP サーバーです。[libuv](https://libuv.org/) から独自の I/O 実装に移行し、現在は `System.IO.Pipelines` と `System.Net.Sockets` を使用した **非同期 I/O** ベースのアーキテクチャを採用しています。
+Kestrel は ASP.NET Core の既定のインプロセス HTTP サーバーです。当初の [libuv](https://libuv.org/) ベースの実装から独自の I/O 実装に移行し、現在は `System.IO.Pipelines` と `System.Net.Sockets` を使った非同期 I/O で動作しています。
 
 #### Kestrel の内部構造
 
@@ -115,7 +115,7 @@ graph TD
     Pipeline --> Http3
 ```
 
-Kestrel の設計で特に重要なのは **`System.IO.Pipelines`** の採用です。従来の `Stream` ベース API では、データの読み取りにバッファーのコピーが頻繁に発生していました。`Pipelines` では `ReadOnlySequence<byte>` を通じて **ゼロコピー** に近い形でデータを処理できます。
+Kestrel は受信データを `System.IO.Pipelines` で読み取ります。従来の `Stream` ベース API では、データを読み取る際にバッファーのコピーが頻繁に発生していました。`Pipelines` では、受信バッファーを `ReadOnlySequence<byte>` として参照するので、コピーをほとんど伴わずにデータを解析できます。
 
 ```csharp
 // Kestrel の HTTP/1.1 パーサーの簡略イメージ
@@ -139,7 +139,9 @@ while (true)
 
 #### 接続管理と同時接続
 
-Kestrel は各接続を個別の `Task` として管理します。`.NET` のスレッドプールと `async/await` により、少数の OS スレッドで大量の同時接続を効率よく処理できます。
+Kestrel は各接続を個別の `Task` として管理します。`.NET` のスレッドプールと `async/await` により、I/O を待つ間はスレッドを解放するので、少数の OS スレッドで大量の同時接続を処理できます。
+
+接続数・リクエストサイズ・タイムアウトの上限は `KestrelServerLimits` で設定でき、既定値は次のとおりです。
 
 | パラメーター | 既定値 | 説明 |
 |-----------|--------|------|
@@ -151,7 +153,7 @@ Kestrel は各接続を個別の `Task` として管理します。`.NET` のス
 
 ### リバースプロキシー構成
 
-プロダクション環境では、Kestrel を直接公開するのではなく、**リバースプロキシー**（Nginx, IIS, YARP 等）の背後に配置するのが一般的です。
+プロダクション環境では、Kestrel を直接公開せず、リバースプロキシー（Nginx, IIS, YARP 等）の背後に配置するのが一般的です。
 
 ```mermaid
 graph LR
@@ -161,19 +163,19 @@ graph LR
     RP --> K3["Kestrel<br/>インスタンス 3"]
 ```
 
-リバースプロキシーが担う責任：
+リバースプロキシーには、主に次の処理を任せられます。
 
-- **TLS 終端** — SSL/TLS の暗号化・復号化
-- **ロードバランシング** — 複数インスタンスへの負荷分散
-- **リクエストバッファリング** — 遅いクライアントからの送信を吸収
-- **静的ファイル配信** — Kestrel に到達させずにレスポンス
-- **レート制限** — DDoS 攻撃やアビューズの緩和
+- TLS 終端：SSL/TLS の暗号化と復号
+- ロードバランシング：複数の Kestrel インスタンスへの負荷分散
+- リクエストバッファリング：遅いクライアントからの送信をプロキシー側で受け切る
+- 静的ファイル配信：Kestrel に到達させずにレスポンスを返す
+- レート制限：DDoS 攻撃や過剰なリクエストの緩和
 
 ## 第2章：ミドルウェアパイプライン — リクエストの旅
 
 ### ミドルウェアの仕組み
 
-ASP.NET Core のリクエスト処理の核心は **ミドルウェアパイプライン** です。各ミドルウェアは `RequestDelegate` を受け取り、`RequestDelegate` を返す **入れ子構造** になっています。
+ASP.NET Core では、リクエストはミドルウェアパイプラインを通って処理されます。パイプラインの各段は、次の段を表す `RequestDelegate` を受け取り、自身の処理を加えた `RequestDelegate` を返します。この組み立て方により、ミドルウェアは入れ子になります。各ミドルウェアは、`_next` を呼ぶ前にリクエストを、呼んだ後にレスポンスを処理できます。
 
 ```csharp
 // RequestDelegate の定義
@@ -204,7 +206,7 @@ public class MyMiddleware
 
 ### パイプラインの構築プロセス
 
-`builder.Build()` で `WebApplication` が構築される過程で、登録されたミドルウェアが<strong>逆順</strong>にチェーンされます。これは<strong>ロシアンドール（マトリョーシカ人形）</strong>モデルと呼ばれます。
+`app.Run()` でホストが起動するとき、`app.UseXxx()` で登録されたミドルウェアが<strong>逆順</strong>にチェーンされます。最後に登録したミドルウェアから順に包んでいくので、最初に登録したミドルウェアが一番外側になり、リクエストを最初に受け取ります。この入れ子の構造は、ロシアンドール（マトリョーシカ人形）モデルと呼ばれます。
 
 ```mermaid
 graph TD
@@ -230,7 +232,7 @@ graph TD
     end
 ```
 
-内部的には、`ApplicationBuilder.Build()` は以下のような処理を行います：
+`ApplicationBuilder.Build()` は、404 を返す終端のデリゲートから始めて、登録されたミドルウェアを後ろから順に包みます。
 
 ```csharp
 // ApplicationBuilder.Build() の簡略化した実装
@@ -255,7 +257,7 @@ public RequestDelegate Build()
 
 ### 短絡（Short-Circuit）
 
-ミドルウェアは `next()` を呼ばないことで、パイプラインを**短絡**できます。例えば `StaticFiles` ミドルウェアは、該当するファイルが見つかった場合、以降のミドルウェアを実行せずに直接レスポンスを返します。
+ミドルウェアは `next()` を呼ばなければ、パイプラインを<strong>短絡</strong>できます。例えば `StaticFiles` ミドルウェアは、該当するファイルが見つかると、後続のミドルウェアを実行せずにレスポンスを返します。
 
 ```mermaid
 sequenceDiagram
@@ -269,7 +271,7 @@ sequenceDiagram
     Client->>Ex: GET /style.css
     Ex->>Https: next()
     Https->>Static: next()
-    Note over Static: ファイル発見！短絡
+    Note over Static: ファイルが見つかったので短絡
     Static-->>Https: レスポンス返却
     Https-->>Ex: レスポンス返却
     Ex-->>Client: 200 OK (style.css)
@@ -278,7 +280,7 @@ sequenceDiagram
 
 ### 組み込みミドルウェアの順序
 
-ASP.NET Core では、ミドルウェアの**登録順序**が動作に直結します。推奨される順序は以下の通りです：
+ミドルウェアは登録順に実行されるので、順序が動作を左右します。例えば `Authorization` を `Authentication` より前に置くと、認可の時点ではまだユーザーが確立されていません。推奨される順序は次のとおりです。
 
 | 順序 | ミドルウェア | 責務 |
 |------|------------|------|
@@ -298,11 +300,11 @@ ASP.NET Core では、ミドルウェアの**登録順序**が動作に直結し
 
 ### ASP.NET Core の DI コンテナー
 
-ASP.NET Core には **フレームワーク組み込み** の DI コンテナーが搭載されています。これは `Microsoft.Extensions.DependencyInjection` パッケージとして提供され、フレームワーク自体もこの DI コンテナーを使って構築されています。
+ASP.NET Core は、`Microsoft.Extensions.DependencyInjection` パッケージとして提供される DI コンテナーを組み込みで使います。アプリケーションのサービスだけでなく、フレームワーク自身のサービスもこのコンテナーに登録されます。
 
 #### サービスのライフタイム
 
-DI コンテナーは3種類のライフタイムをサポートします：
+DI コンテナーは3種類のライフタイムをサポートします。
 
 ```mermaid
 graph TD
@@ -331,13 +333,13 @@ graph TD
 
 | ライフタイム | 生成タイミング | 破棄タイミング |
 |-------------|--------------|--------------|
-| **Transient** | 注入のたびに新規作成 | スコープの終了時 |
-| **Scoped** | スコープ内で初回要求時 | スコープの終了時（リクエスト終了時） |
-| **Singleton** | 初回要求時 | アプリケーション終了時 |
+| Transient | 注入のたびに新規作成 | スコープの終了時 |
+| Scoped | スコープ内で初回要求時 | スコープの終了時（リクエスト終了時） |
+| Singleton | 初回要求時 | アプリケーション終了時 |
 
 #### Captive Dependency（キャプティブ依存関係）問題
 
-**重要な落とし穴**：Singleton サービスが Scoped サービスに依存すると、Scoped サービスが事実上 Singleton として動作してしまいます。これを **キャプティブ依存関係** と呼びます。
+Singleton サービスが Scoped サービスに依存すると、Singleton が保持する参照を通じて、Scoped サービスはリクエストをまたいで使い回されます。Scoped サービスが事実上 Singleton として動作するこの状態を、<strong>キャプティブ依存関係</strong>と呼びます。
 
 ```csharp
 // 危険：Singleton が Scoped に依存
@@ -355,7 +357,7 @@ public class MySingleton
 }
 ```
 
-ASP.NET Core はこの問題を検出して例外をスローする仕組みを持っています。`WebApplication.CreateBuilder()` を使用する場合、**開発環境では `ValidateScopes` と `ValidateOnBuild` が既定で有効**です（.NET 6 以降）。本番環境でも明示的に有効にしたい場合や、`WebApplicationBuilder` 以外のホスト構築を使う場合は以下のように設定します。
+ASP.NET Core には、この依存関係を検出して例外をスローする検証機能があります。`WebApplication.CreateBuilder()` を使う場合、開発環境では `ValidateScopes` と `ValidateOnBuild` が既定で有効です（.NET 6 以降）。本番環境でも有効にしたい場合や、`WebApplicationBuilder` 以外の方法でホストを構築する場合は、次のように設定します。
 
 ```csharp
 builder.Host.UseDefaultServiceProvider(options =>
@@ -367,7 +369,7 @@ builder.Host.UseDefaultServiceProvider(options =>
 
 ### ServiceProvider の内部実装
 
-`ServiceProvider` の内部では、登録されたサービスをどのように解決しているのでしょうか。
+`ServiceProvider` は、要求された型を作るのに必要な依存関係を CallSite のグラフにまとめ、ライフタイムごとのキャッシュを使ってインスタンスを返します。
 
 ```mermaid
 graph TD
@@ -381,7 +383,7 @@ graph TD
     CompiledResolver --> Instance["インスタンスを返却"]
 ```
 
-初回の解決時、`CallSiteFactory` は依存関係のグラフ（**CallSite チェーン**）を構築します。2回目以降は、コンパイル済みのファクトリーデリゲートを使って高速に解決します。
+あるサービスを初めて解決するとき、`CallSiteFactory` が依存関係のグラフ（CallSite チェーン）を構築します。最初はこのグラフをたどってインスタンスを生成し、同じサービスが繰り返し解決されると、グラフからコンパイルしたファクトリーデリゲートに切り替えて高速に解決します。
 
 ```csharp
 // ServiceProvider の解決プロセスの概要
@@ -397,7 +399,7 @@ graph TD
 
 ### スコープの仕組み
 
-HTTP リクエストごとに新しいスコープが作成されます。これは `IServiceScopeFactory` を使って内部的に管理されます。
+HTTP リクエストごとに `IServiceScopeFactory` で新しいスコープが作成され、レスポンスの完了後に破棄されます。スコープの破棄では、そのスコープで生成された `IDisposable` な Scoped / Transient サービスも破棄されます。
 
 ```mermaid
 sequenceDiagram
@@ -422,7 +424,7 @@ sequenceDiagram
 
 ### エンドポイントルーティング
 
-ASP.NET Core は **.NET Core 3.0** 以降、**エンドポイントルーティング** を採用しています。このアーキテクチャでは、ルーティングの処理が2つのミドルウェアに分離されています。
+ASP.NET Core は .NET Core 3.0 以降、エンドポイントルーティングを採用しており、ルーティングの処理は2つのミドルウェアに分かれています。
 
 ```mermaid
 graph LR
@@ -446,11 +448,11 @@ graph LR
     Cors --> Execute
 ```
 
-この分離により、認証・認可ミドルウェアは **どのエンドポイントが選択されたか** を知った上で動作できます。
+`UseRouting()` がエンドポイントを選んでから、`UseEndpoints()` / `MapXxx()` 側で実行するまでの間に認証・認可ミドルウェアが動きます。そのため、認証・認可ミドルウェアは選択されたエンドポイントのメタデータ（`[Authorize]` 属性など）を参照して動作できます。
 
 ### ルートマッチングの内部
 
-ルーティングエンジンは **DFA（Deterministic Finite Automaton：決定性有限オートマトン）** ベースのマッチャーを使用します。これは URL のセグメントを1つずつ処理する状態遷移マシンです。
+ルーティングエンジンは DFA（Deterministic Finite Automaton：決定性有限オートマトン）ベースのマッチャーを使います。DFA マッチャーは、URL のセグメントを1つずつ読んで状態を遷移させます。
 
 ```mermaid
 graph TD
@@ -465,11 +467,11 @@ graph TD
     Blog -->|"{slug}"| BlogPost["Endpoint:<br/>GetBlogPost(string slug)"]
 ```
 
-DFA マッチャーの特長：
+DFA マッチャーには次の特長があります。
 
-- **O(path segments)** の時間計算量でマッチング（全ルートを線形走査しない）
-- ビルド時にルートテーブルからオートマトンを構築
-- ルートパラメーターの制約（`{id:int}`）もマッチング段階で評価
+- マッチングの時間計算量は O(パスのセグメント数) で、全ルートを線形に走査しない
+- オートマトンは、マッチングの前にルートテーブルから構築しておく
+- ルートパラメーターの制約（`{id:int}`）もマッチングの段階で評価する
 
 ```csharp
 // ルートパターンの例と内部的なマッチング
@@ -481,12 +483,13 @@ app.MapGet("/api/users/{id:guid}", (Guid id) => ...);
 
 // 同じパスでも制約が異なれば別のエンドポイントにマッチ
 // /api/users/42       → int 版
-// /api/users/abc-def  → guid 版（GUID 形式の場合）
+// /api/users/3f2504e0-4f89-11d3-9a0c-0305e82c3301  → guid 版
+// /api/users/abc-def  → どちらにも一致しない（404）
 ```
 
 ### Minimal API と Controller の比較
 
-ASP.NET Core は2つのプログラミングモデルを提供しています。
+ASP.NET Core には、Minimal API と Controller（MVC）の2つのプログラミングモデルがあります。Minimal API はハンドラーごとに `RequestDelegateFactory` がデリゲートを生成し、Controller は起動時にコントローラーを解析して、フィルターパイプラインを通してアクションを実行します。
 
 ```mermaid
 graph TD
@@ -506,17 +509,17 @@ graph TD
 
 | 特徴 | Minimal API | Controller (MVC) |
 |------|------------|-----------------|
-| **ルーティング** | `app.MapGet/Post/Put/Delete()` | 属性ルーティング `[Route]` / 規約ベース |
-| **モデルバインディング** | `RequestDelegateFactory` が自動推論 | `ModelBinder` + `ValueProvider` チェーン |
-| **フィルター** | Endpoint Filter（ASP.NET Core 7+） | Action / Result / Exception / Resource |
-| **適用場面** | シンプルな API、マイクロサービス | 複雑なアプリ、View を使う MVC |
-| **起動速度** | 高速（リフレクション最小） | やや遅い（Controller のスキャン・ディスクリプター構築） |
+| ルーティング | `app.MapGet/Post/Put/Delete()` | 属性ルーティング `[Route]` / 規約ベース |
+| モデルバインディング | `RequestDelegateFactory` が自動推論 | `ModelBinder` + `ValueProvider` チェーン |
+| フィルター | Endpoint Filter（ASP.NET Core 7+） | Action / Result / Exception / Resource |
+| 適用場面 | シンプルな API、マイクロサービス | 複雑なアプリ、View を使う MVC |
+| 起動速度 | 高速（リフレクション最小） | やや遅い（Controller のスキャン・ディスクリプター構築） |
 
 ## 第5章：モデルバインディングとバリデーション
 
 ### モデルバインディングの流れ
 
-HTTP リクエストの生データ（クエリー文字列、ルートパラメーター、フォーム、JSON ボディー等）を C# のオブジェクトに変換するプロセスが**モデルバインディング**です。
+モデルバインディングは、HTTP リクエストの生データ（クエリー文字列、ルートパラメーター、フォーム、JSON ボディー等）を C# のオブジェクトに変換する処理です。MVC では、取得した値の検証までがこの流れに含まれます。
 
 ```mermaid
 sequenceDiagram
@@ -539,14 +542,14 @@ sequenceDiagram
 
 ### バインディングソースの種類
 
-明示的に属性を指定することで、以下のソースからデータを取得できます。なお、属性を指定しない場合の既定の検索順序は、フォームフィールド → リクエストボディー（`[ApiController]` が付いたコントローラー）→ ルートデータ → クエリー文字列 → アップロードファイルです。ルートデータとクエリー文字列は主に単純型、アップロードファイルは `IFormFile` / `IEnumerable<IFormFile>` にだけ使われます。
+属性を指定しない場合、値はフォームフィールド → リクエストボディー（`[ApiController]` が付いたコントローラー）→ ルートデータ → クエリー文字列 → アップロードファイルの順に探されます。ルートデータとクエリー文字列は主に単純型、アップロードファイルは `IFormFile` / `IEnumerable<IFormFile>` にだけ使われます。属性を明示すると、次のソースからデータを取得できます。
 
-1. **フォームデータ** (`[FromForm]`)
-2. **リクエストボディー** (`[FromBody]`) — 入力フォーマッター経由で処理
-3. **ルートパラメーター** (`[FromRoute]`)
-4. **クエリー文字列** (`[FromQuery]`)
-5. **ヘッダー** (`[FromHeader]`)
-6. **サービス（DI コンテナー）** (`[FromServices]`)
+1. フォームデータ (`[FromForm]`)
+2. リクエストボディー (`[FromBody]`)：入力フォーマッター経由で処理
+3. ルートパラメーター (`[FromRoute]`)
+4. クエリー文字列 (`[FromQuery]`)
+5. ヘッダー (`[FromHeader]`)
+6. サービス（DI コンテナー） (`[FromServices]`)
 
 ```csharp
 // バインディングソースの明示指定
@@ -564,15 +567,15 @@ public IActionResult UpdateOrder(
 
 ### JSON シリアライズ：System.Text.Json
 
-ASP.NET Core は既定で **System.Text.Json** を使用します。Newtonsoft.Json からの移行ポイントを整理します。
+ASP.NET Core は既定で System.Text.Json を使います。Newtonsoft.Json から移行する際の主な違いは次のとおりです。既定の解析が厳格になる点と、ポリモーフィズムの指定方法が変わる点は、既存コードの動作に影響します。
 
 | 特徴 | System.Text.Json | Newtonsoft.Json |
 |------|-----------------|-----------------|
-| **パフォーマンス** | `Utf8JsonReader/Writer` による高速処理 | リフレクション重視 |
-| **メモリー効率** | `Span<byte>` ベース、アロケーション最小 | `string` ベース |
-| **Source Generator** | `JsonSerializerContext` で AOT 対応 | なし |
-| **既定の動作** | 厳格（コメント不可、trailing comma 不可） | 寛容 |
-| **ポリモーフィズム** | `[JsonDerivedType]`（.NET 7+） | `TypeNameHandling`（セキュリティーリスクあり） |
+| パフォーマンス | `Utf8JsonReader/Writer` による高速処理 | リフレクション重視 |
+| メモリー効率 | `Span<byte>` ベース、アロケーション最小 | `string` ベース |
+| Source Generator | `JsonSerializerContext` で AOT 対応 | なし |
+| 既定の動作 | 厳格（コメント不可、trailing comma 不可） | 寛容 |
+| ポリモーフィズム | `[JsonDerivedType]`（.NET 7+） | `TypeNameHandling`（セキュリティーリスクあり） |
 
 ```csharp
 // Source Generator を使った高速 JSON シリアライズ
@@ -592,7 +595,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 ### フィルターの実行順序
 
-MVC のフィルターは、アクション実行の前後に処理を挿入するメカニズムです。5種類のフィルターが決まった順序で実行されます。
+MVC のフィルターは、アクションの実行前後に処理を差し込む仕組みです。認可・リソース・アクション・例外・結果の5種類があり、次の順序で実行されます。
 
 ```mermaid
 graph TD
@@ -613,7 +616,7 @@ graph TD
 
 ### Endpoint Filter（Minimal API 用）
 
-Minimal API には MVC フィルターの代わりに **Endpoint Filter** が用意されています（ASP.NET Core 7 以降）。
+Minimal API では、MVC フィルターの代わりに Endpoint Filter を使います（ASP.NET Core 7 以降）。次の例では、ハンドラーを呼ぶ前に引数 `id` を検査し、正の整数でなければ 400 Bad Request を返します。
 
 ```csharp
 app.MapGet("/api/users/{id}", (int id) => ...)
@@ -634,7 +637,7 @@ app.MapGet("/api/users/{id}", (int id) => ...)
 
 ### 構成プロバイダーのチェーン
 
-ASP.NET Core の構成システムは複数のソースから設定値を取得し、**後から追加されたソースが前のソースを上書きする** 仕組みです。
+ASP.NET Core の構成システムは複数のソースから設定値を読み込み、同じキーがあれば、後から追加されたソースの値で前のソースの値を上書きします。
 
 ```mermaid
 graph LR
@@ -674,6 +677,8 @@ builder.Services.AddOptions<SmtpSettings>()
 
 ### Options パターンの3つのインターフェース
 
+Options パターンでは、構成の再読み込みが必要か、どのライフタイムのサービスに注入するかに応じて、3つのインターフェースを使い分けます。
+
 | インターフェース | 用途 | リロード対応 |
 |----------------|------|------------|
 | `IOptions<T>` | Singleton。初回アクセス時に値を作成してキャッシュ | 不可 |
@@ -703,7 +708,7 @@ public class MyService
 
 ### 認証スキームとハンドラー
 
-ASP.NET Core の認証システムは **スキームベース** のアーキテクチャです。
+ASP.NET Core の認証は、スキームごとに登録したハンドラー（JWT Bearer、Cookie など）が行い、成功すると `ClaimsPrincipal` が作られます。認可ミドルウェアは、この `ClaimsPrincipal` を使ってポリシーを評価します。
 
 ```mermaid
 graph TD
@@ -747,7 +752,7 @@ public async Task InvokeAsync(HttpContext context)
 
 ### ポリシーベース認可
 
-認可はポリシーと要件（Requirement）の組み合わせで柔軟に構成できます。
+認可の条件は、名前付きのポリシーとして登録します。ロールの確認のような組み込みの条件に加え、要件（Requirement）とそれを判定するハンドラーを実装すれば、独自の条件も表せます。次の例の `MinimumAgeHandler` は、`birth_date` クレームから年齢を計算し、18歳以上なら要件を満たしたと判定します。
 
 ```csharp
 // カスタム認可ポリシーの定義
@@ -822,7 +827,7 @@ graph TD
 
 ### Feature コレクション
 
-`HttpContext.Features` は **拡張ポイント** です。サーバーやミドルウェアが追加の機能を注入できます。
+`HttpContext.Features` は、インターフェースの型をキーにした機能のコレクションです。サーバーやミドルウェアはここに機能を追加し、アプリはその型で取り出して使います。接続情報はサーバー（Kestrel）が設定し、リクエストのタイムアウトは RequestTimeouts ミドルウェアが追加します。
 
 ```csharp
 // Kestrel が提供する Feature の例
@@ -844,7 +849,7 @@ timeoutFeature?.DisableTimeout();
 
 ### Object Pool
 
-ASP.NET Core は頻繁に使用されるオブジェクトの**プーリング**を行い、GC 圧力を低減しています。
+ASP.NET Core は頻繁に使うオブジェクトをプールして再利用し、GC の負荷を減らしています。アプリのコードでも `ObjectPool<T>` を使えば同じことができます。
 
 ```csharp
 // StringBuilder のプーリング例
@@ -866,10 +871,10 @@ finally
 
 ### ArrayPool と MemoryPool
 
-`System.Buffers.ArrayPool<T>` は配列のレンタル・返却を管理し、大量の短命な配列によるヒープ割り当てを削減します。
+`System.Buffers.ArrayPool<T>` は配列のレンタル・返却を管理し、大量の短命な配列によるヒープ割り当てを削減します。Kestrel 自身は `ArrayPool` を使わず、固定（pinned）されたブロックを持つ `MemoryPool<byte>` からソケット I/O 用のバッファーを借り、System.IO.Pipelines に渡します。アプリケーションのコードでは、同じ借りて返すパターンを `ArrayPool` で書けます。
 
 ```csharp
-// Kestrel 内部で使われるバッファ管理パターン
+// アプリケーションコードでの借用・返却パターン
 byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
 try
 {
@@ -905,35 +910,37 @@ builder.Services.Configure<BrotliCompressionProviderOptions>(
 
 | 機能 | 説明 |
 |------|------|
-| **Native AOT** | JIT 不要。起動時間とメモリー消費を大幅に削減 |
-| **Request Delegate Generator** | Minimal API のデリゲートをコンパイル時に生成 |
-| **Frozen Collections** | `FrozenDictionary` / `FrozenSet` で読み取り専用コレクションを最適化 |
-| **SearchValues** | 文字列検索の SIMD 最適化 |
-| **Interceptors** | コンパイル時にメソッド呼び出しを差し替え |
-| **CompositeFormat** | `string.Format` のパース済みフォーマット文字列 |
+| Native AOT | JIT 不要。起動時間とメモリー消費を削減 |
+| Request Delegate Generator | Minimal API のデリゲートをコンパイル時に生成 |
+| Frozen Collections | `FrozenDictionary` / `FrozenSet` で読み取り専用コレクションを最適化 |
+| SearchValues | 文字列検索の SIMD 最適化 |
+| Interceptors | コンパイル時にメソッド呼び出しを差し替え |
+| CompositeFormat | `string.Format` のパース済みフォーマット文字列 |
 
 #### .NET 9
 
 | 機能 | 説明 |
 |------|------|
-| **MapStaticAssets** | ビルド時圧縮・フィンガープリント付き静的ファイル配信（`UseStaticFiles` の推奨代替） |
-| **HybridCache** | `IDistributedCache` と `IMemoryCache` を統合する新キャッシュライブラリー。スタンピード防止機能付き |
-| **Keyed DI in Middleware** | ミドルウェアのコンストラクターや `Invoke` メソッドで `[FromKeyedServices]` をサポート |
-| **SignalR Native AOT** | SignalR のクライアント/サーバーがトリミングと Native AOT に対応 |
+| MapStaticAssets | ビルド時圧縮・フィンガープリント付き静的ファイル配信（`UseStaticFiles` の推奨代替） |
+| HybridCache | `IDistributedCache` と `IMemoryCache` を統合する新キャッシュライブラリー。スタンピード防止機能付き |
+| Keyed DI in Middleware | ミドルウェアのコンストラクターや `Invoke` メソッドで `[FromKeyedServices]` をサポート |
+| SignalR Native AOT | SignalR のクライアント/サーバーがトリミングと Native AOT に対応 |
 
 #### .NET 10
 
 | 機能 | 説明 |
 |------|------|
-| **Minimal API Validation** | `AddValidation()` で DataAnnotations ベースの組み込みバリデーションを有効化 |
-| **Server-Sent Events** | `TypedResults.ServerSentEvents` で SSE ストリームを返却可能 |
-| **OpenAPI 3.1** | JSON Schema draft 2020-12 に準拠した OpenAPI ドキュメント生成 |
-| **Memory Pool Eviction** | Kestrel / IIS / HTTP.sys のメモリープールがアイドル時に自動解放 |
-| **JSON Patch (System.Text.Json)** | `Newtonsoft.Json` 不要の高速 JSON Patch 実装 |
+| Minimal API Validation | `AddValidation()` で DataAnnotations ベースの組み込みバリデーションを有効化 |
+| Server-Sent Events | `TypedResults.ServerSentEvents` で SSE ストリームを返却可能 |
+| OpenAPI 3.1 | JSON Schema draft 2020-12 に準拠した OpenAPI ドキュメント生成 |
+| Memory Pool Eviction | Kestrel / IIS / HTTP.sys のメモリープールがアイドル時に自動解放 |
+| JSON Patch (System.Text.Json) | `Newtonsoft.Json` 不要の JSON Patch 実装 |
 
 ## 第11章：エラーハンドリングのアーキテクチャ
 
 ### 例外処理の階層
+
+MVC のアクション内で発生した例外は、まず例外フィルターが処理します。フィルターで処理されなかった例外は、パイプラインの上流にある ExceptionHandler（開発環境では DeveloperExceptionPage）ミドルウェアに届きます。そこでも処理されなければ 500 が返ります。
 
 ```mermaid
 graph TD
@@ -948,7 +955,7 @@ graph TD
 
 ### Problem Details（RFC 9457）
 
-ASP.NET Core 7 以降は [RFC 9457 (Problem Details)](https://www.rfc-editor.org/rfc/rfc9457) に準拠したエラーレスポンスを簡単に返せます。
+ASP.NET Core 7 以降は、Problem Details 形式のエラーレスポンスを簡単に返せます。この形式は RFC 7807 で定義され、2023 年に [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) へ置き換えられました。
 
 ```csharp
 // グローバルに Problem Details を有効化
@@ -978,7 +985,7 @@ app.UseStatusCodePages();
 
 ### WebApplicationFactory
 
-ASP.NET Core はインメモリーでアプリケーション全体を起動できる `WebApplicationFactory` を提供しています。これにより、実際のネットワーク通信なしにインテグレーションテストが可能です。
+`WebApplicationFactory` は、アプリケーション全体をインメモリーの `TestServer` 上で起動します。テストの `HttpClient` からのリクエストはネットワークを通らずに、本番と同じミドルウェアパイプラインで処理されます。DI に登録したサービスはテスト用の実装に差し替えられます。
 
 ```csharp
 public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
@@ -1024,7 +1031,7 @@ graph TD
 
 ## まとめ：リクエストの生涯
 
-最後に、1つの HTTP リクエストが辿る全過程をまとめます。
+1つの HTTP リクエストは、Kestrel での解析、スコープの作成、ミドルウェア、ルーティング、認証・認可、モデルバインディング、フィルターを通ってアクションに届き、同じ経路を戻ってレスポンスになります。
 
 ```mermaid
 sequenceDiagram

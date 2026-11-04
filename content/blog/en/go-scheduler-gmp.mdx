@@ -1,11 +1,11 @@
 ---
 title: "How Go's Scheduler Works — Understanding the G, M, P Model Visually"
 date: "2026-03-31"
-description: "An interactive visual guide to Go's runtime scheduler and the G (Goroutine), M (Machine/OS Thread), P (Processor) model."
+description: "Go's runtime scheduler and its G (Goroutine), M (Machine/OS Thread), P (Processor) model, explained through the runtime source and an interactive animation."
 tags: ["Go", "Concurrency", "Runtime", "Interactive"]
 ---
 
-The Go runtime scheduler powers Go's concurrency model using the <strong>G-M-P architecture</strong>. This article dives deep into the runtime internals while using an interactive visualization to make the scheduling mechanics tangible.
+The Go runtime scheduler maps goroutines onto OS threads using the <strong>G-M-P model</strong>. A G (goroutine) waits in a queue owned by a P (the right to run Go code), and an M (OS thread) holding that P takes Gs from the queue and runs them. I trace this flow through the structs and functions in the `runtime` package, and an animation shows the same steps.
 
 <ArticleVideo slug="go-scheduler-gmp" />
 
@@ -43,8 +43,8 @@ type g struct {
 
 Key fields:
 
-- <strong>`stack`</strong> — Each G starts with a <strong>2KB stack</strong> (compare to 1–8MB for OS threads). It grows automatically via `runtime.morestack()` as needed.
-- <strong>`sched` (`gobuf`)</strong> — Stores PC (Program Counter), SP (Stack Pointer), and BP (Base Pointer) for context switches. Read/written every time a G is suspended or resumed.
+- <strong>`stack`</strong> — Each G starts with a 2KB stack (OS threads get 1–8MB). When it runs out, `runtime.morestack()` grows it.
+- <strong>`sched` (`gobuf`)</strong> — Stores PC (Program Counter), SP (Stack Pointer), and BP (Base Pointer) for context switches. It is read and written every time a G is suspended or resumed.
 - <strong>`stackguard0`</strong> — Normally set near the stack lower bound. Set to `stackPreempt` (`0xfffffade`) when preemption is requested.
 - <strong>`atomicstatus`</strong> — The G lifecycle: `_Gidle` → `_Grunnable` → `_Grunning` → `_Gsyscall` / `_Gwaiting` → `_Gdead`
 
@@ -65,7 +65,7 @@ type m struct {
 
 - <strong>`g0`</strong> — A special goroutine that exists on every M. Runtime functions like `schedule()`, `findRunnable()`, and GC code run on g0's stack. `mcall()` switches from a user G to g0.
 - <strong>`curg`</strong> — The user goroutine currently running on this M. Set by `execute()`, cleared on `goexit()` or preemption.
-- <strong>`spinning`</strong> — Indicates the M is busy-looping looking for work to steal. The runtime limits the number of spinning M's to avoid wasting CPU.
+- <strong>`spinning`</strong> — Indicates the M is actively searching for runnable work to steal. The runtime caps the number of spinning M's so idle threads don't burn CPU.
 
 ### P (Processor) — `runtime.p` struct
 
@@ -83,8 +83,8 @@ type p struct {
 }
 ```
 
-- <strong>`runq`</strong> — A <strong>256-entry fixed-size ring buffer</strong>. Lock-free access (only the owning P advances head; steal uses atomic CAS on the tail side).
-- <strong>`runnext`</strong> — A 1-slot cache for the most recently created G, ensuring it runs next for better locality.
+- <strong>`runq`</strong> — A 256-entry fixed-size ring buffer that is used without locks. Only the owning P appends at the tail; both the owner and stealers take from the head by advancing it with an atomic CAS.
+- <strong>`runnext`</strong> — A one-slot holder for the G that the current G just made runnable (for example, one it just created). It runs before anything in the queue, so it can use data that is still in cache.
 - The number of P's follows the current `GOMAXPROCS` value. It can change during execution through `runtime.GOMAXPROCS`, and on Go 1.25+ the default can also be re-evaluated automatically unless you set it manually.
 
 ## The `schedule()` Loop in Detail
@@ -108,17 +108,17 @@ func schedule() {
 }
 ```
 
-After `schedule()` has already checked the periodic global queue and the local `runqget()`, `findRunnable()` performs the broader search: trace-reader and GC-worker work, another periodic global-queue check, finalizer/cleanup goroutines, local run queue, a global batch (`min(len/GOMAXPROCS+1, len/2)`), non-blocking netpoll, work stealing, idle GC/trace work, and finally blocking waits for timers or netpoll. The exact order changes across releases, so treat this as a Go 1.27-oriented sketch rather than API.
+If neither the periodic global-queue check in `schedule()` nor the local `runqget()` finds a G, `findRunnable()` searches more widely: trace-reader and GC-worker work, another periodic global-queue check, finalizer/cleanup goroutines, the local run queue, a batch from the global queue (`min(len/GOMAXPROCS+1, len/2)` G's), non-blocking netpoll, work stealing, and idle GC/trace work, in that order, before finally blocking on timers or netpoll. The exact order changes across releases, so treat this as a sketch of Go 1.27 rather than API.
 
-## See the Scheduler in Action
+## Stepping Through the Scheduler
 
-The visualization below walks through the internal mechanics step by step. Each step references the actual runtime functions involved.
+The visualization below steps through these mechanics one at a time. Each step names the runtime functions called at that point.
 
 <GoRoutineVisualizer />
 
 ## Preemption Internals
 
-### Cooperative Preemption (Go 1.1+)
+### Cooperative Preemption (Go 1.2+)
 
 The Go compiler inserts a <strong>stack check prologue</strong> at the beginning of every function:
 
@@ -131,7 +131,7 @@ JBE  morestack          // stack growth or preemption
 
 When sysmon's `retake()` detects a G running for >10ms, it sets `stackguard0` to `stackPreempt` (`0xfffffade`). At the next function call, the prologue detects this value and calls `morestack()` → `gopreempt_m()`, which sets the G back to `_Grunnable`.
 
-<strong>Problem</strong>: Tight loops like `for {}` with no function calls can't be preempted.
+Tight loops such as `for {}` contain no function calls, so they never reach the prologue and cannot be preempted this way.
 
 ### Asynchronous Preemption (Go 1.14+)
 
@@ -140,7 +140,7 @@ Go 1.14 introduced <strong>signal-based asynchronous preemption</strong>:
 1. sysmon calls `preemptone()`
 2. On Unix-like platforms, sends `SIGURG` to the target M (other OSes use platform-specific preemption mechanisms)
 3. Signal handler `doSigPreempt()` saves the current PC/SP
-4. An <strong>asyncPreempt frame</strong> is injected onto the G's stack
+4. An asyncPreempt frame is injected onto the G's stack
 5. G is suspended and control returns to `schedule()`
 
 ```go
@@ -197,7 +197,7 @@ func retake(now int64) uint32 {
 
 ## Netpoller — Async I/O Integration
 
-All network I/O in Go (`net.Conn.Read()`, etc.) is made asynchronous through the <strong>netpoller</strong>:
+All network I/O in Go (`net.Conn.Read()`, etc.) is made asynchronous through the netpoller:
 
 1. G starts network I/O → `runtime.pollWait()` calls `gopark()` → G becomes `_Gwaiting`
 2. The fd is registered with epoll/kqueue/IOCP
@@ -216,7 +216,7 @@ runtime.netpoll()
   → injectglist() into run queues
 ```
 
-Unlike syscalls (`read(2)` etc.), the netpoller <strong>does not block the M</strong>. This is why `net/http` servers can handle thousands of connections with very few OS threads.
+Unlike syscalls (`read(2)` etc.), the netpoller <strong>does not block the M</strong>, so `net/http` servers can handle thousands of connections with very few OS threads.
 
 ## G Lifecycle — State Transitions
 
@@ -238,14 +238,14 @@ _Gidle → _Gdead → _Grunnable → _Grunning → _Gdead
 
 ## Context Switch Cost
 
-Go's context switches are far lighter than OS thread switches:
+Switching goroutines costs roughly an order of magnitude less than switching OS threads. The numbers below are ballpark figures that vary by machine.
 
 | | Go goroutine | OS thread |
 |---|---|---|
-| <strong>What's switched</strong> | PC, SP, BP, a few registers (`gobuf`) | More register/kernel scheduler state; possible cache/TLB disruption (page-table switches are mainly process switches) |
-| <strong>Cost</strong> | ~100–200ns | ~1–10μs |
-| <strong>Stack size</strong> | Initial 2KB (grows dynamically) | Fixed 1–8MB |
-| <strong>Creation cost</strong> | `runtime.newproc` ≈ 300ns | `pthread_create` ≈ 10–30μs |
+| What's switched | PC, SP, BP, a few registers (`gobuf`) | More register/kernel scheduler state; possible cache/TLB disruption (page-table switches are mainly process switches) |
+| Cost | ~100–200ns | ~1–10μs |
+| Stack size | Initial 2KB (grows dynamically) | Fixed 1–8MB |
+| Creation cost | `runtime.newproc` ≈ 300ns | `pthread_create` ≈ 10–30μs |
 
 The [`gobuf`](https://github.com/golang/go/blob/master/src/runtime/runtime2.go) structure:
 
@@ -263,10 +263,10 @@ type gobuf struct {
 
 ## GOMAXPROCS vs Actual Thread Count
 
-The current number of P's is controlled by `GOMAXPROCS`, but actual M's (OS threads) can exceed it:
+The current number of P's is set by `GOMAXPROCS`, but the actual number of M's (OS threads) can be higher.
 
-- M's blocked in syscalls release their P, and new M's are created
-- Default max M count is <strong>10,000</strong> (`runtime/debug.SetMaxThreads`)
+- M's blocked in syscalls release their P, and new M's are created to run that P
+- Default max M count is 10,000 (`runtime/debug.SetMaxThreads`)
 - Idle M's are not destroyed immediately — they're pooled in `midle`
 
 ```go
@@ -277,23 +277,23 @@ runtime.GOMAXPROCS(4)  // P = 4
 
 ### Container-aware defaults (Go 1.25 onwards)
 
-For a long time `GOMAXPROCS` defaulted to the number of logical CPUs at startup (`runtime.NumCPU()`). In containers this was a classic source of trouble: run a Pod with a 2-core CPU limit on a 64-core node and the Go runtime would happily create 64 P's, then get throttled by the cgroup CPU quota while burning time on unnecessary context switches. The usual workaround was an external library such as `automaxprocs`.
+For a long time `GOMAXPROCS` defaulted to the number of logical CPUs at startup (`runtime.NumCPU()`). In containers this was a common cause of performance problems: run a Pod with a 2-core CPU limit on a 64-core node and the Go runtime would set `GOMAXPROCS=64` and create 64 P's. The cgroup CPU limit would then throttle the process, and the extra context switches made latency worse. The usual workaround was an external library such as `automaxprocs`.
 
 [Go 1.25](https://go.dev/doc/go1.25#container-aware-gomaxprocs) moved this into the runtime itself:
 
-- <strong>On Linux the runtime accounts for the cgroup CPU bandwidth limit</strong> — if the limit is lower than the number of logical CPUs, that lower value becomes the `GOMAXPROCS` default. This corresponds to the Kubernetes <strong>CPU limit</strong>; <strong>CPU requests are not considered</strong>.
+- <strong>On Linux the runtime accounts for the cgroup CPU bandwidth limit</strong> — if the limit is lower than the number of logical CPUs, that lower value becomes the `GOMAXPROCS` default. This corresponds to the Kubernetes CPU limit; <strong>CPU requests are not considered</strong>.
 - <strong>On all OSes the value is re-evaluated periodically</strong> — `GOMAXPROCS` follows changes in available logical CPUs or in the cgroup limit.
 
 Both behaviors switch off automatically as soon as you set `GOMAXPROCS` manually, via the environment variable or `runtime.GOMAXPROCS()` (they can also be disabled individually with the GODEBUG settings `containermaxprocs=0` and `updatemaxprocs=0`). If you have set it manually and want to return to the default behavior, use the new `runtime.SetDefaultGOMAXPROCS()`.
 
 ## Summary
 
-Go's G-M-P scheduler achieves high-efficiency concurrency through:
+Go's G-M-P scheduler is built from these seven mechanisms:
 
-1. <strong>M:N scheduling</strong> — Multiplexes many G's onto few M's
-2. <strong>Lock-free local queues</strong> — 256-entry ring buffers per P, no contention
-3. <strong>Work Stealing</strong> — Idle P's steal from busy P's for load balancing
-4. <strong>Hand-off</strong> — P's don't stall when M's block on syscalls
-5. <strong>Netpoller</strong> — Network I/O via epoll/kqueue without blocking M's
-6. <strong>Cooperative + async preemption</strong> — Function prologues plus platform-specific async preemption for fair CPU time
-7. <strong>sysmon</strong> — Independent watchdog detecting long syscalls and runaway G's
+1. <strong>M:N scheduling</strong> — Multiplexes many G's onto a few M's
+2. <strong>Lock-free local queues</strong> — A 256-entry ring buffer per P, so G's go in and out without taking a lock
+3. <strong>Work Stealing</strong> — A P with nothing to run takes G's from another P's queue to spread the load
+4. <strong>Hand-off</strong> — When an M blocks in a syscall, its P moves to another M and keeps running
+5. <strong>Netpoller</strong> — Network I/O handled asynchronously via epoll/kqueue without blocking M's
+6. <strong>Cooperative + async preemption</strong> — Function-prologue checks plus platform-specific async preemption keep one G from holding the CPU indefinitely
+7. <strong>sysmon</strong> — A dedicated thread without a P that detects long syscalls and long-running G's and acts on them

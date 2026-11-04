@@ -1,7 +1,7 @@
 ---
-title: ".NET Aspire の深層 — クラウドネイティブアプリケーション開発の裏側を徹底解剖"
+title: ".NET Aspire の内部構造 — AppHost の数行の裏で何が起きているか"
 date: "2026-04-05"
-description: ".NET Aspire の App Model、オーケストレーション、サービスディスカバリー、ヘルスチェック、テレメトリー統合、カスタムリソース作成まで、フレームワークの内部アーキテクチャを徹底解説します。"
+description: ".NET Aspire の App Model、DCP によるローカル実行、サービスディスカバリー、ヘルスチェック、テレメトリー、カスタムリソースまで、フレームワーク内部の仕組みを解説します。"
 tags: [".NET Aspire", ".NET", "Cloud Native", "Distributed Systems", "Observability"]
 ---
 
@@ -9,32 +9,32 @@ tags: [".NET Aspire", ".NET", "Cloud Native", "Distributed Systems", "Observabil
 
 ### 分散アプリケーション開発の課題
 
-マイクロサービスや分散アプリケーションを構築する際、開発者は「アプリケーションのビジネスロジック」以前に解決しなければならない課題に直面します。Redis や PostgreSQL などのインフラをローカルでどう起動するか、サービス間の接続文字列をどう管理するか、ヘルスチェック・テレメトリー・リトライをどう組み込むか——これらの **構成的な複雑さ（accidental complexity）** が、本来の開発をすぐに圧迫し始めます。
+マイクロサービスや分散アプリケーションでは、ビジネスロジックを書く前に決めることが多くあります。Redis や PostgreSQL をローカルでどう起動するか、サービス間の接続文字列をどう渡すか、ヘルスチェック・テレメトリー・リトライをどう組み込むか、といった点です。こうした<strong>構成上の複雑さ（accidental complexity）</strong>に、開発の手間が取られます。
 
-従来、開発者は `docker-compose.yml` でインフラを定義し、ポート番号をハードコードし、各サービスに個別にテレメトリー SDK をセットアップし、リトライロジックを手書きしていました。プロジェクトが成長するにつれてこれらの設定は分散・乖離し、「ローカルで動くがクラウドでは動かない」「サービス A の設定だけ古い」といった問題が頻発しました。
+従来は `docker-compose.yml` でインフラを定義し、ポート番号をハードコードし、テレメトリー SDK をサービスごとに設定し、リトライ処理を手書きしていました。プロジェクトが大きくなると設定がサービスごとに食い違い、「ローカルでは動くがクラウドでは動かない」「サービス A の設定だけ古い」といった問題がよく起きました。
 
 ### .NET Aspire のアプローチ
 
-.NET Aspire は、こうした課題に対する Microsoft の回答です。分散アプリケーション開発のための **オピニオネイテッド（opinionated）フレームワーク**であり、「オピニオネイテッド」とは、フレームワーク自体が<strong>「こうすべき」という設計上の判断をあらかじめ組み込んでいる</strong>ことを意味します。開発者が一から選定・設定する必要がなく、テレメトリー（OpenTelemetry）、ヘルスチェック（`/health`, `/alive`）、レジリエンス（リトライ・サーキットブレーカー）などのベストプラクティスが最初から標準搭載されています。
+.NET Aspire は、こうした課題に向けて Microsoft が提供する、分散アプリケーション開発用の<strong>オピニオネイテッド（opinionated）なフレームワーク</strong>です。オピニオネイテッドとは、設計上の判断をフレームワークがあらかじめ下していることを指します。テレメトリー（OpenTelemetry）、ヘルスチェック（`/health`, `/alive`）、レジリエンス（リトライ・サーキットブレーカー）が最初から組み込まれているので、開発者が一から選んで設定する必要はありません。
 
-重要なのは、Aspire は既存の .NET エコシステムを置き換えるものではないという点です。ASP.NET Core、Entity Framework Core、HttpClient——すべて従来通りのライブラリー・フレームワークをそのまま使います。Aspire が行うのは、それらの **接着力（glue）** を提供すること、つまりサービス間の接続・テレメトリーの収集・レジリエンスのポリシー適用といった横断的関心事を、一貫したやり方で自動化することです。
+ASP.NET Core、Entity Framework Core、HttpClient などは従来どおりそのまま使います。Aspire が担うのはそれらをつなぐ部分（glue）で、サービス間の接続、テレメトリーの収集、レジリエンスのポリシー適用といった横断的関心事を、どのサービスにも同じやり方で自動的に設定します。
 
-しかし `builder.AddProject<Projects.Api>()` や `builder.AddRedis("cache")` といったシンプルな API の裏側では、複雑なオーケストレーション、依存関係の解決、動的なサービスディスカバリーが行われています。この記事では、.NET Aspire の内部アーキテクチャを深層まで掘り下げます。
+`builder.AddProject<Projects.Api>()` や `builder.AddRedis("cache")` は短いコードですが、その裏ではリソースの起動、依存関係の解決、エンドポイントの動的な解決が行われています。この記事では、その実装を App Model から順にたどります。
 
 > **名称とバージョンについて（追記）**
 >
-> 本記事は Aspire がまだ「.NET Aspire」と呼ばれていた頃に書かれています。その後プロダクトは **「Aspire」へと改名**され、位置づけも .NET 専用から変わりました。現在の Aspire は AppHost を **C# または TypeScript** で記述でき、C# / JavaScript / Python / Go / Java / Rust / PowerShell など多言語のワークロードを一つのアプリケーションモデルでオーケストレートします。
+> 本記事は Aspire がまだ「.NET Aspire」と呼ばれていた頃に書きました。その後、製品名は「Aspire」に変わり、.NET 専用でもなくなりました。現在の Aspire では AppHost を C# または TypeScript で記述でき、C# / JavaScript / Python / Go / Java / Rust / PowerShell などのワークロードを1つのアプリケーションモデルでオーケストレートします。
 >
 > - ドキュメント: [aspire.dev](https://aspire.dev/)（旧: learn.microsoft.com/dotnet/aspire）
 > - リポジトリー: [microsoft/aspire](https://github.com/microsoft/aspire)（旧: dotnet/aspire）
-> - バージョン: 本稿執筆時の 9.x から進み、[`Aspire.Hosting.AppHost`](https://www.nuget.org/packages/Aspire.Hosting.AppHost) は 2026 年 9 月 10 日時点で <strong>13.5.3</strong> が最新
-> - CLI: `aspire run` / `aspire agent init` などの専用 CLI が中心になり、AI コーディングエージェント向けに MCP サーバーや Skill ファイルも提供される
+> - バージョン: 執筆時は 9.x。[`Aspire.Hosting.AppHost`](https://www.nuget.org/packages/Aspire.Hosting.AppHost) の最新は 2026 年 9 月 10 日時点で 13.5.3
+> - CLI: `aspire run` / `aspire agent init` などの専用 CLI が中心になり、AI コーディングエージェント向けに MCP サーバーや Skill ファイルも提供されている
 >
-> 以下で解説する App Model、オーケストレーション、サービスディスカバリー、ヘルスチェック、テレメトリー統合といった<strong>設計の骨格は現在もそのまま通用します</strong>が、名称・パッケージバージョン・ドキュメント URL は最新のものに読み替えてください。
+> 以下で説明する App Model、オーケストレーション、サービスディスカバリー、ヘルスチェック、テレメトリーの設計の基本は現在も同じです。名称・パッケージバージョン・ドキュメント URL は最新のものに読み替えてください。
 
 ## 全体アーキテクチャの俯瞰
 
-.NET Aspire は大きく3つの柱で構成されます。
+.NET Aspire は、次の3つの柱で構成されます。
 
 ```mermaid
 graph TD
@@ -70,33 +70,31 @@ graph TD
 | **コンポーネント** | 外部サービス（Redis、PostgreSQL 等）へのクライアント接続を標準化 |
 | **ツーリング** | 開発・デバッグ・デプロイのワークフロー支援 |
 
-第1の柱である**オーケストレーション**は、この記事の中心的なトピックです。ここで登場するのが **AppHost** と呼ばれるプロジェクトです。AppHost は、アプリケーション全体の「設計図」を C# コードで定義する専用のコンソールアプリケーションです。どのサービスが存在し、どのインフラに依存し、サービス間がどう接続されるかを宣言的に記述します。AppHost 自身はビジネスロジックを一切含まず、純粋にアプリケーションの構成（composition）だけを担います。
+この記事で中心に扱うのは、第1の柱のオーケストレーションです。その起点になるのが AppHost と呼ばれるプロジェクトで、アプリケーション全体の構成を C# コードで定義する専用のコンソールアプリケーションです。どのサービスがあり、どのインフラに依存し、サービス同士がどうつながるかを宣言的に記述します。AppHost 自身はビジネスロジックを含まず、アプリケーションの構成（composition）だけを担います。
 
-第2の柱である**コンポーネント**は、各サービスプロジェクト（API、Worker など）にインストールする NuGet パッケージ群です。`Aspire.StackExchange.Redis` や `Aspire.Npgsql` といったパッケージが、接続文字列の解決・ヘルスチェック・テレメトリー計装を自動的にセットアップします。開発者は `builder.AddRedisClient("cache")` と1行書くだけで、接続管理・監視・障害検知がすべて組み込まれた Redis クライアントを手に入れます。
+第2の柱のコンポーネントは、API や Worker などの各サービスプロジェクトにインストールする NuGet パッケージ群です。`Aspire.StackExchange.Redis` や `Aspire.Npgsql` などのパッケージが、接続文字列の解決・ヘルスチェック・テレメトリー計装を自動的に設定します。例えば `builder.AddRedisClient("cache")` の1行で、接続管理・監視・障害検知を組み込んだ Redis クライアントが使えるようになります。
 
-第3の柱である**ツーリング**は、Visual Studio や `aspire` CLI（C# AppHost では `dotnet run --project AppHost` も引き続き利用可能）、Azure Developer CLI (`azd`) によるエンドツーエンドの開発体験を提供します。プロジェクトの作成からローカルデバッグ、クラウドデプロイまでを一貫して支援します。
-
-以降の章では、第1の柱であるオーケストレーションの内部——AppHost が構築する App Model とは何か、それがどのようにローカルで実行されるのか——を中心に、フレームワークの深層を解き明かしていきます。
+第3の柱のツーリングには、Visual Studio、`aspire` CLI（C# AppHost では `dotnet run --project AppHost` も引き続き使えます）、Azure Developer CLI（`azd`）があります。プロジェクトの作成からローカルデバッグ、クラウドへのデプロイまでをこれらのツールで行えます。
 
 ## 第1章：App Model — リソースグラフの構築
 
 ### AppHost とは何か
 
-.NET Aspire のオーケストレーションの起点は **AppHost プロジェクト** です。AppHost は、`dotnet new aspire` や Visual Studio のテンプレートで生成される、ソリューション内の特別なコンソールアプリケーションです。
+.NET Aspire のオーケストレーションは **AppHost プロジェクト** から始まります。AppHost は、`dotnet new aspire` や Visual Studio のテンプレートで生成される、ソリューション内の特別なコンソールアプリケーションです。
 
-一般的な .NET ソリューションでは、各プロジェクト（Web API、Worker、Blazor フロントエンドなど）は独立して起動・実行されます。しかしマイクロサービス構成では「Redis と PostgreSQL を先に起動し、マイグレーションを実行し、その後に API と Worker を立ち上げ、最後にフロントエンドを起動する」といった **起動順序と接続関係** の管理が必要です。従来はこれを `docker-compose.yml` やシェルスクリプトで手作業で記述していましたが、AppHost はこれを **C# コード** で宣言的に表現します。
+一般的な .NET ソリューションでは、Web API、Worker、Blazor フロントエンドなどの各プロジェクトを個別に起動します。マイクロサービス構成ではさらに、「Redis と PostgreSQL を先に起動し、マイグレーションを実行してから API と Worker を立ち上げ、最後にフロントエンドを起動する」といった起動順序と接続関係を管理する必要があります。従来は `docker-compose.yml` やシェルスクリプトに手で書いていたこの内容を、AppHost では C# コードで宣言的に表現します。
 
-AppHost の `Program.cs` は通常のビジネスロジックコードとは異なり、アプリケーション全体の **トポロジー（構成図）** を定義するファイルです。「このソリューションには Redis と PostgreSQL と3つの .NET プロジェクトがあり、API は PostgreSQL と Redis に依存し、Worker は RabbitMQ に依存し、フロントエンドは API に依存する」——こうした関係性を `AddProject()`、`AddRedis()`、`WithReference()` といったメソッドチェーンで記述します。
+AppHost の `Program.cs` には、ビジネスロジックではなく、アプリケーション全体のトポロジー（構成図）を書きます。「このソリューションには Redis、PostgreSQL、3つの .NET プロジェクトがあり、API は PostgreSQL と Redis に、Worker は RabbitMQ に、フロントエンドは API に依存する」といった関係を、`AddProject()`、`AddRedis()`、`WithReference()` などのメソッドチェーンで記述します。
 
-AppHost の `.csproj` ファイルには、オーケストレーション対象のプロジェクトへの `ProjectReference` が列挙されます。ビルド時に Source Generator がこれらの参照を解析し、後述する型安全なプロジェクトメタデータクラスを自動生成します。つまり AppHost は、ソリューション内の「全体を俯瞰する唯一の場所」であり、他のプロジェクトは AppHost の存在を知りません。
+AppHost の `.csproj` ファイルには、オーケストレーション対象のプロジェクトへの `ProjectReference` を並べます。ビルド時に Source Generator がこれらの参照を解析し、後述する型安全なプロジェクトメタデータクラスを生成します。ソリューション全体の構成を知っているのは AppHost だけで、ほかのプロジェクトは AppHost の存在を知りません。
 
 ### App Model とは
 
-.NET Aspire の中核は **App Model** です。これは、アプリケーションを構成するすべてのリソース（プロジェクト、コンテナー、実行ファイル、外部サービス）とその依存関係を表す **有向非巡回グラフ（DAG）** です。AppHost の `Program.cs` に記述する一連の `Add*()` や `WithReference()` の呼び出しが、内部的にこの DAG を構築しています。
+.NET Aspire の中核は **App Model** です。アプリケーションを構成するすべてのリソース（プロジェクト、コンテナー、実行ファイル、外部サービス）とその依存関係を、<strong>有向非巡回グラフ（DAG）</strong>として表します。AppHost の `Program.cs` で呼び出す `Add*()` や `WithReference()` が、内部でこの DAG を組み立てます。
 
-DAG（Directed Acyclic Graph）とは、ノード間に方向があり、かつ循環しないグラフ構造です。Aspire では各リソース（Redis、PostgreSQL、API サービスなど）がノードに、`WithReference()` による依存関係がエッジに対応します。この構造があることで、Aspire は「PostgreSQL → データベースマイグレーション → API サービス」といった起動順序を自動的に導出できます。
+DAG（Directed Acyclic Graph）は、辺に向きがあり、循環を含まないグラフです。Aspire では Redis、PostgreSQL、API サービスなどの各リソースがノードに、`WithReference()` で宣言した依存関係がエッジに対応します。`WithReference()` は接続情報を渡す関係を表すもので、起動順序は第2章で説明する `WaitFor()` で指定します。
 
-以下に、典型的な AppHost の `Program.cs` とそこから構築されるリソースグラフを示します。
+典型的な AppHost の `Program.cs` と、そこから構築されるリソースグラフを次に示します。
 
 ```csharp
 // AppHost の Program.cs
@@ -125,7 +123,7 @@ var webFrontend = builder.AddProject<Projects.WebFrontend>("web-frontend")
 builder.Build().Run();
 ```
 
-このコードから構築されるリソースグラフ：
+このコードから構築されるリソースグラフは次のとおりです。
 
 ```mermaid
 graph TD
@@ -149,15 +147,15 @@ graph TD
 
 ### `AddProject<T>()` の型パラメーターの仕組み
 
-上のコードで `builder.AddProject<Projects.CatalogApi>("catalog-api")` と書きましたが、この `<Projects.CatalogApi>` とは何でしょうか？これは C# の**ジェネリクス**（型パラメーター）構文で、プロジェクトを「型」として扱っています。
+上のコードの `builder.AddProject<Projects.CatalogApi>("catalog-api")` では、C# のジェネリクス（型パラメーター）を使い、プロジェクトを型として指定しています。
 
-AppHost の `.csproj` にプロジェクト参照を追加すると：
+AppHost の `.csproj` に次のようなプロジェクト参照を追加すると、
 
 ```xml
 <ProjectReference Include="..\CatalogApi\CatalogApi.csproj" />
 ```
 
-Aspire のビルドツール（[Source Generator](https://github.com/dotnet/aspire/blob/main/src/Aspire.Hosting/ProjectResourceBuilderExtensions.cs)）が`Projects` 名前空間の下にクラスを**自動生成**します。生成されるコードはおおよそ以下のようなものです：
+Aspire のビルドツール（[Source Generator](https://github.com/dotnet/aspire/blob/main/src/Aspire.Hosting/ProjectResourceBuilderExtensions.cs)）が `Projects` 名前空間の下にクラスを生成します。生成されるコードはおおよそ次のとおりです。
 
 ```csharp
 namespace Projects;
@@ -169,7 +167,7 @@ public class CatalogApi : IProjectMetadata
 }
 ```
 
-`AddProject<T>()` のシグネチャは以下のようになっています：
+`AddProject<T>()` のシグネチャは次のとおりです。
 
 ```csharp
 public static IResourceBuilder<ProjectResource> AddProject<TProject>(
@@ -178,15 +176,15 @@ public static IResourceBuilder<ProjectResource> AddProject<TProject>(
     where TProject : IProjectMetadata, new()
 ```
 
-型制約 `where TProject : IProjectMetadata, new()` により、`TProject` は `IProjectMetadata` を実装し、引数なしコンストラクターを持つ型でなければなりません。メソッド内部では `new TProject().ProjectPath` で `.csproj` のパスを取得し、オーケストレーターがどのプロジェクトを起動すべきかを特定します。
+型制約 `where TProject : IProjectMetadata, new()` により、`TProject` は `IProjectMetadata` を実装し、引数なしコンストラクターを持つ型に限られます。メソッド内部では `new TProject().ProjectPath` で `.csproj` のパスを取得し、オーケストレーターが起動するプロジェクトを特定します。
 
-**なぜ文字列パスではなく型を使うのか？** 最大の理由は**コンパイル時の安全性**です。文字列パス `AddProject("../CatalogApi")` では typo がランタイムエラーになりますが、型パラメーター `AddProject<Projects.CatalogApi>()` ならプロジェクト参照を削除・リネームした時点で `Projects.CatalogApi` が存在しなくなり、**ビルドエラーとして即座に検出**できます。IDE の補完・リファクタリング支援も効くため、大規模なマイクロサービス構成でも安全にリソースを管理できます。
+文字列のパスではなく型を使う最大の理由は、<strong>コンパイル時に誤りを検出できること</strong>です。`AddProject("../CatalogApi")` のような文字列パスでは、typo は実行時に初めてエラーになります。型パラメーターの `AddProject<Projects.CatalogApi>()` なら、プロジェクト参照を削除・リネームした時点で `Projects.CatalogApi` がなくなり、ビルドエラーになります。IDE の補完やリファクタリング機能も使えるため、サービスの数が多い構成でもリソースの指定を誤りにくくなります。
 
 ### IResource インターフェースの階層
 
-App Model に登録されるリソースは、すべて `IResource` インターフェースを実装する型のインスタンスです。「Redis コンテナー」も「.NET プロジェクト」も「RabbitMQ」も、Aspire から見れば等しく「リソース」であり、それぞれ `ContainerResource`、`ProjectResource`、`ExecutableResource` といった具象クラスで表現されます。
+App Model に登録されるリソースは、すべて [`IResource`](https://github.com/dotnet/aspire/blob/main/src/Aspire.Hosting/ApplicationModel/IResource.cs) インターフェースを実装する型のインスタンスです。Redis コンテナーも .NET プロジェクトも RabbitMQ も、Aspire からは同じリソースとして扱われ、`ContainerResource`、`ProjectResource`、`ExecutableResource` などの具象クラスで表現されます。
 
-この型階層の設計は、Aspire が新しい種類のリソース（例：Kafka、Elasticsearch、独自のサイドカー）を追加する際の拡張ポイントでもあります。すべてのリソースは [`IResource`](https://github.com/dotnet/aspire/blob/main/src/Aspire.Hosting/ApplicationModel/IResource.cs) インターフェースを実装します。
+Kafka、Elasticsearch、独自のサイドカーなど新しい種類のリソースを追加するときも、この型階層に沿ってクラスを定義します。
 
 ```mermaid
 graph TD
@@ -223,9 +221,9 @@ public class RedisResource : ContainerResource, IResourceWithConnectionString
 
 ### Annotation ベースの拡張モデル
 
-リソースの型階層を見ると疑問が湧くかもしれません——「Redis のポート番号情報はどこに持つのか？」「環境変数の注入ロジックはどう紐づけるのか？」。Aspire の回答は **アノテーション（Annotation）パターン** です。
+型階層だけでは、Redis のポート番号をどこに持つのか、環境変数を注入する処理をどう結び付けるのかが決まりません。Aspire はこれを<strong>アノテーション（Annotation）</strong>で扱います。
 
-クラスの継承で機能を追加するのではなく、リソースオブジェクトに「付箋」のようにメタデータを貼り付けていく設計です。これは継承ではなく**コンポジション**でリソースの能力を拡張するアプローチであり、`WithEndpoint()`、`WithEnvironment()` といったメソッドチェーンは、内部的にアノテーションオブジェクトをリソースの `Annotations` コレクションに追加しています。この設計のおかげで、リソースの型を変更することなく、後から自由に能力を付加できます。
+リソースオブジェクトにメタデータを付箋のように追加していく設計で、クラスの継承ではなくコンポジションでリソースの能力を広げます。`WithEndpoint()` や `WithEnvironment()` などのメソッドは、内部でアノテーションオブジェクトをリソースの `Annotations` コレクションに追加しています。そのため、リソースの型を変えずに、後から能力を加えられます。
 
 ```csharp
 // アノテーションの例
@@ -273,9 +271,9 @@ public static IResourceBuilder<T> WithReference<T>(
 
 ### DCP の役割
 
-第1章で見た App Model は、あくまでアプリケーションの「設計図」にすぎません。実際にコンテナーを起動し、プロセスを立ち上げ、ネットワークを接続する「実行エンジン」が必要です。それが **DCP（Developer Control Plane）** です。
+第1章の App Model は、アプリケーションの設計図にすぎません。コンテナーやプロセスを実際に起動し、ネットワークを接続する実行エンジンが **DCP（Developer Control Plane）** です。
 
-AppHost プロジェクトを `dotnet run` すると、最初に App Model（DAG）がメモリー上に構築されます。次に、この DAG が gRPC を介して DCP プロセスに送信されます。DCP は受け取った設計図に基づいて、Docker コンテナーの起動・.NET プロジェクトのプロセス起動・ポートの割り当てと接続文字列の注入を実行します。開発者から見ると `dotnet run` 一発でアプリケーション全体が立ち上がりますが、裏側では AppHost → DCP → Docker/プロセス という明確な責務分離が行われています。
+AppHost プロジェクトを `dotnet run` で起動すると、まず App Model（DAG）がメモリー上に構築されます。AppHost はこの DAG をもとにしたリソース定義を、DCP が提供する Kubernetes 互換の API を通じて DCP プロセスに渡します。DCP はその定義に従って、Docker コンテナーと .NET プロジェクトのプロセスを起動し、ポートを割り当て、接続文字列を注入します。開発者は `dotnet run` を1回実行するだけですが、内部では AppHost が構成を定義し、DCP が Docker やプロセスを操作するという役割分担になっています。
 
 ```mermaid
 sequenceDiagram
@@ -288,33 +286,33 @@ sequenceDiagram
 
     Dev->>AppHost: dotnet run
     AppHost->>AppHost: App Model 構築
-    AppHost->>DCP: gRPC でリソース定義を送信
+    AppHost->>DCP: Kubernetes 互換 API でリソース定義を登録
     DCP->>Docker: コンテナーリソースを起動
     Docker-->>DCP: コンテナー起動完了
     DCP->>Project: プロジェクトリソースを起動
     Note over DCP,Project: 環境変数・接続文字列を注入
     Project-->>DCP: プロセス起動完了
-    DCP->>Dashboard: テレメトリーデータ送信 (OTLP)
+    DCP->>Dashboard: Dashboard を起動
     Dashboard-->>Dev: ブラウザーで可視化
 ```
 
 ### DCP の内部アーキテクチャ
 
-DCP は Go 言語で実装された軽量なコントロールプレーンです。「Kubernetes に着想を得た」というのは比喩ではなく、実際に Kubernetes の Custom Resource Definition (CRD) と同様の **宣言的リソースモデル** を採用しています。つまり、DCP は「Redis コンテナーをポート 6379 で起動せよ」という命令を受け取るのではなく、「Redis コンテナーが存在すべき」という**望ましい状態（desired state）** を受け取り、現在の状態との差分を埋める **Reconciliation（調停）ループ** を実行します。
+DCP は Go で実装された軽量なコントロールプレーンで、Kubernetes の Custom Resource Definition（CRD）と同じような宣言的リソースモデルを採用しています。DCP が受け取るのは「Redis コンテナーをポート 6379 で起動せよ」という命令ではなく、「Redis コンテナーが存在すべき」という<strong>望ましい状態（desired state）</strong>です。DCP は現在の状態との差を埋める<strong>調停（reconciliation）ループ</strong>を実行します。
 
-コンテナーが異常終了した場合は自動的に再起動し、エンドポイントが変更された場合はプロキシー設定を更新する——こうした自己修復的な振る舞いは、この宣言的モデルから自然に導かれます。ただし DCP は Kubernetes クラスターを要求しません。あくまでローカルの開発マシン上で動作する軽量プロセスであり、Docker Desktop さえあれば動きます。
+コンテナーが異常終了すれば再起動し、エンドポイントが変わればプロキシーの設定を更新する、といった動作は、この宣言的モデルから導かれます。ただし DCP に Kubernetes クラスターは不要です。ローカルの開発マシン上で動く軽量なプロセスで、Docker Desktop があれば動きます。
 
 ```mermaid
 graph TD
     subgraph DCP["DCP (Developer Control Plane)"]
-        APIServer["API Server<br/>(gRPC)"]
+        APIServer["API Server<br/>(Kubernetes 互換 API)"]
         Reconciler["Reconciler<br/>宣言的→実際の状態"]
         ContainerCtrl["Container Controller"]
         ExecCtrl["Executable Controller"]
         EndpointCtrl["Endpoint Controller"]
     end
 
-    AppHost["AppHost"] -->|gRPC| APIServer
+    AppHost["AppHost"] -->|Kubernetes 互換 API| APIServer
     APIServer --> Reconciler
     Reconciler --> ContainerCtrl
     Reconciler --> ExecCtrl
@@ -325,7 +323,7 @@ graph TD
     EndpointCtrl --> Proxy["Reverse Proxy"]
 ```
 
-DCP のリソースモデル：
+DCP が扱うリソースは次のとおりです。
 
 | DCP リソース | 対応する概念 | 説明 |
 |-------------|------------|------|
@@ -336,9 +334,9 @@ DCP のリソースモデル：
 
 ### リソースの起動順序と依存関係解決
 
-App Model は DAG（有向非巡回グラフ）なので、DCP は **トポロジカルソート** を適用して安全な起動順序を決定できます。トポロジカルソートとは、グラフ内のすべての辺 (u → v) について u が v より前に来るような線形順序を求めるアルゴリズムです。
+`WithReference()` で依存関係を宣言しただけでは、起動順序は決まりません。既定ではすべてのリソースが並行して起動するので、依存先の準備ができてから起動させたいリソースには `WaitFor()` を指定します。
 
-具体的には、依存先のないリソース（Redis、PostgreSQL、RabbitMQ）が最初に起動され、それらに依存するリソース（API、Worker）がその次に、最後に上流サービスに依存するフロントエンドが起動されます。同じフェーズ内のリソースは**並列に**起動されるため、全体の起動時間が最小化されます。
+依存先すべてに `WaitFor()` を指定すると、起動は次の図のような段階に分かれます。依存先のない Redis、PostgreSQL、RabbitMQ が最初に起動し、それらに依存する API と Worker が続き、最後に API に依存するフロントエンドが起動します。この順序は依存グラフの<strong>トポロジカル順序</strong>、つまりすべての辺 (u → v) で u が v より前に来る順序になります。同じ段階のリソースは並行して起動するので、順番に起動するより全体の起動時間が短くなります。
 
 ```mermaid
 graph TD
@@ -381,18 +379,18 @@ var migration = builder.AddProject<Projects.DbMigration>("migration")
 
 var api = builder.AddProject<Projects.Api>("api")
     .WithReference(postgres)
-    .WaitFor(migration); // マイグレーション完了を待つ
+    .WaitForCompletion(migration); // マイグレーションの完了を待つ
 ```
 
-`WaitFor()` は内部的にヘルスチェックを使って依存リソースの準備完了を確認します。
+`WaitFor()` は依存リソースのヘルスチェックが成功するまで待ちます。マイグレーションのように処理を終えて停止するリソースには `WaitForCompletion()` を使い、そのリソースの実行が終わるまで待ちます。
 
 ## 第3章：サービスディスカバリー — 動的なエンドポイント解決
 
 ### 接続文字列と環境変数
 
-マイクロサービス構成で避けられない問題のひとつが「サービス A はサービス B にどうやって接続するのか」です。IP アドレスやポート番号をハードコードするのは論外ですし、ローカル開発とクラウドデプロイで接続先が異なるため、設定ファイルで管理するのも煩雑です。
+マイクロサービス構成では、サービス A がサービス B にどう接続するかを必ず決める必要があります。IP アドレスやポート番号のハードコードは避けたいところですし、ローカル開発とクラウドでは接続先が異なるため、設定ファイルで管理するのも手間がかかります。
 
-Aspire はこの問題を **環境変数による自動注入** で解決します。`WithReference()` でリソース間の依存関係を宣言すると、DCP が下流サービスのプロセス起動時に、上流リソースの**接続文字列**や**エンドポイント URL** を環境変数として自動的に注入します。開発者はコード内で接続先を意識する必要がなく、`IConfiguration.GetConnectionString("cache")` と書くだけで、Aspire が注入した値が取得されます。
+Aspire は、接続先を<strong>環境変数で自動的に注入</strong>します。`WithReference()` でリソース間の依存関係を宣言すると、DCP が参照側のサービスのプロセスを起動するときに、参照先リソースの接続文字列やエンドポイント URL を環境変数として渡します。コードに接続先を書く必要はなく、`IConfiguration.GetConnectionString("cache")` で Aspire が注入した値を取得できます。
 
 ```csharp
 // この宣言から...
@@ -404,7 +402,7 @@ var api = builder.AddProject<Projects.Api>("api")
 // ConnectionStrings__cache = "localhost:63241"
 ```
 
-環境変数の命名規則：
+環境変数の命名規則は次のとおりです。
 
 | 参照タイプ | 環境変数パターン | 例 |
 |-----------|----------------|---|
@@ -414,9 +412,9 @@ var api = builder.AddProject<Projects.Api>("api")
 
 ### サービスディスカバリーの仕組み
 
-環境変数による接続文字列の注入は「静的な」エンドポイント解決です。しかし、サービスがレプリカを持つ場合や、エンドポイントが動的に変化する場合はどうでしょうか？ここで登場するのが .NET Aspire のサービスディスカバリー機構です。
+接続文字列の注入は、起動時に値が決まる静的な解決です。サービスに複数のレプリカがある場合や、エンドポイントが動的に変わる場合には、.NET Aspire のサービスディスカバリー機構を使います。
 
-`Microsoft.Extensions.ServiceDiscovery` パッケージは、HttpClient のパイプラインにインターセプトハンドラーを挿入します。開発者が `http://catalog-api/api/products` のように**論理名**（サービス名）で URL を指定すると、ハンドラーがリクエストを横取りし、環境変数や DNS SRV レコードから実際のエンドポイント（`https://localhost:7234/api/products`）に透過的に解決します。コードに物理アドレスが一切現れないため、ローカル開発でもクラウド環境でもコードの変更が不要です。
+`Microsoft.Extensions.ServiceDiscovery` パッケージは、HttpClient のパイプラインにハンドラーを挿入します。`http://catalog-api/api/products` のように論理名（サービス名）で URL を指定すると、ハンドラーがリクエストを受け取り、環境変数や DNS SRV レコードをもとに実際のエンドポイント（`https://localhost:7234/api/products`）へ書き換えます。コードに物理アドレスが現れないため、ローカル開発でもクラウドでも同じコードで動きます。
 
 ```mermaid
 graph TD
@@ -448,9 +446,11 @@ app.MapGet("/products", async (HttpClient client) =>
 
 ### エンドポイント解決の優先順位
 
+サービスディスカバリーは、次の順にエンドポイントを解決します。
+
 1. **Configuration** — 環境変数 `services__{name}__{scheme}__{index}` から解決
 2. **DNS SRV** — DNS SRV レコードから解決（Kubernetes 環境で有用）
-3. **Pass-through** — ホスト名がそのまま通過（従来の DNS 解決）
+3. **Pass-through** — ホスト名をそのまま使う（従来の DNS 解決）
 
 ```csharp
 // Aspire が注入する環境変数の実際の値
@@ -480,9 +480,9 @@ var api = builder.AddProject<Projects.Api>("api")
 
 ### コンポーネントの哲学
 
-Redis に接続するとき、開発者は通常こうした作業を行います——NuGet パッケージのインストール、接続文字列の取得、`IConnectionMultiplexer` の DI 登録、ヘルスチェックの追加、OpenTelemetry の計装設定、リトライポリシーの構成。これらはプロジェクトごとに繰り返される **ボイラープレート** であり、どれかひとつでも忘れるとモニタリングの穴が生まれます。
+Redis に接続するには、通常は NuGet パッケージのインストール、接続文字列の取得、`IConnectionMultiplexer` の DI 登録、ヘルスチェックの追加、OpenTelemetry の計装設定、リトライポリシーの構成が必要です。これらはプロジェクトごとに繰り返すボイラープレートで、1つでも忘れると監視できない箇所が生まれます。
 
-.NET Aspire コンポーネントは、この繰り返し作業を **1行のメソッド呼び出し** に凝縮する NuGet パッケージです。`builder.AddRedisClient("cache")` と書くだけで、上記すべてが標準的な方法でセットアップされます。これが「オピニオネイテッド」の具体的な現れです——ベストプラクティスをデフォルトとして組み込むことで、開発者が「正しいこと」をするのに余分な労力を必要としなくなります。
+.NET Aspire コンポーネントは、この作業を1行のメソッド呼び出しにまとめる NuGet パッケージです。`builder.AddRedisClient("cache")` と書くと、上の作業がすべて標準的な方法で設定されます。オピニオネイテッドな設計が具体的に表れている部分で、推奨される設定が既定になっているため、開発者は追加の手間をかけずにそれに従えます。
 
 ```mermaid
 graph TD
@@ -496,7 +496,7 @@ graph TD
 
 ### コンポーネントの内部実装
 
-コンポーネントの「1行で全部入り」がどう実現されているか、`Aspire.StackExchange.Redis` を例に内部を見てみましょう。`AddRedisClient()` メソッドは、内部で5つのステップを順に実行しています。設定のバインド → 接続文字列の取得 → DI コンテナーへの登録 → ヘルスチェックの追加 → テレメトリーの計装です。これらが1つのメソッド内に凝集されていることで、設定の一部だけ忘れるという問題が構造的に排除されています。
+`Aspire.StackExchange.Redis` の `AddRedisClient()` は、設定のバインド、接続文字列の取得、DI コンテナーへの登録、ヘルスチェックの追加、テレメトリーの計装という5つの処理を順に実行します。すべてが1つのメソッドにまとまっているため、一部の設定だけを忘れることがありません。
 
 ```csharp
 // AddRedisClient() の内部実装（簡略化）
@@ -544,9 +544,9 @@ public static void AddRedisClient(
 
 ### ホスティング側 vs クライアント側
 
-Aspire コンポーネントを理解する上で重要なのが、**ホスティングパッケージ** と **クライアントパッケージ** の区別です。同じ Redis でも2種類の NuGet パッケージが存在し、それぞれ異なるプロジェクトにインストールされます。
+Aspire コンポーネントは、<strong>ホスティングパッケージ</strong>と<strong>クライアントパッケージ</strong>に分かれます。同じ Redis にも NuGet パッケージが2つあり、それぞれ別のプロジェクトにインストールします。
 
-ホスティングパッケージ（`Aspire.Hosting.Redis`）は AppHost プロジェクトにインストールし、「Redis コンテナーをどう起動するか」を定義します。クライアントパッケージ（`Aspire.StackExchange.Redis`）は各サービスプロジェクトにインストールし、「Redis にどう接続するか」を設定します。両者の間を橋渡しするのが、DCP が注入する環境変数（`ConnectionStrings__cache`）です。
+ホスティングパッケージ（`Aspire.Hosting.Redis`）は AppHost プロジェクトにインストールし、Redis コンテナーの起動方法を定義します。クライアントパッケージ（`Aspire.StackExchange.Redis`）は各サービスプロジェクトにインストールし、Redis への接続方法を設定します。両者をつなぐのは、DCP が注入する環境変数（`ConnectionStrings__cache`）です。
 
 | パッケージ | 用途 | インストール先 |
 |-----------|------|-------------|
@@ -570,11 +570,11 @@ graph LR
 
 ### ServiceDefaults の役割
 
-個々のコンポーネントが外部サービスごとのベストプラクティスを提供するのに対し、**ServiceDefaults** はサービス自体の横断的関心事（Cross-Cutting Concerns）を一箇所にまとめたプロジェクトです。
+コンポーネントが外部サービスごとの推奨設定を提供するのに対し、**ServiceDefaults** はサービス自体の横断的関心事（cross-cutting concerns）を1か所にまとめたプロジェクトです。
 
-「横断的関心事」とは、ビジネスロジックとは直交するが、すべてのサービスに必要な機能——テレメトリー収集、ヘルスチェックエンドポイント、サービスディスカバリー、HTTP リトライポリシー——のことです。これらをサービスごとに個別に設定すると、設定の不整合が起きやすくなります。ServiceDefaults は共有クラスライブラリーとして実装され、すべてのサービスプロジェクトが `builder.AddServiceDefaults()` を呼び出すだけで、統一された設定が適用されます。
+横断的関心事とは、ビジネスロジックとは別に、すべてのサービスが必要とする機能のことで、テレメトリーの収集、ヘルスチェックエンドポイント、サービスディスカバリー、HTTP のリトライポリシーなどがあります。サービスごとに個別に設定すると、設定が食い違いやすくなります。ServiceDefaults は共有クラスライブラリーとして実装され、各サービスプロジェクトが `builder.AddServiceDefaults()` を呼び出すと、共通の設定が適用されます。
 
-以下は ServiceDefaults の `AddServiceDefaults()` メソッドの構造です。わずか数行で、OpenTelemetry・ヘルスチェック・サービスディスカバリー・リトライが一括設定されていることがわかります。
+ServiceDefaults の `AddServiceDefaults()` メソッドは次のような構造で、数行で OpenTelemetry・ヘルスチェック・サービスディスカバリー・リトライをまとめて設定します。
 
 ```csharp
 // ServiceDefaults/Extensions.cs の全体構造
@@ -603,9 +603,9 @@ public static IHostApplicationBuilder AddServiceDefaults(
 
 ### OpenTelemetry 統合の詳細
 
-Aspire が OpenTelemetry を選択したのは偶然ではありません。OpenTelemetry は CNCF（Cloud Native Computing Foundation）がホストするオープンスタンダードであり、ベンダーロックインなしにログ・メトリクス・トレースを統一的に扱えます。Aspire は各サービスの OpenTelemetry SDK 設定を自動化し、データの送信先として Aspire Dashboard の OTLP Receiver を環境変数（`OTEL_EXPORTER_OTLP_ENDPOINT`）で指定します。
+Aspire はテレメトリーに OpenTelemetry を使います。OpenTelemetry は CNCF（Cloud Native Computing Foundation）がホストするオープンな標準で、特定ベンダーに依存せずにログ・メトリクス・トレースを同じ方法で扱えます。Aspire は各サービスの OpenTelemetry SDK を自動的に設定し、送信先として Aspire Dashboard の OTLP レシーバーを環境変数 `OTEL_EXPORTER_OTLP_ENDPOINT` で指定します。
 
-注目すべきは、この設定が AppHost でも ServiceDefaults でもなく、**ランタイム時に環境変数を介して動的に行われる**点です。ローカル開発時は Dashboard に送信され、プロダクション環境では Jaeger や Azure Monitor など別のバックエンドに切り替えられます——コードの変更なしに。
+送信先は AppHost にも ServiceDefaults にも書かれておらず、実行時に環境変数で決まります。そのため、ローカル開発時は Dashboard に送り、本番環境では Jaeger や Azure Monitor などの別のバックエンドに、コードを変えずに切り替えられます。
 
 ```csharp
 public static IHostApplicationBuilder ConfigureOpenTelemetry(
@@ -655,7 +655,7 @@ private static IHostApplicationBuilder AddOpenTelemetryExporters(
 }
 ```
 
-テレメトリーデータの流れ：
+テレメトリーデータは次のように流れます。
 
 ```mermaid
 graph LR
@@ -684,33 +684,39 @@ graph LR
 
 ### Dashboard のアーキテクチャ
 
-ServiceDefaults が各サービスにテレメトリー計装を設定しても、データを受信・可視化する先がなければ意味がありません。Aspire Dashboard はその受け皿として機能する **Blazor Server** アプリケーションです。
+ServiceDefaults で各サービスにテレメトリーの計装を設定しても、データを受信して表示する先が必要です。その受け皿になるのが、Blazor Server で実装された Aspire Dashboard です。
 
-AppHost を起動すると、DCP が Docker コンテナーとして Dashboard を自動的に立ち上げます（通常 `http://localhost:15888` でアクセス可能）。Dashboard は OTLP（OpenTelemetry Protocol）レシーバーとして動作し、すべてのサービスからログ・メトリクス・分散トレースをリアルタイムに受信します。これらのデータはインメモリーの循環バッファーに格納され、ブラウザー上でインタラクティブに探索できます。
+AppHost を起動すると、DCP が Dashboard をプロセスとして自動的に起動します。Dashboard の URL は AppHost の `launchSettings.json` の `applicationUrl` で決まり、AppHost は起動時にログイン用の URL をコンソールに出力します。Dashboard は OTLP（OpenTelemetry Protocol）レシーバーとして動き、すべてのサービスからログ・メトリクス・分散トレースをリアルタイムに受け取ります。受け取ったデータはメモリー上の循環バッファーに格納され、ブラウザーで検索・絞り込みができます。
 
-開発中にエラーが発生した場合、Dashboard の分散トレース画面を開けば「どのサービスのどのオペレーションで何ms かかり、どこでエラーが発生したか」を一目で確認できます。従来であれば複数のサービスのログファイルを突き合わせる必要があった作業が、一画面で完結します。
+開発中にエラーが起きたときは、Dashboard の分散トレース画面で、どのサービスのどの処理に何 ms かかり、どこでエラーになったかを確認できます。従来は複数サービスのログファイルを突き合わせていた作業を、1つの画面で行えます。
 
 ```mermaid
 graph TD
     subgraph Dashboard["Aspire Dashboard"]
         UI["Blazor Server UI"]
         OTLPReceiver["OTLP Receiver<br/>:18889 (gRPC)<br/>:18890 (HTTP)"]
-        ResourceServer["Resource Service<br/>:18999 (gRPC)"]
         Storage["In-Memory<br/>Circular Buffer"]
     end
 
     subgraph Sources["テレメトリーソース"]
         App1["サービス 1"]
         App2["サービス 2"]
-        DCP["DCP"]
     end
+
+    subgraph AppHostProc["AppHost プロセス"]
+        AppHost["AppHost"]
+        ResourceServer["Resource Service<br/>(gRPC)"]
+    end
+
+    DCP["DCP"]
 
     App1 -->|OTLP| OTLPReceiver
     App2 -->|OTLP| OTLPReceiver
-    DCP -->|リソース状態| ResourceServer
+    DCP -->|リソース状態| AppHost
+    AppHost -->|リソース状態| ResourceServer
     OTLPReceiver --> Storage
     Storage --> UI
-    ResourceServer --> UI
+    ResourceServer -->|gRPC| UI
 ```
 
 | 機能 | 説明 |
@@ -722,7 +728,7 @@ graph TD
 
 ### Dashboard の独立利用
 
-Dashboard はスタンドアロンの Docker コンテナーとしても利用可能です（MCR では 2026 年 9 月時点で `13.5` タグが公開されています）。
+Dashboard は単体の Docker コンテナーとしても使えます（MCR では 2026 年 9 月時点で `13.5` タグが公開されています）。
 
 ```bash
 docker run --rm -it -d \
@@ -733,17 +739,17 @@ docker run --rm -it -d \
   mcr.microsoft.com/dotnet/aspire-dashboard:13.5
 ```
 
-この場合、任意の OTLP 互換アプリケーション（Java、Go、Python 等）のテレメトリーも受信できます。
+この構成では、Java、Go、Python などで書かれた任意の OTLP 対応アプリケーションのテレメトリーも受信できます。
 
 ## 第7章：ヘルスチェックと Readiness
 
 ### ヘルスチェックの階層
 
-分散システムでは「サービスのプロセスが起動している」ことと「サービスがリクエストを正しく処理できる」ことは別の問題です。プロセスは生きていても、DB 接続が切れていればリクエストは処理できません。
+分散システムでは、サービスのプロセスが起動していることと、サービスがリクエストを正しく処理できることは別です。プロセスが動いていても、DB 接続が切れていればリクエストを処理できません。
 
-.NET Aspire はこの区別を **Liveness**（生存確認）と **Readiness**（準備完了確認）の2階層で表現します。Liveness（`/alive`）は「プロセスが応答するか」だけを確認し、デッドロックやメモリー枯渇の検知に使います。Readiness（`/health`）は DB・Redis・依存サービスを含むすべての依存関係が正常かを確認し、「トラフィックを受け入れてよいか」を判定します。
+.NET Aspire はこの区別を **Liveness**（生存確認）と **Readiness**（準備完了確認）の2階層で表します。Liveness（`/alive`）はプロセスが応答するかだけを確認し、デッドロックやメモリー枯渇の検知に使います。Readiness（`/health`）は DB・Redis・依存サービスを含むすべての依存先が正常かを確認し、トラフィックを受け入れてよいかを判定します。
 
-この2階層は Kubernetes の `livenessProbe` と `readinessProbe` にそのまま対応しており、ローカル開発時と Kubernetes デプロイ時で同じヘルスチェック定義が使い回されます。AppHost の `WaitFor()` は Readiness エンドポイントをポーリングすることで、依存リソースが本当に「使える状態」になるまで下流の起動を遅延させます。
+この2階層は Kubernetes の `livenessProbe` と `readinessProbe` に対応しており、ローカル開発と Kubernetes へのデプロイで同じヘルスチェック定義を使えます。AppHost の `WaitFor()` は、依存リソースのヘルスチェックが成功して実際に使える状態になるまで、そのリソースに依存するリソースの起動を遅らせます。このヘルスチェックを実行するのは AppHost で、DCP がサービスの `/health` エンドポイントをポーリングするわけではありません。
 
 ```mermaid
 graph TD
@@ -760,8 +766,9 @@ graph TD
         R --> R3["依存サービス応答可能"]
     end
 
-    WaitFor["WaitFor() / WaitForCompletion()"]
-    WaitFor -->|ポーリング| Readiness
+    WaitFor["WaitFor()"]
+    HC["依存リソースのヘルスチェック"]
+    WaitFor -->|AppHost 側のヘルスチェック結果を待つ| HC
 ```
 
 ```csharp
@@ -795,19 +802,19 @@ public static WebApplication MapDefaultEndpoints(
 
 ### WaitFor の内部実装
 
-`WaitFor()` は、DCP が依存リソースのヘルスチェックエンドポイントをポーリングし、`Healthy` レスポンスが返るまで依存先リソースの起動を遅延させます。
+`WaitFor()` を指定すると、AppHost は依存先リソースのヘルスチェックを繰り返し実行し、`Healthy` になるまで、そのリソースに依存するリソースの起動を遅らせます。`WaitForCompletion()` の場合は、下の図のマイグレーションのように、リソースが正常終了するまで待ちます。
 
 ```mermaid
 sequenceDiagram
-    participant DCP
+    participant DCP as AppHost / DCP
     participant PG as PostgreSQL
     participant Migration as DbMigration
     participant API as catalog-api
 
     DCP->>PG: コンテナー起動
-    DCP->>PG: /health ポーリング
+    DCP->>PG: ヘルスチェック
     PG-->>DCP: Unhealthy (起動中)
-    DCP->>PG: /health ポーリング
+    DCP->>PG: ヘルスチェック
     PG-->>DCP: Healthy
     DCP->>Migration: プロセス起動
     Migration->>PG: マイグレーション実行
@@ -820,9 +827,9 @@ sequenceDiagram
 
 ### 標準レジリエンスハンドラー
 
-分散システムでは、ネットワーク遅延・一時的な障害・サービスの再起動は日常茶飯事です。クライアントコードに何の対策もなければ、1つのサービスの一時的なスローダウンがリトライの嵐とタイムアウトの連鎖を引き起こし、システム全体が崩壊します。
+分散システムでは、ネットワークの遅延、一時的な障害、サービスの再起動が日常的に起こります。クライアントコードに対策がないと、1つのサービスの一時的な遅延がリトライの集中とタイムアウトの連鎖を招き、システム全体が止まることがあります。
 
-ServiceDefaults の `AddStandardResilienceHandler()` は、`Microsoft.Extensions.Http.Resilience`（内部的に [Polly v8](https://github.com/App-vNext/Polly) を使用）を使って、**5層のレジリエンスパイプライン** をすべての `HttpClient` に自動適用します。各層は外側から順にリクエストをラップし、様々な障害パターンに対処します。
+ServiceDefaults の `AddStandardResilienceHandler()` は、`Microsoft.Extensions.Http.Resilience`（内部で [Polly v8](https://github.com/App-vNext/Polly) を使用）により、5層のレジリエンスパイプラインをすべての `HttpClient` に適用します。各層は外側から順にリクエストを包み、それぞれ別の種類の障害に対処します。
 
 ```mermaid
 graph LR
@@ -864,9 +871,9 @@ builder.Services.ConfigureHttpClientDefaults(http =>
 
 ### マニフェスト生成
 
-ここまでの章では、AppHost がローカル開発環境でどう機能するかを見てきました。しかし Aspire の野心はローカル開発にとどまりません。AppHost が構築する App Model は、**デプロイメントマニフェスト**として JSON に書き出すことができ、これによりローカルの構成定義がそのままクラウドデプロイの設計図になります。
+ここまでは、ローカル開発環境での AppHost の働きを説明しました。AppHost が構築する App Model は<strong>デプロイメントマニフェスト</strong>として JSON に書き出せるので、ローカルの構成定義をそのままクラウドへのデプロイにも使えます。
 
-これは「ローカルで動いたものがそのまま本番に行く」という開発者体験の核心です。`docker-compose.yml` から Kubernetes マニフェスト、あるいは Terraform 定義への手動変換が不要になり、AppHost の C# コードが **Single Source of Truth（唯一の信頼できる情報源）** として機能します。
+`docker-compose.yml` から Kubernetes マニフェストや Terraform 定義へ手作業で変換する必要がなくなり、AppHost の C# コードが構成の Single Source of Truth（唯一の信頼できる情報源）になります。
 
 ```bash
 # マニフェストの生成（C# AppHost は dotnet run でも起動できるが、現在は aspire CLI が中心）
@@ -887,7 +894,7 @@ graph TD
 
 ### マニフェストの構造
 
-生成されるマニフェストには、リソース間の接続情報とデプロイに必要な設定がすべて含まれます。
+生成されるマニフェストには、リソース間の接続情報とデプロイに必要な設定が含まれます。
 
 ```json
 {
@@ -922,7 +929,7 @@ graph TD
 
 ### Azure Container Apps へのデプロイ
 
-`azd` (Azure Developer CLI) は Aspire マニフェストを読み取り、Azure リソースを自動プロビジョニングします。
+`azd`（Azure Developer CLI）は Aspire のマニフェストを読み取り、Azure リソースを自動的にプロビジョニングします。
 
 ```mermaid
 graph LR
@@ -930,15 +937,15 @@ graph LR
     AZD --> Infra["Bicep テンプレート生成"]
     Infra --> ACA["Azure Container Apps"]
     Infra --> ACR["Azure Container Registry"]
-    Infra --> Redis["Azure Cache for Redis"]
-    Infra --> PGSQL["Azure Database<br/>for PostgreSQL"]
-    Infra --> SB["Azure Service Bus"]
+    Infra --> Redis["Azure Cache for Redis<br/>(AddAzureRedis 使用時)"]
+    Infra --> PGSQL["Azure Database<br/>for PostgreSQL<br/>(AddAzurePostgresFlexibleServer 使用時)"]
+    Infra --> SB["Azure Service Bus<br/>(AddAzureServiceBus 使用時)"]
 ```
 
 | Aspire リソース | Azure マッピング |
 |---------------|----------------|
-| `AddRedis()` | Azure Cache for Redis |
-| `AddPostgres()` | Azure Database for PostgreSQL |
+| `AddRedis()` | Azure Container Apps 上の Redis コンテナー（Azure Cache for Redis を使う場合は `AddAzureRedis()` などを選ぶ） |
+| `AddPostgres()` | Azure Container Apps 上の PostgreSQL コンテナー（Azure Database for PostgreSQL を使う場合は `AddAzurePostgresFlexibleServer()` を選ぶ） |
 | `AddRabbitMQ()` | RabbitMQ コンテナーまたは明示的な発行先（Service Bus を使う場合は `AddAzureServiceBus()` などを選ぶ） |
 | `AddProject()` | Azure Container Apps |
 | コンテナーリソース | Azure Container Apps (カスタムコンテナー) |
@@ -947,9 +954,9 @@ graph LR
 
 ### カスタムリソースの実装パターン
 
-Aspire が標準で提供するリソース（Redis、PostgreSQL、RabbitMQ など）は便利ですが、実際のプロジェクトではこれらだけでは足りない場面が必ずあります。ローカル開発用のメールサーバー（MailDev）、社内用のキューシステム、独自のサイドカープロセスなど——こうした「Aspire が知らないインフラ」もリソースとして統合したい場合があります。
+Aspire は Redis、PostgreSQL、RabbitMQ などのリソースを標準で提供していますが、実際のプロジェクトではそれ以外のインフラも必要になります。ローカル開発用のメールサーバー（MailDev）、社内のキューシステム、独自のサイドカープロセスなど、Aspire に組み込まれていないインフラもリソースとして扱いたい場合があります。
 
-Aspire はこのニーズに対して **カスタムリソース** という拡張ポイントを提供しています。実装の流れは明快で、(1) `ContainerResource` などを継承したリソースクラスを定義し、(2) `AddMailDev()` のようなビルダー拡張メソッドを作成し、(3) AppHost の `Program.cs` で他のリソースと同じように使う——これだけです。カスタムリソースは標準リソースと同じ生態系（ヘルスチェック、テレメトリー、`WithReference()` による依存関係）に完全に参加できます。
+そのための拡張ポイントが<strong>カスタムリソース</strong>です。(1) `ContainerResource` などを継承したリソースクラスを定義し、(2) `AddMailDev()` のようなビルダー拡張メソッドを作り、(3) AppHost の `Program.cs` でほかのリソースと同じように使います。カスタムリソースでも、ヘルスチェック、テレメトリー、`WithReference()` による依存関係を標準のリソースと同じように使えます。
 
 ```csharp
 // 1. リソースクラスの定義
@@ -1034,9 +1041,9 @@ builder.Services
 
 ### DistributedApplicationTestingBuilder
 
-マイクロサービスの統合テストは伝統的に困難でした。各サービスを手動で起動し、テスト用のインフラを用意し、テスト後にクリーンアップする——この手間がテストの省略や不十分なカバレッジにつながりがちです。
+マイクロサービスの統合テストは、以前から手間のかかる作業でした。各サービスを手動で起動し、テスト用のインフラを用意し、テスト後に片付ける必要があるため、テストが省かれたり、カバレッジが不十分になったりしがちです。
 
-Aspire は `DistributedApplication.TestingBuilder` を提供することで、この問題を根本から解消します。テストコード内で AppHost 全体を起動し、実際のコンテナーとプロセスが動く環境に対して HTTP リクエストを送ることができます。モックやスタブではなく、本物のインフラ（Docker で起動した PostgreSQL・Redis）を使った**本物の統合テスト**です。テスト終了時には `await using` パターンでリソースが自動クリーンアップされます。
+Aspire の `DistributedApplicationTestingBuilder` を使うと、テストコードの中で AppHost 全体を起動し、実際のコンテナーとプロセスが動く環境に HTTP リクエストを送れます。モックやスタブではなく、Docker で起動した PostgreSQL や Redis を使う統合テストです。テストが終わると、`await using` によってリソースが自動的に片付けられます。
 
 ```csharp
 public class AppHostTests
@@ -1094,7 +1101,7 @@ graph TD
 
 ### テスト時の設定カスタマイズ
 
-テスト時に設定を上書きしたり、サービスコレクションをカスタマイズすることも可能です。
+テストでは、設定を上書きしたり、サービスコレクションをカスタマイズしたりできます。
 
 ```csharp
 var appHost = await DistributedApplicationTestingBuilder
@@ -1115,9 +1122,9 @@ appHost.Services.ConfigureHttpClientDefaults(http =>
 
 ### 主要な新機能
 
-Aspire はリリースサイクルが速く、.NET 9 と同時にリリースされた Aspire 9 では、コミュニティーのフィードバックを反映した多くの改善が行われています。特に注目すべきは、開発体験のさらなる向上を目指した新機能群です（このリリースペースはその後さらに加速し、バージョン番号は 13.x まで進んでいます。以下は「9 世代で何が入ったか」のスナップショットとして読んでください）。
+Aspire はリリースの間隔が短く、.NET 9 と同時にリリースされた Aspire 9 でも、コミュニティーからのフィードバックを受けて、開発体験に関わる機能が多く追加・改善されました（リリースのペースはその後さらに上がり、バージョン番号は 13.x まで進んでいます。この章は Aspire 9 で追加された内容として読んでください）。
 
-`WaitFor` / `WaitForCompletion` は第2章で触れた起動順序制御の宣言的 API で、Aspire 9 で正式導入されました。`Persistent Containers` は `dotnet run` を再起動するたびにコンテナーが再作成される待ち時間を解消する機能です。`Resource Commands` と `Custom Resource States` は Dashboard の拡張ポイントであり、カスタムリソースの運用をよりインタラクティブにします。`Eventing Model` はリソースのライフサイクルにフックし、「Redis が起動完了したら特定の処理を実行する」といった宣言的なイベント駆動パターンを可能にします。
+`WaitFor` / `WaitForCompletion` は、第2章で触れた起動順序を宣言的に制御する API で、Aspire 9 で正式に導入されました。`Persistent Containers` を使うと、`dotnet run` で再起動するたびにコンテナーが作り直される待ち時間がなくなります。`Resource Commands` と `Custom Resource States` は Dashboard の拡張ポイントで、Dashboard からカスタムリソースを操作したり、その状態を表示したりできます。`Eventing Model` はリソースのライフサイクルにフックし、「Redis の起動が完了したら特定の処理を実行する」といったイベント駆動の処理を宣言的に書けるようにします。
 
 | 機能 | 説明 |
 |------|------|
@@ -1164,7 +1171,7 @@ var postgres = builder.AddPostgres("pg")
 
 ## Aspire のアーキテクチャ全体像
 
-最後に、.NET Aspire の全体的なアーキテクチャを一枚の図にまとめます。
+.NET Aspire 全体のアーキテクチャを1枚の図にまとめます。
 
 ```mermaid
 graph TD
@@ -1174,7 +1181,7 @@ graph TD
         Dashboard["Aspire Dashboard<br/>(OTLP + UI)"]
         Docker["Docker Desktop"]
 
-        AppHost -->|gRPC| DCP
+        AppHost -->|Kubernetes 互換 API| DCP
         DCP --> Docker
         DCP --> Dashboard
     end
@@ -1216,15 +1223,15 @@ graph TD
 
 ## まとめ
 
-.NET Aspire は単なるプロジェクトテンプレートやコード生成ツールではありません。AppHost による宣言的な構成定義から、DCP によるローカルオーケストレーション、コンポーネントによるベストプラクティスの自動適用、そしてデプロイメントマニフェストによるクラウドへの移行まで、分散アプリケーション開発の**ライフサイクル全体**をカバーするフレームワークです。
+.NET Aspire は、分散アプリケーション開発のライフサイクル全体を扱うフレームワークです。AppHost による宣言的な構成定義、DCP によるローカルオーケストレーション、コンポーネントによる推奨設定の自動適用、デプロイメントマニフェストを使ったクラウドへの移行までが、その範囲に入ります。
 
-その本質は「開発者が本来やるべきこと（ビジネスロジックの実装）に集中できるように、インフラの接続・監視・障害対策という構成的な複雑さを引き受ける」ことにあります。以下の設計原則がそれを支えています。
+Aspire は、インフラの接続・監視・障害対策という構成上の複雑さを引き受け、開発者がビジネスロジックの実装に集中できるようにします。それを支える設計は次のとおりです。
 
 1. **宣言的な App Model** — リソースとその依存関係をコードで表現
-2. **ローカルファーストのオーケストレーション** — DCP による開発体験の最適化
-3. **オブザーバビリティーの組み込み** — OpenTelemetry の標準統合
-4. **レジリエンスの標準化** — リトライ・サーキットブレーカーのデフォルト適用
-5. **クラウドへのスムーズな移行** — マニフェストを介したデプロイ抽象化
+2. **ローカルファーストのオーケストレーション** — DCP がローカルでコンテナーとプロセスを起動・管理
+3. **オブザーバビリティーの組み込み** — OpenTelemetry による計装を標準で設定
+4. **レジリエンスの標準化** — リトライ・サーキットブレーカーを既定で適用
+5. **クラウドへの移行** — マニフェストを介してデプロイ先の構成を生成
 6. **拡張性** — カスタムリソース、ライフサイクルフック、イベントモデル
 
 ## 参考資料

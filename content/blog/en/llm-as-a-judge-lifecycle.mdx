@@ -1,37 +1,32 @@
 ---
-title: "Raising an LLM Judge, Not Just Building One — Netflix's Lifecycle for Recommendation-Explanation Judges and an Enterprise Implementation Framework"
+title: "Operating an LLM Judge Over Its Lifetime — Netflix's Lifecycle for Recommendation-Explanation Judges and an Enterprise Implementation Framework"
 date: "2026-10-16"
-description: "A deep technical reading of Netflix's \"The Lifecycle of LLM-as-a-Judge for Large-Scale Recommendation Explanations\": the four phases of birth, training, deployment and monitoring, RART (rubric tuning that aligns the judge's reasons, not just its labels), one judge serving as both gate and critic, and drift detection measured against human disagreement. We go beyond the paper into how retries amplify judge misses and the statistical traps in its monitoring rule, then turn it all into a framework for doing the same in an enterprise: charter, key decisions, maturity model, roadmap and checklists."
+description: "A technical reading of Netflix's \"The Lifecycle of LLM-as-a-Judge for Large-Scale Recommendation Explanations\": the four phases of birth, training, deployment and monitoring, RART (rubric tuning that aligns the judge's reasons as well as its labels), one judge serving as both gate and critic, and drift detection measured against human disagreement. It also analyzes how retries amplify judge misses and the statistical traps in the paper's monitoring rule, and turns the lifecycle into a framework for enterprises: charter, key decisions, maturity model, roadmap and checklists."
 tags: ["LLM", "LLM-as-Judge", "Evaluation", "MLOps", "Human-in-the-Loop", "Recommender Systems", "Enterprise AI", "Paper Reading"]
 ---
 
 ## Introduction — a judge starts decaying the moment it ships
 
-LLM-as-a-Judge is no longer exotic. We let one LLM grade another model's output and run large volumes of evaluations instead of costly human review (Zheng et al.'s study with MT-Bench and Chatbot Arena, G-Eval and Prometheus are representative early work). Prototype evaluation, regression tests, guardrails, reward shaping for reinforcement learning — LLM judges are everywhere now.
+LLM-as-a-Judge means letting one LLM grade another model's output so that large volumes of evaluations can run instead of costly human review. Representative early work includes Zheng et al.'s study with MT-Bench and Chatbot Arena, G-Eval and Prometheus. LLM judges are now used for prototype evaluation, regression tests, guardrails and reward shaping for reinforcement learning.
 
-Yet in most teams a judge is still treated as <strong>an artifact: a prompt that was written once and checked against a few dozen hand-labeled examples</strong>. Production does not stand still. The data changes every week, the generator gets updated, and the judge's own base model changes on the vendor side. Once the judge's verdict starts blocking outputs and its reasons start being read by another system that acts on them, every small distortion in the judge becomes a distortion in the product.
+Yet many teams still treat a judge as an artifact: a prompt that was written once and checked against a few dozen hand-labeled examples. In production, the data changes every week, the generator gets updated, and the judge's own base model changes on the vendor side. Once the judge's verdict starts blocking outputs and its reasons start being read by another system that acts on them, every small distortion in the judge becomes a distortion in the product.
 
-[The Lifecycle of LLM-as-a-Judge for Large-Scale Recommendation Explanations](https://arxiv.org/abs/2608.18300) by researchers at Netflix (arXiv:2608.18300, accepted at the Lifelong Agents and AIMS workshops co-located with COLM 2026) takes this problem head-on. In a service that generates hundreds of thousands of recommendation explanations per week, it treats the judge as <strong>a lifelong agent with a four-phase lifecycle — birth, training, deployment and monitoring</strong> — and documents the whole loop together with an A/B test over tens of millions of members.
+[The Lifecycle of LLM-as-a-Judge for Large-Scale Recommendation Explanations](https://arxiv.org/abs/2608.18300) by researchers at Netflix (arXiv:2608.18300, accepted at the Lifelong Agents and AIMS workshops co-located with COLM 2026) addresses this problem. In a service that generates hundreds of thousands of recommendation explanations per week, it treats the judge as <strong>a lifelong agent with a four-phase lifecycle — birth, training, deployment and monitoring</strong> — and documents the whole loop together with an A/B test over tens of millions of members.
 
-This article is organized as follows.
+§1 gives an overview of the paper, and §2–§5 follow the technical substance of each phase down to the equations, the algorithm and the numbers in the figures. §6 reads the paper critically and works out implications it does not spell out; an interactive simulator lets you check how retries amplify a judge's misses. §7 is a framework for doing the same thing in an enterprise, with key decisions, artifacts, exit criteria, a maturity model, a 90-day roadmap and a checklist. §8 gives implementation sketches: the judge's I/O contract, the RART loop, the weekly drift check and telemetry.
 
-1. An overview of the paper (§1) and the technical substance of each phase (§2–§5), down to the equations, the algorithm and the numbers in the figures
-2. A critical reading that digs into implications the paper does not spell out (§6). You can try for yourself how retries amplify a judge's misses with an interactive simulator
-3. A framework for doing the same thing in an enterprise (§7): key decisions, artifacts, exit criteria, a maturity model, a 90-day roadmap and a checklist
-4. Implementation sketches (§8): the judge's I/O contract, the RART loop, the weekly drift check and telemetry
+The conclusions are as follows.
 
-Here are the conclusions up front.
+- A judge is something you operate, not a finished artifact. Treat the ground truth (guidelines and rationale-annotated labels), the rubric, the judge model, the thresholds and the monitoring design as one versioned unit, and keep checking it against humans every week
+- The judge's reasons are an API that downstream systems read. Once the judge's rejection reason is consumed as the generator's revision instruction, "right label, wrong reason" causes real damage. RART turns that reasoning mismatch into an optimization signal
+- One judge serves as both gate and critic. Compared with aligning a separate judge for each role, this lowers alignment cost and keeps behavior consistent. The price is that the judge's blind spots propagate to every role
+- The yardstick for drift is not a fixed threshold but disagreement among humans. The judge is not penalized in weeks that humans also find hard, and new titles are watched separately
+- Our additional analysis (1), retries: the revision loop is optimization against the judge, and when the judge's misses are independent across attempts it amplifies the number of defects served. Measuring, by human audit, the defect rate of what retries add and comparing it with the break-even rate implied by your cost ratio tells you where to cap the number of retries (§6.2)
+- Our additional analysis (2), monitoring statistics: a gate cannot, in principle, measure its own misses with its own verdicts. Applied literally, the paper's drift rule is biased in the raters' favor, and a "two standard deviations" band with three raters raises false alarms in about 11% of checks even for an equally accurate judge. That the weekly sample is stratified by the judge's own decisions also changes how its metrics should be read (§6.3–§6.4)
 
-- <strong>A judge is not an artifact; it is something you operate.</strong> Treat the ground truth (guidelines and rationale-annotated labels), the rubric, the judge model, the thresholds and the monitoring design as one versioned unit, and keep checking it against humans every week
-- <strong>Reasons are not decoration; they are an API.</strong> Once the judge's rejection reason is consumed as the generator's revision instruction, "right label, wrong reason" causes real damage. RART turns that reasoning mismatch into an optimization signal
-- <strong>Letting one judge play two roles (gate and critic)</strong> lowers alignment cost and keeps behavior consistent. The price is that the judge's blind spots propagate to every role
-- <strong>The yardstick for drift is not a fixed threshold but disagreement among humans.</strong> Weeks that are hard for humans are forgiven for the judge, and new titles are watched separately
-- <strong>Our additional analysis (1): retries.</strong> The revision loop is optimization against the judge, and when the judge's misses are independent across attempts it amplifies the number of defects served. Measuring, by human audit, the defect rate of what retries add and comparing it with the break-even rate implied by your cost ratio tells you where to cap the number of retries (§6.2)
-- <strong>Our additional analysis (2): monitoring statistics.</strong> A gate cannot, in principle, measure its own misses with its own verdicts. Applied literally, the paper's drift rule is biased in the raters' favor, and a "two standard deviations" band with three raters false-alarms at a non-trivial rate even for an equally accurate judge. That the weekly sample is stratified by the judge's own decisions also changes how its metrics should be read (§6.3–§6.4)
+If you want to put this into practice, read §1 → §4.2 → §6.2–§6.4 → §7 → §8; if you want to understand the paper itself in depth, read §1–§6 in order.
 
-How to read this article: if you want to put this into practice, go §1 → §4.2 → §6.2–§6.4 → §7 → §8; if you want to understand the paper itself in depth, read §1–§6 in order.
-
-> Numbers come from v3 of the paper (published 2026-08-31). Values read off the figures by eye are marked "~" and carry a reading error of roughly ±0.01–0.02. The paper withholds the exact criteria definitions and the identities of the generator and judge models.
+> Numbers come from v3 of the paper (published August 31, 2026). Values read off the figures by eye are marked "~" and carry a reading error of roughly ±0.01–0.02. The paper withholds the exact criteria definitions and the identities of the generator and judge models.
 
 ---
 
@@ -39,21 +34,21 @@ How to read this article: if you want to put this into practice, go §1 → §4.
 
 ### 1.1 The problem — writing "why this title?" correctly, hundreds of thousands of times a week
 
-The paper deals with the short explanations that accompany Netflix recommendations. Specifically, <strong>similarity-based</strong> explanations, which connect a recommended (target) title to a reference title the member has watched (1–2 references per benchmark item) via shared attributes such as genre and tone. The paper's example:
+The paper deals with the short explanations that accompany Netflix recommendations, specifically similarity-based explanations, which connect a recommended (target) title to a reference title the member has watched (1–2 references per benchmark item) via shared attributes such as genre and tone. The paper's example:
 
 > "A funny, heartfelt holiday romance about love and new beginnings, much like My Secret Santa."
 
-The goals are content discovery and trust, which is exactly why quality matters. A misleading or poorly grounded explanation erodes the very trust the feature is meant to build.
+The goals are content discovery and trust. A misleading or poorly grounded explanation erodes the very trust the feature is meant to build.
 
 There are three sources of difficulty.
 
 | Difficulty | What it means |
 |---|---|
-| <strong>Volume</strong> | During the experiments the pipeline generated hundreds of thousands of distinct item-level explanations per week, any of which could reach members — and each must be accurate, item-specific, and free of sensitive or offensive content. Human evaluation is the gold standard but cannot cover that volume |
-| <strong>Free-form text</strong> | Earlier, template-based explanation systems were correct by construction. Free-form LLM text at catalog scale gives up that guarantee, so quality has to be measured rather than assumed |
-| <strong>Sharing</strong> | Explanations are generated per item, not per (member, item) pair; an online personalization model then picks the best-fitting explanation for each pair. A single explanation is therefore shared by many members |
+| Volume | During the experiments the pipeline generated hundreds of thousands of distinct item-level explanations per week, any of which could reach members — and each must be accurate, item-specific, and free of sensitive or offensive content. Human evaluation is the gold standard but cannot cover that volume |
+| Free-form text | Earlier, template-based explanation systems were correct by construction. Free-form LLM text at catalog scale gives up that guarantee, so quality has to be measured rather than assumed |
+| Sharing | Explanations are generated per item, not per (member, item) pair; an online personalization model then picks the best-fitting explanation for each pair. A single explanation is therefore shared by many members |
 
-The third property is easy to overlook but important. Sharing means a single bad explanation can reach many members (amplified harm), but also that a single check protects many impressions at once (amortized inspection). The setup — generate per item, let an online model merely select at display time — also reads as if generation and judging run outside the request path (the paper does not say so explicitly). That would explain why the retries described later (up to three regenerations) do not add to user-facing latency.
+The third property is easy to overlook. Sharing means a single bad explanation can reach many members (amplified harm), but also that a single check protects many impressions at once (amortized inspection). The setup — generate per item, let an online model merely select at display time — also suggests that generation and judging run outside the request path (the paper does not say so explicitly). That would explain why the retries described later (up to three regenerations) do not add to user-facing latency.
 
 ### 1.2 Four phases, three roles, two loops
 
@@ -79,9 +74,9 @@ flowchart LR
 | III Deployment | Use the same judge in production as a quality gate and as the critic of a revision loop | None (automated) | Logs of serve / revise / drop decisions |
 | IV Monitoring | Detect drift with weekly human evaluation (HITL: human-in-the-loop, i.e., humans take part in the evaluation loop), augment the benchmark, re-tune when the bar is crossed | ~300 explanations per week, 3+ raters each | Alerts, augmented benchmark, revised guidelines |
 
-Within this picture the judge plays three roles: the <strong>optimization target</strong> in Phase II, the <strong>feedback provider and guardrail decision-maker</strong> in Phase III, and the <strong>monitored object</strong> in Phase IV. Phase IV closes two loops: a <strong>fast loop</strong> that re-triggers Phase II re-tuning when judge–human agreement decays, and a <strong>slow loop</strong> that keeps the Phase I dataset representative of the live catalog.
+Within this picture the judge plays three roles: the optimization target in Phase II, the feedback provider and guardrail decision-maker in Phase III, and the monitored object in Phase IV. Phase IV closes two loops: a <strong>fast loop</strong> that re-triggers Phase II re-tuning when judge–human agreement decays, and a <strong>slow loop</strong> that keeps the Phase I dataset representative of the live catalog.
 
-The authors frame all of this with the term "lifelong agent". The judge must <strong>learn</strong> from accumulating human feedback, stay <strong>aligned</strong> with human judgment for the right reasons rather than by coincidence, and <strong>evolve</strong> as the catalog, the recommendation algorithms and the user population shift.
+The authors call the judge a "lifelong agent": it must learn from accumulating human feedback, stay aligned with human judgment for the right reasons rather than by coincidence, and evolve as the catalog, the recommendation algorithms and the user population shift.
 
 ### 1.3 Key numbers
 
@@ -105,24 +100,24 @@ The authors frame all of this with the term "lifelong agent". The judge must <st
 
 ## 2. Phase I Birth — build the ground truth before the judge
 
-Of the four phases, birth is the most human-intensive. The paper's first lesson (§8) is precisely "invest in the benchmark before the judge."
+Of the four phases, birth is the most human-intensive. The first lesson in the paper's §8 is "invest in the benchmark before the judge."
 
 ### 2.1 Two tiers of criteria, and the human setup
 
-In-house writing experts define the evaluation criteria, author the labeling guidelines for human raters, hand-craft adversarial examples and anchor human rating. Raters are trained and calibrated by the Human Data Operations team (the protocol is internal).
+In-house writing experts define the evaluation criteria, author the labeling guidelines for human raters, hand-craft adversarial examples and are the reference point for human rating. Raters are trained and calibrated by the Human Data Operations team (the protocol is internal).
 
 The criteria come in two tiers.
 
 - <strong>Must-have</strong>: pass/fail conditions every explanation has to satisfy before it can be shown
 - <strong>Soft</strong>: softer criteria about style and recommendation relevance
 
-The specific criteria are withheld for confidentiality, but we later learn that there are three must-haves, each with its own dedicated judge.
+The specific criteria are withheld for confidentiality, but the paper later reveals that there are three must-haves, each with its own dedicated judge.
 
 ### 2.2 The guidelines are a shared truth for humans and judges
 
-The design decision that, in our view, pays off most in this paper is that <strong>the labeling guidelines, pass/fail conditions and boundary examples are the single source of truth for both the human raters and the LLM judges</strong>. The guidelines double as the judges' seed rubrics in Phase II.
+In our view, the most effective design decision in this paper is making <strong>the labeling guidelines, pass/fail conditions and boundary examples the single source of truth for both the human raters and the LLM judges</strong>. The guidelines double as the judges' seed rubrics in Phase II.
 
-This has two effects. First, because humans and judges read the same document, any disagreement reduces to "one side misread the document" or "the document has a hole," which makes root causes traceable. Second, when the criteria are revised in Phase IV, editing the guidelines in one place updates the raters' standard and the judges' seed rubric at the same time, so both sides of the comparison move together. If you maintain a "standard for humans" and a "prompt for the judge" separately, they will inevitably drift apart.
+Because humans and judges read the same document, any disagreement reduces to "one side misread the document" or "the document has a hole," which makes root causes traceable. And when the criteria are revised in Phase IV, editing the guidelines in one place updates the raters' standard and the judges' seed rubric at the same time, so both sides of the comparison move together. If you maintain a "standard for humans" and a "prompt for the judge" separately, they will sooner or later drift apart.
 
 ### 2.3 Three sources for the benchmark
 
@@ -134,31 +129,31 @@ The benchmark is built from three complementary sources.
 | (ii) LLM-synthesized boundary examples | Synthesized near the criterion boundary and rated by humans ("grey" examples in the paper's Figure 1) | Hard cases that naturalistic sampling rarely surfaces |
 | (iii) Generator outputs | Samples from the explanation-generation system, collected before it was fully integrated into serving | The distribution of real generations |
 
-Public benchmarks such as JudgeBench and RewardBench measure general-purpose correctness, safety and instruction following; they miss the constraints of recommendation explanations, which are item-specific, context-dependent and short. Hence a domain-specific benchmark.
+Public benchmarks such as JudgeBench and RewardBench measure general-purpose correctness, safety and instruction following; they miss the constraints of recommendation explanations, which are item-specific, context-dependent and short. The paper therefore builds a domain-specific benchmark.
 
 One reason the paper anchors every phase to human labels and rationales is the systematic biases of LLM judges: sensitivity to answer position (Wang et al., ACL 2024) and to verbosity (Zheng et al., 2023), and a preference for their own generations (Panickssery et al., NeurIPS 2024).
 
 ### 2.4 Deliberately balancing the classes — and what you can no longer claim
 
-At the start of the online experiments the benchmark held roughly 900 human-labeled explanations, with a slight majority labeled fail (~54%). The paper <strong>deliberately keeps the classes near balance</strong> rather than matching the prevalence in generated samples, where failures are far rarer. Specificity, the reasoning agreement rate $\mathrm{RA}_{\text{neg}}$ introduced below, and RART's training data all depend on human-failed examples.
+At the start of the online experiments the benchmark held roughly 900 human-labeled explanations, with a slight majority labeled fail (~54%). The paper deliberately keeps the classes near balance rather than matching the prevalence in generated samples, where failures are far rarer, because Specificity, the reasoning agreement rate $\mathrm{RA}_{\text{neg}}$ introduced below, and RART's training data all depend on human-failed examples.
 
-The paper itself spells out the consequence: these alignment metrics measure <strong>agreement on a class-balanced, difficulty-enriched benchmark, not defect rates on live traffic</strong>.
+The paper itself spells out the consequence: these alignment metrics measure agreement on a class-balanced, difficulty-enriched benchmark, not defect rates on live traffic.
 
-The distinction matters a great deal in practice, so let us make it explicit. For a single judgment with a human-standard defect rate (prior) $\pi$, the share of defects among outputs that pass the judge is
+The following formula shows what this distinction means in practice. For a single judgment with a human-standard defect rate (prior) $\pi$, the share of defects among outputs that pass the judge is
 
 $$
 P(\text{bad} \mid \text{passed}) = \frac{\pi\,(1 - \mathrm{Spec})}{\pi\,(1 - \mathrm{Spec}) + (1 - \pi)\,\mathrm{Rec}}
 $$
 
-where Spec and Rec, defined in the next section, are the recall on human fails and on human passes respectively. Even for a judge with $\mathrm{Spec} = 0.9,\ \mathrm{Rec} = 0.8$, the defect share among passes is about 1.4% when $\pi = 0.1$ but about 21% when $\pi = 0.68$ (the default of the simulator in §6.2: the overall first-draft defect rate, unfixable items included). <strong>For the same judge, the defect share of what it passes differs fifteenfold depending on the prior.</strong>
+where Spec and Rec, defined in the next section, are the recall on human fails and on human passes respectively. For a judge with $\mathrm{Spec} = 0.9,\ \mathrm{Rec} = 0.8$, the defect share among passes is about 1.4% when $\pi = 0.1$ but about 21% when $\pi = 0.68$ (the default of the simulator in §6.2: the overall first-draft defect rate, unfixable items included). For the same judge, the defect share of what it passes differs fifteenfold depending on the prior.
 
-On top of that, the benchmark is not only class-balanced but also enriched with boundary and hard cases. A judge's Spec and Rec themselves depend on the difficulty mix (what diagnostic testing calls the spectrum effect), so there is no guarantee the benchmark values carry over to production either. Measuring the production prior separately is not enough; <strong>the reliable way to know the defect rate users actually see is to have humans label served outputs directly</strong>. §6.3 digs into this.
+The benchmark is also enriched with boundary and hard cases. A judge's Spec and Rec themselves depend on the difficulty mix (what diagnostic testing calls the spectrum effect), so there is no guarantee the benchmark values carry over to production either. Measuring the production prior separately is not enough; <strong>the reliable way to know the defect rate users actually see is to have humans label served outputs directly</strong> (§6.3).
 
 ### 2.5 Every fail label carries a reason
 
-Every fail label comes with a free-text rationale against the guideline. That is what makes RART possible later. The paper's lesson: a modest, rationale-annotated benchmark is worth more than a large label-only one. Without rationales you cannot detect "right label, wrong reason," and you have no way to align the judge with humans at the level of reasoning.
+Every fail label comes with a free-text rationale against the guideline, and RART (§3) depends on these rationales. The paper's lesson: a modest, rationale-annotated benchmark is worth more than a large label-only one. Without rationales you cannot detect "right label, wrong reason," and you have no way to align the judge with humans at the level of reasoning.
 
-The dataset is not fixed. During tests, the Phase IV HITL pipeline appends about 300 freshly rated explanations every week, tracking distribution shift in the live catalog.
+The dataset also keeps growing. During tests, the Phase IV HITL pipeline appends about 300 freshly rated explanations every week, tracking distribution shift in the live catalog.
 
 ---
 
@@ -172,7 +167,7 @@ One judge is tuned per must-have criterion, three in total. Each judge is instan
 - <strong>User message</strong>: the explanation text and the target- and reference-item metadata
 - <strong>Output</strong>: a JSON object `{label, reason}` per explanation
 
-The surrounding prompt is held constant; only the per-criterion rubric text is tuned. In other words, <strong>the judge's "parameters" are human-readable text</strong>. As we will see, this property is a big governance advantage: rubric updates can be reviewed as diffs.
+The surrounding prompt is held constant; only the per-criterion rubric text is tuned. <strong>The judge's "parameters" are therefore human-readable text</strong>. Rubric updates can be reviewed as diffs, which is a large advantage for governance.
 
 ### 3.2 Three alignment metrics
 
@@ -190,7 +185,7 @@ $$
 \mathrm{Rec} = \frac{\lvert\{x : \ell_J(x) = \textsf{pass},\ \ell_H(x) = \textsf{pass}\}\rvert}{\lvert\{x : \ell_H(x) = \textsf{pass}\}\rvert}
 $$
 
-<strong>Reasoning agreement rate $\mathrm{RA}_{\text{neg}}$</strong>: among the human-failed examples $\mathcal{F}$, the share the judge also rejects <strong>and for the same reason</strong>. Reasons can only agree where both labels are fail, i.e. on the agreed-fail set $\mathcal{N} = \{x : \ell_J(x) = \ell_H(x) = \textsf{fail}\} \subseteq \mathcal{F}$, so the numerator is restricted to it while the denominator is all of $\mathcal{F}$. Agreement is decided by a meta-judge $\mathcal{M}$.
+<strong>Reasoning agreement rate $\mathrm{RA}_{\text{neg}}$</strong>: among the human-failed examples $\mathcal{F}$, the share the judge also rejects and for the same reason. Reasons can only agree where both labels are fail, i.e. on the agreed-fail set $\mathcal{N} = \{x : \ell_J(x) = \ell_H(x) = \textsf{fail}\} \subseteq \mathcal{F}$, so the numerator is restricted to it while the denominator is all of $\mathcal{F}$. Agreement is decided by a meta-judge $\mathcal{M}$.
 
 $$
 \mathrm{RA}_{\text{neg}} = \frac{\lvert\{x \in \mathcal{N} : \mathcal{M}(r_J(x), r_H(x)) = \textsf{agree}\}\rvert}{\lvert\mathcal{F}\rvert}
@@ -204,7 +199,7 @@ $$
 
 Specificity gets three times the weight because the two error types are not symmetric online: a bad explanation that escapes the gate is served to members, while a good one that is wrongly rejected is merely revised or dropped.
 
-Three things to keep in mind when reading this.
+Three points need care when reading these metrics.
 
 1. <strong>Which class is positive</strong>: the paper names its metrics as if pass were the positive class. Under the common ML convention of treating fail (defect) as positive, this "Specificity" is the recall of defects. Whenever you define these metrics internally, state which class is positive
 2. <strong>$\mathrm{RA}_{\text{neg}} \le \mathrm{Spec}$</strong>: the numerator is a subset of the agreed-fail set and the denominator is the same $\mathcal{F}$ as Spec's. $\mathrm{RA}_{\text{neg}} / \mathrm{Spec}$ reads as "of the examples both rejected, the share where the reasons also agreed"
@@ -233,23 +228,23 @@ for t = 0 .. T-1:
 return R*
 ```
 
-Five design points stand out. According to the paper's Figure 1, the reflector also consults "anchor examples" (which we read as examples that ground each criterion), in addition to the mismatched examples and their rationales.
+According to the paper's Figure 1, the reflector also consults "anchor examples" (which we read as examples that ground each criterion), in addition to the mismatched examples and their rationales, when it rewrites the rubric. Five design points stand out.
 
-1. <strong>Redefining "error"</strong>: an error is not only a wrong label. Examples that both sides labeled fail but for different reasons — the right verdict for the wrong reason — also go into the reflector's focus set
+1. <strong>Redefining "error"</strong>: besides wrong labels, examples that both sides labeled fail but for different reasons — the right verdict for the wrong reason — count as errors and go into the reflector's focus set
 2. <strong>The meta-judge runs only on agreed-fail examples</strong>: to surface cases where a shared label hides divergent reasons. Examples whose reasons agree stay out of the focus set, so the rubric preserves what the judge already gets right
 3. <strong>Greedy, single-objective, best checkpoint</strong>: return the rubric with the best validation score; stop early once every metric clears its per-criterion bound
 4. <strong>The next candidate comes from the latest rubric</strong>: the pseudocode reads `R_{t+1} <- Refl(R_t, X ∪ Nx)`, so the search continues from a candidate even if its validation score dropped (it does not revert to the best rubric $R^\star$). That differs from hill climbing with revert-to-best and from GEPA, which keeps a Pareto pool of candidates (our reading)
 5. <strong>Which split the focus set comes from</strong>: the pseudocode does not say, but since val is used for checkpoint selection, taking the focus set from train is the natural reading (our reading)
 
-Why align reasons at all? The answer is in Phase III. After deployment the same judge becomes the critic of the revision loop, and <strong>its rejection reason becomes the generator's revision instruction</strong>. A correct verdict with a wrong reason sends the generator rewriting in the wrong direction, wastes retries and may introduce a different defect. The judge's reason is not an explanation for humans; it is <strong>an API consumed by a downstream system</strong>.
+Reasons have to be aligned too because, after deployment in Phase III, the same judge becomes the critic of the revision loop, and its rejection reason becomes the generator's revision instruction. A correct verdict with a wrong reason sends the generator rewriting in the wrong direction, wastes retries and may introduce a different defect. The judge's reason works as <strong>an API consumed by a downstream system</strong>.
 
 ### 3.4 Validating the meta-judge
 
-Because $\mathcal{M}$ is both an evaluation metric ($\mathrm{RA}_{\text{neg}}$) and a learning signal, the paper validates it directly against humans. Trained raters independently labeled rationale agreement on 300 agreed-fail rationale pairs, and $\mathcal{M}$'s verdicts matched theirs 98.6% of the time (≈296/300; a Wilson 95% interval of roughly 96.6–99.5%).
+Because $\mathcal{M}$ feeds both an evaluation metric ($\mathrm{RA}_{\text{neg}}$) and the learning signal, the paper validates it directly against humans. Trained raters independently labeled rationale agreement on 300 agreed-fail rationale pairs, and $\mathcal{M}$'s verdicts matched theirs 98.6% of the time (≈296/300; a Wilson 95% interval of roughly 96.6–99.5%).
 
 The paper's Appendix A adds two caveats itself. First, this is agreement on a narrower and simpler task — "do these two reasons say the same thing?" — and not evidence that the primary judge matches humans at a comparable rate. Second, the primary judge and the meta-judge are built on the same base model family, so their errors are plausibly correlated; the human validation bounds that concern but does not remove it.
 
-We would add one more point: <strong>the ratio of agree to mismatch is not reported</strong>. If 95% of the 300 pairs were agreements, always answering "agree" would score 95%. Chance-corrected agreement such as Cohen's $\kappa$, or per-class agreement, would be good to see as well.
+We would add one more point: <strong>the ratio of agree to mismatch is not reported</strong>. If 95% of the 300 pairs were agreements, always answering "agree" would score 95%. Chance-corrected agreement such as Cohen's $\kappa$, or per-class agreement, would show what the 98.6% actually means.
 
 ### 3.5 Ablation — what the reasoning signal changes
 
@@ -263,9 +258,9 @@ To isolate the reasoning signal, the paper compares RART with <strong>vanilla</s
 
 The readings are consistent with the definition of $s$ (for criterion 1 with RART, $3 \times 0.17 - 0.10 + 0.15 \approx 0.56$).
 
-The paper's interpretation: wherever the default rubric leaves headroom, RART improves the most important metric, Specificity, more than vanilla. On criterion 1 this comes at a recall cost, which is acceptable because a wrongly rejected explanation re-enters the revision loop and is regenerated, whereas a bad explanation that reaches members cannot be recalled. On criterion 3, label-only vanilla collapsed Specificity and reasoning agreement in every iteration, so the best-checkpoint rule effectively returned the default rubric (lift ≈ 0), while RART lifts both metrics and even improves recall slightly. On criterion 2 the default rubric is already near ceiling and the two methods are indistinguishable. In short, <strong>reasoning alignment helps where there is room and does no harm where there is none; how much it gains is governed by the headroom the default rubric leaves</strong>.
+The paper's interpretation: wherever the default rubric leaves headroom, RART improves the most important metric, Specificity, more than vanilla. On criterion 1 this comes at a recall cost, which is acceptable because a wrongly rejected explanation re-enters the revision loop and is regenerated, whereas a bad explanation that reaches members cannot be recalled. On criterion 3, label-only vanilla collapsed Specificity and reasoning agreement in every iteration, so the best-checkpoint rule effectively returned the default rubric (lift ≈ 0), while RART lifts both metrics and even improves recall slightly. On criterion 2 the default rubric is already near ceiling and the two methods are indistinguishable. From this the paper concludes that <strong>reasoning alignment helps where there is room and does no harm where there is none, and how much it gains is governed by the headroom the default rubric leaves</strong>.
 
-A note on the statistics. With the exact (binomial) two-sided sign test, ties excluded, 8 seeds can only reach $p < 0.01$ if <strong>RART beats vanilla on all 8 seeds</strong> ($p = 2/256 \approx 0.0078$). Seven wins out of eight gives $p \approx 0.070$, i.e. only †, and a \* requires ties with all 6–7 remaining seeds won by RART. So \*\* means "RART won on every reshuffled split." The paper does not say which version of the sign test it used, though; under a normal approximation without continuity correction, even 7 wins out of 8 gives $p \approx 0.034$ (\*), so this reading assumes the exact test. Also, the 8 splits are reshuffles of the same ~900 examples, not independent replications. The evidence supports "consistently won on different cuts of the same data," and no more.
+The significance marks need careful reading. With the exact (binomial) two-sided sign test, ties excluded, 8 seeds can only reach $p < 0.01$ if RART beats vanilla on all 8 seeds ($p = 2/256 \approx 0.0078$). Seven wins out of eight gives $p \approx 0.070$, i.e. only †, and a \* requires one or two ties with RART winning all of the remaining 6–7 seeds. So \*\* means "RART won on every reshuffled split." The paper does not say which version of the sign test it used, though; under a normal approximation without continuity correction, even 7 wins out of 8 gives $p \approx 0.034$ (\*), so this reading assumes the exact test. Also, the 8 splits are reshuffles of the same ~900 examples, not independent replications. The evidence supports "consistently won on different cuts of the same data," and no more.
 
 ### 3.6 Where RART sits among text-space optimizers
 
@@ -279,9 +274,9 @@ RART belongs to the family of "textual analogues of gradient descent" that revis
 | GEPA (on DSPy) | Prompts inside compound systems | Reflection on execution traces | Evolutionary search over a Pareto pool |
 | OpenRubrics | Rubrics for reward modeling | Contrast between chosen/rejected pairs | Synthesis |
 | Meta-Rewarding | The model's own judging ability | A meta-judge grading the model's own judgments (unsupervised) | Self-improving training |
-| <strong>RART</strong> | <strong>The judge's rubric</strong> | <strong>Label mismatches + rationale mismatches grounded in human reasons</strong> | <strong>Greedy, single-objective, best checkpoint</strong> |
+| <strong>RART</strong> | The judge's rubric | Label mismatches + rationale mismatches grounded in human reasons | Greedy, single-objective, best checkpoint |
 
-The paper itself positions RART as "closest to GEPA but a greedy, single-objective special case." Its novelty lies on the signal side, not the search: the textual gradient is computed over <strong>rationale mismatches</strong> rather than generations, and the meta-judge is grounded in human rationales rather than in the model's own unsupervised judgments.
+The paper itself positions RART as "closest to GEPA but a greedy, single-objective special case." Its novelty lies on the signal side, not the search: the textual gradient is computed over rationale mismatches rather than generations, and the meta-judge is grounded in human rationales rather than in the model's own unsupervised judgments.
 
 ---
 
@@ -289,7 +284,7 @@ The paper itself positions RART as "closest to GEPA but a greedy, single-objecti
 
 ### 4.1 The generate → judge → revise loop
 
-The judge tuned in Phase II plays two online roles on every generated explanation. As a <strong>gate</strong>, it rejects explanations that fail any criterion in a configurable subset. As a <strong>critic</strong>, it sends flagged explanations back to the generator.
+The judge tuned in Phase II plays two online roles on every generated explanation. As a gate, it rejects explanations that fail any criterion in a configurable subset. As a critic, it sends flagged explanations back to the generator.
 
 ```mermaid
 flowchart TD
@@ -306,7 +301,7 @@ The generator drafts an explanation conditioned on the style (which captures the
 
 Dropping is a deliberate asymmetry: a bad explanation is a trust hazard, whereas a missing one merely forgoes an opportunity.
 
-The paper's second lesson is that "one tuned judge can serve many roles." Using the same judge as gate and critic means you pay for alignment once, and online behavior stays consistent (the reasons the gate rejects for and the direction the critic pushes in never contradict each other). The flip side is that <strong>the judge's blind spots propagate to the gate and the critic simultaneously</strong>. Only humans — or at least an audit mechanism independent of the judge (§6.3) — can inspect a dual-role judge from the outside, which is where Phase IV gets its importance.
+The paper's second lesson is that "one tuned judge can serve many roles." Using the same judge as gate and critic means you pay for alignment once, and online behavior stays consistent (the reasons the gate rejects for and the direction the critic pushes in never contradict each other). The flip side is that <strong>the judge's blind spots propagate to the gate and the critic simultaneously</strong>. Only humans — or at least an audit mechanism independent of the judge (§6.3) — can inspect a dual-role judge from the outside, which is why Phase IV is needed.
 
 ### 4.2 Reading the retry-budget curve
 
@@ -321,10 +316,10 @@ The paper's Figure 3 plots the cumulative pass rate (by the judge's standard) ag
 
 The paper draws four conclusions.
 
-1. <strong>The pass rate rises monotonically in $k$</strong>, because the judge's free-text reason steers the next draft
-2. <strong>But returns diminish fast</strong>. The paper states that the three strong generators capture at least 80% of their achievable lift by $k = 3$–$4$, which motivates a small fixed $K$
-3. <strong>Revision only partly rescues a weak generator</strong>. Model 3 rises from ~0.05 to ~0.45 but stays below 50% even at $k = 12$. Judge-guided revision amplifies a capable generator rather than substituting for one
-4. <strong>A sustained drop in the $k = 0$ pass rate signals a generator-side regression rather than judge drift</strong> (this reading holds only when Phase IV's comparison with humans confirms the judge itself is stable; see the diagnostic table in §7.6)
+1. The pass rate rises monotonically in $k$, because the judge's free-text reason steers the next draft
+2. But returns diminish fast. The paper states that the three strong generators capture at least 80% of their achievable lift by $k = 3$–$4$, which motivates a small fixed $K$
+3. Revision only partly rescues a weak generator. Model 3 rises from ~0.05 to ~0.45 but stays below 50% even at $k = 12$. Judge-guided revision amplifies a capable generator rather than substituting for one
+4. A sustained drop in the $k = 0$ pass rate signals a generator-side regression rather than judge drift (this reading holds only when Phase IV's comparison with humans confirms the judge itself is stable; see the diagnostic table in §7.6)
 
 In production they paired the strongest model with $K = 3$, capturing most of the achievable lift while bounding the cost per explanation. At this budget the end-to-end pipeline ran at a few thousand US dollars per week in inference cost. Divided by hundreds of thousands of explanations, that is on the order of one cent per explanation (our back-of-the-envelope estimate).
 
@@ -332,9 +327,9 @@ What follows is our own analysis.
 
 <strong>(a) "At least 80%" depends on the definition.</strong> If you define the "achievable lift" as the lift up to $k = 12$ and compute it from the figure, model 1 captures ~75% at $k = 3$ and ~82% at $k = 4$, but models 2 and 4 capture only ~56–60% at $k = 3$ and ~66–69% at $k = 4$. If instead you measure the ratio of pass rates themselves, $P_k / P_{12}$, model 1 is at ~84% by $k = 3$ and models 2 and 4 at ~77–79% by $k = 4$, which roughly matches the paper's claim. The paper does not define the achievable lift. When choosing your own $K$, do not borrow these numbers — draw the same curve for your own generator and judge.
 
-<strong>(b) Expected number of generations.</strong> Every failure triggers a regeneration, so the expected number of drafts per item at $K = 3$ is $1 + \sum_{k=0}^{2} (1 - P_k)$. For model 1 that is $1 + 0.70 + 0.50 + 0.38 \approx 2.6$ drafts, each judged on every criterion. Cost estimates should use this expectation, not "one call per item." Note also that Figure 3 is a sample from 2026-04-20, where model 1 reaches ~0.68 at $k = 3$, while the pass rate during the A/B test is reported as "over 75%." Different periods and samples; better not to mix them.
+<strong>(b) Expected number of generations.</strong> Every failure triggers a regeneration, so the expected number of drafts per item at $K = 3$ is $1 + \sum_{k=0}^{2} (1 - P_k)$. For model 1 that is $1 + 0.70 + 0.50 + 0.38 \approx 2.6$ drafts, each judged on every criterion. Cost estimates should use this expectation, not "one call per item." Figure 3 is also a sample from April 20, 2026, where model 1 reaches ~0.68 at $k = 3$, while the pass rate during the A/B test is reported as "over 75%." The two come from different periods and samples, so they should not be mixed.
 
-<strong>(c) What it means that ~70% of first drafts fail.</strong> The paper says it balanced the benchmark because failures are "far rarer" in generated samples. Yet in Figure 3, even the strongest model has about 70% of its first drafts rejected by the judges. The two can be reconciled by (1) per-criterion defect rates vs. the union over three criteria, (2) human-standard defects vs. judge-standard rejections, or (3) differences in timing or generation settings — the paper does not let us tell which. Point (2) matters for design: in a gate that requires passing every criterion, <strong>the rate at which good drafts get through multiplies across criteria</strong>. Even with a per-criterion recall of 0.9, if errors are independent a good draft passes all three only $0.9^3 \approx 0.73$ of the time. Every must-have you add increases wrongful rejections and regenerations of good explanations.
+<strong>(c) What it means that ~70% of first drafts fail.</strong> The paper says it balanced the benchmark because failures are "far rarer" in generated samples. Yet in Figure 3, even the strongest model has about 70% of its first drafts rejected by the judges. The two can be reconciled by (1) per-criterion defect rates vs. the union over three criteria, (2) human-standard defects vs. judge-standard rejections, or (3) differences in timing or generation settings — the paper does not let us tell which. Point (2) matters for design: in a gate that requires passing every criterion, the rate at which good drafts get through multiplies across criteria. Even with a per-criterion recall of 0.9, if errors are independent a good draft passes all three only $0.9^3 \approx 0.73$ of the time. Every must-have you add increases wrongful rejections and regenerations of good explanations.
 
 <strong>(d) The shape of the curves suggests heterogeneous items.</strong> Figure 3's curves are poorly explained by a model in which every item gets fixed at the same rate; a model in which "fixability differs a lot from item to item" fits more than an order of magnitude better (details in the collapsible below). Under the simplest two-population model, the share of items that never pass however often they are revised is estimated at ~20% for model 1 and ~40–50% for model 3. The curves are also still rising slowly at $k = 12$: for model 1 between $k = 6$ and $k = 12$, about 3–4% of the not-yet-passed items pass on each additional attempt.
 
@@ -345,7 +340,7 @@ We fit the homogeneous model $P_k = 1 - (1 - a)(1 - g)^k$ and a two-population m
 
 </details>
 
-Two practical implications follow. First, <strong>some problems are not fixed within any practical retry budget</strong>. Input-side issues — a genuinely weak similarity between target and reference, sparse metadata — are hard to fix by rewriting, so those items should be routed elsewhere (pick a different reference title, fall back to a template). Second, the slow rise caps the judge's leak on those items: if the remaining items really are bad, the judge misses each of them at most about 3–4% of the time per attempt. That is consistent both with independent misses at high Specificity and with per-item consistent decisions, and Figure 3 alone cannot tell them apart. Only human labels can, and Phase IV's sampling of "dropped" and "served after revision" as separate strata of the weekly sample (described in §5.1) is one way to answer that question (§6.2).
+Two practical implications follow. First, some problems are not fixed within any practical retry budget. Input-side issues — a genuinely weak similarity between target and reference, sparse metadata — are hard to fix by rewriting, so those items should be routed elsewhere (pick a different reference title, fall back to a template). Second, the slow rise caps the judge's leak on those items: if the remaining items really are bad, the judge misses each of them at most about 3–4% of the time per attempt. That is consistent both with independent misses at high Specificity and with per-item consistent decisions, and Figure 3 alone cannot tell them apart. Only human labels can, and Phase IV's sampling of "dropped" and "served after revision" as separate strata of the weekly sample (described in §5.1) is one way to answer that question (§6.2).
 
 ### 4.3 The online A/B test
 
@@ -356,25 +351,25 @@ High offline agreement with humans and low judged defect rates are <strong>neces
 | Shift of viewing toward novel (previously unwatched) titles | +0.2% | $p < 0.05$ |
 | Sessions with a successful play | +0.3% | $p < 0.05$ |
 
-The first is consistent with explanations helping members discover unfamiliar titles rather than only reinforcing familiar viewing. The paper reads the second as reduced browse friction. The relative lifts are small, but at this scale they add up to a substantial aggregate effect, and movements of this size are considered meaningful for a feature-level intervention on this surface. As supporting evidence, there were no user-initiated escalations related to explanation quality during the test.
+The first is consistent with explanations helping members discover unfamiliar titles rather than only reinforcing familiar viewing. The paper reads the second as reduced browse friction. The relative lifts are small, but at this scale they add up to a substantial aggregate effect, and the paper describes movements of this size as meaningful for a feature-level intervention on this surface. As supporting evidence, it reports no user-initiated escalations related to explanation quality during the test.
 
-We examine what this A/B test does and does not show in §6.5.
+§6.5 examines what this A/B test does and does not show.
 
 ---
 
 ## 5. Phase IV Monitoring — human disagreement as the yardstick
 
-A judge that is well aligned at deployment will not stay aligned. The catalog shifts (new categories, seasonal content), and the meaning of "high quality" itself can evolve. Phase IV closes the loop. The paper's third lesson: plan monitoring from day one.
+A judge that is well aligned at deployment will not stay aligned. The catalog shifts (new categories, seasonal content), and the meaning of "high quality" itself can evolve. The paper's third lesson: plan monitoring from day one.
 
 ### 5.1 Weekly HITL sampling
 
 Every week about 300 explanations are drawn from the generated pool for HITL evaluation. The sampling is designed as follows.
 
-- <strong>Stratified by the judge's decision</strong>: served without revision / served after revision / dropped
-- <strong>Biased toward newer catalog titles</strong>, where drift is most likely
-- <strong>The stratification is fixed week to week</strong>, so weeks are comparable
+- Stratified by the judge's decision: served without revision / served after revision / dropped
+- Biased toward newer catalog titles, where drift is most likely
+- The stratification is fixed week to week, so weeks are comparable
 
-Human raters label the sample under the Phase I guidelines. Each explanation is reviewed by at least three raters and the majority label is taken as ground truth. The panel yields both a consensus reference and a direct measure of rater disagreement — and <strong>that disagreement is what sets the bar for the judge</strong>.
+Human raters label the sample under the Phase I guidelines. Each explanation is reviewed by at least three raters and the majority label is taken as ground truth. The panel yields both a consensus reference and a direct measure of rater disagreement, and <strong>that disagreement sets the bar for the judge</strong>.
 
 The relabeled sample drives drift detection and is also appended to the train/validation pool, subsampled to preserve class balance. This is the "continuous benchmark augmentation" of Figure 1.
 
@@ -386,31 +381,31 @@ $$
 M(J) \ \ge\ \mathrm{mean}\big(M(H)\big) - 2\,\mathrm{sd}\big(M(H)\big)
 $$
 
-The judge must score no worse than two standard deviations below the average rater, where the standard deviation measures disagreement among the raters themselves. Falling below the band on any metric raises an <strong>alert</strong>. Note that computing $\mathrm{RA}_{\text{neg}}$ per rater requires deciding which rationale serves as the reference for a majority label (a majority-side rater's rationale, or an adjudicated one); the paper does not describe this.
+The judge must score no worse than two standard deviations below the average rater, where the standard deviation measures disagreement among the raters themselves. Falling below the band on any metric raises an alert. Computing $\mathrm{RA}_{\text{neg}}$ per rater also requires deciding which rationale to use as the reference for a majority label (a majority-side rater's rationale, or an adjudicated one); the paper does not describe this.
 
-An example: if three raters have Specificity 0.92, 0.88 and 0.90, the mean is 0.90, the sample standard deviation is 0.02 and the lower bound is 0.86. A judge at 0.86 passes; at 0.85 it alerts. The paper does not say, however, whether it uses the sample standard deviation (dividing by $n - 1$) or the population one (dividing by $n$). With the latter the lower bound is about 0.867 and a judge at 0.86 alerts. With only three raters the difference can flip the decision, so make it explicit when you implement this (NumPy's `np.std` returns the population standard deviation by default).
+For example, if three raters have Specificity 0.92, 0.88 and 0.90, the mean is 0.90, the sample standard deviation is 0.02 and the lower bound is 0.86. A judge at 0.86 passes; at 0.85 it alerts. The paper does not say, however, whether it uses the sample standard deviation (dividing by $n - 1$) or the population one (dividing by $n$). With the latter the lower bound is about 0.867 and a judge at 0.86 alerts. With only three raters the difference can flip the decision, so make it explicit when you implement this (NumPy's `np.std` returns the population standard deviation by default).
 
-The rule is deliberately not a fixed threshold. A harder weekly sample raises human disagreement, widening $\mathrm{sd}(M(H))$ and with it the band, so <strong>the judge is not penalized for difficulty that humans also find hard</strong>. A harder week also lowers the raters' mean $\mathrm{mean}(M(H))$ itself, so the bar moves down even if the spread does not widen (the paper credits only the widening standard deviation; this is our addition).
+Unlike a fixed threshold, the band adapts to difficulty. A harder weekly sample raises human disagreement, widening $\mathrm{sd}(M(H))$ and with it the band, so <strong>the judge is not penalized for difficulty that humans also find hard</strong>. A harder week also lowers the raters' mean $\mathrm{mean}(M(H))$ itself, so the bar moves down even if the spread does not widen (the paper credits only the widening standard deviation; this is our addition).
 
-The paper applies the rule both to the full weekly sample and separately to <strong>newly added titles only</strong>, because catalog shift shows up there first and a threshold calibrated on established content would misfire. In the paper's words, requiring no degradation on new titles is what makes the loop a shift detector rather than a generic regression test.
+The paper applies the rule both to the full weekly sample and separately to newly added titles only, because catalog shift shows up there first and a threshold calibrated on established content would misfire. The paper argues that requiring no degradation on new titles is what makes the loop a shift detector rather than a generic regression test.
 
 ### 5.3 Re-tuning behind a human review gate
 
-A drift event triggers Phase II re-tuning on the augmented benchmark. The new rubric is <strong>staged behind a manual review gate</strong> and is not deployed until approved; the previous rubric is retained for rollback.
+A drift event triggers Phase II re-tuning on the augmented benchmark. The new rubric is staged behind a manual review gate and is not deployed until approved; the previous rubric is retained for rollback.
 
-Across every weekly sample during the large-scale A/B test, the judge stayed within the human band on every metric, including on newly added titles, so re-tuning was never triggered. The authors note that the loop still matters going forward, because the catalog, the recommendation algorithms and the user population keep changing — today's agreement says little about tomorrow's. Conversely, <strong>the automated response path for drift has never actually run online</strong> (the paper lists this among its limitations).
+Across every weekly sample during the large-scale A/B test, the judge stayed within the human band on every metric, including on newly added titles, so re-tuning was never triggered. The authors note that the loop still matters going forward, because the catalog, the recommendation algorithms and the user population keep changing — today's agreement says little about tomorrow's. This also means that <strong>the automated response path for drift has never actually run online</strong> (the paper lists this among its limitations).
 
 ### 5.4 Problems the numbers do not show — qualitative review and guideline revisions
 
 Beyond the aggregate metrics, the weekly human review repeatedly surfaced failure patterns that a per-criterion agreement score would not flag. The paper names three kinds.
 
-1. <strong>Borderline cases whose verdict depends on how confidently the explanation is phrased</strong>, rather than on the underlying recommendation quality
-2. <strong>Failures concentrated in specific genres</strong>: for example, stand-up comedy comparisons in which two specials share surface-level tags but sit in very different cultural contexts
-3. <strong>Explanations that pass every must-have criterion yet still read as confusing or oddly framed</strong>
+1. Borderline cases whose verdict depends on how confidently the explanation is phrased, rather than on the underlying recommendation quality
+2. Failures concentrated in specific genres: for example, stand-up comedy comparisons in which two specials share surface-level tags but sit in very different cultural contexts
+3. Explanations that pass every must-have criterion yet still read as confusing or oddly framed
 
-None of these necessarily moves the agreement metrics, yet each calls for a change to the rubric itself. When a pattern recurs, the writing and review experts revise the Phase I labeling guidelines and the affected judges are re-tuned through Phase II against the revised guidelines. Because the guidelines are the source of truth for both the raters and the judges' seed rubrics, one revision updates both sides of the comparison at once.
+None of these necessarily moves the agreement metrics, yet each calls for a change to the rubric itself. When a pattern recurs, the writing and review experts revise the Phase I labeling guidelines and the affected judges are re-tuned through Phase II against the revised guidelines. Because the guidelines feed both the raters and the judges' seed rubrics (§2.2), one revision updates both sides of the comparison at once.
 
-There is an important distinction about monitoring here. Quantitative drift detection measures <strong>degradation relative to the rubric</strong>; continuous qualitative review catches <strong>holes in the rubric itself</strong>. With only the former you never notice that the criteria have become outdated. This matches the observation of "criteria drift" (Shankar et al., UIST 2024): evaluation criteria take shape, and keep changing, in the very process of grading outputs. Criteria are not something you define once up front.
+Quantitative drift detection measures <strong>degradation relative to the rubric</strong>; continuous qualitative review catches <strong>holes in the rubric itself</strong>. With only the former you never notice that the criteria have become outdated. This matches the observation of "criteria drift" (Shankar et al., UIST 2024): evaluation criteria take shape, and keep changing, in the very process of grading outputs, rather than being fixed once up front.
 
 ---
 
@@ -418,7 +413,7 @@ There is an important distinction about monitoring here. Quantitative drift dete
 
 ### 6.1 Limitations the authors state
 
-First, the scope the paper itself acknowledges.
+The paper itself acknowledges the following limits on its scope.
 
 - The results come from controlled experiments run over months; how the lifecycle behaves across the year-scale shifts it is designed for is unknown
 - The A/B test covers one surface (mobile) and one explanation family (similarity-based), and reports only the metrics most relevant to discovery
@@ -428,11 +423,11 @@ First, the scope the paper itself acknowledges.
 
 As future directions the authors list four: recasting rubric tuning as memory management, fine-tuning the judge itself on accumulated rationales, generalizing to GEPA-style Pareto search, and promoting the judge to a reward model. For the last, they suggest replacing the weighted score with a constrained objective that holds each must-have criterion at its operating point while optimizing the softer criteria (§7.3 borrows this idea).
 
-Below are six further observations of our own.
+Sections 6.2–6.7 add six observations of our own.
 
 ### 6.2 Retries are optimization against the judge
 
-The critic loop has the generator search for "a draft the judge will pass." That is inference-time optimization whose objective is the judge itself. Optimizing against a proxy objective drifts away from the true objective — this is known as overoptimization of reward models under best-of-n sampling and reinforcement learning (Gao et al., ICML 2023). The retry loop has the same structure.
+The critic loop has the generator search for "a draft the judge will pass." That is inference-time optimization whose objective is the judge itself. Optimizing against a proxy objective drifts away from the true objective, as studies of reward-model overoptimization under best-of-n sampling and reinforcement learning have shown (Gao et al., ICML 2023). The retry loop has the same structure.
 
 Take the simplest case. If an item stays bad however often it is rewritten, and whether the judge misses it is independent across attempts, then the probability that the defect is eventually served within $K$ retries is
 
@@ -447,7 +442,7 @@ $$
 | 0.95 | 5.0% | 9.8% | 14.3% | 18.5% |
 | 0.99 | 1.0% | 2.0% | 3.0% | 3.9% |
 
-Even with a Specificity of 0.9, at $K = 3$ just over a third of unfixable defects eventually get through. If catchability varies from item to item and attempts are independent given the item (the form the simulator below also uses), Jensen's inequality makes this the upper bound. The absolute bound that holds under any dependence is the union bound $(K+1)(1 - \mathrm{Spec})$, i.e. 40% for Spec 0.9 and $K = 3$. Conversely, if the judge's misses are consistent per item (the same defect is always missed or always caught), there is no amplification. Reality lies in between.
+Even with a Specificity of 0.9, at $K = 3$ just over a third of unfixable defects eventually get through. If catchability varies from item to item and attempts are independent given the item (the form the simulator below also uses), Jensen's inequality makes this the upper bound. The absolute bound that holds under any dependence is the union bound $(K+1)(1 - \mathrm{Spec})$, i.e. 40% for Spec 0.9 and $K = 3$. Conversely, if the judge's misses are consistent per item (the same defect is always missed or always caught), there is no amplification. Real judges fall somewhere between these two cases.
 
 You can explore the effect with the simulator below: a small Markov chain with human-standard quality, the judge's Specificity and Recall, the success rate of a revision, the share of unfixable items, and the persistence of misses $\rho$.
 
@@ -463,9 +458,9 @@ With the defaults (a 60% first-draft defect rate among fixable items — 68% ove
 | Same ($\rho = 0$: independent misses) | 77.9% | 21.4% | 1,664 |
 | Same ($\rho = 1$: persistent misses) | 70.1% | 9.8% | 688 |
 
-The takeaway is that <strong>"the defect share of what is served" and "the number of defects served" can move in opposite directions</strong>. At $\rho = 0.5$, retries lower the defect share users see from 21.0% to 15.9%, while the absolute number of defects served rises from 680 to 1,176. Whether raising $K$ is a good idea depends on whether you manage risk per impression or the total number of incidents. At $\rho = 0$ both get worse. So make <strong>defects served per 10k items</strong>, not only the defect share of what is served, a primary monitoring metric.
+<strong>"The defect share of what is served" and "the number of defects served" can move in opposite directions</strong>. At $\rho = 0.5$, retries lower the defect share users see from 21.0% to 15.9%, while the absolute number of defects served rises from 680 to 1,176; at $\rho = 0$ both get worse. Whether raising $K$ is a good idea depends on whether you manage risk per impression or the total number of incidents. So make defects served per 10k items a primary monitoring metric alongside the defect share of what is served.
 
-<strong>How to choose $K$ — the "served after revision" stratum and the break-even rate.</strong> There is a model-independent view. <strong>The "served after revision" stratum is exactly what retries add on top of $K = 0$</strong>: every item in it would otherwise have been dropped. Its volume is the coverage the retries buy, and its human-labeled defect share is the defect rate of that extra coverage. Under the defaults, the first-pass and post-revision strata compare as follows.
+<strong>How to choose $K$ — the "served after revision" stratum and the break-even rate.</strong> A model-independent view starts from the fact that the "served after revision" stratum is exactly what retries add on top of $K = 0$: every item in it would otherwise have been dropped. Its volume is the coverage the retries buy, and its human-labeled defect share is the defect rate of that extra coverage. Under the defaults, the first-pass and post-revision strata compare as follows.
 
 | $\rho$ | Defect share, served on first pass | Defect share, served after revision | Defects served / 10k items ($K = 0 \to 3$) |
 |---|---|---|---|
@@ -473,22 +468,24 @@ The takeaway is that <strong>"the defect share of what is served" and "the numbe
 | 0.5 | 21.0% | 11.9% | 680 → 1,176 |
 | 0 (independent) | 21.0% | 21.6% | 680 → 1,664 |
 
-Compare that defect share with the break-even rate set by the charter's cost ratio (§7.3). When nothing is shown on a drop (a fallback worth 0), and serving a good item is worth 1 while serving a defect costs 50, the break-even defect rate is $1/(1 + 50) \approx 2\%$ (ignoring regeneration cost; §7.3, item 2 gives the general form with a fallback). The defaults' post-revision stratum sits at 11.9%, so at that cost ratio $K = 3$ does not pay: per 10k items, retries add 3,661 good items (value +3,661) but also 496 defects (cost −24,800), a net of about −21,000. At $\rho = 1$ the stratum is 0.2% (8 defects against 3,758 good items), a net of about +3,400, and the retries pay off. Splitting the weekly sample's post-revision stratum by attempt index (first served at $k = 1, 2, 3$) turns this directly into a rule for choosing $K$: if the marginal stratum's defect share exceeds break-even, lower $K$. Because the break-even rate is as small as about 2%, though, the decision needs hundreds of labels from the post-revision stratum alone. With 5 bad out of 100 a week, the Wilson 95% interval is a wide 2.2–11.2%; only by pooling four weeks (20 out of 400) does it narrow to 3.3–7.6%. Stratifying by decision outcome, as the paper does, is the right design in this sense as well.
+Compare that defect share with the break-even rate set by the charter's cost ratio (§7.3). When nothing is shown on a drop (a fallback worth 0), and serving a good item is worth 1 while serving a defect costs 50, the break-even defect rate is $1/(1 + 50) \approx 2\%$ (ignoring regeneration cost; §7.3, item 2 gives the general form with a fallback). The defaults' post-revision stratum sits at 11.9%, so at that cost ratio $K = 3$ does not pay: per 10k items, retries add 3,661 good items (value +3,661) but also 496 defects (cost −24,800), a net of about −21,000. At $\rho = 1$ the stratum is 0.2% (8 defects against 3,758 good items), a net of about +3,400, and the retries pay off. Splitting the weekly sample's post-revision stratum by attempt index (first served at $k = 1, 2, 3$) turns this directly into a rule for choosing $K$: if the marginal stratum's defect share exceeds break-even, lower $K$. Because the break-even rate is as small as about 2%, though, the decision needs hundreds of labels from the post-revision stratum alone. With 5 bad out of 100 a week, the Wilson 95% interval is a wide 2.2–11.2%; only by pooling four weeks (20 out of 400) does it narrow to 3.3–7.6%. The paper's stratification by decision outcome is the right design for this purpose too, because it lets you sample the post-revision stratum directly.
 
 Per-attempt telemetry (§8.4) lets you attribute each post-revision defect. If the judge had failed the same criterion on an earlier draft of that item, it most likely caught the defect once and later missed it (a different defect may also have arisen under the same criterion, so compare the `evidence_spans` or label the earlier draft to confirm). If it never failed that criterion, the defect either rode along with another defect that was caught or was introduced by the revision; labeling the first draft too, for this stratum only, separates the two.
 
 <details className="my-4 rounded-lg border border-border bg-muted/30 px-4 py-2">
 <summary className="cursor-pointer font-semibold">Estimating ρ, and the limits of this model (click to expand)</summary>
 
-With persistent misses, the only defects that can reach the post-revision stratum are new ones introduced by a revision and invisible to the judge, so almost nothing gets through (0.2% with the defaults). That, however, holds in this article's single-defect model, which treats a draft as simply good or bad. The paper's gate has a separate judge for each of three criteria. If a draft carries one defect that gets caught and another that is always missed, the revision fixes the first and the second "rides along" into the post-revision stratum. That happens even at $\rho = 1$, and it is still a defect caused by retries (at $K = 0$ that draft would have been dropped).
+With persistent misses, the only defects that can reach the post-revision stratum are new ones introduced by a revision and invisible to the judge, so almost nothing gets through (0.2% with the defaults). That, however, holds in the simulator's single-defect model, which treats a draft as simply good or bad. The paper's gate has a separate judge for each of three criteria. If a draft carries one defect that gets caught and another that is always missed, the revision fixes the first and the second "rides along" into the post-revision stratum. That happens even at $\rho = 1$, and it is still a defect caused by retries (at $K = 0$ that draft would have been dropped).
 
 With independent misses, on the other hand, retries keep harvesting the judge's misses — but comparing that level with the first-pass stratum does not reveal $\rho$. The more unfixable items pile up in the revision queue, the dirtier the post-revision stratum gets (with 50% unfixable items in the defaults, 33.3% on first pass vs. 40.7% after revision), while if revisions mostly succeed it ends up cleaner than the first-pass stratum. Over a grid of first-draft defect rates 0.1–0.9 for fixable items, unfixable shares 0–0.5, fix rates 0.1–0.9, regression rates 0, 0.1 and 0.3, Specificity 0.7–0.95 and Recall 0.6–0.95 ($K = 3$, 5,400 combinations), the gap between the two strata at $\rho = 0$ ranged from −79 to +72 points, and even at $\rho = 1$ the post-revision defect share reached up to about 16% depending on the regression rate.
 
-To measure $\rho$ itself, have the judge evaluate several <strong>distinct drafts</strong> of human-bad items that still carry the defect, and measure how strongly misses correlate within an item. Re-judging the same input repeatedly measures test–retest agreement (§7.5) instead — a different quantity, and one that almost trivially looks "consistent" at temperature 0. With a miss rate $m = 1 - \mathrm{Spec}$, the model gives $\rho = \big(P(\text{miss} \mid \text{another draft of the item was missed}) - m\big)/(1 - m)$, and from the catch-then-miss pattern that is easier to observe in logs, $\rho \approx 1 - P(\text{missed at } k+1 \mid \text{caught at } k, \text{ both drafts bad})/m$ (this needs human labels on both consecutive drafts). Plug your own estimates of the first-draft defect rate, the unfixable share, the fix rate, Spec and Rec into the simulator and you can also see where your observed post-revision defect share falls between the $\rho = 1$ and $\rho = 0$ predictions (within the single-defect model; ride-along defects can push it above the $\rho = 1$ prediction).
+To measure $\rho$ itself, have the judge evaluate several distinct drafts of human-bad items that still carry the defect, and measure how strongly misses correlate within an item. Re-judging the same input repeatedly measures test–retest agreement (§7.5) instead — a different quantity, and one that almost trivially looks "consistent" at temperature 0. With a miss rate $m = 1 - \mathrm{Spec}$, the model gives $\rho = \big(P(\text{miss} \mid \text{another draft of the item was missed}) - m\big)/(1 - m)$, and from the catch-then-miss pattern that is easier to observe in logs, $\rho \approx 1 - P(\text{missed at } k+1 \mid \text{caught at } k, \text{ both drafts bad})/m$ (this needs human labels on both consecutive drafts). Plug your own estimates of the first-draft defect rate, the unfixable share, the fix rate, Spec and Rec into the simulator and you can also see where your observed post-revision defect share falls between the $\rho = 1$ and $\rho = 0$ predictions (within the single-defect model; ride-along defects can push it above the $\rho = 1$ prediction).
 
 </details>
 
-<strong>Countermeasure — an AND gate, and two kinds of correlation.</strong> One option is an AND gate: require revised drafts to pass both the original judge and a judge of a different family (or a human). If the two judges' errors are independent, the per-attempt leak drops to roughly $(1 - \mathrm{Spec}_A)(1 - \mathrm{Spec}_B)$, and the generator is less able to steer toward the original judge's blind spots. Strong models' errors, however, have been reported to be positively correlated even across model families (Goel et al., ICML 2025), so that product is an optimistic estimate. Recall multiplies as well, so wrongful rejections and drops of good drafts increase too. Two kinds of "correlation" need to be kept apart here. $\rho$ — how consistent one judge's misses are across attempts on the same item — is better when high, because it means less amplification. The overlap between the critic's blind spots and the final acceptance decision is better when low. Sampling the post-revision stratum more heavily is another lever. The AND gate trades away the consistency of "one judge for every role" that the paper values, and adds inference cost.
+<strong>Countermeasure — an AND gate, and two kinds of correlation.</strong> One option is an AND gate: require revised drafts to pass both the original judge and a judge of a different family (or a human). If the two judges' errors are independent, the per-attempt leak drops to roughly $(1 - \mathrm{Spec}_A)(1 - \mathrm{Spec}_B)$, and the generator is less able to steer toward the original judge's blind spots. Strong models' errors, however, have been reported to be positively correlated even across model families (Goel et al., ICML 2025), so that product is an optimistic estimate. Recall multiplies as well, so wrongful rejections and drops of good drafts increase too, and the AND gate trades away the consistency of "one judge for every role" that the paper values and adds inference cost. Sampling the post-revision stratum more heavily is another lever.
+
+Two kinds of "correlation" need to be kept apart here. $\rho$ — how consistent one judge's misses are across attempts on the same item — is better when high, because it means less amplification. The overlap between the critic's blind spots and the final acceptance decision is better when low.
 
 ### 6.3 A gate cannot measure its own misses
 
@@ -496,7 +493,7 @@ Everything that is served has, by definition, passed the judge. So <strong>you c
 
 There are three practical tools.
 
-1. <strong>Estimate directly from human labels on the served strata</strong>. If 3 out of 100 sampled served explanations are bad, the Wilson 95% interval is roughly 1.0–8.5%. The 3% point estimate itself is unbiased, but the uncertainty is lopsided: the upper bound is about 2.8 times the point estimate. Report only the point estimate and you misjudge the worst case
+1. <strong>Estimate directly from human labels on the served strata</strong>. If 3 out of 100 sampled served explanations are bad, the Wilson 95% interval is roughly 1.0–8.5%. The 3% point estimate itself is unbiased, but the uncertainty is lopsided: the upper bound is about 2.8 times the point estimate. Reporting only the point estimate understates the worst case
 2. <strong>Re-weight by stratum</strong>. The paper's weekly sample is stratified by decision outcome and biased toward new titles. For a population-level defect rate, combine each stratum's estimate weighted by its production volume (the strata are fixed before sampling, so this is the standard stratified estimator). Oversampling of new titles within a stratum is undone with item-level inverse inclusion probabilities (Horvitz–Thompson style)
 3. <strong>Combine an independent audit judge with prediction-powered inference (PPI)</strong>. Run an audit judge $g$ of a different family from the gate over all $N$ served items, and attach human labels $Y$ to $n$ randomly chosen ones. The defect rate of the served set can then be estimated as
 
@@ -504,9 +501,9 @@ $$
 \hat\theta_{\mathrm{PP}} = \frac{1}{N}\sum_{i=1}^{N} g(\tilde X_i) \;-\; \frac{1}{n}\sum_{j=1}^{n} \big(g(X_j) - Y_j\big)
 $$
 
-(Angelopoulos et al., Science 2023). The second term is a "rectifier" that corrects the audit judge's bias using human labels; as long as the $n$ labeled items are a random sample from the same population, the confidence interval is valid regardless of how accurate $g$ is, and the better $g$ correlates with humans, the narrower it gets. The interval relies on a normal approximation and is only asymptotically valid, though, so check its coverage when defects are rare and $n$ is small. PPI++ (Angelopoulos, Duchi and Zrnic), which tunes how much to trust the predictions automatically and is (asymptotically) never worse than the human-only interval, is also available. PPI also assumes that the $n$ human-labeled items are drawn <strong>uniformly at random</strong> from the served set. The weekly HITL sample is stratified and tilted toward new titles, so it cannot be used as is: draw a separate uniform audit sample, or use StratPPI (Fisch et al., NeurIPS 2024), which handles stratified sampling. StratPPI, too, assumes uniform sampling within strata of known size, so if you tilt toward new titles within a stratum, redefine the strata as "decision outcome × new/established title". Note that using the gate judge itself as $g$ adds nothing: on the served set, $g$ always says "pass."
+(Angelopoulos et al., Science 2023). The second term is a "rectifier" that corrects the audit judge's bias using human labels. As long as the $n$ human-labeled items are drawn <strong>uniformly at random</strong> from the served set, the confidence interval is valid regardless of how accurate $g$ is, and the better $g$ correlates with humans, the narrower it gets. The interval relies on a normal approximation and is only asymptotically valid, though, so check its coverage when defects are rare and $n$ is small. A variant, PPI++ (Angelopoulos, Duchi and Zrnic), tunes how much to trust the predictions automatically and is (asymptotically) never worse than the human-only interval. The weekly HITL sample is stratified and tilted toward new titles, so it cannot be used as is: draw a separate uniform audit sample, or use StratPPI (Fisch et al., NeurIPS 2024), which handles stratified sampling. StratPPI, too, assumes uniform sampling within strata of known size, so if you tilt toward new titles within a stratum, redefine the strata as "decision outcome × new/established title". Using the gate judge itself as $g$ adds nothing: on the served set, $g$ always says "pass."
 
-There is also a cheap auxiliary signal. For drafts before the gate, the judge's rejection rate $f$ together with Spec and Rec estimated by humans gives back the draft defect rate (the prior) through the Rogan–Gladen estimator
+A cheaper auxiliary signal comes from drafts before the gate. The judge's rejection rate $f$ on those drafts, together with Spec and Rec estimated by humans, gives back the draft defect rate (the prior) through the Rogan–Gladen estimator
 
 $$
 \hat\pi = \frac{f + \mathrm{Rec} - 1}{\mathrm{Spec} + \mathrm{Rec} - 1}
@@ -516,9 +513,9 @@ Because it can be computed from the full weekly volume, it is good at catching h
 
 ### 6.4 Statistical properties of the drift rule
 
-The idea behind Eq. (5) — using human disagreement as the yardstick — is excellent. Implemented literally, though, it has five statistical quirks.
+The idea behind Eq. (5) — using human disagreement as the yardstick — is sound. Implemented literally, though, it has five statistical quirks.
 
-<strong>(1) Raters are scored against a majority that includes their own vote.</strong> The judge, by contrast, is scored against a majority it did not take part in. In a simple model where everyone (the judge included) answers correctly and independently with probability $a$, a rater agrees with "a 3-rater majority that includes them" at rate $1 - a(1-a)$, while an equally accurate outsider (the judge) agrees with that majority less often: 0.84 vs. ~0.738 at $a = 0.8$, and 0.91 vs. ~0.878 at $a = 0.9$. <strong>Even a judge exactly as accurate as the raters looks 3–10 points worse.</strong>
+<strong>(1) Raters are scored against a majority that includes their own vote.</strong> The judge, by contrast, is scored against a majority it did not take part in. In a simple model where everyone (the judge included) answers correctly and independently with probability $a$, a rater agrees with "a 3-rater majority that includes them" at rate $1 - a(1-a)$, while an equally accurate outsider (the judge) agrees with that majority less often: 0.84 vs. ~0.738 at $a = 0.8$, and 0.91 vs. ~0.878 at $a = 0.9$. Even a judge exactly as accurate as the raters looks 3–10 points worse.
 
 <strong>(2) The standard deviation of three raters is mostly noise.</strong> With $R = 3$ the sample standard deviation has only 2 degrees of freedom, and the 95% interval for the population standard deviation spans roughly 0.52 to 6.28 times the observed $s$. The width of the band itself swings wildly from week to week.
 
@@ -539,7 +536,7 @@ The roughly one-in-ten false-alarm rate of the leave-one-out version can be expl
 
 </details>
 
-Practical reinforcements:
+In practice, the rule can be reinforced in several ways:
 
 - <strong>Build the reference with leave-one-out</strong>, so the judge and the raters are compared against the same kind of reference
 - <strong>Derive the band width from a false-alarm rate</strong> instead of fixing "two standard deviations": choose the width from the tolerated false-alarm rate and the number of raters (about 3.37s for 5% with three raters). More raters allow a narrower band
@@ -548,19 +545,19 @@ Practical reinforcements:
 - <strong>Add a persistence condition</strong> — two consecutive weeks, or a cumulative sum such as CUSUM — to separate one-off noise from sustained degradation
 - <strong>If you need to formally ask "may the judge replace a rater?"</strong>, use the Alternative Annotator Test (Calderon et al., ACL 2025), which turns the leave-one-out comparison into a statistical test
 
-It cuts the other way, too. If the paper applied Eq. (5) literally, the rule was biased against the judge, so the report that the judge never fell below the band during the A/B test at least cannot be explained by a lenient rule. It does not prove the judge is strong, either. If raters come from a rotating pool rather than a fixed panel, each rater's metrics rest on few items, which inflates the standard deviation across raters and widens the band. Raters of varying accuracy also reduce false alarms (to about 18–26% under the literal rule in the setting above). And the paper does not describe how per-rater metrics were computed in the first place.
+These quirks also bear on the paper's own result. If the paper applied Eq. (5) literally, the rule was biased against the judge, so the report that the judge never fell below the band during the A/B test at least cannot be explained by a lenient rule. It does not prove the judge is strong, either. If raters come from a rotating pool rather than a fixed panel, each rater's metrics rest on few items, which inflates the standard deviation across raters and widens the band. Raters of varying accuracy also reduce false alarms (to about 18–26% under the literal rule in the setting above). And the paper does not describe how per-rater metrics were computed in the first place.
 
 ### 6.5 What the A/B test shows — and what it does not
 
 The A/B test compared "the judge-aligned explanation pipeline" with "no explanations." What it shows is <strong>the value of the shipped feature as a whole</strong>. The judge's marginal value — how much better than serving the same explanations without a gate — is not isolated. An ungated arm would deliberately take exactly the risk the system is built to avoid (showing unvetted text to members), so leaving it out is understandable.
 
-Most of a judge's value lies in incidents that did not happen: <strong>risk avoided</strong>. That is rare, delayed and hard to see in engagement metrics. "No quality-related escalations" is supporting evidence, but members rarely bother to report subtle problems with explanations, so the absence of complaints does not mean the absence of defects.
+Most of a judge's value lies in incidents that did not happen: risk avoided. That is rare, delayed and hard to see in engagement metrics. "No quality-related escalations" is supporting evidence, but members rarely bother to report subtle problems with explanations, so the absence of complaints does not mean the absence of defects.
 
-There is also the question of scale. Detecting a 0.3% relative lift on a metric with a 50% baseline takes about 1.74 million users per arm at a two-sided 5% significance level and 80% power; with a 30% baseline it takes about 4.07 million. The effect was visible precisely because there were tens of millions of members. In an enterprise system with tens of thousands of users, an effect of this size cannot realistically be detected — the test simply lacks the power. Such systems have to rely on HITL quality metrics, targeted user research, and validation on surfaces where effects are larger.
+Detecting a 0.3% relative lift on a metric with a 50% baseline takes about 1.74 million users per arm at a two-sided 5% significance level and 80% power; with a 30% baseline it takes about 4.07 million. The effect was visible precisely because there were tens of millions of members. In an enterprise system with tens of thousands of users, a test lacks the power to detect an effect of this size. Such systems have to rely on HITL quality metrics, targeted user research, and validation on surfaces where effects are larger.
 
 ### 6.6 Reasoning agreement and sensitivity to phrasing
 
-The first failure pattern in §5.4 — verdicts that swing with how confidently an explanation is phrased rather than with recommendation quality — takes on another meaning in combination with the critic loop. The generator reads the judge's reasons and rewrites accordingly, so instead of improving the grounding it may learn to satisfy the judge with surface changes such as hedging. That is a pathway to "gaming" the judge (the paper does not report this; it is our hypothesis).
+The first failure pattern in §5.4 — verdicts that swing with how confidently an explanation is phrased rather than with recommendation quality — becomes a risk when combined with the critic loop. The generator reads the judge's reasons and rewrites accordingly, so instead of improving the grounding it may learn to satisfy the judge with surface changes such as hedging. That is a pathway to "gaming" the judge (the paper does not report this; it is our hypothesis).
 
 Possible countermeasures: write rubrics that tie verdicts to verifiable facts (for example, shared attributes that actually exist in the metadata) rather than to tone; include adversarial examples such as "hedged but wrong" and "assertive and right" in the benchmark; and monitor the distribution of served text over time (e.g. the frequency of hedging phrases), comparing first-pass and post-revision passes.
 
@@ -574,9 +571,9 @@ What does not generalize is the numbers. $K = 3$, 300 a week, two standard devia
 
 ## 7. An enterprise implementation framework — five phases and three foundations
 
-This section turns the paper into a framework for an enterprise that wants to do the same thing. It consists of the paper's four phases plus <strong>Phase 0 (charter)</strong>, which enterprises most often lack, for five phases in total, underpinned by <strong>three cross-cutting foundations</strong>.
+The framework adds Phase 0 (charter), which enterprises most often lack, to the paper's four phases, for five phases in total, and underpins them with three cross-cutting foundations.
 
-How to navigate this section: §7.2 decides whether you need this at all and what to build first; §7.3–§7.7 cover the phases (goal, key decisions, artifacts, exit criteria); §7.8–§7.10 the foundations; §7.11–§7.16 the maturity model, roadmap, use cases, incident response, anti-patterns and the pre-enforcement checklist.
+§7.2 helps decide whether you need this at all and what to build first; §7.3–§7.7 cover the phases (goal, key decisions, artifacts, exit criteria); §7.8–§7.10 the foundations; §7.11–§7.16 the maturity model, roadmap, use cases, incident response, anti-patterns and the pre-enforcement checklist.
 
 ### 7.1 The big picture
 
@@ -603,7 +600,7 @@ flowchart LR
 
 Phase 0 stands on its own because what was implicit in the paper has to be made explicit in an enterprise. At Netflix, writing experts owned the criteria and the asymmetry "better no explanation than a bad one" was shared inside the organization. In an enterprise, none of the numbers can be set until product, legal, operations and the domain owners explicitly agree on what the judge blocks, what is shown instead, and who is accountable when it is wrong.
 
-The phases map to the paper's as Birth → Criteria and ground truth, Training → Alignment, Deployment → Operation, and Monitoring → Assurance (the numbering follows the paper; the names follow the role each phase plays in an enterprise). Of the foundations, the Judge BOM (§7.8) is the idea of versioning, as one unit, every artifact that determines the judge's behavior.
+The phases map to the paper's as Birth → Criteria and ground truth, Training → Alignment, Deployment → Operation, and Monitoring → Assurance (the numbering follows the paper; the names follow the role each phase plays in an enterprise). Of the foundations, the Judge BOM (§7.8) means versioning, as one unit, every artifact that determines the judge's behavior.
 
 ### 7.2 Do you need a lifecycle at all — and where to start
 
@@ -628,7 +625,7 @@ Even when only some of these hold, the standard move is to put deterministic che
 5. A weekly band check (leave-one-out) and confidence intervals for the defect rate of the served strata (§7.7)
 6. Rollback and a kill switch (§7.7)
 
-The conditions to meet before the gate starts actually blocking outputs (enforcement) go beyond these six, though. That gate is the set of items marked [required] in the §7.16 checklist, and the "Before enforcement" column below matches it (numbers refer to the numbered key decisions in §7.3–§7.7). The incident procedure of §7.14 is also [required] before enforcement; it has no key-decision number, so it does not appear in the table.
+The conditions to meet before the gate starts actually blocking outputs (enforcement) go beyond these six, though. They are the items marked [required] in the §7.16 checklist, and the "Before enforcement" column below matches them (numbers refer to the numbered key decisions in §7.3–§7.7). The incident procedure of §7.14 is also [required] before enforcement; it has no key-decision number, so it does not appear in the table.
 
 | Phase | Before enforcement | Within the first quarter after enforcement | As you scale |
 |---|---|---|---|
@@ -645,8 +642,8 @@ The conditions to meet before the gate starts actually blocking outputs (enforce
 <strong>Key decisions</strong>
 
 1. <strong>List the roles and set requirements per role.</strong> A gate (blocks) needs Specificity on the must-have criteria; a critic (makes things get fixed) needs reason quality ($\mathrm{RA}_{\text{neg}}$); a monitor (measures) needs stability over time and calibration; a reward model (learning signal) needs robustness to optimization pressure. Combining roles means accepting the consistency-versus-single-point-of-failure trade-off described in §4.1 and §6.2
-2. <strong>Write the asymmetric costs down as numbers.</strong> Write down separately, as relative values if you like, the loss from serving one defect, the loss from not serving a good output, and the cost of one regeneration. Measure the first two relative to the fallback shown on a drop (such as a template; showing nothing means a fallback worth 0). With a good item worth $v_g$, the fallback worth $v_{\text{fb}}$ and a defect costing $c_d$, not serving a good item loses $v_g - v_{\text{fb}}$, serving a defect loses $c_d + v_{\text{fb}}$ (the defect's cost plus the fallback you could have shown), and the break-even defect rate for serving is $(v_g - v_{\text{fb}})/(v_g + c_d)$ — that is, drop_good ÷ (drop_good + serve_defect) in the YAML below. Then prefer a constrained form, "put a floor on must-have Specificity and maximize Recall subject to it," over mixing everything with weights. The paper, too, in its future work on promoting the judge to a reward model, suggests replacing the weighted score with a constrained objective that holds each must-have criterion at its operating point while optimizing the softer criteria. Our proposal applies the same idea to choosing the judge's operating point. Note that the Specificity floor is per judgment. As §6.2 shows, with retries the probability that an unfixable defect leaks per item can grow to $1 - \mathrm{Spec}^{K+1}$ (18.5% at 0.95 and 7.8% at 0.98 for $K = 3$), so set a separate cap on the defect rate of the served strata as well
-3. <strong>Decide the unit of generation and the blast radius.</strong> If outputs are shared per unit (product, FAQ, title), "generate ahead of time, check, cache and serve" is the strongest pattern (Netflix generates per title and lets an online model merely select at display time, which we read as close to this shape): one check protects many impressions and retries stay off the latency path. With per-request generation, the latency budget bounds $K$
+2. <strong>Write the asymmetric costs down as numbers.</strong> Record separately, as relative values if you like, the loss from serving one defect, the loss from not serving a good output, and the cost of one regeneration. Measure the first two relative to the fallback shown on a drop (such as a template; showing nothing means a fallback worth 0). With a good item worth $v_g$, the fallback worth $v_{\text{fb}}$ and a defect costing $c_d$, not serving a good item loses $v_g - v_{\text{fb}}$, serving a defect loses $c_d + v_{\text{fb}}$ (the defect's cost plus the fallback you could have shown), and the break-even defect rate for serving is $(v_g - v_{\text{fb}})/(v_g + c_d)$ — that is, drop_good ÷ (drop_good + serve_defect) in the YAML below. Then prefer a constrained form, "put a floor on must-have Specificity and maximize Recall subject to it," over mixing everything with weights. In its future work on promoting the judge to a reward model, the paper suggests a constrained objective of this kind, holding each must-have criterion at its operating point while optimizing the softer criteria (§6.1); we apply the same idea to choosing the judge's operating point. The Specificity floor is per judgment, though. As §6.2 shows, with retries the probability that an unfixable defect leaks per item can grow to $1 - \mathrm{Spec}^{K+1}$ (18.5% at 0.95 and 7.8% at 0.98 for $K = 3$), so set a separate cap on the defect rate of the served strata as well
+3. <strong>Decide the unit of generation and the blast radius.</strong> If outputs are shared per unit (product, FAQ, title), "generate ahead of time, check, cache and serve" fits best (Netflix generates per title and lets an online model merely select at display time, which we read as close to this shape), because one check protects many impressions and retries stay off the latency path. With per-request generation, the latency budget bounds $K$
 4. <strong>Decide the fallback for drops.</strong> Show nothing (Netflix), a template, a human queue, or the last approved version. The quality of the fallback is part of the product experience
 5. <strong>Decide what happens when the judge itself fails.</strong> When the judge times out or its API is down, do you stop output (fail-closed) or serve the last approved version? In high-risk domains fail-closed is the rule
 6. <strong>Decide who decides.</strong> Who can change the criteria, who approves rubric updates, and who responds to alerts
@@ -699,19 +696,19 @@ judge_charter:
 1. <strong>Separate must-have (binary) from soft criteria, with one judge per must-have.</strong> A gate built on a 1–10 overall score tells you neither what is wrong nor how to fix it
 2. <strong>Make the guidelines the single source of truth and version them.</strong> Generate both the human rating procedure and the judges' seed rubrics from the guidelines, and stamp every label with a `guideline_version`. When the guidelines change, re-adjudicate or invalidate the affected labels (the paper does not cover this, but if you skip it you will train a new judge on labels made under the old standard)
 3. <strong>Require a reason for every fail.</strong> Besides free text, a failure-mode tag (e.g. factual error, ungrounded, prohibited phrasing) makes aggregation and focusing RART much easier
-4. <strong>Mix sources.</strong> On top of the paper's three (expert adversarial examples, LLM-synthesized boundary cases, real outputs), past incidents and complaints and red-team findings are powerful sources in an enterprise
+4. <strong>Mix sources.</strong> In an enterprise, add past incidents and complaints and red-team findings to the paper's three (expert adversarial examples, LLM-synthesized boundary cases, real outputs)
 5. <strong>Measure inter-rater agreement first.</strong> Report Cohen's $\kappa$ per criterion for two raters, and Fleiss' $\kappa$ or Krippendorff's $\alpha$ for three or more. Krippendorff treats $\alpha \ge 0.800$ as reliable and $0.667 \le \alpha < 0.800$ as good enough only for tentative conclusions. For the exit decision, compute it with a bootstrap confidence interval on 100–200 items of the class-balanced benchmark (on skewed data where fails are rare, $\alpha$ and $\kappa$ come out low even when raters agree — the "kappa paradox"; the standard remedy, proposed by Cicchetti and Feinstein (1990) in the companion to Feinstein and Cicchetti (1990), is to also report agreement on each class separately — positive and negative specific agreement). Fix the pass rule in advance too — for example, a point estimate of at least 0.800 with the interval's lower bound no lower than 0.667. A criterion humans cannot agree on is a guidelines problem, not a judge problem
 6. <strong>Balance the classes and size the benchmark.</strong> For a criterion whose Specificity is around 0.9, estimating it within ±5 points takes about 139 human fails; within ±3 points, about 385 (normal approximation). Those counts are needed per criterion inside the test split you report on. The paper does not break its ~900 examples (~490 fails) down by criterion, so we read them as covering all splits and criteria together; with, say, 20% held out for testing you would have at most about 100 fails per criterion and an interval of roughly ±6 points around a Specificity of 0.9
 7. <strong>Lock the test split.</strong> Carve out a split that neither the reflector nor the prompt authors ever see, and audit for leakage
 8. <strong>Set the rules for sensitive data.</strong> What raters may see, masking, retention, and data-processing agreements with external rating vendors. Watch out for judge reasons that quote personal data verbatim into logs. HITL means continuously showing production data to people, so decide this up front
-9. <strong>If you have no in-house "writing experts," build the ground-truth function first.</strong> Make the domain owner the criteria owner. Run calibration rounds — three people label the same 50 items, discuss disagreements and revise the guidelines — until agreement reaches the agreed level (50 items give only a rough estimate of $\alpha$, so make the final call on the 100–200 items above). Complaints, legal review comments and the diffs of human edits to drafts are a goldmine of fail labels with reasons. Show LLM pre-labels only after a person has made their own call (showing them first anchors people). Qualify external raters on a gold set with known answers
+9. <strong>If you have no in-house "writing experts," build the ground-truth function first.</strong> Make the domain owner the criteria owner. Run calibration rounds — three people label the same 50 items, discuss disagreements and revise the guidelines — until agreement reaches the agreed level (50 items give only a rough estimate of $\alpha$, so make the final call on the 100–200 items above). Complaints, legal review comments and the diffs of human edits to drafts are rich sources of fail labels with reasons. Show LLM pre-labels only after a person has made their own call (showing them first anchors people). Qualify external raters on a gold set with known answers
 10. <strong>For multiple languages, split by language.</strong> Keep a benchmark, native-speaker raters and a band check per language, and verify that a rubric tuned in one language transfers before reusing it in another
 
 <strong>Artifacts</strong>: guidelines v1, benchmark v1 (with a data card), an inter-rater agreement report.
 
 <strong>Exit criteria</strong>: inter-rater agreement meets the agreed level (as a rule of thumb, a Krippendorff's $\alpha$ point estimate of at least 0.800 with a bootstrap lower bound of at least 0.667) for every must-have criterion, and the test split is locked.
 
-### 7.5 Phase II Alignment — align the reasons, not just the labels
+### 7.5 Phase II Alignment — align the reasons as well as the labels
 
 <strong>Goal</strong>: align each per-criterion judge with humans on both labels and reasons, and pass the release review.
 
@@ -720,7 +717,7 @@ judge_charter:
 1. <strong>Fix the template and tune only the rubric.</strong> Updates become reviewable diffs, and you can re-tune with the same procedure when you switch base models
 2. <strong>Report Spec, Rec, $\mathrm{RA}_{\text{neg}}$ and the confusion matrix per criterion.</strong> Derive the weights or constraints from the charter's cost ratios rather than picking them arbitrarily
 3. <strong>The focus set is "label mismatches" plus "right label, wrong reason."</strong> Leave out examples whose reasons already agree, so you do not break what already works
-4. <strong>Validate the meta-judge independently with humans.</strong> Start with about 300 pairs as the paper did, and report $\kappa$ and per-class agreement, not just raw agreement. If possible, use a different model family from the primary judge (LLMs are known to favor their own generations, and models of the same family tend to make correlated errors)
+4. <strong>Validate the meta-judge independently with humans.</strong> Start with about 300 pairs as the paper did, and report $\kappa$ and per-class agreement in addition to raw agreement. If possible, use a different model family from the primary judge (LLMs are known to favor their own generations, and models of the same family tend to make correlated errors)
 5. <strong>Guard against overfitting.</strong> Select checkpoints on validation, report on test, and check stability across seeds. In addition, freeze known critical cases that must always fail (or pass) as a regression suite, and make passing all of them a release condition
 6. <strong>Formalize the release decision.</strong> Require per-criterion bounds to be met with confidence intervals, and require the domain owner to review and approve the rubric diff. Unlike weights, a text rubric can be read and signed off by a person — a big advantage for audits. Certifying a bound with a lower confidence limit takes volume, though. To certify the charter's Specificity floor of 0.95 with a one-sided 95% lower confidence bound, for example, an observed Specificity of exactly 0.97 clears the floor with roughly 200 (Wald) to 320 (Wilson) human fails per criterion in the test split. At those counts, however, even a judge whose true Specificity is 0.97 passes only about half the time. Passing with 80% probability takes about 450 (Wald) to 630 (score method), and a floor of 0.98 with a true value of 0.99 takes about 610–990 — several times what a ~900-example benchmark yields per criterion (§7.4, item 6). Plan on accumulating test labels across weeks. Keep those labels out of the locked test split: put them in the rolling split (item 9 of this section, weighted per §6.4, item (5)), or freeze them as a larger test split v2 at the next certification. Until you have them, put the point estimates and confidence intervals on the judge card (the judge's specification; see this section's artifacts), have the charter's decision-maker explicitly accept the residual risk where the lower bound falls short, and compensate with a staged rollout and monitoring of the served strata
 7. <strong>Treat base-model updates as "planned drift."</strong> When the vendor updates or retires a model, re-validate with the same procedure before switching. Pin and record the model ID. Evaluate a candidate model on the accumulated HITL corpus (about 3,900 items per quarter at 300 a week, each labeled by at least three raters; only the fails carry reasons) plus one live weekly cycle run in parallel. That corpus was sampled in strata defined by the current judge's decisions, so comparing a candidate on it needs the weighting from §6.4, item (5). Keeping a pre-validated fallback judge from another vendor means fail-closed does not have to mean a full outage. Track deprecation dates, and the data-retention and processing-region terms of the contract
@@ -739,7 +736,7 @@ judge_charter:
 <strong>Key decisions</strong>
 
 1. <strong>Start in shadow mode.</strong> Run a period in which verdicts are only logged, not enforced, and confirm agreement with humans on production data before enforcing (the paper does not mention this, but in an enterprise it is close to mandatory). Even in shadow mode, run the full generate → judge → revise loop and record the strata that would have been served had the gate been enforced (§7.7, item 4), along with the $K$ curves
-2. <strong>Pick $K$ from your own curves and the break-even rate.</strong> Draw the cumulative pass rate for $k = 0$–$12$ on about 1,000 items, and, per §6.2, look at the defects-served curve as well. Before enforcement, estimate that curve by feeding your measured Spec, Rec, first-draft defect rate, unfixable share and fix rate into the §6.2 simulator, then confirm it with the post-revision stratum once in production. In production, measure the defect share of the post-revision stratum by attempt index and compare it with the break-even rate set by the charter's cost ratio (with a fallback worth 0, value of a good item ÷ (that value + cost of a defect); §7.3, item 2 gives the general form) (§6.2). Decide on intervals: lower $K$ once the lower confidence bound of the marginal step (items first served at $k = K$) exceeds break-even, keep $K$ while its upper bound stays below break-even, and otherwise keep pooling weeks. The marginal step is the smallest sub-stratum of the post-revision stratum, so oversample it. On a synchronous path the latency SLO is the upper bound
+2. <strong>Pick $K$ from your own curves and the break-even rate.</strong> Draw the cumulative pass rate for $k = 0$–$12$ on about 1,000 items, and, per §6.2, look at the defects-served curve as well. Before enforcement, estimate that curve by feeding your measured Spec, Rec, first-draft defect rate, unfixable share and fix rate into the §6.2 simulator, then confirm it with the post-revision stratum once in production. In production, measure the defect share of the post-revision stratum by attempt index and compare it with the break-even rate set by the charter's cost ratio (with a fallback worth 0, value of a good item ÷ (that value + cost of a defect); §7.3, item 2 gives the general form) (§6.2). Base the decision on confidence intervals: lower $K$ once the lower confidence bound of the marginal step (items first served at $k = K$) exceeds break-even, keep $K$ while its upper bound stays below break-even, and otherwise keep pooling weeks. The marginal step is the smallest sub-stratum of the post-revision stratum, so oversample it. On a synchronous path the latency SLO is the upper bound
 3. <strong>Hand reasons to the generator as data.</strong> Instead of concatenating free-text reasons into the prompt, pass them structured as criterion ID, offending span and violated guideline clause. Also check that the judge's wording never leaks into user-facing output
 4. <strong>Keep per-attempt telemetry.</strong> Per-criterion labels and reasons (plus the offending spans and violated clause on a fail), attempt number, the draft's hash and storage location, final decision (served on first pass / served after revision / dropped), the BOM version that made the call, latency and cost (§8.4)
 5. <strong>Monitor generator health and judge health separately.</strong> See the diagnostic table below
@@ -778,11 +775,11 @@ judge_charter:
 
 <strong>Artifacts</strong>: a weekly monitoring report (metrics and bands, defect rates per stratum, qualitative patterns) and a revision history.
 
-<strong>Exit criteria</strong>: ongoing (it never ends) — keep passing the quarterly review.
+<strong>Exit criteria</strong>: this phase does not end; the judge must keep passing the quarterly review.
 
 ### 7.8 Foundation A — artifacts and versioning (the Judge BOM)
 
-A judge's behavior is not determined by its prompt alone. It is determined by the combination of the following artifacts, which we call the Judge BOM (bill of materials).
+A judge's behavior is determined not by its prompt alone but by the combination of the following artifacts, which we call the Judge BOM (bill of materials).
 
 | Artifact | Contents | What changes it |
 |---|---|---|
@@ -815,9 +812,9 @@ Mapping the roles in the paper (writing experts, Human Data Operations, ML engin
 | Incident containment and diagnosis | C | I | R | A | C | C |
 | Notifying users or regulators | C | I | I | C | I | A/R |
 
-It also maps onto existing risk-management frameworks. First, where the reference documents stand (as of October 2026):
+It also maps onto existing risk-management frameworks. As of October 2026, the reference documents stand as follows.
 
-- <strong>US model risk management</strong>: SR 11-7, the US banking supervisory guidance on model risk management (2011), asked for disciplined model development, implementation and use; independent validation (evaluation of conceptual soundness, ongoing monitoring, outcomes analysis); "effective challenge"; and governance. On April 17, 2026 it was superseded by revised interagency guidance from the Federal Reserve, OCC and FDIC (Fed SR 26-2, OCC Bulletin 2026-13), which states that it sets no enforceable standards and <strong>explicitly places generative AI and agentic AI models outside its scope</strong>
+- <strong>US model risk management</strong>: SR 11-7, the US banking supervisory guidance on model risk management (2011), asked for disciplined model development, implementation and use; independent validation (evaluation of conceptual soundness, ongoing monitoring, outcomes analysis); "effective challenge"; and governance. On April 17, 2026 it was superseded by revised interagency guidance from the Federal Reserve, OCC and FDIC (Fed SR 26-2, OCC Bulletin 2026-13), which states that it sets no enforceable standards and explicitly places generative AI and agentic AI models outside its scope
 - <strong>NIST AI RMF</strong>: version 1.0 (2023) organizes AI risk management into four functions — GOVERN, MAP, MEASURE and MANAGE — and has a companion Generative AI Profile (NIST AI 600-1, July 2024). AI RMF 1.0 itself is being revised as part of the White House AI Action Plan
 - <strong>Japan</strong>: the AI Guidelines for Business from MIC and METI (version 1.2, published March 31, 2026)
 - <strong>International standards</strong>: the AI management system standard ISO/IEC 42001:2023
@@ -851,7 +848,7 @@ $$
 
 With the paper's setup, $n_{\text{week}} \approx 300$ and $R \ge 3$, so at least 900 ratings happen every week. $t_{\text{rate}}$ (time per rating) and $w$ (hourly rate) depend on the organization, but budget for the fact that ratings with written reasons take longer than labels alone. At launch you also pay for building the benchmark.
 
-<strong>Label budget.</strong> Translating the statistical requirements in this article into human labeling volume gives the following. Plan rater staffing backwards from it.
+<strong>Label budget.</strong> Translated into human labeling volumes, the statistical requirements above come to roughly the following; plan rater staffing backwards from them.
 
 | Purpose | Rough volume | Frequency | See |
 |---|---|---|---|
@@ -867,7 +864,7 @@ Because the ~300 weekly items are a stratified sample, they double as the labels
 
 There are four levers for inference cost: (1) a cascade in which a cheap judge settles the obvious passes and fails and only uncertain cases go to an expensive judge (re-validate the cascade as a whole, as if it were one judge); (2) ordering criteria and stopping at the first failure (at the price of losing the other criteria's reasons for the revision prompt); (3) batch APIs on pre-generation paths; and (4) caching verdicts keyed by a hash of the draft plus the BOM version.
 
-On the value side, think in terms of (1) the cost of defects avoided (fewer misses × damage per incident), (2) the cost of full human review avoided, and (3) what is often the largest item: <strong>value as a "license to operate"</strong>. The paper notes that free-form text at catalog scale gives up the correctness that earlier template-based systems guaranteed by construction. Read in that context, the judge is the precondition for shipping free-form explanations at all; without it, the feature might not have shipped (our interpretation). Many enterprise generative-AI features share that structure.
+On the value side, think in terms of (1) the cost of defects avoided (fewer misses × damage per incident), (2) the cost of full human review avoided, and (3) what is often the largest item: value as a "license to operate". The paper notes that free-form text at catalog scale gives up the correctness that earlier template-based systems guaranteed by construction. Read in that context, the judge is the precondition for shipping free-form explanations at all; without it, the feature might not have shipped (our interpretation). Many enterprise generative-AI features share that structure.
 
 ### 7.11 Maturity model
 
@@ -879,11 +876,11 @@ On the value side, think in terms of (1) the cost of defects avoided (fewer miss
 | L3 | Operated | Running as gate and critic, per-attempt telemetry, weekly HITL and band check (manual steps included), generator and judge health separated | Automate weekly HITL and the band check |
 | L4 | Lifelong | Weekly HITL, drift → re-tune → human gate, guideline revision loop, auditable BOM | Regular charter reviews; extend to new uses such as reward modeling |
 
-Most enterprises sit between L0 and L1. The first step is not sophisticated optimization but <strong>collecting human labels with reasons and checking the judge against them</strong>.
+Most enterprises sit between L0 and L1. The first step is <strong>collecting human labels with reasons and checking the judge against them</strong>, before any sophisticated optimization.
 
 ### 7.12 A 90-day roadmap (example)
 
-An example of a team starting from L0–L1 reaching L3 on one use case.
+The table below is an example plan for a team starting from L0–L1 to reach L3 on one use case.
 
 | Weeks | Milestone | Main artifacts | Exit criteria |
 |---|---|---|---|
@@ -937,7 +934,7 @@ As long as there is a gate, something will eventually slip through it. Decide th
 
 ### 7.16 Checklist before enforcement and during rollout
 
-Grouped by phase. Items marked <strong>[required]</strong> must be in place before the gate starts actually blocking outputs (enforcement); the rest are completed during the staged rollout and the first quarter after enforcement. Each item ends with the numbers of the key decisions it covers, and the priority table in §7.2 matches this checklist.
+The checklist is grouped by phase. Items marked <strong>[required]</strong> must be in place before the gate starts actually blocking outputs (enforcement); the rest are completed during the staged rollout and the first quarter after enforcement. Each item ends with the numbers of the key decisions it covers, and the priority table in §7.2 matches this checklist.
 
 <strong>Phase 0 and I — charter and ground truth</strong>
 
@@ -988,7 +985,7 @@ Grouped by phase. Items marked <strong>[required]</strong> must be in place befo
 
 ## 8. Implementation sketches
 
-Here are code skeletons for the key points of the framework. None of them depends on a specific LLM API, and the Python code (3.10 or later) has been run locally with dummy components plugged in.
+This section sketches the key points of the framework as code. None of the sketches depends on a specific LLM API, and the Python code (3.10 or later) has been run locally with dummy components plugged in.
 
 ### 8.1 The judge's I/O contract
 
@@ -1045,7 +1042,7 @@ Before handing reasons back to the generator, also check in your application tha
 
 ### 8.2 The RART loop
 
-Algorithm 1, written with its components (judge, meta-judge, reflector) injected. The focus set comes from train and checkpoints are selected on val.
+The code below implements Algorithm 1 with its components (judge, meta-judge, reflector) injected. The focus set comes from train and checkpoints are selected on val.
 
 ```python
 from dataclasses import dataclass
@@ -1118,7 +1115,7 @@ Things you will want to add in production: when the focus set handed to the refl
 
 ### 8.3 The weekly band check (with leave-one-out and bootstrap)
 
-Eq. (5) with the reinforcements from §6.4. `leave_one_out=False, width=2.0` applies the paper's rule literally under our reading: sample standard deviation, an odd number of raters and a fixed panel. This assumes the same rater panel rates every item of the weekly sample. Passing item-level inverse inclusion probabilities as `weights` turns the metrics into production values; leaving them out gives metrics relative to the sampling design (§6.4, item (5)).
+The code below implements Eq. (5) with the reinforcements from §6.4. `leave_one_out=False, width=2.0` applies the paper's rule literally under our reading: sample standard deviation, an odd number of raters and a fixed panel. This assumes the same rater panel rates every item of the weekly sample. Passing item-level inverse inclusion probabilities as `weights` turns the metrics into production values; leaving them out gives metrics relative to the sampling design (§6.4, item (5)).
 
 ```python
 import math
@@ -1202,7 +1199,7 @@ The default `width` of 3.37 keeps the false-alarm rate per check near 5% with th
 
 ### 8.4 Per-attempt telemetry
 
-Keep a record like the following for every judging attempt. The key point is that the BOM version is stamped on it.
+Keep a record like the following, stamped with the BOM version, for every judging attempt.
 
 ```json
 {
@@ -1238,19 +1235,19 @@ Keep a record like the following for every judging attempt. The key point is tha
 
 `attempt` is zero-based, with 0 being the first draft (the same counting as $k$ in §4.2). This example is the second draft: it failed c1 and went to revision, and the item was eventually served after revision. `attempt_outcome` is the result of that attempt (`pass` / `fail_revise` / `fail_drop`), and `item_decision` is the item's final decision, mapped directly to the weekly sampling strata (served on first pass / served after revision / dropped). The final decision is only known when the item's attempts are over, so either backfill it into the attempt records or keep a separate item-level record.
 
-Keep the `evidence_spans` and `guideline_clause` from §8.1 on every fail verdict, and make the draft itself retrievable through `draft_sha256` and `draft_uri` (the example hash is truncated for display; store the full 64-hex digest). The attribution in §6.2 (comparing with the offending span of an earlier draft), the re-judging in §7.14 and the cache key in §7.10 (draft hash plus BOM version) all depend on them. `bom_version` is the immutable version of the whole BOM from §7.8, and `bom` spells out the components that directly shape this verdict (an excerpt; the full manifest is resolved from `bom_version`); the generator's model sits outside the BOM and is logged alongside it. Generator health ($k = 0$ pass rate, mean attempts, drop rate) and judge health (agreement with humans) can then both be computed from this log. Note that judge reasons and quotes can carry personal data from the input verbatim, so subject the retention and masking of logs and drafts to the rules from §7.4.
+Keep the `evidence_spans` and `guideline_clause` from §8.1 on every fail verdict, and make the draft itself retrievable through `draft_sha256` and `draft_uri` (the example hash is truncated for display; store the full 64-hex digest). The attribution in §6.2 (comparing with the offending span of an earlier draft), the re-judging in §7.14 and the cache key in §7.10 (draft hash plus BOM version) all depend on them. `bom_version` is the immutable version of the whole BOM from §7.8, and `bom` spells out the components that directly shape this verdict (an excerpt; the full manifest is resolved from `bom_version`); the generator's model sits outside the BOM and is logged alongside it. Generator health ($k = 0$ pass rate, mean attempts, drop rate) and judge health (agreement with humans) can then both be computed from this log. Judge reasons and quotes can carry personal data from the input verbatim, so subject the retention and masking of logs and drafts to the rules from §7.4.
 
 ---
 
 ## 9. Closing — an evaluator is a product
 
-In our view the value of this paper lies less in RART as a method than in showing, at the scale of a real service, <strong>a concrete template for treating an LLM judge as a component that is operated with accountability</strong>. The judge has owners and versioned artifacts, is checked against humans every week, and when it drifts it is fixed only after human approval. Humans did not leave the loop; <strong>they moved from reviewing everything to maintaining the yardstick</strong>. About 300 explanations a week, each judged by at least three people, anchor hundreds of thousands of verdicts a week.
+In our view the value of this paper lies less in RART as a method than in showing, at the scale of a real service, <strong>a concrete template for treating an LLM judge as a component that is operated with accountability</strong>. The judge has owners and versioned artifacts, is checked against humans every week, and when it drifts it is fixed only after human approval. Humans did not leave the loop; they moved from reviewing everything to maintaining the yardstick. About 300 explanations a week, each judged by at least three people, anchor hundreds of thousands of verdicts a week.
 
-If you are starting the same journey in an enterprise, the first step is not implementing RART. It is <strong>starting to collect human labels with reasons</strong>. With reasons you can see why the judge was wrong, fix the rubric, and decide whether the judge's reasons are safe to hand downstream. No number of labels without reasons lets you skip that step.
+If you are starting the same work in an enterprise, start collecting human labels with reasons before implementing RART. With reasons you can see why the judge was wrong, fix the rubric, and decide whether the judge's reasons are safe to hand downstream. No number of labels without reasons lets you skip that step.
 
-An LLM judge is not a device that replaces human judgment; it is a device that stretches human judgment across hundreds of thousands of decisions. The more you stretch it, the more any distortion is stretched as well. That is why you build the ground truth before you stretch, and keep holding the yardstick against it while you do. "Lifecycle" is the name for that discipline.
+An LLM judge does not replace human judgment; it stretches human judgment across hundreds of thousands of decisions. The further it is stretched, the further any distortion in that judgment spreads. That is why you build the ground truth before you stretch it, and keep holding the human yardstick against the judge while you do. The lifecycle is the discipline for doing that.
 
-Related posts: [How to Measure LLM Output Variance in Chatbots](/en/blog/llm-output-variance-evaluation) (measuring the judge's own variance), [How to Evaluate Conversation UX](/en/blog/conversation-ux-evaluation) (designing evaluation axes and a three-layer measurement pipeline), and [Automatic Optimization of Agent Skills](/en/blog/agent-skills-automatic-optimization) (the broader landscape of text-space optimization).
+Related posts: [How to Measure LLM Output Variance in Chatbots](/en/blog/llm-output-variance-evaluation) (measuring the judge's own variance), [How to Evaluate Conversation UX](/en/blog/conversation-ux-evaluation) (designing evaluation axes and a three-layer measurement pipeline), and [Automatic Optimization of Agent Skills](/en/blog/agent-skills-automatic-optimization) (research on text-space optimization more broadly).
 
 ---
 

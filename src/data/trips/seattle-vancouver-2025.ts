@@ -5,16 +5,16 @@ export const stopsJa: StoryStop[] = [
     id: "narita",
     title: "🛫 成田空港 — 旅の始まり",
     description:
-      "2月の冷たい空気の中、成田空港から太平洋を越える旅が始まった。約9時間のフライトでシアトルへ。窓の外に広がる太平洋を眺めながら、これから待ち受けるテック企業の聖地と大自然に胸を躍らせた。",
+      "2月の冷たい空気の中、成田空港から出発した。シアトルまでは約9時間のフライト。窓の外の太平洋を眺めながら、テック企業の本社が集まる街と、その先の自然を見るのを楽しみにしていた。",
     coordinates: [35.7647, 140.3864],
     zoom: 5,
     images: ["/images/trips/seattle-vancouver-2025/narita-1.webp"],
   },
   {
     id: "pike-place",
-    title: "🐟 Pike Place Market & スターバックス1号店",
+    title: "🐟 Pike Place Market & 最古のスターバックス",
     description:
-      "シアトルに到着してまず向かったのは、Pike Place Market。1907年から続く歴史あるマーケットで、新鮮な魚介類が飛び交う名物の魚投げパフォーマンスに圧倒された。そしてお目当てのスターバックス1号店へ。行列に並んで、ここでしか買えないオリジナルグッズをゲット。",
+      "シアトルに着いて最初に向かったのは Pike Place Market。1907年から続くマーケットで、名物の魚投げには圧倒された。そのあと、お目当ての Original Starbucks へ。現存する最古のスターバックスで、行列に並んで、この店でしか買えないオリジナルグッズを買った。",
     coordinates: [47.6097, -122.3425],
     zoom: 15,
     pathType: "flight",
@@ -30,7 +30,7 @@ export const stopsJa: StoryStop[] = [
     id: "space-needle",
     title: "🗼 Space Needle",
     description:
-      "シアトルのシンボル、Space Needle。地上184メートルの展望デッキからは、ダウンタウンのスカイライン、ピュージェット湾、そして晴れた日にはレーニア山まで見渡せる360度の絶景が広がっていた。2月の澄んだ空気のおかげで視界は抜群だった。",
+      "シアトルのシンボル、Space Needle。高さ184メートルのタワーで、地上約160メートルの展望デッキからはダウンタウンのビル群とピュージェット湾を360度見渡せる。晴れていればレーニア山も見える。2月の澄んだ空気のおかげで、遠くまでよく見えた。",
     coordinates: [47.6205, -122.3493],
     zoom: 15,
     images: [
@@ -42,7 +42,7 @@ export const stopsJa: StoryStop[] = [
     id: "uw",
     title: "🎓 ワシントン大学",
     description:
-      "ゴシック様式の美しい建物が並ぶワシントン大学のキャンパスを散策。特に有名な図書館 Suzzallo Library の荘厳な内装に息をのんだ。まるでハリー・ポッターの世界に迷い込んだような感覚。",
+      "ゴシック様式の建物が並ぶワシントン大学のキャンパスを散策した。図書館 Suzzallo Library の内装は特に見事で、ハリー・ポッターの映画に出てきそうな雰囲気だった。",
     coordinates: [47.6553, -122.3035],
     zoom: 15,
     images: [
@@ -54,7 +54,7 @@ export const stopsJa: StoryStop[] = [
     id: "amazon-hq",
     title: "📦 Amazon本社 — The Spheres",
     description:
-      "Amazon本社のあるSouth Lake Union地区へ。巨大なガラスのドーム「The Spheres」が目を引く。4万本の植物が植えられた温室のようなオフィスは、テック企業のスケールの大きさを実感させてくれた。周辺のDay 1ビルやAmazon Goの無人コンビニも体験。",
+      "Amazon本社のある South Lake Union 地区へ。まず目に入るのが、ガラスのドームが連なる「The Spheres」だ。約4万株の植物が植えられた温室のようなオフィスで、会社の規模の大きさを感じた。近くの Day 1 ビルも見て、無人コンビニの Amazon Go で買い物もしてみた。",
     coordinates: [47.6157, -122.3389],
     zoom: 15,
     images: [
@@ -66,7 +66,7 @@ export const stopsJa: StoryStop[] = [
     id: "microsoft",
     title: "💻 Microsoft本社 — Redmond",
     description:
-      "シアトルから車で東へ約30分のRedmondにあるMicrosoft本社キャンパスへ。広大な敷地にオフィスビルが点在する様子は、まるでひとつの街のよう。ビジターセンターでMicrosoftの歴史とテクノロジーに触れ、テック企業で働くことへのモチベーションが上がった。",
+      "シアトルから車で東へ約30分、Redmond の Microsoft 本社キャンパスへ。広い敷地にオフィスビルが点在していて、ひとつの街のようだった。ビジターセンターで Microsoft の歴史と技術の展示を見て、テック企業で働くことへの意欲が高まった。",
     coordinates: [47.6396, -122.1286],
     zoom: 14,
     pathType: "drive",
@@ -76,7 +76,7 @@ export const stopsJa: StoryStop[] = [
     id: "seattle-bar",
     title: "🍺 シアトルの夜",
     description:
-      "シアトル最後の夜は、Capitol Hill地区のクラフトビールバーへ。ローカルの人々に混ざって太平洋岸北西部ならではのIPAを堪能。シアトルのクラフトビールシーンの層の厚さに驚かされた。",
+      "シアトル最後の夜は、Capitol Hill 地区のクラフトビールバーへ。地元の人たちに混ざって、太平洋岸北西部の IPA を楽しんだ。シアトルのクラフトビールの種類の多さに驚いた。",
     coordinates: [47.6253, -122.3222],
     zoom: 15,
     pathType: "drive",
@@ -90,7 +90,7 @@ export const stopsJa: StoryStop[] = [
     id: "border-crossing",
     title: "🚌 国境越え — シアトルからバンクーバーへ",
     description:
-      "シアトルからバスに乗り、約4時間かけてカナダ国境を越えバンクーバーへ。車窓から見える景色が、都市から郊外、そして雄大な自然へと変わっていく様子が印象的だった。国境でのパスポートチェックを経て、ついにカナダに入国。",
+      "シアトルからバスに乗り、約4時間かけてカナダ国境を越えてバンクーバーへ。車窓の景色が都市から郊外、そして山や森へと変わっていくのが印象に残っている。国境でパスポートチェックを受けて、カナダに入国した。",
     coordinates: [49.0024, -122.756],
     zoom: 9,
     pathType: "drive",
@@ -100,7 +100,7 @@ export const stopsJa: StoryStop[] = [
     id: "lynn-canyon",
     title: "🌲 Lynn Canyon Park",
     description:
-      "バンクーバーに到着して最初に向かったのは、ノースバンクーバーのLynn Canyon Park。無料で渡れる吊り橋から見下ろす渓谷は迫力満点。冬のため観光客も少なく、静寂の中で大自然を独り占めした気分。トレイルを歩きながら、巨大な針葉樹の森林浴を楽しんだ。",
+      "バンクーバーに着いて最初に向かったのは、ノースバンクーバーの Lynn Canyon Park。無料で渡れる吊り橋から見下ろす渓谷は迫力があった。冬で観光客が少なく、静かな森を独り占めしているような気分だった。トレイルを歩きながら、大きな針葉樹に囲まれて森林浴をした。",
     coordinates: [49.339, -123.0189],
     zoom: 14,
     pathType: "drive",
@@ -113,7 +113,7 @@ export const stopsJa: StoryStop[] = [
     id: "lions-gate",
     title: "🌉 Lions Gate Bridge",
     description:
-      "Lynn Canyonの後は、バンクーバーのシンボル的存在であるライオンズ・ゲート・ブリッジへ。全長1,823mの吊り橋は、バラード・インレットとバンクーバー・ダウンタウンを結ぶ。橋の上からはバンクーバーのスカイラインと山々のパノラマが広がり、絶景だった。",
+      "Lynn Canyon の後は、バンクーバーのシンボルのひとつ、ライオンズ・ゲート・ブリッジへ。全長1,823mの吊り橋で、バラード・インレットをまたいでノースショアとバンクーバーのダウンタウンを結んでいる。橋の上からは、バンクーバーのビル群と周りの山々が一望できた。",
     coordinates: [49.31740493348699, -123.14023029015001],
     zoom: 14,
     images: ["/images/trips/seattle-vancouver-2025/lions-gate-1.webp"],
@@ -122,7 +122,7 @@ export const stopsJa: StoryStop[] = [
     id: "canada-place",
     title: "⚓ Canada Place",
     description:
-      "バンクーバーのウォーターフロントに立つCanada Place。白い帆のような屋根が特徴的な建物で、クルーズ船のターミナルでもある。海沿いのプロムナードを歩きながら、対岸のノースバンクーバーの山々と港に停泊する船を眺めた。ここから見る夕焼けは格別だった。",
+      "バンクーバーのウォーターフロントに立つ Canada Place。白い帆のような屋根が目印の建物で、クルーズ船のターミナルも兼ねている。海沿いのプロムナードを歩きながら、対岸のノースバンクーバーの山々と港に停泊する船を眺めた。ここで見た夕焼けがとてもきれいだった。",
     coordinates: [49.2888, -123.1111],
     zoom: 15,
     pathType: "drive",
@@ -132,7 +132,7 @@ export const stopsJa: StoryStop[] = [
     id: "gastown",
     title: "⏰ Gastown — 蒸気時計",
     description:
-      "バンクーバー発祥の地、Gastown。レンガ造りの歴史的な街並みが美しい。名物の蒸気時計（Steam Clock）は15分ごとに蒸気で音を奏でる。夜のGastownはライトアップされて雰囲気抜群。おしゃれなレストランやバーも多く、バンクーバー最後の夜を楽しんだ。",
+      "バンクーバー発祥の地とされる Gastown。レンガ造りの古い建物が並ぶ。名物の蒸気時計（Steam Clock）は、15分ごとに蒸気で汽笛のメロディーを鳴らす。夜の Gastown はライトアップされていて雰囲気がよく、レストランやバーも多い。ここでバンクーバー最後の夜を過ごした。",
     coordinates: [49.2844, -123.1088],
     zoom: 16,
     images: [
@@ -144,7 +144,7 @@ export const stopsJa: StoryStop[] = [
     id: "narita-return",
     title: "🛬 帰国 — また来よう、太平洋岸北西部",
     description:
-      "バンクーバーから約10時間のフライトで成田に帰国。テック企業の最前線とカナダの大自然、全く異なる二つの顔を持つ太平洋岸北西部の旅は最高の体験だった。次はもっとゆっくり、夏に来たい。",
+      "バンクーバーから約10時間のフライトで成田に帰国。テック企業の本社が集まるシアトルと、山と森がすぐそばにあるバンクーバー。同じ太平洋岸北西部でも雰囲気のまったく違う2つの街を回れて、本当に楽しい旅だった。次は夏に、もっとゆっくり来たい。",
     coordinates: [35.7647, 140.3864],
     zoom: 5,
     pathType: "flight",
@@ -157,7 +157,7 @@ export const stopsEn: StoryStop[] = [
     id: "narita",
     title: "🛫 Narita Airport — The Journey Begins",
     description:
-      "In the cold February air, the journey across the Pacific began at Narita Airport. A roughly 9-hour flight to Seattle. Watching the vast Pacific Ocean through the window, my heart raced with anticipation for the tech mecca and wilderness that awaited.",
+      "Left Narita Airport in the cold February air. The flight to Seattle took about 9 hours. Watching the Pacific through the window, I was looking forward to the city full of tech company headquarters and the nature beyond it.",
     coordinates: [35.7647, 140.3864],
     zoom: 5,
     images: ["/images/trips/seattle-vancouver-2025/narita-1.webp"],
@@ -166,7 +166,7 @@ export const stopsEn: StoryStop[] = [
     id: "pike-place",
     title: "🐟 Pike Place Market & Original Starbucks",
     description:
-      "First stop in Seattle: Pike Place Market. This historic market, operating since 1907, overwhelmed me with its famous fish-throwing performances. Then on to the original Starbucks store — waited in line and grabbed exclusive merchandise you can only get here.",
+      "First stop in Seattle: Pike Place Market, open since 1907. The famous fish throwing was overwhelming to watch. Then on to the Original Starbucks, the oldest Starbucks still operating, where I waited in line and bought merchandise sold only at that shop.",
     coordinates: [47.6097, -122.3425],
     zoom: 15,
     pathType: "flight",
@@ -182,7 +182,7 @@ export const stopsEn: StoryStop[] = [
     id: "space-needle",
     title: "🗼 Space Needle",
     description:
-      "Seattle's iconic Space Needle. The observation deck at 184 meters offered a 360-degree panorama of the downtown skyline, Puget Sound, and on clear days, Mount Rainier. The crisp February air made for exceptional visibility.",
+      "The Space Needle, Seattle's landmark. The tower is 184 meters tall, and from the observation deck about 160 meters up you get a 360-degree view of the downtown towers and Puget Sound, plus Mount Rainier on clear days. The crisp February air meant I could see a long way.",
     coordinates: [47.6205, -122.3493],
     zoom: 15,
     images: [
@@ -194,7 +194,7 @@ export const stopsEn: StoryStop[] = [
     id: "uw",
     title: "🎓 University of Washington",
     description:
-      "Strolled through the beautiful Gothic architecture of the University of Washington campus. The majestic interior of Suzzallo Library was absolutely breathtaking — like stepping into the world of Harry Potter.",
+      "Walked around the University of Washington campus and its Gothic buildings. The interior of Suzzallo Library stood out; it looked like something out of a Harry Potter film.",
     coordinates: [47.6553, -122.3035],
     zoom: 15,
     images: [
@@ -206,7 +206,7 @@ export const stopsEn: StoryStop[] = [
     id: "amazon-hq",
     title: "📦 Amazon HQ — The Spheres",
     description:
-      "Headed to the South Lake Union district, home of Amazon HQ. The massive glass domes of 'The Spheres' were stunning — a greenhouse-like office housing 40,000 plants that truly showcases the scale of tech companies. Also experienced the Day 1 building and an Amazon Go cashierless store.",
+      "Headed to South Lake Union, where Amazon has its headquarters. The first thing you notice is The Spheres, a cluster of glass domes: a greenhouse-like office with about 40,000 plants, and a good sense of how big the company is. I also saw the Day 1 building nearby and shopped at an Amazon Go cashierless store.",
     coordinates: [47.6157, -122.3389],
     zoom: 15,
     images: [
@@ -218,7 +218,7 @@ export const stopsEn: StoryStop[] = [
     id: "microsoft",
     title: "💻 Microsoft HQ — Redmond",
     description:
-      "About 30 minutes east of Seattle lies Microsoft's headquarters campus in Redmond. Office buildings scattered across the vast grounds made it feel like its own small city. The Visitor Center showcased Microsoft's history and technology, boosting my motivation for working in tech.",
+      "Drove about 30 minutes east of Seattle to Microsoft's headquarters campus in Redmond. Office buildings are spread across the large grounds, so it felt like a small town. The Visitor Center's exhibits on Microsoft's history and technology made me more motivated to work in tech.",
     coordinates: [47.6396, -122.1286],
     zoom: 14,
     pathType: "drive",
@@ -228,7 +228,7 @@ export const stopsEn: StoryStop[] = [
     id: "seattle-bar",
     title: "🍺 Seattle Nights",
     description:
-      "Spent the last night in Seattle at a craft beer bar in the Capitol Hill district. Mingling with locals while enjoying Pacific Northwest IPAs. The depth of Seattle's craft beer scene was truly impressive.",
+      "Spent my last night in Seattle at a craft beer bar in Capitol Hill, drinking Pacific Northwest IPAs among the locals. I was surprised by how many different craft beers Seattle has.",
     coordinates: [47.6253, -122.3222],
     zoom: 15,
     pathType: "drive",
@@ -242,7 +242,7 @@ export const stopsEn: StoryStop[] = [
     id: "border-crossing",
     title: "🚌 Border Crossing — Seattle to Vancouver",
     description:
-      "Boarded a bus from Seattle for the roughly 4-hour journey across the Canadian border to Vancouver. Watching the scenery transform from urban to suburban to majestic wilderness through the window was mesmerizing. After passport control, finally set foot in Canada.",
+      "Took a bus from Seattle, about 4 hours across the Canadian border to Vancouver. I remember the view outside changing from city to suburbs to mountains and forest. After passport control at the border, I was in Canada.",
     coordinates: [49.0024, -122.756],
     zoom: 9,
     pathType: "drive",
@@ -252,7 +252,7 @@ export const stopsEn: StoryStop[] = [
     id: "lynn-canyon",
     title: "🌲 Lynn Canyon Park",
     description:
-      "First destination in Vancouver: Lynn Canyon Park in North Vancouver. The free suspension bridge offered thrilling views of the canyon below. With fewer tourists in winter, it felt like having the wilderness all to ourselves. Hiked the trails surrounded by towering conifers.",
+      "First stop in Vancouver: Lynn Canyon Park in North Vancouver. Looking down at the canyon from the free suspension bridge was a rush. It was winter and there were few tourists, so I had the quiet forest almost to myself. I walked the trails among tall conifers.",
     coordinates: [49.339, -123.0189],
     zoom: 14,
     pathType: "drive",
@@ -265,7 +265,7 @@ export const stopsEn: StoryStop[] = [
     id: "lions-gate",
     title: "🌉 Lions Gate Bridge",
     description:
-      "After Lynn Canyon, headed to Lions Gate Bridge—an iconic symbol of Vancouver. The 1,823m suspension bridge connects the North Shore to downtown Vancouver. From the bridge, a stunning panorama of Vancouver's skyline and surrounding mountains unfolded.",
+      "After Lynn Canyon, on to Lions Gate Bridge, one of Vancouver's landmarks. The 1,823m suspension bridge crosses Burrard Inlet, linking the North Shore with downtown Vancouver. From the bridge you can see the city's towers and the mountains around them.",
     coordinates: [49.31740493348699, -123.14023029015001],
     zoom: 14,
     images: ["/images/trips/seattle-vancouver-2025/lions-gate-1.webp"],
@@ -274,7 +274,7 @@ export const stopsEn: StoryStop[] = [
     id: "canada-place",
     title: "⚓ Canada Place",
     description:
-      "Canada Place on Vancouver's waterfront, with its distinctive sail-like roof, also serves as a cruise ship terminal. Walking along the seaside promenade, gazing at the North Vancouver mountains and ships docked in the harbor. The sunset from here was spectacular.",
+      "Canada Place stands on Vancouver's waterfront. Its white, sail-like roof makes it easy to spot, and it doubles as a cruise ship terminal. I walked the seaside promenade looking across at the North Vancouver mountains and the ships in the harbor. The sunset from here was beautiful.",
     coordinates: [49.2888, -123.1111],
     zoom: 15,
     pathType: "drive",
@@ -284,7 +284,7 @@ export const stopsEn: StoryStop[] = [
     id: "gastown",
     title: "⏰ Gastown — Steam Clock",
     description:
-      "Gastown, the birthplace of Vancouver. Beautiful historic brick buildings line the streets. The famous Steam Clock plays sounds powered by steam every 15 minutes. Gastown lit up at night was incredibly atmospheric. Enjoyed the last Vancouver evening at trendy restaurants and bars.",
+      "Gastown, often called the birthplace of Vancouver, with streets of old brick buildings. Its famous Steam Clock plays a tune on steam whistles every 15 minutes. At night the area is lit up and has a great atmosphere, with plenty of restaurants and bars. I spent my last evening in Vancouver here.",
     coordinates: [49.2844, -123.1088],
     zoom: 16,
     images: [
@@ -296,7 +296,7 @@ export const stopsEn: StoryStop[] = [
     id: "narita-return",
     title: "🛬 Homeward Bound — Until Next Time, Pacific Northwest",
     description:
-      "A roughly 10-hour flight from Vancouver back to Narita. This journey through the cutting edge of tech and Canada's magnificent wilderness — two completely different faces of the Pacific Northwest — was an unforgettable experience. Next time, a longer stay in summer.",
+      "A flight of about 10 hours from Vancouver back to Narita. Seattle, full of tech company headquarters, and Vancouver, with mountains and forest close by: two cities in the same Pacific Northwest with very different feels. It was a really fun trip. Next time I want to come in summer and stay longer.",
     coordinates: [35.7647, 140.3864],
     zoom: 5,
     pathType: "flight",

@@ -1,25 +1,22 @@
 ---
-title: "Vector Database Internals — The Algorithms Behind Approximate Nearest Neighbor Search"
+title: "Vector Database Internals — Algorithms for Approximate Nearest Neighbor Search"
 date: "2026-04-17"
-description: "A deep dive into the algorithms powering modern vector databases: distance metrics, IVF, Product Quantization, HNSW, and DiskANN, grounded in the actual implementations of FAISS, Milvus, pgvector, and Qdrant."
+description: "How the approximate nearest neighbor (ANN) search at the core of vector databases works, from distance metrics through IVF, Product Quantization, HNSW, and DiskANN, following the papers and implementations such as FAISS."
 tags: ["Vector Database", "ANN", "HNSW", "Embedding", "RAG"]
 ---
 
-The rise of large language models (LLMs) turned the humble "vector database" into a core piece of modern infrastructure: it powers semantic search, recommendation, and Retrieval-Augmented Generation (RAG). Underneath the REST API, however, a vector database is solving a decades-old problem — <strong>Approximate Nearest Neighbor Search (ANN) in high-dimensional spaces</strong> — with algorithms that mix combinatorial data structures, quantization, and careful systems engineering.
+With the spread of large language models (LLMs), vector databases, which store and search embedding vectors, have become a common foundation for semantic search, recommendation, and Retrieval-Augmented Generation (RAG). The problem they solve internally has been studied for decades: <strong>Approximate Nearest Neighbor Search (ANN) in high-dimensional spaces</strong>.
 
-This article builds up the core algorithms layer by layer, starting from brute force, climbing through <strong>IVF (Inverted File)</strong>, <strong>Product Quantization (PQ)</strong>, <strong>HNSW (Hierarchical Navigable Small World)</strong>, and finally <strong>DiskANN (Vamana)</strong> — with references grounded in real code from FAISS, Milvus, pgvector, and Qdrant.
+This article explains the core algorithms in order, starting from brute force and moving through IVF (Inverted File), Product Quantization (PQ), HNSW (Hierarchical Navigable Small World), and DiskANN (Vamana). Design decisions are discussed with reference to the papers and to the code of open-source implementations (FAISS, Milvus, pgvector, Qdrant).
 
-> <strong>A mental model to carry through</strong>
+> <strong>The big picture, as a library</strong>
 >
-> Picture a vast library.
+> Imagine looking for books similar to one you have, in a huge library. Brute force means picking up every book and checking how similar it is; with a billion books, you never finish.
 >
-> - <strong>Brute force</strong> is a librarian picking up <em>every</em> book to check how similar it is — hopeless at a billion books.
-> - <strong>IVF</strong> is a librarian who first glances at the <em>shelf labels</em>, walks only to the 10 shelves whose labels are closest to the book you're looking for, and searches there.
-> - <strong>Product Quantization</strong> summarises each book's cover into <em>64 colour codes chosen from a 256-colour palette</em>, then compares colour codes instead of covers — blazingly fast, slightly lossy.
-> - <strong>HNSW</strong> is a social graph of books linked to "books I'm friends with," navigated top-down from sparse world map to dense street map.
-> - <strong>DiskANN</strong> is the same graph but <strong>living on SSD</strong>. Only <em>low-resolution thumbnails of every book</em> (PQ-compressed vectors) stay in RAM; the full originals are pulled from disk only when a candidate looks promising.
->
-> The rest of the article is the careful version of this story.
+> - <strong>IVF</strong>: each shelf has a label card. You pick the 10 shelves whose labels are closest to your book and search only those.
+> - <strong>Product Quantization</strong>: each book's cover is summarized as 64 color codes chosen from a 256-color palette. Comparing codes instead of covers is much faster, at the cost of some accuracy.
+> - <strong>HNSW</strong>: similar books are linked as "friends," and you follow the links toward your target, zooming from a sparse world map down to a dense street map.
+> - <strong>DiskANN</strong>: the same network of links, stored on SSD. RAM holds only a compressed copy of every book (PQ-compressed vectors), and the originals are read from SSD only for promising candidates.
 
 <ArticleVideo slug="vector-database-internals" />
 
@@ -27,7 +24,7 @@ This article builds up the core algorithms layer by layer, starting from brute f
 
 ### 1.1 Embedding vectors
 
-An embedding maps text / image / audio into a <strong>fixed-dimensional real vector</strong> such that semantic similarity corresponds to geometric closeness. Typical dimensionalities:
+An embedding maps text, images, or audio to a <strong>fixed-dimensional real vector</strong> so that items with similar meaning end up close together. Typical dimensionalities:
 
 | Model | Dimension | Preferred distance |
 | --- | --- | --- |
@@ -37,7 +34,7 @@ An embedding maps text / image / audio into a <strong>fixed-dimensional real vec
 | BGE-M3 | 1024 | cosine |
 | CLIP ViT-L/14 | 768 | cosine |
 
-Dimension $d$ is commonly above 1000, and at that scale <strong>brute-force search stops being practical</strong>.
+Dimension $d$ is often above 1000, and at that scale brute-force search over many vectors is no longer practical.
 
 ### 1.2 Distances and similarities
 
@@ -61,27 +58,27 @@ $$
 \cos(\mathbf{x}, \mathbf{y}) = \frac{\mathbf{x} \cdot \mathbf{y}}{\|\mathbf{x}\|\,\|\mathbf{y}\|}
 $$
 
-When every vector is normalised to unit length,
+When every vector is normalized to unit length,
 
 $$
 d_{L2}(\mathbf{x}, \mathbf{y})^2 = 2 - 2\,\mathbf{x}\cdot\mathbf{y}
 $$
 
-so <strong>L2, cosine, and inner product become equivalent up to monotonic transformations</strong> (transformations that preserve order, so the ranking of results does not change). Most ANN libraries internally use L2 or IP, with optional pre-normalisation.
+so <strong>L2, cosine, and inner product are related by monotonic transformations</strong> (transformations that preserve order), and all three give the same ranking. Most ANN libraries therefore use L2 or IP internally and switch between the three by whether vectors are normalized first.
 
 ### 1.3 The curse of dimensionality
 
-High-dimensional geometry defies low-dimensional intuition:
+In high dimensions, intuition from low dimensions stops working:
 
-- <strong>Distance concentration</strong> — the ratio $\max/\min$ of pairwise distances converges to 1; "far" and "near" points become relatively indistinguishable.
-- <strong>Volume concentration</strong> — almost the entire volume of a unit ball lives near its surface.
-- <strong>Space partitioning fails</strong> — axis-aligned structures like kd-trees (a classical binary-tree index that recursively splits space along coordinate axes) visit essentially every node once $d \gtrsim 20$.
+- <strong>Distance concentration</strong>: the ratio $\max/\min$ of pairwise distances approaches 1, so the gap between the nearest and a far point becomes relatively small.
+- <strong>Volume concentration</strong>: almost all of the volume of a unit ball lies near its surface.
+- <strong>Space partitioning breaks down</strong>: axis-aligned structures like kd-trees (a classical index that recursively splits space in two along coordinate axes) work well in low dimensions, but once $d \gtrsim 20$ they visit about as many nodes as brute force.
 
-These facts force us to <strong>relax to approximate</strong> search — aiming for, say, 95% recall (the fraction of the true top-k that we actually return) rather than exact correctness. This is the premise of ANN.
+So practical vector search gives up on exact answers and <strong>solves the problem approximately</strong>, aiming for 95% recall or better (the fraction of the true top-k that the search actually returns). This is the premise of ANN.
 
 ## 2. Baseline: brute-force (Flat)
 
-Always start with the baseline. In FAISS this is `IndexFlatL2` / `IndexFlatIP`.
+If brute force is fast enough for your data, use it. In FAISS this is `IndexFlatL2` / `IndexFlatIP`.
 
 ```python
 # Naive brute-force search (pseudocode)
@@ -91,23 +88,21 @@ def search(query: np.ndarray, xb: np.ndarray, k: int):
     return idx[np.argsort(dists[idx])]
 ```
 
-Complexity is $O(Nd)$. With $N=10^6$, $d=1024$, float32, a single query streams <strong>4 GB of memory</strong> (roughly the byte count of a full-HD movie — per query). With good SIMD (AVX-512 / NEON; CPU instructions that process many numbers in parallel in a single op) and BLAS-style GEMM (highly tuned matrix-multiply routines), brute force can still beat HNSW up to $N \approx 10^5$. That is exactly why FAISS keeps `IndexFlat` as the gold-standard reference.
+Complexity is $O(Nd)$. With $N=10^6$, $d=1024$, and float32, every query scans 4 GB of memory. Even so, with SIMD (AVX-512 / NEON; CPU instructions that compute on many numbers at once) and BLAS-style GEMM (highly tuned matrix-multiply routines), brute force can be faster than HNSW up to about $N \approx 10^5$. That is why FAISS keeps `IndexFlat` as the reference for exact results.
 
-ANN reduces that $O(Nd)$ by either <strong>(a) visiting fewer vectors</strong> or <strong>(b) compressing each distance computation</strong>. IVF does (a); PQ does (b); HNSW does (a) differently; DiskANN combines both.
+ANN reduces that $O(Nd)$ in one of two ways: <strong>(a) visiting fewer vectors</strong> or <strong>(b) making each distance computation cheaper</strong>. IVF does (a) and PQ does (b). HNSW achieves (a) by a different method from IVF, and DiskANN combines (a) and (b).
 
 ## 3. IVF: partition the space
 
-> <strong>TL;DR</strong>: don't look at everything — <em>pre-sort the data into buckets of similar items</em>, and at query time open only the few buckets closest to the query. Fast, but if the right answer happens to sit in a bucket you didn't open, you miss it.
+> Instead of checking everything, check only the nearby shelves. When building the index, the data is grouped into clusters of similar items; at query time only the few clusters closest to the query are opened and searched exhaustively. The weakness is that a true answer in a cluster you didn't open is missed.
 
 ### 3.1 Coarse quantization via k-means
 
-IVF (inverted file index) adapts the classic text inverted index to vectors:
+The name IVF (inverted file index) comes from the inverted index used in text search.
 
-> <strong>Analogy</strong>: finding a good ramen shop in Tokyo. You don't walk all 23 wards; you first pick "the 3 wards closest to my query location," then brute-force within them. IVF first coarsely picks a few <em>cells</em> (centroids closest to the query), then searches exhaustively inside them.
-
-1. <strong>Train</strong>: run k-means on the dataset, producing $n_{\text{list}}$ centroids (the "average vectors" that act as a representative for each cluster) $\{\mathbf{c}_1, \dots, \mathbf{c}_{n_{\text{list}}}\}$ (typically $n_{\text{list}} \approx \sqrt{N}$).
-2. <strong>Build</strong>: assign every vector to its nearest centroid; each centroid owns a <strong>posting list</strong> (the list of IDs of points that belong to that centroid — structurally identical to the list of page numbers filed under one entry in a book's back-of-book index).
-3. <strong>Search</strong>: pick the top-$n_{\text{probe}}$ centroids closest to the query; scan only the corresponding posting lists.
+1. Train: run k-means on the dataset, producing $n_{\text{list}}$ centroids (representative vectors for the center of each cluster) $\{\mathbf{c}_1, \dots, \mathbf{c}_{n_{\text{list}}}\}$ (typically $n_{\text{list}} \approx \sqrt{N}$).
+2. Build: assign every vector to its nearest centroid and store its ID in that centroid's <strong>posting list</strong> (like the list of page numbers under one entry in a book's index).
+3. Search: pick the top-$n_{\text{probe}}$ centroids closest to the query; scan only the corresponding posting lists.
 
 ```mermaid
 graph LR
@@ -122,27 +117,27 @@ graph LR
 
 ### 3.2 Parameter design
 
-- <strong>`nlist`</strong> — larger means shorter posting lists and faster search, but you also need a larger `nprobe` to maintain recall. Rule of thumb: $4\sqrt{N} \le n_{\text{list}} \le 16\sqrt{N}$.
-- <strong>`nprobe`</strong> — number of posting lists visited. `nprobe=1` is very fast but low recall because the true nearest neighbour might sit in a cell you didn't open; 10-128 typically yields 90-99% recall.
-- <strong>Training data</strong> — FAISS's clustering defaults are `min_points_per_centroid = 39` and `max_points_per_centroid = 256`; roughly 39-256 × `nlist` samples is the comfort zone (below it you get a warning, above it FAISS auto-subsamples).
+- <strong>`nlist`</strong>: larger values mean shorter posting lists and faster search, but you also need a larger `nprobe` to keep the same recall. Rule of thumb: $4\sqrt{N} \le n_{\text{list}} \le 16\sqrt{N}$.
+- <strong>`nprobe`</strong>: the number of posting lists visited. `nprobe=1` is very fast but has low recall, because the true nearest neighbor might sit in a cell you didn't open; 10-128 typically gives 90-99% recall.
+- <strong>Training data</strong>: FAISS's clustering defaults are `min_points_per_centroid = 39` and `max_points_per_centroid = 256`. About 39-256 × `nlist` samples is the target; below that FAISS warns, and above it FAISS subsamples automatically.
 
 ### 3.3 Limits of IVF alone
 
-Inside each cell, IVF is still brute force. Long posting lists become the bottleneck, which motivates combining IVF with Product Quantization (FAISS's `IndexIVFPQ`).
+IVF still uses brute force inside each cell, so search stays slow when a cell holds many points. That is why IVF is usually combined with Product Quantization, covered next (FAISS's `IndexIVFPQ`).
 
 ## 4. Product Quantization (PQ)
 
-> <strong>TL;DR</strong>: instead of comparing full vectors, compare <em>compressed summary codes</em>. Each vector is sliced into short chunks and each chunk is replaced by the nearest entry in a 256-entry palette, shrinking a kilobyte-sized vector to a few dozen bytes. Memory drops, distance math becomes table lookups, and you trade a bit of accuracy for one to two orders of magnitude in speed.
+> Instead of comparing full vectors, compare short summary codes. Each vector is cut into short chunks, and each chunk is labeled with the nearest entry from a 256-entry palette, compressing a vector to a few dozen bytes of integers. Memory use drops and distance computation becomes orders of magnitude faster, at the cost of some accuracy lost to the coarser summary.
 
 ### 4.1 Break the vector into sub-codes
 
-PQ<sup>[1]</sup> (Jégou et al., 2011) <strong>compresses high-dimensional vectors into short integer codes</strong> to accelerate distance computation.
+PQ<sup>[1]</sup> (Jégou et al., 2011) <strong>compresses high-dimensional vectors into short integer codes</strong> to make distance computation faster.
 
 1. Split $\mathbf{x} \in \mathbb{R}^d$ into $m$ subvectors: $\mathbf{x} = [\mathbf{x}^{(1)}, \dots, \mathbf{x}^{(m)}]$, each $\in \mathbb{R}^{d/m}$.
-2. In each subspace run an independent k-means, producing $k^* = 256$ centroids $\{\mathbf{c}^{(i)}_1, \dots, \mathbf{c}^{(i)}_{256}\}$ — these are the <strong>codebook</strong> (think of it as a per-subspace 256-colour palette).
-3. Replace each $\mathbf{x}^{(i)}$ with the <strong>8-bit ID</strong> of its nearest centroid.
+2. In each subspace, run k-means independently to get $k^* = 256$ centroids $\{\mathbf{c}^{(i)}_1, \dots, \mathbf{c}^{(i)}_{256}\}$. These form the codebook (a 256-color palette per subspace).
+3. Replace each $\mathbf{x}^{(i)}$ with the 8-bit ID of its nearest centroid.
 
-A $d$-dim float32 vector ($4d$ bytes) shrinks to <strong>$m$ bytes</strong>. For $d=1024$, $m=64$ that's 4096 → 64 bytes — <strong>64× compression</strong>.
+A $d$-dim float32 vector ($4d$ bytes) shrinks to $m$ bytes. For $d=1024$ and $m=64$, that is 4096 bytes down to 64 bytes, 64× compression.
 
 ```mermaid
 graph TD
@@ -159,21 +154,19 @@ graph TD
 
 ### 4.2 Asymmetric Distance Computation (ADC)
 
-The speed trick of PQ is <strong>Asymmetric Distance Computation</strong>: the query stays uncompressed, and we precompute a lookup table per subspace.
+PQ is fast because of Asymmetric Distance Computation: the query stays uncompressed, and a lookup table (LUT) is computed per subspace at query time.
 
 1. Split the query: $\mathbf{q} = [\mathbf{q}^{(1)}, \dots, \mathbf{q}^{(m)}]$.
 2. For each subspace $i$, precompute distances to all 256 centroids:
    $$
    \text{LUT}_i[j] = \|\mathbf{q}^{(i)} - \mathbf{c}^{(i)}_j\|^2, \quad j \in \{0, \dots, 255\}
    $$
-3. For a stored vector with code $(id_1, \dots, id_m)$, the approximate distance is just <strong>$m$ table lookups summed</strong>:
+3. For a stored vector with code $(id_1, \dots, id_m)$, the approximate distance is just $m$ table lookups summed:
    $$
    d(\mathbf{q}, \mathbf{x})^2 \approx \sum_{i=1}^{m} \text{LUT}_i[id_i]
    $$
 
-<strong>Zero float multiplications per distance</strong> after the lookup tables are built; with $m=64$ each stored code needs 64 byte-indexed table lookups and additions of the table values. SIMD fast-scan kernels such as FAISS `pq4_fast_scan` can scan very large batches quickly, but the exact throughput depends on code size, CPU SIMD width, memory layout, and recall settings.
-
-<strong>In short</strong>: PQ turns distance computation from "$d$-dimensional subtraction and squaring" into "summing values from a precomputed table", and that substitution is the whole reason PQ is orders of magnitude faster.
+Once the lookup tables are built, <strong>a distance needs zero float multiplications</strong>. Summing table values replaces the $d$-dimensional subtract-and-square, which is why PQ is orders of magnitude faster. With $m=64$, each stored code needs 64 byte-indexed table lookups and additions of the table values. SIMD fast-scan kernels such as FAISS `pq4_fast_scan` can scan very large batches quickly, but the exact throughput depends on code size, CPU SIMD width, memory layout, and recall settings.
 
 <ProductQuantizationVisualizer />
 
@@ -184,39 +177,40 @@ $$
 \text{LUT}_1 = [\,0,\ 2,\ 4,\ 2\,]
 $$
 
-(each entry is $\|\mathbf{q}^{(1)} - \mathbf{c}^{(1)}_j\|^2$). Similarly $\text{LUT}_2 = [2, 0, 2, 4]$. A stored vector with PQ code $(id_1, id_2) = (0, 1)$ (so $\hat{\mathbf{x}} \approx [1, 0, 0, 1]$) has approximate squared distance $\text{LUT}_1[0] + \text{LUT}_2[1] = 0 + 0 = 0$ — <strong>two table lookups and one add</strong>, no multiplication. Real indices simply scale this up: 64 tables of 256 entries each, executed 16-32 codes wide in SIMD.
+(each entry is $\|\mathbf{q}^{(1)} - \mathbf{c}^{(1)}_j\|^2$). If subspace 2 uses the same codebook, $\text{LUT}_2 = [2, 0, 2, 4]$. A stored vector with PQ code $(id_1, id_2) = (0, 1)$ (so $\hat{\mathbf{x}} \approx [1, 0, 0, 1]$) has approximate squared distance $\text{LUT}_1[0] + \text{LUT}_2[1] = 0 + 0 = 0$: two table lookups and one add, with no multiplication. A real index has 64 tables of 256 entries each and runs the same operation over 16-32 codes at a time with SIMD.
 
 ### 4.3 Error and tuning
 
-PQ is lossy. Practical knobs:
+PQ is lossy, so it introduces error. Rules of thumb for the parameters:
 
-- <strong>`m`</strong> — number of sub-quantizers. Must divide $d$; $d/m$ in the range 4-16 balances accuracy and speed.
-- <strong>`nbits`</strong> — typically 8 (256 centroids). 16 bits (65k centroids) exists but codebook training gets expensive.
-- <strong>Optimised Product Quantization (OPQ)</strong><sup>[2]</sup> — apply an orthogonal rotation $R$ before splitting, balancing variance across subspaces. Recovers several percentage points of recall.
+- <strong>`m`</strong>: the number of sub-quantizers. It must divide $d$; $d/m$ between 4 and 16 balances accuracy and speed.
+- <strong>`nbits`</strong>: usually 8 (256 centroids). 16 bits (65,536 centroids) is possible, but codebook training becomes expensive.
+- <strong>Optimized Product Quantization (OPQ)</strong><sup>[2]</sup>: rotate vectors with an orthogonal matrix $R$ before splitting, to even out the variance across subspaces. This improves recall by a few to 10 percentage points.
 
-### 4.4 IVFPQ: the workhorse
+### 4.4 IVFPQ: two stages
 
-FAISS's `IndexIVFPQ` combines both:
+One of the most widely used configurations in practical vector databases is IVF + PQ, available in FAISS as `IndexIVFPQ`:
 
-- IVF narrows the query to a few cells.
-- Each cell stores PQ codes of the <strong>residual</strong> $\mathbf{x} - \mathbf{c}$ (residual PQ), which concentrates codebook capacity.
+- IVF narrows the search to a few cells.
+- Vectors inside each cell are stored as PQ codes.
+- PQ encodes not the vector itself but the residual $\mathbf{x} - \mathbf{c}$ from the cell centroid (<strong>residual PQ</strong>).
 
-<strong>Geometric intuition for the residual.</strong> A raw vector $\mathbf{x}$ can live anywhere in the big ambient space, but once you subtract its cell centroid $\mathbf{c}$, the residual $\mathbf{x} - \mathbf{c}$ only describes <strong>the offset inside that cell</strong> — a much smaller, more concentrated distribution. The same 256 PQ centroids can now resolve finer detail, so quantisation error drops. The more cells you have ($n_{\text{list}}$), the tighter the residual distribution becomes.
+The reason for encoding the residual is geometric. A raw vector $\mathbf{x}$ can sit anywhere in the full space, but after subtracting its cell centroid $\mathbf{c}$, the residual $\mathbf{x} - \mathbf{c}$ only describes the offset inside that cell, which is a small vector. Because the distribution is tighter, the same 256 centroids can capture finer differences and quantization error goes down. The more cells ($n_{\text{list}}$), the stronger this effect.
 
-`IndexIVFPQ` scales to $N=10^9$ (≈ a billion vectors — roughly 100 × the number of articles in English Wikipedia) on a single machine, with per-query latency ranging from a few ms to a few tens of ms depending on hardware, `nprobe`, and recall target (see the FAISS wiki [Indexing 1G vectors](https://github.com/facebookresearch/faiss/wiki/Indexing-1G-vectors) page). Recall tends to be lower than HNSW, but memory usage and GPU amenability win in many production settings (FAISS-GPU, cost-constrained, disk-backed).
+`IndexIVFPQ` scales to $N=10^9$ (a billion vectors) on a single machine, with per-query latency from a few ms to a few tens of ms when `nprobe` is kept small (the exact numbers depend heavily on hardware, `nprobe`, and the recall target; see the FAISS wiki page [Indexing 1G vectors](https://github.com/facebookresearch/faiss/wiki/Indexing-1G-vectors)). Recall tends to be lower than HNSW, but because it uses little memory and runs on GPUs, it is the first choice for GPU search (FAISS GPU), for environments without much memory, and for setups that also use disk.
 
-<strong>What goes wrong in production.</strong> If your training data doesn't match the serving distribution, you can hit <strong>codebook collapse</strong> — most vectors get assigned to a handful of centroids and the rest sit empty, tanking recall. Stay above FAISS's `min_points_per_centroid` warning, and <strong>train on samples drawn from the same distribution you'll serve</strong> (e.g. if production is multilingual BGE, match the language mix at training time). IVF has a cousin problem: if data is topic-skewed, cell sizes get lopsided, and a few long posting lists dominate p99 latency even at modest `nprobe`. Track max/min cell size as a metric so you notice before users do.
+<strong>Production pitfalls.</strong> If the training data doesn't match the serving distribution, you can get <strong>codebook collapse</strong>: almost all vectors are assigned to a handful of centroids and the rest stay empty, and recall drops sharply. To prevent it, use at least as many training samples as FAISS's `min_points_per_centroid` warning requires, and train on samples drawn from the same distribution you serve (for example, with multilingual BGE, match the language mix in production). IVF has a related problem: if the data is skewed toward a few topics, cell sizes become uneven, and a few long posting lists push up p99 latency even as `nprobe` increases. Recording the maximum and minimum cluster sizes as a metric helps you catch this early.
 
 ## 5. HNSW: hierarchical navigable small world
 
-> <strong>TL;DR</strong>: pre-build a “<em>social network</em> of vectors” in which similar vectors link to each other, then at query time <em>walk the graph</em> towards the query, zooming from world map down to street map as you go. Today’s default for in-memory vector search — but only works well while everything fits in RAM.
+> Build a graph in advance in which similar vectors are linked as "friends." At query time, start from one point and keep moving to a friend closer to the query, descending from a world map to a country map to a street map. It is the standard choice today for in-memory vector search, but it <strong>assumes all data fits in RAM</strong>.
 
 ### 5.1 Inspiration
 
-HNSW<sup>[3]</sup> (Malkov & Yashunin, 2016) is the most widely deployed graph-based ANN today. It combines two ideas:
+HNSW<sup>[3]</sup> (Malkov & Yashunin, 2016) is the most widely used graph-based ANN method today. It combines two ideas:
 
-1. <strong>Navigable Small World (NSW)</strong> — a graph with both short and long-range edges supports greedy routing (at every step, move to whichever neighbour of the current node is closest to the query — a purely local rule) to any node in logarithmic hops (Kleinberg's small-world model). Kleinberg's key result is that when long-range edges are drawn with probability $\propto 1/r^d$ in the node-distance $r$ — <strong>and only in that case for that grid model</strong> — a purely local greedy algorithm reaches its target in $O(\log^2 N)$ hops. HNSW borrows this intuition by combining probabilistic layers with diversity-based neighbor selection; it does not explicitly sample long-range edges from Kleinberg's exact distribution.
-2. <strong>Skip lists</strong> — a randomised layered structure lets search start coarse and refine.
+1. <strong>Navigable Small World (NSW)</strong>: in a graph with long-range edges as well as edges to nearby points, greedy routing (at every step, move to whichever neighbor of the current node is closest to the query, a purely local rule) can reach any node in a small number of hops (Kleinberg's 2000 small-world model). Kleinberg's key result is that in a grid model, if and only if long-range edges are drawn with probability $\propto 1/r^d$ in the node distance $r$, a greedy algorithm using only local information reaches its target in $O(\log^2 N)$ hops. HNSW takes this idea through probabilistic layers and diversity-based neighbor selection; it does not explicitly sample long-range edges from Kleinberg's distribution.
+2. <strong>Skip lists</strong>: building layers at random lets the search start on a coarse layer and move down to finer ones.
 
 ### 5.2 Structure
 
@@ -237,9 +231,9 @@ graph TD
     A1 -.-> A0
 ```
 
-- Every point lives in Layer 0.
-- Each point's top layer is drawn from an exponential distribution $\ell = \lfloor -\ln(U(0,1)) \cdot m_L \rfloor$ (default $m_L = 1/\ln(M)$).
-- Each node has at most $M$ edges per layer ($2M$ at Layer 0).
+- Every point is in Layer 0.
+- The highest layer each point belongs to is drawn at random from an exponential distribution, $\ell = \lfloor -\ln(U(0,1)) \cdot m_L \rfloor$ (default $m_L = 1/\ln(M)$).
+- Each node has at most $M$ edges per layer ($M_{\max 0} = 2M$ at Layer 0).
 
 ### 5.3 Search algorithm
 
@@ -273,13 +267,11 @@ greedy_search_layer(q, ep, ef, level):
     return W
 ```
 
-Key points:
+The search has two stages: in the upper layers it heads roughly toward the query, and in the bottom layer it follows several candidates in parallel.
 
-- <strong>`efSearch`</strong> — size of the beam. Larger gives higher recall, lower QPS. 50-200 in production, 300+ when chasing 99% recall.
-- <strong>Upper layers use `ef=1`</strong> — a plain greedy descent.
-- <strong>Layer 0 uses `ef=efSearch`</strong> — beam search (keep several candidates alive at once and expand them in parallel — a wider, breadth-first style of walk) to broaden candidates.
-
-<strong>In short</strong>: go "roughly in the right direction" in the upper layers, then "walk several candidates forward in parallel" in the bottom layer to recover precision.
+- <strong>`efSearch`</strong>: the size of the candidate set. Larger values give higher recall but slower search. Production settings are usually 50-200, and sometimes 300 or more when aiming for 99% recall.
+- <strong>Upper layers use `ef=1`</strong>: a plain greedy move toward whatever is closest to the query.
+- <strong>Layer 0 uses `ef=efSearch`</strong>: beam search (keeping several candidates at once and expanding them in parallel) widens the candidates.
 
 ### 5.4 Insertion and neighbor selection
 
@@ -301,7 +293,7 @@ insert(x):
     if ℓ > top_level: top_level = ℓ; entry_point = x
 ```
 
-Neighbor <strong>selection</strong> decides HNSW's quality. Rather than "$M$ nearest neighbours", HNSW uses a <strong>diversity heuristic</strong>:
+HNSW's quality depends on how neighbors are selected. Instead of simply taking the $M$ nearest, HNSW uses a <strong>heuristic that keeps neighbors diverse (select_neighbors_heuristic)</strong>:
 
 ```text
 select_neighbors_heuristic(x, W, M):
@@ -314,32 +306,30 @@ select_neighbors_heuristic(x, W, M):
     return R
 ```
 
-Keep $e$ only if $x$ is closer to $e$ than any already-selected neighbour is. This <strong>spreads neighbours across directions</strong>, preventing the graph from collapsing onto a single cluster — a key reason HNSW avoids local minima during search. `faiss/impl/HNSW.cpp`'s `shrink_neighbor_list` implements this.
+This rule keeps a candidate $e$ only if $x$ is closer to $e$ than any already-selected neighbor is. Candidates lying in the same direction as an existing neighbor are dropped, so the neighbors spread out in different directions. As a result, the graph does not close in on local clusters, and search is less likely to get stuck in a local optimum. In FAISS, `shrink_neighbor_list` in `faiss/impl/HNSW.cpp` implements this.
 
-<strong>In short</strong>: instead of "take the $M$ nearest", HNSW picks "the $M$ near-ish neighbours that aren't redundant with each other", so edges fan out in all directions and greedy search rarely gets stuck in a local pocket.
-
-The paper's full Algorithm 4 takes two additional optional flags: <strong>`extendCandidates`</strong> (grow $W$ by the neighbours of each candidate before selecting — useful on sparse upper layers) and <strong>`keepPrunedConnections`</strong> (if $|R| < M$ at the end, refill from the pruned set in distance order). Many implementations including FAISS default both to false; the paper recommends `extendCandidates=true` only on upper layers.
+The paper's full Algorithm 4 has two more options. `extendCandidates` grows the candidate set $W$ with each candidate's neighbors before selecting, which helps on sparse layers. `keepPrunedConnections` refills from the pruned candidates in distance order if $|R| < M$ at the end. Many implementations, including FAISS, set both to false by default; the paper recommends `extendCandidates=true` only on the upper layers.
 
 ### 5.5 Parameters and cost
 
-- <strong>`M`</strong>: 12-48 typically. Higher gives better recall at the cost of memory ($M \cdot 4$ bytes of links per point).
-- <strong>`efConstruction`</strong>: 100-500; build-time only; higher improves index quality but is linear in build time.
-- <strong>Complexity</strong>: search expected $O(\log N)$, build $O(N \log N)$.
-- <strong>Memory</strong>: $N$ vectors + roughly $N \cdot M_0 \cdot 4$ bytes of links (most nodes live only in Layer 0, so upper-layer links are negligible). $M=16$ ($M_0 = 2M = 32$), $d=1024$, $N=10^6$: 4 GB vectors + ~128 MB links (the link overhead is only ~3% on top of the raw vectors).
+- <strong>`M`</strong>: typically 12-48. Larger values improve recall but use more memory ($M \cdot 4$ bytes of links per point).
+- <strong>`efConstruction`</strong>: 100-500. It affects build time only; larger values improve index quality, and build time grows roughly in proportion.
+- <strong>Complexity</strong>: search is $O(\log N)$ in expectation, build is $O(N \log N)$.
+- <strong>Memory</strong>: $N$ vectors plus roughly $N \cdot M_0 \cdot 4$ bytes of links (most nodes exist only in Layer 0, so upper-layer links are negligible). With $M=16$ ($M_0 = 2M = 32$), $d=1024$, and $N=10^6$, that is 4 GB of vectors and about 128 MB of links, around 3% of the vectors themselves.
 
-Downsides: <strong>memory-hungry</strong> and <strong>hard to delete from</strong>. Actually removing a node and re-wiring its edges can break graph connectivity, so most implementations mark the node with a <strong>tombstone</strong> (a "deleted" flag that leaves the node in the graph but hides it from query results). Over time the tombstoned nodes clutter the graph: search paths still route through them, and regions of the graph can become effectively unreachable, so recall silently degrades even at high `efSearch`. A common operational rule is to <strong>trigger a full rebuild (compaction — periodically rewriting the index so tombstoned nodes are physically removed) once the tombstone ratio crosses 5-10%</strong>.
+HNSW's weaknesses are high memory use and difficult deletion. Actually removing a node from the graph and rewiring its edges can break connectivity, so most implementations mark deleted nodes with a <strong>tombstone</strong> (a "deleted" flag: the node stays in the graph but is excluded from results) and remove them during a periodic rebuild (compaction: physically removing all tombstoned nodes and rebuilding the index). As deletions accumulate, the graph becomes sparse and unreachable regions appear; in the worst case recall does not recover even with a larger `efSearch`. Many teams therefore have an operational rule to rebuild once the tombstone ratio exceeds 5-10%.
 
 ## 6. DiskANN / Vamana: a graph index for SSDs
 
-> <strong>TL;DR</strong>: same “walk a friend graph” idea as HNSW, but the graph <em>lives on SSD</em> and only a PQ-compressed thumbnail sits in RAM. Unlocks billion-vector single-node indexes at the cost of SSD IOPS — throughput under high concurrency becomes the new bottleneck.
+> The same approach as HNSW of following links between neighbors, but the vectors themselves stay on SSD and only a compressed copy is kept in RAM. It can handle billions of vectors that don't fit in RAM, but as concurrent queries increase, SSD IOPS tends to become the bottleneck.
 
 ### 6.1 Motivation
 
-HNSW assumes every vector fits in RAM. A billion 1024-dim float32 vectors is 4 TB (several times the 512 GB–1 TB DRAM of a typical server — clearly doesn't fit on a single machine). DiskANN<sup>[4]</sup> (Microsoft, 2019) introduces a <strong>single-layer graph index designed to run from SSD</strong>.
+HNSW assumes every vector fits in RAM. A billion 1024-dim float32 vectors take 4 TB as raw data. A high-end server has around 512 GB–1 TB of DRAM, so this is several times larger and does not fit in one machine's memory. DiskANN<sup>[4]</sup>, published by Microsoft in 2019, is a <strong>single-layer graph index designed for SSD</strong>.
 
 ### 6.2 The Vamana graph
 
-Like HNSW, search is greedy, but there is no layered hierarchy — a single layer mixes short and long edges. The entry point is the <strong>medoid</strong> of the dataset, computed once at build time. Unlike the centroid (an abstract arithmetic mean that may not correspond to any real vector), the medoid is the <strong>actual data point closest to the centroid</strong> — i.e. the data point that sits most "centrally" in the distribution. Starting greedy search from there minimises the expected number of hops to any query target, since on average no point in the dataset is too far from the medoid. Construction uses <strong>$\alpha$-pruning</strong>:
+Like HNSW, search is greedy, but there is no hierarchy: a single-layer graph mixes long and short edges. The search entry point is the <strong>medoid</strong> of the dataset, computed once at build time. A centroid is a computed point and is not necessarily a real data point. The medoid, by contrast, is the existing data point closest to the mean of the dataset. Because search starts from a real node near the center of the data, many queries can be expected to reach their target in fewer hops. Construction uses a rule called $\alpha$-pruning:
 
 ```text
 build_vamana(X, R, α):
@@ -367,66 +357,64 @@ robust_prune(p, V, α, R):
     return P
 ```
 
-With <strong>$\alpha=1$ on the first pass and $\alpha > 1$ (typically 1.2) on the second</strong>, Vamana <strong>keeps more long-range edges</strong> than HNSW's diversity heuristic. That is what makes greedy search work well on SSD.
-
-<strong>In short</strong>: raising $\alpha$ above 1 discards "nearby, similar" neighbours in favour of "farther-away, differently-oriented" ones, so a single hop can jump further across the graph. On SSD, one hop = one random read, so fewer hops translate directly to lower latency.
+The paper uses $\alpha=1.0$ on the first pass and $\alpha > 1$ (typically 1.2) on the second. With $\alpha > 1$, Vamana <strong>keeps more long-range edges</strong> than HNSW's diversity heuristic. The larger $\alpha$ is, the more nearby neighbors in similar directions are dropped in favor of farther neighbors in other directions, so a single hop can travel further across the graph. On SSD, one hop is one random read, so fewer hops translate directly into lower latency.
 
 ### 6.3 SSD layout
 
-- Vectors and adjacency lists are co-located in 4 KB pages (<strong>Vamana page layout</strong>).
-- Visiting a node on the search path costs <strong>one 4 KB random read</strong> that returns both the vector and its neighbours.
-- To keep recall, DiskANN keeps a <strong>PQ-compressed copy in memory</strong> for coarse distance pruning, and only reads the full-precision vector for a handful of candidates.
+- Each vector and its adjacency list are stored together in the same page on disk (Vamana page layout).
+- Visiting a node on the search path costs one 4 KB random read that returns both the vector and its adjacency list.
+- A PQ-compressed copy stays in memory, and these approximate distances are used for distance computation and pruning during traversal. The full-precision vectors read from disk are used to re-rank candidates, which limits the accuracy lost to compression.
 
 ### 6.4 IOPS and recall
 
-On a single NVMe SSD, DiskANN typically reaches <strong>50-150 random 4 KB reads per query</strong> (the paper's SIFT1B benchmark reports roughly 100 reads at recall@1 = 95%), p99 5-10 ms — at scales (10B+ vectors) far beyond what HNSW can hold in RAM for the same budget. FreshDiskANN (2021) adds background insert/delete with periodic re-merges.
+On a single NVMe SSD, DiskANN typically needs 50-150 random 4 KB reads per query (the paper's SIFT1B benchmark reports roughly 100 reads at recall@1 = 95%), with p99 latency of 5-10 ms. It handles scales (over a billion vectors) that HNSW cannot hold in RAM on the same budget. FreshDiskANN (2021) proposes doing inserts, deletes, and rebuilds in the background.
 
-<strong>What goes wrong in production.</strong> Those numbers are for low-concurrency workloads. Consumer SSDs top out around 50-200 k random 4 KB read IOPS (I/O operations per second); server NVMe reaches 500 k-1 M. As concurrent QPS × (reads per query) approaches that ceiling, the device queue saturates and <strong>tail latency blows up non-linearly</strong> — p99 (the worst 1% of queries) can jump from 10 ms to hundreds of ms even while the median barely moves. Standard mitigations: stripe across multiple SSDs (RAID-0), crank up PQ compression so more pruning happens in memory before hitting disk, or lower `beam_width` to visit fewer nodes per query.
+<strong>Production pitfalls.</strong> Those numbers are for low concurrency. As concurrent queries increase, <strong>SSD IOPS (random I/O operations per second) saturates and tail latency worsens sharply</strong>. Typical consumer SSDs manage 50-200 k random 4 KB read IOPS, and server NVMe drives 500 k-1 M. As QPS × (reads per query) approaches that ceiling, queues form, and p99 (the slowest 1% of queries) can jump from about 10 ms to hundreds of ms while the median barely moves. Common mitigations are striping across multiple SSDs (RAID-0), raising PQ compression so more pruning happens in memory, and tuning `beam_width` to visit fewer nodes per query.
 
 ## 7. ScaNN: Google's anisotropic quantization
 
-Before moving on, it is worth circling back to §4's PQ to look at one important refinement. Google's ScaNN<sup>[5]</sup> (2020) targets maximum inner product search via a more careful kind of quantisation (compressing each vector down to a short sequence of bits).
+ScaNN<sup>[5]</sup> refines §4's PQ for inner-product search. Google published it in 2020, proposing a quantization (compressing each vector into a short sequence of bits) designed for maximum inner product search.
 
-Regular PQ minimises <strong>reconstruction error $\|\mathbf{x} - \hat{\mathbf{x}}\|^2$</strong>. But for IP search, what matters is the error in $\mathbf{q} \cdot \mathbf{x}$, which is dominated by the component parallel to $\mathbf{q}$. ScaNN's <strong>anisotropic quantization loss</strong> weights the two components differently:
+Regular PQ minimizes reconstruction error $\|\mathbf{x} - \hat{\mathbf{x}}\|^2$. But what matters for search is the error in the inner product $\mathbf{q} \cdot \mathbf{x}$. The queries for which a datapoint $\mathbf{x}$ should rank near the top are those with a large inner product, and such queries point in nearly the same direction as $\mathbf{x}$. So the error component parallel to $\mathbf{x}$ has the largest effect on inner-product error. ScaNN's <strong>anisotropic quantization loss</strong> is:
 
 $$
 L(\mathbf{x}, \hat{\mathbf{x}}) = h_\parallel(\mathbf{x}) \cdot \|(\mathbf{x} - \hat{\mathbf{x}})_\parallel\|^2 + h_\perp(\mathbf{x}) \cdot \|(\mathbf{x} - \hat{\mathbf{x}})_\perp\|^2
 $$
 
-with $h_\parallel \gg h_\perp$. This learns a quantizer that minimises the error direction that matters for IP. Empirically, ScaNN lifts recall by 5-10% at the same bit budget.
+Here $\parallel$ is the component parallel to $\mathbf{x}$ and $\perp$ the orthogonal component. Setting $h_\parallel \gg h_\perp$ learns a quantizer that keeps error parallel to $\mathbf{x}$ especially small. For inner-product search, recall tends to be 5-10% higher than PQ at the same bit budget.
 
 ## 8. Filtered search (pre / post / in-filter)
 
-Real systems need <strong>metadata-filtered ANN</strong>: "only published docs", "only this tenant".
+Real services need metadata-filtered ANN, such as "only published documents" or "only data owned by user X".
 
-- <strong>Post-filter</strong>: retrieve $k' \gg k$ via ANN, apply the filter afterwards. Breaks when selectivity (the fraction of rows that pass the filter) is low.
-- <strong>Pre-filter</strong>: materialise the filter-matching ID set, brute-force within it. Good for very selective filters, loses ANN speed.
-- <strong>In-filter / integrated</strong>: keep only filter-matching nodes as candidates during graph traversal. Each system handles reachability differently. Current Milvus docs describe two modes: <strong>standard filtering</strong> (scalar pre-filter, then ANN within the matching set) and <strong>iterative filtering</strong> (vector-search iterator with per-hit scalar checks); the query planner picks between them. Qdrant uses a <strong>filterable HNSW index</strong> that adds extra links into the graph based on payload categories so the graph stays connected under filtering (and falls back to the payload index alone when cardinality is too low).
+- <strong>Post-filter</strong>: retrieve $k'$ results ($k' \gg k$) with ANN, then apply the filter. When selectivity (the fraction of rows that pass the filter) is low, most of the $k'$ results are filtered out, fewer than $k$ remain, and you have to search again with a larger $k'$.
+- <strong>Pre-filter</strong>: build the set of IDs matching the filter and brute-force within that set. Fast when the subset is small, but the ANN graph goes unused.
+- <strong>In-filter (integrated)</strong>: keep only filter-matching nodes as candidates during graph traversal. Each database has its own technique to keep the graph reachable. Current Milvus docs describe two modes, standard filtering (a pre-filter that narrows with a scalar index first) and iterative filtering (turning vector search into an iterator and filtering each hit with scalar conditions), and the query planner picks one. Qdrant uses a filterable HNSW index that adds extra links to the HNSW graph based on payload categories so the graph stays connected after filtering (and switches from HNSW to scanning the payload index when cardinality is low).
 
-Recent research — ACORN (2024), Filtered-DiskANN (2023) — builds graphs that are filter-aware from the start.
-
-When does each strategy win?
+Which strategy suits which selectivity:
 
 | Strategy | Works well when | Fails when | Typical home |
 | --- | --- | --- | --- |
 | Post-filter | selectivity ≥ 50% (most rows pass) | selectivity ≤ 1%; top-$k$ ends up empty | pgvector, naive Elasticsearch |
 | Pre-filter | selectivity ≤ 1% (subset is tiny) | mid-range selectivity — ANN is wasted and the linear scan dominates | Milvus standard filtering |
-| In-filter | the messy middle, selectivity 1–50% | harder to implement; graph connectivity must be engineered in | Qdrant filterable HNSW, Filtered-DiskANN |
+| In-filter | the middle range, selectivity 1–50% | harder to implement; graph connectivity must be engineered in | Qdrant filterable HNSW, Filtered-DiskANN |
+
+Recent research (ACORN, 2024; Filtered-DiskANN, 2023) proposes taking filter labels into account when the graph is built.
 
 ## 9. Implementations compared
 
-A cheat sheet for how today’s popular OSS and SaaS products <strong>combine the algorithms</strong> from §2–§8. A rough mental model: FAISS is a <em>library</em>, Milvus / Qdrant / Weaviate are full distributed-DB <em>products</em>, pgvector is a Postgres extension, and Pinecone is a fully managed SaaS.
+The table below shows how popular OSS and SaaS products combine the algorithms from §2–§8. FAISS is a library; Milvus, Qdrant, and Weaviate are database products that include distribution and persistence; pgvector is a PostgreSQL extension; and Pinecone is a fully managed SaaS.
 
 | Library | Core algorithms | Notes |
 | --- | --- | --- |
-| <strong>FAISS</strong> | Flat, IVF, IVFPQ, HNSW, OPQ | Meta. GPU + SIMD. The research reference. |
-| <strong>Milvus</strong> | Wraps FAISS / HNSW / DiskANN | Distributed, persistent, multi-tenant. Kubernetes-first. |
-| <strong>Qdrant</strong> | HNSW (custom Rust) | Strong payload filtering, gRPC/REST. |
-| <strong>Weaviate</strong> | HNSW | Module-based vectorisers, GraphQL API. |
-| <strong>pgvector</strong> | IVFFlat, HNSW | PostgreSQL extension. Joins with existing SQL. |
-| <strong>Pinecone</strong> | Proprietary hybrid | Fully managed SaaS. |
-| <strong>LanceDB</strong> | IVFPQ, HNSW over Arrow/Parquet | Columnar persistence — think "DuckDB for embeddings". |
-| <strong>Elasticsearch / OpenSearch</strong> | Lucene HNSW | BM25 + vector hybrid in one engine. |
+| FAISS | Flat, IVF, IVFPQ, HNSW, OPQ | Meta. GPU + SIMD. The research reference. |
+| Milvus | Wraps FAISS / HNSW / DiskANN | Distributed, persistent, filtering, multi-tenant. Kubernetes-first. |
+| Qdrant | HNSW (custom Rust) | Strong payload filtering, gRPC/REST. |
+| Weaviate | HNSW | Module-based vectorizers, GraphQL API. |
+| pgvector | IVFFlat, HNSW | PostgreSQL extension. Joins with existing SQL. |
+| Pinecone | Proprietary hybrid | Fully managed SaaS. |
+| LanceDB | IVFPQ, HNSW over Arrow/Parquet | Columnar persistence — think "DuckDB for embeddings". |
+| Elasticsearch / OpenSearch | Lucene HNSW | BM25 + vector hybrid in one engine. |
 
 ### 9.1 A selection flowchart
 
@@ -445,7 +433,7 @@ graph TD
 
 ## 10. Hybrid search: BM25 + vector
 
-In practice, combining <strong>lexical (BM25; a classical relevance score from the TF-IDF family that weights how many of the query's words appear in each document) and semantic (vector)</strong> beats either alone.
+In practice, combining lexical matching (BM25; a classical relevance score from the TF-IDF family that weights how many of the query's words appear in each document) and semantic similarity (vector) gives better quality than ANN alone. Two common ways to combine them:
 
 ### 10.1 Reciprocal Rank Fusion (RRF)
 
@@ -453,13 +441,13 @@ $$
 \text{score}(d) = \sum_{r \in R} \frac{1}{k + \text{rank}_r(d)}
 $$
 
-$R$ is the set of retrievers (BM25, vector, …), $k \approx 60$ by convention. <strong>No score normalisation required</strong>, which is why Elasticsearch and Weaviate use RRF as a default hybrid strategy.
+$R$ is the set of retrievers (BM25, vector, and so on), and $k \approx 60$ is the usual empirical value. Because it uses only ranks, <strong>scores don't need to be on the same scale</strong>, and Elasticsearch and Weaviate both offer RRF as a fusion method for hybrid search.
 
 ### 10.2 Cross-encoder re-rank
 
-Retrieve 100 with ANN, re-score each with a BERT-style cross-encoder. This is essentially the standard RAG pipeline.
+Retrieve 100 results with ANN, then re-score them with a BERT-style cross-encoder. This is a common setup in production RAG.
 
-<strong>Bi-encoder vs cross-encoder.</strong> Vector search itself uses a <strong>bi-encoder</strong>: query and document are embedded <strong>independently</strong>, and similarity is a cheap cosine / dot product between the two vectors. Because document embeddings can be precomputed offline, a bi-encoder scales to billions of docs. A <strong>cross-encoder</strong> instead concatenates the (query, document) pair and runs them through one Transformer so every attention head can see both sides at once — this captures interactions a bi-encoder cannot, giving noticeably better relevance, but <strong>you pay a full forward pass per (query, doc) pair at query time</strong>. The two-stage pattern — cheap bi-encoder to get 100 candidates, expensive cross-encoder to re-rank only those — is the cost/quality sweet spot.
+<strong>Bi-encoder vs cross-encoder.</strong> Vector search uses a bi-encoder: the query and document are embedded separately and compared by cosine similarity (fast, because document embeddings can be computed offline). A cross-encoder instead concatenates the query and document, passes them through one Transformer, and lets attention relate the two directly to produce a relevance score. <strong>It is more accurate, but slow, because it must run again for every document on every query</strong>. So a two-stage setup, using a cheap bi-encoder to narrow down to 100 candidates and an expensive cross-encoder to re-score only those 100, improves accuracy while keeping cost down.
 
 ```mermaid
 sequenceDiagram
@@ -480,45 +468,45 @@ sequenceDiagram
 
 | Metric | Meaning |
 | --- | --- |
-| <strong>Recall@k</strong> | overlap between returned top-k and true top-k |
-| <strong>QPS</strong> | queries per second |
-| <strong>p50 / p95 / p99 latency</strong> | median / top-5% / top-1% latency; the tail (especially p99) is where GC pauses and disk IO stalls show up |
-| <strong>Build time</strong> | batch reindex time |
-| <strong>Index size</strong> | shows compression efficiency |
-| <strong>Insert/delete throughput</strong> | whether streaming updates are viable |
+| Recall@k | overlap between returned top-k and true top-k |
+| QPS | queries per second |
+| p50 / p95 / p99 latency | median / top-5% / top-1% latency; the tail (especially p99) is where GC pauses and disk IO stalls show up |
+| Build time | batch reindex time |
+| Index size | shows compression efficiency |
+| Insert/delete throughput | whether streaming updates are viable |
 
-[ann-benchmarks](https://github.com/erikbern/ann-benchmarks) is the standard framework for comparing HNSW / IVFPQ / ScaNN etc under identical conditions. The canonical visualisation is a <strong>recall vs QPS Pareto frontier</strong> plot. The Pareto frontier is the set of operating points such that <strong>you cannot improve recall without sacrificing QPS, or vice versa</strong> — an algorithm whose frontier sits further out dominates the others at every trade-off. The point of plotting frontiers (rather than a single number) is that ANN algorithms rarely win outright: method A may beat B at 95% recall yet lose at 99%, and only the frontier shows that crossover clearly.
+[ann-benchmarks](https://github.com/erikbern/ann-benchmarks) is the standard benchmark for comparing HNSW, IVFPQ, ScaNN, and others under the same conditions. Comparisons usually use a Pareto frontier plot with recall on the x-axis and QPS on the y-axis. The Pareto frontier is the curve through the points where you can no longer raise QPS without lowering recall, or the reverse. If one algorithm's whole curve lies outside another's, it is better at every operating point. When curves cross, the comparison becomes a trade-off such as <strong>A being faster at 95% recall while B is faster at 99%</strong>, which a single number like "A is faster than B" cannot capture.
 
 ## 12. State of the art (as of 2026)
 
-What’s likely to become the <em>next default</em>, as of 2026. The running themes are <strong>bigger scale, tighter compression, and easier updates</strong>.
+The research and implementations drawing attention as of 2026 share three themes: larger scale, tighter compression, and easier updates.
 
-- <strong>SPANN / SPFresh</strong> (Microsoft, 2021-2023) — IVF trees kept on SSD with clustered posting lists for easier updates; a DiskANN successor line.
-- <strong>Learned indexes</strong> — an active research direction where neural nets adapt centroid selection or hierarchical structure to the data distribution (not yet upstreamed into FAISS).
-- <strong>RaBitQ</strong> — a randomised binary quantisation with tighter error bounds than PQ (Gao & Long, 2024). FAISS has landed `faiss::IndexRaBitQ` / `IndexIVFRaBitQ`; pgvector 0.8 is evaluating it.
-- <strong>GPU HNSW (CAGRA, 2023)</strong> — NVIDIA RAPIDS reformulates HNSW construction and search as CUDA-friendly graph ops.
-- <strong>Hybrid DRAM / CXL layouts</strong> — after Optane was discontinued, the new direction is NVMe + big RAM + CXL memory pools for very large working sets.
+- <strong>SPANN / SPFresh</strong> (Microsoft, 2021-2023): an IVF-style approach that keeps centroids in memory and posting lists on SSD. SPFresh adds in-place updates to the posting lists. Like DiskANN, it targets billion-scale search on SSD.
+- <strong>Learned indexes</strong>: a research area that uses neural networks to learn centroid selection or hierarchical structure and adapt it to the data distribution (not yet in FAISS itself).
+- <strong>RaBitQ</strong>: a randomized binary quantization with tighter error bounds than PQ (Gao & Long, 2024). FAISS implements it as `faiss::IndexRaBitQ` / `IndexIVFRaBitQ`; pgvector 0.8 is evaluating it.
+- <strong>GPU graph index (CAGRA, 2023)</strong>: part of NVIDIA RAPIDS (cuVS). Not a port of HNSW, but a CUDA implementation of a non-hierarchical graph index designed for parallel processing on GPUs.
+- <strong>Hybrid DRAM / CXL layouts</strong>: since Intel Optane was discontinued, NVMe plus large RAM has been the norm, and new configurations using CXL memory pools are being researched.
 
 ## 13. Putting it all together
 
-The design space of vector search can be summarised in three orthogonal axes:
+The design choices in vector search can be organized along three axes:
 
 | Axis | Technique |
 | --- | --- |
-| <strong>Reduce candidate set</strong> | IVF / Graph (HNSW, Vamana) |
-| <strong>Compress distance</strong> | PQ / OPQ / ScaNN / RaBitQ |
-| <strong>Exploit the memory hierarchy</strong> | DiskANN / SPANN (SSD), CAGRA (GPU) |
+| Reduce candidate set | IVF / Graph (HNSW, Vamana) |
+| Compress distance | PQ / OPQ / ScaNN / RaBitQ |
+| Exploit the memory hierarchy | DiskANN / SPANN (SSD), CAGRA (GPU) |
 
-In practice, four questions drive the choice: <strong>N, memory budget, update rate, recall target</strong>.
+In practice, four factors narrow the choice: data size, memory budget, update frequency, and recall target.
 
 - $N \le 10^5$ → Flat
-- $10^5 \le N \le 10^7$, RAM plentiful → HNSW
-- $10^7 \le N$, RAM constrained → IVFPQ
+- $10^5 \le N \le 10^7$ with plenty of RAM → HNSW
+- $10^7 \le N$ with limited RAM → IVFPQ
 - $N \ge 10^9$ → DiskANN / SPANN
 - Already on PostgreSQL → pgvector (HNSW)
-- Need distributed → Milvus / Qdrant / Weaviate
+- Need distribution → Milvus / Qdrant / Weaviate
 
-Vector DBs aren't magic. Once you see them as <strong>classical inverted indexes extended to high-dimensional space</strong>, the whole architecture becomes legible — and your ability to debug recall regressions, size capacity, and triage incidents changes entirely.
+A vector database can be seen as <strong>the classical inverted-index idea extended to high-dimensional space</strong>. IVF uses per-cluster posting lists, PQ compresses distance computation, and HNSW and DiskANN are graphs for walking through candidates. Knowing these mechanisms tells you whether to suspect `efSearch` or `nprobe` when recall drops, whether to spend on memory or SSD, and what to look at when p99 gets worse.
 
 ## References
 

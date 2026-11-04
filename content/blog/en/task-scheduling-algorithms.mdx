@@ -7,7 +7,7 @@ tags: ["Algorithms", "Scheduling", "Operating Systems", "LLM", "Interactive"]
 
 There is no single correct answer to “what should run next?” for a shared queue. The right algorithm depends on whether the objective is to reduce mean waiting time, respond to interaction quickly, meet deadlines, or divide resources fairly among users.
 
-This article connects CPU scheduling, network fair queueing, and LLM inference serving by asking <strong>what each generation tried to optimize and what it changed from its predecessors</strong>. The second half focuses on [*Start-time Fair Queueing: Pay-after fair scheduling*](https://imoz.jp/scraps/202607_start_time_fair_queueing.en.html), explaining why SFQ's “select, then charge” structure fits admission order for LLM requests and how that router-level use differs from VTC inside an inference engine.
+CPU scheduling, network fair queueing, and LLM inference serving can be traced as one genealogy by asking <strong>what each algorithm tries to optimize and what it changes from its predecessors</strong>. For the order in which LLM requests are admitted into a server pool, the “select, then charge” structure of [Start-time Fair Queueing](https://imoz.jp/scraps/202607_start_time_fair_queueing.en.html) (SFQ) fits well: even when output length is unknown, a router can admit a request first and charge its estimated cost afterward. VTC, used inside an inference engine, differs by charging tokens as they are actually generated.
 
 <ArticleVideo slug="task-scheduling-algorithms" />
 
@@ -24,9 +24,9 @@ Represent task $i$ by arrival time $a_i$, processing demand $p_i$, completion ti
 | Use all capacity | Throughput, utilization, work conservation | Is usable capacity being left idle? |
 | Be predictable | Tail latency, maximum wait, jitter | Can P99 or a worst case be bounded? |
 
-These objectives often conflict. Prioritizing short jobs reduces mean wait but can starve long jobs. Switching in small increments improves responsiveness but costs context switches and cache locality.
+These objectives often conflict. Prioritizing short jobs reduces mean wait but can starve long jobs. Switching in small increments improves responsiveness but adds context switches and hurts cache locality.
 
-At least the following assumptions must also be fixed before choosing an algorithm:
+Before choosing an algorithm, settle at least the following assumptions:
 
 - <strong>Preemptibility</strong>: can work stop and resume partway through?
 - <strong>Size information</strong>: is $p_i$ exact, estimated, or unknown until completion?
@@ -34,9 +34,9 @@ At least the following assumptions must also be fixed before choosing an algorit
 - <strong>Fairness principal</strong>: is fairness among processes, users, organizations, API keys, or models?
 - <strong>Decision layer</strong>: is the decision admission, replica placement, dispatch order, or an in-flight token iteration?
 
-## 2. Genealogy: branches by objective, not one linear progression
+## 2. Genealogy: branches by objective
 
-The following is a <strong>conceptual map of objectives and selection logic</strong>, not a chronology or a strict inheritance tree. Solid edges group or contrast design transitions. Dotted edges show Linux's adoption transition or DLPM relaxing VTC's strict order for locality. DLPM's quantum and deficit are also influenced by DRR.
+The following diagram groups the algorithms by objective and selection logic. It does not show a chronology or a strict inheritance tree. Solid edges connect related designs by classification or contrast. Dotted edges show Linux's adoption transition or DLPM relaxing VTC's strict order for locality. DLPM's quantum and deficit are also influenced by DRR.
 
 ```mermaid
 flowchart TB
@@ -75,7 +75,7 @@ flowchart TB
     LOCAL --> DLPM
 ```
 
-This is not a chart in which every newer algorithm dominates every older one. DRR's amortized $O(1)$ work is attractive for tens of thousands of flows at line rate. A gateway with a few dozen LLM tenants can afford a tag-based algorithm with $O(\log n)$ selection. A different branch becomes useful whenever the objective or constraint changes.
+Newer algorithms do not dominate older ones; which branch fits depends on the objective and constraints. DRR's amortized $O(1)$ work is attractive for tens of thousands of flows at line rate. A gateway with a few dozen LLM tenants can afford a tag-based algorithm with $O(\log n)$ selection.
 
 ## 3. The completion-time and responsiveness branch
 
@@ -90,7 +90,7 @@ if the CPU is free:
 run running until completion
 ```
 
-Each enqueue/dequeue and next-task decision is $O(1)$, deterministic, and easy to explain; constructing the full schedule for $n$ jobs is $O(n)$. Its weakness is the <strong>convoy effect</strong>: when one long job is followed by many short jobs, every short job waits behind the long one. This hurts both the mean and the response time of interactive work.
+Each enqueue/dequeue and next-task decision is $O(1)$, deterministic, and easy to explain; constructing the full schedule for $n$ jobs is $O(n)$. Its weakness is the <strong>convoy effect</strong>: when one long job is followed by many short jobs, every short job waits behind the long one. Mean waiting time rises, and interactive work responds later.
 
 ### 3.2 SJF / SRTF: prefer short work when size is known
 
@@ -100,7 +100,7 @@ Shortest Remaining Time First (SRTF, also called SRPT or STCF) is the preemptive
 
 - long tasks can starve while short tasks keep arriving;
 - the policy is sensitive to size-prediction error;
-- frequent preemption requires state-save and restore work;
+- every preemption adds state-save and restore work;
 - a user benefits by declaring a job shorter, so untrusted self-reported size is unsafe.
 
 ### 3.3 Round Robin: prioritize “run once soon” over completion order
@@ -115,13 +115,13 @@ while ready is not empty:
         ready.push_back(task)
 ```
 
-As $q\to\infty$, RR approaches FCFS. Reducing $q$ lets every runnable task respond sooner, but making it too small increases context-switch and cache-miss costs on real hardware. RR equalizes CPU <strong>time</strong>. A request-count round robin, discussed later, does not equalize resources when one request can be much heavier than another.
+As $q\to\infty$, RR approaches FCFS. Reducing $q$ lets every runnable task respond sooner, but making it too small increases context-switch and cache-miss costs on real hardware. RR equalizes CPU time. A request-count round robin, discussed later, does not equalize resources when one request can be much heavier than another.
 
 ### 3.4 MLFQ: infer short and interactive work without knowing the future
 
 A Multi-Level Feedback Queue (MLFQ) maintains several priority queues. New tasks start at high priority; tasks that consume their CPU allotment are demoted; interactive tasks that block or yield quickly remain high. Periodically moving every task back to the top—a global priority boost—limits starvation. Aging, which raises an individual task's priority as it waits, is another related mechanism.
 
-MLFQ can be understood as replacing SJF's impossible “predict total run time” input with <strong>online inference from observed behavior</strong>. Care is needed: if the rules reward yielding just before a quantum expires, a task can game the policy. Implementations therefore account for cumulative CPU usage and related behavior.
+MLFQ effectively replaces SJF's impossible “predict total run time” input with online inference from observed behavior. If the rules reward yielding just before a quantum expires, however, a task can game the policy, so implementations account for cumulative CPU usage and related behavior.
 
 Fixed-priority scheduling always chooses the highest-priority runnable task. In a simple implementation, low-priority tasks can starve, so aging or bounded priority boosts are needed. <strong>Priority inversion</strong> is a different failure mode: a low-priority task holding a shared lock can block a high-priority task while medium-priority work preempts the lock holder. Priority inheritance temporarily boosts the lock holder to the waiting task's priority. Priority-ceiling protocols instead use each resource's ceiling priority to restrict or raise lock holders, limiting inversion and deadlock.
 
@@ -139,11 +139,11 @@ $$
 
 In the same independent periodic-task, implicit-deadline model with idealized preemption and switching cost, EDF is schedulable exactly up to total utilization $U\le1$, i.e. 100% of one CPU.
 
-EDF and RM do not try to give everybody equal service. They reorder work to satisfy timing constraints.
+EDF and RM reorder work to meet deadlines rather than to give everybody equal service.
 
 ### 4.2 Lottery / Stride: convert weights into CPU shares
 
-Lottery scheduling gives each task tickets proportional to its weight and draws which task receives the next <strong>fixed-size allocation quantum</strong>. It provides proportional shares in long-run expectation but has short-term variance.
+Lottery scheduling gives each task tickets proportional to its weight and draws which task receives the next fixed-size allocation quantum. It provides proportional shares in long-run expectation but has short-term variance.
 
 Stride scheduling makes the process deterministic. For a large constant $L$, define
 
@@ -157,7 +157,7 @@ Choose the task with the smallest `pass`, grant the same-size quantum, then upda
 
 Linux's Completely Fair Scheduler (CFS) approximates an ideal weighted CPU that runs all runnable tasks simultaneously. On a real CPU it selects the task with the smallest normalized execution time, `vruntime`. Running that task advances its `vruntime` until another task becomes leftmost.
 
-Earliest Eligible Virtual Deadline First (EEVDF) was proposed in 1995, and Linux began moving to Peter Zijlstra's 2023 EEVDF design in version 6.6. As of 2026, describing mainline Linux's normal fair class as still using the old CFS “pick minimum `vruntime`” rule by default is no longer accurate: the default selection rule is EEVDF, built in the same virtual-time lineage. EEVDF expresses how far a task is behind its fair share as `lag`; among tasks with `lag >= 0`, it chooses the earliest virtual deadline. This preserves proportional sharing while making latency-sensitive tasks with shorter requested slices easier to express. CFS and EEVDF belong to the same virtual-time family, but EEVDF makes eligibility and deadline explicit in the selection rule.
+Earliest Eligible Virtual Deadline First (EEVDF) was proposed in 1995, and Linux began moving to Peter Zijlstra's 2023 EEVDF design in version 6.6. As of 2026, the default selection rule for mainline Linux's normal fair class is therefore EEVDF, which keeps CFS's virtual-time approach, rather than CFS's “pick minimum `vruntime`” rule. EEVDF expresses how far a task is behind its fair share as `lag`; among tasks with `lag >= 0`, it chooses the earliest virtual deadline. Making eligibility and deadline explicit in the selection rule preserves proportional sharing while making latency-sensitive tasks with shorter requested slices easier to express.
 
 ## 5. Fair queueing grew up in networks
 
@@ -180,15 +180,15 @@ Weighted Fair Queueing (WFQ) broadly selects the packet with the smallest $F_i^k
 
 ### 5.3 SFQ: choose by start tag, not finish tag
 
-Start-time Fair Queueing (SFQ) compares the FIFO head packet of every backlogged flow and selects the one with the smallest $S_i^k$. The selected packet's length does not decide whether that packet is selected now. Instead, it sets the finish tag—and therefore affects the <strong>next selection</strong> from that flow.
+Start-time Fair Queueing (SFQ) compares the FIFO head packet of every backlogged flow and selects the one with the smallest $S_i^k$. The selected packet's length does not decide whether that packet is selected now. Instead, it sets the finish tag—and therefore affects the next selection from that flow.
 
-That shift in time is useful for an LLM router with estimated request size. Let a request pass first, record its estimated cost on the tenant's meter, and let the other tenants catch up before selecting that tenant again. It is a deferred-charge structure.
+That shift in time suits an LLM router that knows request size only as an estimate. Let a request pass first, record its estimated cost on the tenant's meter, and let the other tenants catch up before selecting that tenant again—a pay-after, or deferred-charge, structure.
 
 ### 5.4 DRR: replace tag arithmetic with a quantum and deficit
 
-Deficit Round Robin (DRR) keeps a deficit counter $D_i$ for each flow and adds quantum $Q_i$ whenever it visits an active flow. It <strong>repeatedly</strong> transmits head packets while they fit, subtracting each length, and carries an unused deficit to the next round only while the flow remains backlogged. When the queue drains, it resets $D_i=0$ so idle credit cannot accumulate. Weighted DRR uses $Q_i\propto w_i$. If $Q_i\ge L_{\max}$, every visit can advance at least one packet, supporting the usual amortized-$O(1)$ argument.
+Deficit Round Robin (DRR) keeps a deficit counter $D_i$ for each flow and adds quantum $Q_i$ whenever it visits an active flow. It repeatedly transmits head packets while they fit, subtracting each length, and carries an unused deficit to the next round only while the flow remains backlogged. When the queue drains, it resets $D_i=0$ so idle credit cannot accumulate. Weighted DRR uses $Q_i\propto w_i$. If $Q_i\ge L_{\max}$, every visit can advance at least one packet, supporting the usual amortized-$O(1)$ argument.
 
-DRR distributes <strong>credit before use</strong>; SFQ lets work pass and records <strong>debt after selection</strong>. A network MTU gives a stable basis for choosing a quantum. Maximum LLM request cost changes substantially with the model and workload.
+DRR hands out credit before use, whereas SFQ lets work pass first and records the debt after selection. A network MTU gives a stable basis for choosing a quantum. Maximum LLM request cost changes substantially with the model and workload, so a quantum is harder to choose.
 
 ### 5.5 DRF: consider multiple resources together
 
@@ -196,20 +196,22 @@ In a cluster, one job can dominate CPU while another dominates memory. Dominant 
 
 ## 6. Run the algorithms yourself
 
-The lab below has two modes. In LLM mode, each tenant's configured requests arrive as one batch at its join time, and logical time advances by one per admission. While queues remain active, a boundary join occurs before that time's admission. If the preceding admission drained every queue, SFQ's idle reset occurs before a join at the same boundary. If all queues remain empty until a future arrival, time jumps there and reset / join appears as a separate non-admission stage. With no future arrival, the final reset is annotated on the last admission.
+The lab below has two modes.
 
 1. <strong>CPU</strong>: change arrival time, burst length, and RR quantum; compare FCFS, SJF, SRTF, and RR timelines and delays.
 2. <strong>LLM</strong>: change every tenant's estimated cost, request count, and weight, plus tenant C's join time; compare global FIFO, request-count RR, shortest request first, and SFQ admission order.
 
-In CPU mode, first observe short C waiting behind long A, then switch to SRTF. In LLM mode, set A's cost to 8 and B's to 2. Count admissions in the sequence under tenant RR and SFQ, then compare them with the normalized-cost bars for the common-backlog interval.
+In LLM mode, each tenant's configured requests arrive as one batch at its join time, and logical time advances by one per admission. While queues remain active, a boundary join occurs before that time's admission. If the preceding admission drained every queue, SFQ's idle reset occurs before a join at the same boundary. If all queues remain empty until a future arrival, time jumps there and reset / join appears as a separate non-admission stage. With no future arrival, the final reset is annotated on the last admission.
+
+In CPU mode, first observe short C waiting behind long A, then switch to SRTF. In LLM mode, set A's cost to 8 and B's to 2. Count admissions in the sequence under Tenant Round Robin and SFQ, then compare them with the normalized-cost bars for the common-backlog interval: Tenant Round Robin equalizes request counts, while SFQ equalizes normalized cost.
 
 <TaskSchedulingVisualizer />
 
-The simulator is a discrete teaching model. In particular, LLM mode models only <strong>admission order into a server pool</strong>, not GPU execution time. Because finite queues eventually expose different total demand, observe fairness while both tenants remain backlogged rather than only at the final state.
+The simulator is a discrete teaching model. In particular, LLM mode models only admission order into a server pool, not GPU execution time. Because finite queues eventually expose different total demand, observe fairness while both tenants remain backlogged rather than only at the final state.
 
 ## 7. What is special about an LLM request?
 
-LLM inference is more than a queue of differently sized HTTP requests.
+LLM requests have properties that are missed if they are treated as differently sized HTTP requests.
 
 ### 7.1 Output length is unknown at selection time
 
@@ -223,7 +225,7 @@ Prefill processes prompt tokens in parallel and tends to be compute-heavy. Decod
 
 After a load balancer dispatches a request, returning it safely and moving it to another server is generally expensive. Treating it as non-preemptive at the outer router is therefore natural.
 
-Inside an engine, Orca proposed iteration-level scheduling with selective batching. In what is now commonly called continuous or in-flight batching, an engine can rebuild a batch at decode-iteration boundaries. Some implementations can also preempt with KV-cache swap or recomputation. “LLM requests are never preemptible” is therefore too broad; the <strong>scheduler layer</strong> must be stated.
+Inside an engine, Orca proposed iteration-level scheduling with selective batching. In what is now commonly called continuous or in-flight batching, an engine can rebuild a batch at decode-iteration boundaries. Some implementations can also preempt with KV-cache swap or recomputation. Whether an LLM request can be preempted therefore depends on which layer's scheduler is making the decision.
 
 ### 7.4 Batching, KV cache, and prefix locality interact
 
@@ -276,15 +278,15 @@ The interactive lab exposes both tenant C's late join and the final reset of `V`
 
 ### 8.3 Why not retroactively correct every meter with actual cost?
 
-In this router-level SFQ variant, $c(r)$ is fixed at admission and is not surcharged or refunded after completion. Meters remain monotonic, which removes races over when to reconcile measured completion cost. Completion still determines when capacity opens relative to arrivals, so it can change the candidate set. Deterministic replay requires the same totally ordered stream of arrival, cancellation, and dispatch-capacity events, serialized decisions, and deterministic tie-breaking—not merely the same arrivals. Systematic error is addressed by slowly recalibrating $\alpha$, $\beta$, or the output-length predictor for future requests rather than rolling back individual meters.
+In this router-level SFQ variant, $c(r)$ is fixed at admission and is not surcharged or refunded after completion. Meters only move forward, and no race arises over the order in which measured completion costs are applied. Completion still determines when capacity opens relative to arrivals, so it can change the candidate set. Deterministic replay requires the same totally ordered stream of arrival, cancellation, and dispatch-capacity events, serialized decisions, and deterministic tie-breaking—not merely the same arrivals. Systematic error is addressed by slowly recalibrating $\alpha$, $\beta$, or the output-length predictor for future requests rather than rolling back individual meters.
 
-This is not the only possible design. VTC's length-prediction variant, discussed below, reconciles predicted and actual output. That policy needs an analysis different from the simple fixed-charge SFQ invariant.
+Other designs reconcile predicted and actual output, such as VTC's length-prediction variant discussed below. They need an analysis different from the simple fixed-charge SFQ invariant.
 
 ### 8.4 What does it guarantee?
 
 Use the tags from the [original SFQ paper](https://doi.org/10.1145/248156.248171) with the [discrete router interpretation](https://imoz.jp/scraps/202607_start_time_fair_queueing.en.html).
 
-Assume equal weights, one-at-a-time admission, and a positive cost fixed at admission. Let $\bar c$ be either a configured uniform bound on every request or the largest charge from the start of the busy period containing an observation interval through that interval's end. The maximum <strong>inside the observation interval alone</strong> cannot cover debt created before the interval. With this definition, meters for waiting tenants lie exactly in the following band at decision boundaries:
+Assume equal weights, one-at-a-time admission, and a positive cost fixed at admission. Let $\bar c$ be either a configured uniform bound on every request or the largest charge from the start of the busy period containing an observation interval through that interval's end. The maximum <strong>inside the observation interval alone</strong> cannot cover debt created before the interval. With this definition, meters for waiting tenants always lie in the following band at decision boundaries:
 
 $$
 V\le M_i\le V+\bar c.
@@ -308,7 +310,7 @@ The guarantee covers <strong>admission fairness over the estimated cost charged<
 
 ### 8.5 Implementation cost
 
-For $T$ active tenants, scanning every meter is $O(T)$. A heap or ordered set keyed by `(meter, tenant_id)` gives $O(\log T)$ updates and selection. A linear scan can be practical and easier to audit for tens or hundreds of tenants.
+For $T$ active tenants, scanning every meter is $O(T)$. A heap or ordered set keyed by `(meter, tenant_id)` gives $O(\log T)$ updates and selection. For tens or hundreds of tenants, a linear scan is practical and easier to audit.
 
 Implementation details that matter:
 
@@ -322,9 +324,7 @@ Implementation details that matter:
 
 ### 9.1 VTC: charge unknown output as tokens appear
 
-[The VTC paper (OSDI 2024)](https://www.usenix.org/conference/osdi24/presentation/sheng) defines this engine-level fairness mechanism.
-
-Virtual Token Counter (VTC) integrates with a continuous-batching scheduler and maintains a counter per client. Adding a new request charges its input-token service. Every decode iteration adds the service of output tokens actually generated. When capacity opens in the batch, requests from the client with the smallest counter are favored.
+Virtual Token Counter (VTC), defined in an [OSDI 2024 paper](https://www.usenix.org/conference/osdi24/presentation/sheng), is an engine-level fairness mechanism. It integrates with a continuous-batching scheduler and maintains a counter per client. Adding a new request charges its input-token service. Every decode iteration adds the service of output tokens actually generated. When capacity opens in the batch, requests from the client with the smallest counter are favored.
 
 VTC also lifts a returning client's counter to the active baseline so that idle time cannot accumulate credit. Its biggest difference from router-level SFQ is that unknown output need not be predicted: service is observed and charged while generation progresses.
 
@@ -337,25 +337,21 @@ VTC also lifts a returning client's counter to the active baseline so that idle 
 | Main guarantee target | Dispatch fairness over estimated cost | Execution fairness over defined token service |
 | Relationship | Upstream | Downstream; both can be combined |
 
-VTC's formal bound applies to clients continuously backlogged in the waiting queue under its single-engine, non-preemptive continuous-batching model. It bounds the defined token-service difference and depends on maximum input cost and the running batch's token capacity. “Execution fairness” does not mean every GPU metric or a distributed replica fleet. The length-prediction variant can reduce average discrepancy empirically, but it does not improve the paper's worst-case lower bound.
+VTC's formal bound applies to clients continuously backlogged in the waiting queue under its single-engine, non-preemptive continuous-batching model. It bounds the defined token-service difference and depends on maximum input cost and the running batch's token capacity. “Execution fairness” does not mean every GPU metric or a distributed replica fleet.
 
-There is no contradiction between the VTC paper saying unknown output prevents direct application of classical SFQ and recommending SFQ here. VTC targets <strong>measured token-service fairness inside the engine</strong>. Router SFQ narrows the problem to <strong>ordering fairness over cost fixed at admission</strong>. They guarantee different quantities.
+The VTC paper says unknown output length prevents classical SFQ from being applied directly, yet this does not conflict with recommending SFQ here, because the two guarantee different quantities. VTC targets <strong>measured token-service fairness inside the engine</strong>, while router SFQ narrows the problem to <strong>ordering fairness over cost fixed at admission</strong>.
 
-VTC's length-prediction variant pre-charges predicted output cost when selecting a request, adds any underprediction during decoding, and refunds overprediction at completion. It can reduce average service discrepancy, but prediction error and completion events enter counter updates, unlike fixed-charge router SFQ.
+VTC's length-prediction variant pre-charges predicted output cost when selecting a request, adds any underprediction during decoding, and refunds overprediction at completion. Experiments show that it can reduce average service discrepancy, but it does not improve the paper's worst-case lower bound. Prediction error and completion events also enter its counter updates, which makes it a different mechanism from fixed-charge router SFQ.
 
 ### 9.2 DLPM / D²LPM: relax fair order to reuse prefixes
 
-The [2025 DLPM / D²LPM preprint](https://arxiv.org/abs/2501.14312) addresses the conflict between VTC's strict order and prefix locality.
+VTC does not consider prefix locality. Deficit Longest Prefix Match (DLPM), proposed in a [2025 arXiv preprint](https://arxiv.org/abs/2501.14312), addresses the conflict between VTC's strict order and prefix locality. DLPM uses a client quantum $Q_u$ and deficit: while credit permits, it favors longest-prefix matches; when credit is exhausted, it yields to other clients. Double Deficit LPM (D²LPM) adds a per-client/per-worker quantum $Q_w$ to control stickiness to a worker, bringing distributed prefix locality and load balance into the decision.
 
-VTC does not consider prefix locality. The 2025 arXiv preprint proposing Deficit Longest Prefix Match (DLPM) uses a client quantum $Q_u$ and deficit: while credit permits, it favors longest-prefix matches; when credit is exhausted, it yields to other clients. Double Deficit LPM (D²LPM) adds a per-client/per-worker quantum $Q_w$ to control stickiness to a worker, bringing distributed prefix locality and load balance into the decision.
-
-Increasing $Q_u$ gives locality more freedom but also loosens DLPM's service bound. $Q_w$ primarily controls worker stickiness and the locality/load-balance trade-off. The two roles should not be collapsed: together they expose the conflict between fairness and efficiency as explicit knobs rather than claiming to maximize both with one order.
+Increasing $Q_u$ gives locality more freedom but also loosens DLPM's service bound. $Q_w$ primarily controls worker stickiness and the locality/load-balance trade-off. The two quanta play different roles. DLPM-family policies expose the conflict between fairness and efficiency—one order cannot maximize both—as these explicit knobs.
 
 ### 9.3 Equinox: the argument that one token counter is insufficient
 
-The [2025 Equinox preprint](https://arxiv.org/abs/2508.16646) explores a different direction that predicts and combines multiple metrics.
-
-The 2025 Equinox preprint argues that prefill/decode asymmetry prevents token count alone from representing latency, throughput, and GPU utilization simultaneously. It combines predicted user-side and resource-side counters. This is an interesting development, but it needs predictors and policy weights, making semantics and validation more complex than SFQ or VTC. Its reported experiments should be treated as preprint evidence, not a universal production guarantee.
+[Equinox, a 2025 preprint](https://arxiv.org/abs/2508.16646), takes a different direction that predicts and combines multiple metrics. It argues that prefill/decode asymmetry prevents token count alone from representing latency, throughput, and GPU utilization simultaneously, and it combines predicted user-side and resource-side counters. Because it needs predictors and several policy weights, the meaning of a policy is harder to follow than with SFQ or VTC, and there is more to validate. Its experimental results are reported in a preprint and are not a general guarantee for production environments.
 
 ## 10. Choose from the objective and layer backward
 
@@ -369,7 +365,7 @@ The 2025 Equinox preprint argues that prefill/decode asymmetry prevents token co
 | Allocate multiple cluster resources to users | DRF | Placement can remain a separate problem |
 | Fairly order admission into unmodified LLM servers | Estimated cost + SFQ | Guarantee stops at one scheduler and estimated-cost order |
 | Handle unknown output inside continuous batching | VTC | Requires engine integration and a cost function |
-| Preserve LLM prefix locality too | DLPM / D2LPM | Quantum controls the fairness-locality trade-off |
+| Preserve LLM prefix locality too | DLPM / D²LPM | Quantum controls the fairness-locality trade-off |
 | Make SLO/latency and GPU efficiency multi-objective | Profile- or predictor-based scheduler | Continuously validate prediction error and policy weights |
 
 A production design is usually clearer when responsibilities are layered instead of assigned to one algorithm:
@@ -383,7 +379,7 @@ flowchart LR
     E --> F["Continuous batch\nprefill + decode"]
 ```
 
-Rate limits enforce abuse and budget ceilings. A fair scheduler divides congested shares. Placement handles load and locality. The engine scheduler controls actual token service. Orthogonal responsibilities make “why did this request wait?” easier to explain.
+Rate limits enforce abuse and budget ceilings. A fair scheduler divides congested shares. Placement handles load and locality. The engine scheduler controls actual token service. Separating these responsibilities by layer makes “why did this request wait?” easier to explain.
 
 ## 11. Pre-deployment validation checklist
 
@@ -404,18 +400,18 @@ $$
 J(x_1,\ldots,x_n)=\frac{(\sum_i x_i)^2}{n\sum_i x_i^2}
 $$
 
-is useful, but its meaning changes completely depending on whether $x_i$ is request count, token service, or GPU seconds. It should not demand service from a tenant with no demand, and it is undefined when all $x_i=0$. The lab resets its baseline whenever the comparison cohort changes and computes the displayed value only from increments during an interval in which that same cohort shares backlog. Production evaluation should likewise combine it with backlogged intervals, SLOs, and work conservation.
+is useful, but its meaning changes completely depending on whether $x_i$ is request count, token service, or GPU seconds. It should not be used to demand equal service for a tenant with little demand, and it is undefined when all $x_i=0$. The lab resets its baseline whenever the comparison cohort changes and computes the displayed value only from increments during an interval in which that same cohort shares backlog. Production evaluation should likewise combine it with backlogged intervals, SLOs, and work conservation.
 
 ## 12. Summary
 
-- A scheduler is not just a “choose next” function. It is a combination of <strong>objective, assumptions, charging unit, and decision layer</strong>.
+- A scheduler combines an <strong>objective, assumptions, charging unit, and decision layer</strong>; the rule for choosing the next item is only one part.
 - FCFS → SJF/SRTF targets mean delay; RR/MLFQ targets responsiveness; EDF/RM targets deadlines; Lottery/Stride/CFS/EEVDF and fair queueing pursue proportional allocation on separate branches.
 - Approximating GPS with indivisible packets produced two implementation directions: WFQ/SFQ select minimum tags, whereas DRR avoids a global `argmin` by using cyclic visits and deficits.
 - Unknown output, prefill/decode, continuous batching, KV cache, and prefix locality mean request-count round robin is insufficient for LLM serving fairness.
-- In front of an unmodified server pool, SFQ is simple and explainable when it <strong>charges a fixed estimated cost after selection</strong>. Its guarantee is dispatch fairness over that estimate—not measured GPU fairness.
+- In front of an unmodified server pool, SFQ is simple and explainable when it charges a fixed estimated cost after selection. Its guarantee is dispatch fairness over that estimate—not measured GPU fairness.
 - When the engine can be controlled, VTC's incremental charge for actual token progress better matches unknown output. DLPM-family policies become relevant when prefix locality must also be preserved.
 
-The most important rule is not to choose by algorithm name. Define the fairness principal and the unit of service, identify the layer where a decision can actually be enforced, and only then compare selection rules. That design order is unchanged from classical operating systems to LLM serving.
+Do not choose an algorithm by name. Define the fairness principal and the unit of service, identify the layer where a decision can actually be enforced, and then compare selection rules under those conditions. That design order is the same from classical operating systems to LLM serving.
 
 ## References
 
